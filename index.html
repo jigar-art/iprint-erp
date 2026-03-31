@@ -129,14 +129,14 @@ function MainApp({user,onLogout,masterData}){
     async function load(){
       setLoading(true);
       const [j,b,li,g,pl,fl,ol,dl] = await Promise.all([
-        sb.from('jobs').select('*').order('created_at',{ascending:false}),
-        sb.from('batches').select('*').order('created_at',{ascending:false}),
-        sb.from('line_items').select('*'),
-        sb.from('grn').select('*').order('created_at',{ascending:false}),
-        sb.from('print_logs').select('*').order('created_at',{ascending:false}),
-        sb.from('fab_logs').select('*').order('created_at',{ascending:false}),
-        sb.from('outsource_logs').select('*').order('created_at',{ascending:false}),
-        sb.from('dispatch_logs').select('*').order('created_at',{ascending:false}),
+        sb.from('jobs').select('*').order('created_at',{ascending:false}).range(0,9999),
+        sb.from('batches').select('*').order('created_at',{ascending:false}).range(0,9999),
+        sb.from('line_items').select('*').range(0,9999),
+        sb.from('grn').select('*').order('created_at',{ascending:false}).range(0,4999),
+        sb.from('print_logs').select('*').order('created_at',{ascending:false}).range(0,4999),
+        sb.from('fab_logs').select('*').order('created_at',{ascending:false}).range(0,4999),
+        sb.from('outsource_logs').select('*').order('created_at',{ascending:false}).range(0,4999),
+        sb.from('dispatch_logs').select('*').order('created_at',{ascending:false}).range(0,4999),
       ]);
       if(j.data) setJobs(j.data);
       if(b.data) setBatches(b.data);
@@ -654,10 +654,4 @@ function RootApp(){
   if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,background:"#060810"}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading iPrint ERP...</p></div>;
 
   if(!user) return <Login onLogin={setUser} team={masterData.team}/>;
-  return <MainApp user={user} onLogout={()=>setUser(null)} masterData={masterData}/>;
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(<RootApp/>);
-</script>
-</body>
-</html>
+  return <MainApp user={user} onLogout={()=>setUser(null)} masterData={maste
