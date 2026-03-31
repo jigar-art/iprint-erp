@@ -261,19 +261,19 @@ function MainApp({user,onLogout,masterData}){
 
   // Role-based nav
   const allNav=[
-    {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts"]},
+    {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch"]},
     {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts"]},
     {id:"new",l:"New Job",e:"➕",roles:["admin","sales"]},
     {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales"]},
-    {id:"grn",l:"Material In",e:"📦",roles:["admin","production"]},
-    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production"]},
-    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production"]},
-    {id:"os",l:"Outsource",e:"📤",roles:["admin","production"]},
-    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales"]},
-    {id:"stock",l:"Stock",e:"📦",roles:["admin","production"]},
+    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch"]},
+    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing"]},
+    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication"]},
+    {id:"os",l:"Outsource",e:"📤",roles:["admin","production","printing","fabrication"]},
+    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch"]},
+    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch"]},
     {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales"]},
     {id:"cli",l:"Clients",e:"👥",roles:["admin","sales"]},
-    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts"]},
+    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
   ];
   const nav=allNav.filter(n=>n.roles.includes(user.role));
 
