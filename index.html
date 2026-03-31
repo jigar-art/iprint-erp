@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iPrint ERP</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e3a008'/><text x='5' y='23' font-size='18' font-weight='900' fill='%23060810'>iP</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',system-ui,sans-serif;background:#060810;color:#e2e8f0;overflow:hidden}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#1e293b;border-radius:3px}
+input,select,textarea{font-family:inherit}
+@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes sr{from{transform:translateX(120%)}to{transform:translateX(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.a{animation:fi .3s ease both}
+.c{background:#0c1017;border:1px solid #1a2030;border-radius:10px;transition:border-color .2s}
+.c:hover{border-color:#2a3548}
+.b{display:inline-flex;align-items:center;gap:4px;padding:6px 11px;border-radius:6px;border:1px solid #1a2030;background:#0c1017;color:#c9d1d9;cursor:pointer;font-size:11px;font-weight:500;transition:all .15s;font-family:inherit;white-space:nowrap}
+.b:hover{background:#151c28}
+.bp{background:#e3a008;border-color:#e3a008;color:#060810;font-weight:700}.bp:hover{background:#ca8a04}
+.bg{background:#238636;border-color:#238636;color:#fff}.bg:hover{background:#1a7f37}
+.br{background:#da3633;border-color:#da3633;color:#fff}
+.bs{padding:3px 7px;font-size:10px}
+.bd{display:inline-flex;padding:2px 6px;border-radius:8px;font-size:9px;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:5px 7px;font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;border-bottom:1px solid #1a2030;font-weight:600;position:sticky;top:0;background:#0c1017;z-index:1}
+td{padding:5px 7px;font-size:11px;border-bottom:1px solid #0c1017}
+tr:hover td{background:#0a0f1a}
+.in{width:100%;padding:5px 8px;border-radius:5px;border:1px solid #1a2030;background:#060810;color:#e2e8f0;font-size:11px;outline:none}
+.in:focus{border-color:#e3a008}
+.mn{font-family:'JetBrains Mono',monospace}
+.done{text-decoration:line-through;opacity:.4}
+.ck{width:14px;height:14px;border-radius:3px;border:2px solid #1a2030;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;flex-shrink:0}
+.ck.on{background:#238636;border-color:#238636;color:#fff}
+.ni{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:500;color:#64748b;transition:all .12s;border:1px solid transparent;margin-bottom:1px}
+.ni:hover{color:#e2e8f0;background:#111827}
+.ni.on{color:#e3a008;background:#18150a;border-color:#e3a00833}
+.fg{display:grid;gap:5px}
+.f2{grid-template-columns:1fr 1fr}
+.f3{grid-template-columns:1fr 1fr 1fr}
+.f4{grid-template-columns:1fr 1fr 1fr 1fr}
+.loader{width:24px;height:24px;border:3px solid #1a2030;border-top-color:#e3a008;border-radius:50%;animation:spin .6s linear infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useCallback,useMemo,useEffect} = React;
+
+// ─── SUPABASE CONNECTION ────────────────────────────────────
+const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_X03X1SdaVjTL2O7lq2oc5A_AR3e8xjP';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ─── CONSTANTS ──────────────────────────────────────────────
+const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
+const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
+const SIZES=["MM","INCH","FOOT"];
+const RATES=["SQFT","UNIT","RFT","NOS","SET","LOT"];
+const MUNITS=["roll","nos","sheet","pcs","sqft","mtr","kg","box","set","lot"];
+const FAB_P=["Laser Cutting","Router Cutting","CNC Cutting","Bending","Welding","PU Coating","Painting","Polishing","Assembly","Carpentry","3D Cutting"];
+
+const fmt=n=>"₹"+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0});
+const fmtK=n=>n>=1e5?"₹"+(n/1e5).toFixed(1)+"L":n>=1e3?"₹"+(n/1e3).toFixed(0)+"K":fmt(n);
+const cSq=(w,h,q,u)=>{if(!w||!h)return 0;const W=+w,H=+h,Q=+q||1;return u==="MM"?Math.round(W*H*Q/92903.04*100)/100:u==="INCH"?Math.round(W*H*Q/144*100)/100:u==="FOOT"?Math.round(W*H*Q*100)/100:0;};
+const td=()=>new Date().toISOString().slice(0,10);
+const uid=()=>""+Date.now()+Math.random().toString(36).slice(2,6);
+
+// ═══════════════════════════════════════════════════════════
+// LOGIN SCREEN
+// ═══════════════════════════════════════════════════════════
+function Login({onLogin,team}){
+  const [sel,setSel]=useState('');
+  const [pin,setPin]=useState('');
+  const [err,setErr]=useState('');
+  const submit=()=>{
+    const member=team.find(t=>t.name===sel);
+    if(!member){setErr('Select your name');return;}
+    if(member.pin&&member.pin!==pin){setErr('Wrong PIN');return;}
+    onLogin(member);
+  };
+  return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
+    <div className="a" style={{width:340,padding:32,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
+      <div style={{width:56,height:56,borderRadius:12,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:20,color:"#060810",margin:"0 auto 16px"}}>iP</div>
+      <h1 style={{fontSize:20,fontWeight:800,color:"#e3a008",marginBottom:4}}>iPrint ERP</h1>
+      <p style={{fontSize:11,color:"#64748b",marginBottom:24}}>FY 2026-27 · Sign in to continue</p>
+      <select className="in" value={sel} onChange={e=>{setSel(e.target.value);setErr('');}} style={{marginBottom:10,textAlign:"center",fontSize:13,padding:10}}>
+        <option value="">Select your name...</option>
+        {team.map(t=><option key={t.name} value={t.name}>{t.name} ({t.role})</option>)}
+      </select>
+      <input className="in mn" type="password" placeholder="Enter PIN" value={pin} onChange={e=>{setPin(e.target.value);setErr('');}} onKeyDown={e=>e.key==='Enter'&&submit()} style={{marginBottom:10,textAlign:"center",fontSize:16,padding:10,letterSpacing:8}}/>
+      {err&&<p style={{color:"#f47067",fontSize:11,marginBottom:8}}>{err}</p>}
+      <button className="b bp" onClick={submit} style={{width:"100%",padding:10,fontSize:13,justifyContent:"center"}}>Sign In</button>
+      <p style={{fontSize:9,color:"#475569",marginTop:16}}>Jyoti Print · Juxtapose · Versahue</p>
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════
+function MainApp({user,onLogout,masterData}){
+  const {firms,clients,suppliers,products,materials,machines,agencies,delBoys} = masterData;
+  const [jobs,setJobs]=useState([]);
+  const [batches,setBatches]=useState([]);
+  const [items,setItems]=useState([]);
+  const [grnData,setGrnData]=useState([]);
+  const [pLogs,setPLogs]=useState([]);
+  const [fLogs,setFLogs]=useState([]);
+  const [osLogs,setOsLogs]=useState([]);
+  const [dLogs,setDLogs]=useState([]);
+  const [pg,setPg]=useState("dash");
+  const [toast,setToast]=useState(null);
+  const [search,setSearch]=useState("");
+  const [col,setCol]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [modal,setModal]=useState(null);
+
+  const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
+
+  // Load data from Supabase
+  useEffect(()=>{
+    async function load(){
+      setLoading(true);
+      const [j,b,li,g,pl,fl,ol,dl] = await Promise.all([
+        sb.from('jobs').select('*').order('created_at',{ascending:false}),
+        sb.from('batches').select('*').order('created_at',{ascending:false}),
+        sb.from('line_items').select('*'),
+        sb.from('grn').select('*').order('created_at',{ascending:false}),
+        sb.from('print_logs').select('*').order('created_at',{ascending:false}),
+        sb.from('fab_logs').select('*').order('created_at',{ascending:false}),
+        sb.from('outsource_logs').select('*').order('created_at',{ascending:false}),
+        sb.from('dispatch_logs').select('*').order('created_at',{ascending:false}),
+      ]);
+      if(j.data) setJobs(j.data);
+      if(b.data) setBatches(b.data);
+      if(li.data) setItems(li.data);
+      if(g.data) setGrnData(g.data);
+      if(pl.data) setPLogs(pl.data);
+      if(fl.data) setFLogs(fl.data);
+      if(ol.data) setOsLogs(ol.data);
+      if(dl.data) setDLogs(dl.data);
+      setLoading(false);
+    }
+    load();
+  },[]);
+
+  // ─── CREATE JOB ───────────────────────────────────────────
+  const createJob = useCallback(async (jobData, batchData, lineItemsData) => {
+    const {error:je} = await sb.from('jobs').insert(jobData);
+    if(je){show("Error: "+je.message,false);return;}
+    const {error:be} = await sb.from('batches').insert(batchData);
+    if(lineItemsData.length>0) await sb.from('line_items').insert(lineItemsData);
+    setJobs(p=>[jobData,...p]);
+    setBatches(p=>[batchData,...p]);
+    setItems(p=>[...lineItemsData,...p]);
+    show("Job created successfully!");
+    setPg("jobs");
+  },[show]);
+
+  // ─── ADD BATCH TO JOB ─────────────────────────────────────
+  const addBatchToJob = useCallback(async (batchData) => {
+    const {error} = await sb.from('batches').insert(batchData);
+    if(!error) {setBatches(p=>[batchData,...p]); show("Batch added!");}
+  },[show]);
+
+  // ─── TOGGLE DEPT ──────────────────────────────────────────
+  const togDept = useCallback(async (itemId, dept, newVal) => {
+    const col = 'dept_'+dept.toLowerCase();
+    await sb.from('line_items').update({[col]:newVal}).eq('id',itemId);
+    setItems(p=>p.map(i=>i.id===itemId?{...i,[col]:newVal}:i));
+  },[]);
+
+  // ─── ADD GRN ──────────────────────────────────────────────
+  const addGRN = useCallback(async (data) => {
+    const {error} = await sb.from('grn').insert(data);
+    if(!error){setGrnData(p=>[data,...p]);show("GRN saved!");}
+    else show("Error: "+error.message,false);
+  },[show]);
+
+  // ─── ADD PRINT LOG ────────────────────────────────────────
+  const addPrintLog = useCallback(async (data) => {
+    const {error} = await sb.from('print_logs').insert(data);
+    if(!error){setPLogs(p=>[data,...p]);show("Print log saved!");}
+  },[show]);
+
+  // ─── ADD FAB LOG ──────────────────────────────────────────
+  const addFabLog = useCallback(async (data) => {
+    const {error} = await sb.from('fab_logs').insert(data);
+    if(!error){setFLogs(p=>[data,...p]);show("Fab log saved!");}
+  },[show]);
+
+  // ─── ADD OUTSOURCE ────────────────────────────────────────
+  const addOsLog = useCallback(async (data) => {
+    const {error} = await sb.from('outsource_logs').insert(data);
+    if(!error){setOsLogs(p=>[data,...p]);show("Outsource saved!");}
+  },[show]);
+
+  // ─── MARK OUTSOURCE RETURN ────────────────────────────────
+  const markOsReturn = useCallback(async (id) => {
+    await sb.from('outsource_logs').update({returned:true,return_date:td()}).eq('id',id);
+    setOsLogs(p=>p.map(l=>l.id===id?{...l,returned:true,return_date:td()}:l));
+    show("Return recorded!");
+  },[show]);
+
+  // ─── ADD DISPATCH ─────────────────────────────────────────
+  const addDispatch = useCallback(async (data) => {
+    const {error} = await sb.from('dispatch_logs').insert(data);
+    if(!error){setDLogs(p=>[data,...p]);show("Dispatch logged!");}
+  },[show]);
+
+  // ─── UPDATE BATCH BILL ────────────────────────────────────
+  const saveBill = useCallback(async (batchId, billNo) => {
+    await sb.from('batches').update({bill_no:billNo,status:'Done'}).eq('id',batchId);
+    setBatches(p=>p.map(b=>b.id===batchId?{...b,bill_no:billNo,status:'Done'}:b));
+    show("Tally invoice saved!");
+  },[show]);
+
+  // Stock calc
+  const stock=useMemo(()=>{
+    const s={};
+    grnData.forEach(g=>{s[g.material]=(s[g.material]||0)+(+g.qty||0);});
+    pLogs.forEach(l=>{s[l.material]=(s[l.material]||0)-(+l.qty_used||0);});
+    fLogs.forEach(l=>{s[l.material]=(s[l.material]||0)-(+l.qty_used||0);});
+    osLogs.filter(l=>!l.returned).forEach(l=>{s[l.material]=(s[l.material]||0)-(+l.qty_sent||0);});
+    return s;
+  },[grnData,pLogs,fLogs,osLogs]);
+
+  // Assemble jobs with batches and items
+  const fullJobs = useMemo(()=>jobs.map(j=>({
+    ...j,
+    batches: batches.filter(b=>b.job_id===j.id).map(b=>({
+      ...b,
+      items: items.filter(i=>i.batch_id===b.id)
+    }))
+  })),[jobs,batches,items]);
+
+  const stats=useMemo(()=>({
+    jobs:fullJobs.length,
+    active:fullJobs.reduce((s,j)=>s+j.batches.filter(b=>b.status!=='Done').length,0),
+    billed:fullJobs.reduce((s,j)=>s+j.batches.filter(b=>b.bill_no).reduce((s2,b)=>s2+b.items.reduce((s3,it)=>s3+(+it.amount||0),0),0),0),
+    poPend:fullJobs.filter(j=>!j.po_number).length,
+    grn:grnData.length,print:pLogs.length,fab:fLogs.length,os:osLogs.length,disp:dLogs.length,
+  }),[fullJobs,grnData,pLogs,fLogs,osLogs,dLogs]);
+
+  // Role-based nav
+  const allNav=[
+    {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts"]},
+    {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts"]},
+    {id:"new",l:"New Job",e:"➕",roles:["admin","sales"]},
+    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales"]},
+    {id:"grn",l:"Material In",e:"📦",roles:["admin","production"]},
+    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production"]},
+    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production"]},
+    {id:"os",l:"Outsource",e:"📤",roles:["admin","production"]},
+    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales"]},
+    {id:"stock",l:"Stock",e:"📦",roles:["admin","production"]},
+    {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales"]},
+    {id:"cli",l:"Clients",e:"👥",roles:["admin","sales"]},
+    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts"]},
+  ];
+  const nav=allNav.filter(n=>n.roles.includes(user.role));
+
+  if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading iPrint ERP...</p></div>;
+
+  return(
+    <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+      {/* SIDEBAR */}
+      <aside style={{width:col?44:180,background:"#060810",borderRight:"1px solid #1a2030",display:"flex",flexDirection:"column",transition:"width .2s",overflow:"hidden",flexShrink:0}}>
+        <div style={{padding:"8px",display:"flex",alignItems:"center",gap:6,borderBottom:"1px solid #1a2030",minHeight:38}}>
+          <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
+          {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
+        </div>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=><div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}</div>)}</nav>
+        <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
+          {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
+          <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
+          <div className="ni" onClick={()=>setCol(p=>!p)}><span>{col?"▸":"◂"}</span></div>
+        </div>
+      </aside>
+
+      {/* MAIN */}
+      <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <header style={{height:38,borderBottom:"1px solid #1a2030",display:"flex",alignItems:"center",padding:"0 12px",gap:8,flexShrink:0}}>
+          <h2 style={{fontWeight:700,fontSize:12,flex:1}}>{nav.find(n=>n.id===pg)?.l||"iPrint"}</h2>
+          <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
+        </header>
+        <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg}/>}
+          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal}/>}
+          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} createJob={createJob} sp={setPg}/>}
+          {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept}/>}
+          {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN}/>}
+          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog}/>}
+          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog}/>}
+          {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn}/>}
+          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch}/>}
+          {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
+          {pg==="rem"&&<RemPage jobs={fullJobs}/>}
+          {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
+          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms}/>}
+        </div>
+      </main>
+
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"20px 10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1050,padding:18,animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.x}</div></div>}
+      {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
+    </div>
+  );
+}
+
+// ─── SMALL COMPONENTS ───────────────────────────────────────
+function SC({l,v,s,c="#e3a008",d=0}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}</p><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
+function FB({f,firms}){const fm=firms?.find(x=>x.code===f);return fm?<span className="bd" style={{background:fm.color+"20",color:fm.color}}>{fm.short_name}</span>:null;}
+function Ck({on,onClick}){return <div className={`ck ${on?"on":""}`} onClick={onClick}>{on?"✓":""}</div>;}
+function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b",fontWeight:600,textTransform:"uppercase",display:"block",marginBottom:1}}>{l}</label>{children}</div>;}
+
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════
+function DashPage({s,stock,sp}){
+  const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
+      <SC l="Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Billed" v={fmtK(s.billed)} c="#06b6d4" d={30}/><SC l="GRN" v={s.grn} c="#10b981" d={60}/><SC l="Printing" v={s.print} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Outsource" v={s.os} c="#8b5cf6" d={150}/><SC l="Dispatch" v={s.disp} c="#059669" d={180}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={210}/>
+    </div>
+    {low.length>0&&<div className="c" style={{padding:10,borderColor:"#f4706733"}}><p style={{fontSize:9,color:"#f47067",fontWeight:700,marginBottom:4}}>⚠️ Low Stock</p><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{low.map(([m,q])=><span key={m} style={{background:"#1a0505",border:"1px solid #f4706733",borderRadius:5,padding:"3px 6px",fontSize:9.5}}><strong style={{color:"#f47067"}}>{q}</strong> {m}</span>)}</div></div>}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:5}}>{[{l:"New Job",p:"new",e:"➕"},{l:"Material In",p:"grn",e:"📦"},{l:"Printing",p:"print",e:"🖨️"},{l:"Fabrication",p:"fab",e:"🔧"},{l:"Outsource",p:"os",e:"📤"},{l:"Dispatch",p:"disp",e:"🚚"},{l:"Stock",p:"stock",e:"📊"},{l:"Accounts",p:"acc",e:"🧾"}].map(a=><button key={a.l} className="b" style={{padding:8,justifyContent:"flex-start"}} onClick={()=>sp(a.p)}>{a.e} {a.l}</button>)}</div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ALL JOBS
+// ═══════════════════════════════════════════════════════════
+function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm}){
+  const [ff,sf]=useState("All");
+  const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;return true;});
+  
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show}/>});
+
+  return <div style={{display:"flex",flexDirection:"column",gap:7}}>
+    <div style={{display:"flex",justifyContent:"space-between",gap:3,flexWrap:"wrap"}}><div style={{display:"flex",gap:2}}>{["All","JPP","JXT","VHD"].map(f=><button key={f} className={`b bs ${ff===f?"bp":""}`} onClick={()=>sf(f)}>{f==="All"?"All":firms.find(x=>x.code===f)?.short_name||f}</button>)}</div><button className="b bp bs" onClick={()=>sp("new")}>➕ New Job</button></div>
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Batches</th><th>PO</th><th>By</th><th>%</th></tr></thead><tbody>
+      {fl.map(j=>{const ti=j.batches?.reduce((a,b)=>a+(b.items?.length||0),0)||0;const di=j.batches?.reduce((a,b)=>a+(b.items?.filter(it=>DEPTS.every(d=>it['dept_'+d.toLowerCase()])).length||0),0)||0;const p=ti?Math.round(di/ti*100):0;
+        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td>
+          <td><div style={{display:"flex",alignItems:"center",gap:2}}><div style={{width:30,height:3,background:"#1a2030",borderRadius:2}}><div style={{width:`${p}%`,height:"100%",borderRadius:2,background:p===100?"#4ade80":"#e3a008"}}/></div><span className="mn" style={{fontSize:7}}>{p}%</span></div></td></tr>;})}</tbody></table></div></div>
+  </div>;
+}
+
+// JOB DETAIL
+function JobDetail({j,firms,togDept,addBatchToJob,show}){
+  const [vm,svm]=useState("internal");
+  const [sa,ssa]=useState(false);const [nn,snn]=useState("");
+  const fm=firms.find(f=>f.code===j.firm)||{};
+  const ab=async()=>{const bd={id:"B"+uid(),job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);};
+  
+  return <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"70vh",overflowY:"auto"}}>
+    <div style={{display:"flex",justifyContent:"space-between"}}><div><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:10,color:"#64748b"}}>{j.project} · {j.client_name}</p></div>
+      <div style={{display:"flex",gap:2}}><FB f={j.firm} firms={firms}/><button className={`b bs ${vm==="internal"?"bp":""}`} onClick={()=>svm("internal")}>Internal</button><button className={`b bs ${vm==="client"?"bp":""}`} onClick={()=>svm("client")}>DC</button></div></div>
+    <div className="fg f3" style={{fontSize:10,background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
+      {[["By",j.made_by],["PO",j.po_number||"⚠️ Pending"],["Contact",j.contact_person],["Delivery",j.delivery_address?.slice(0,40)],["Firm",fm.name],["GST",fm.gst]].map(([k,v])=><div key={k}><span style={{color:"#64748b",fontSize:8}}>{k}</span><p style={{fontWeight:600}}>{v||"—"}</p></div>)}
+    </div>
+    {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
+      <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>{b.bill_no&&<span className="mn" style={{fontSize:9,color:"#06b6d4"}}>{b.bill_no}</span>}</div>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Qty</th><th>Rate</th><th>Amt</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+        <tbody>{(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);return <tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td className="mn" style={{fontSize:10}}>₹{it.rate}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+    </div>)}
+    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>}
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// NEW JOB
+// ═══════════════════════════════════════════════════════════
+function NewJobPage({firms,clients,products,team,createJob,sp}){
+  const [fm,sfm]=useState("JXT");
+  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||""});
+  const [su,sSu]=useState("INCH");
+  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0}]);
+
+  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone}));};
+  const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
+  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;it.sqft=cSq(w,h,q,su);it.tot=it.rm==="SQFT"?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*.18*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
+  const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0}]);
+  const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
+  const tot=useMemo(()=>{const s=its.reduce((a,x)=>a+x.tot,0),g=its.reduce((a,x)=>a+x.gst,0);return {s,g,t:s+g};},[its]);
+  const jid=`${String(Math.floor(Math.random()*9000+1000))}-2627`;
+
+  const sub=async()=>{
+    if(!f.cn){alert("Select client");return;}
+    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:"50% Advance",status:"Active"};
+    const batchId="B"+uid();
+    const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
+    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,amount:it.amt,dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false}));
+    await createJob(jobData,batchData,lineItems);
+  };
+
+  return <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:1050}}>
+    <div style={{display:"flex",gap:4}}>{firms.map(f=><button key={f.code} className="b" onClick={()=>sfm(f.code)} style={{flex:1,padding:8,flexDirection:"column",border:`2px solid ${fm===f.code?f.color:"#1a2030"}`,background:fm===f.code?f.color+"15":"transparent"}}><span style={{fontWeight:800,color:f.color,fontSize:12}}>{f.short_name}</span><span style={{fontSize:7,color:"#64748b"}}>{f.gst}</span></button>)}</div>
+    <div className="c a" style={{padding:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div><p style={{fontSize:8,color:"#64748b"}}>NEW JOB</p><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{jid}</p></div><FB f={fm} firms={firms}/></div>
+      <div className="fg f3">
+        <F l="Made By"><select className="in" value={f.mb} onChange={e=>sF(p=>({...p,mb:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+        <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
+        <F l="Client"><select className="in" value={f.cl} onChange={e=>selC(e.target.value)}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></F>
+        <F l="Project"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))}/></F>
+        <F l="Contact"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))}/></F>
+        <F l="PO #"><input className="in mn" value={f.po} onChange={e=>sF(p=>({...p,po:e.target.value}))}/></F>
+        <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={f.da} onChange={e=>sF(p=>({...p,da:e.target.value}))}/></F></div>
+        <F l="Size Unit"><select className="in" value={su} onChange={e=>sSu(e.target.value)}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
+      </div>
+    </div>
+    <div className="c a" style={{padding:0,animationDelay:"50ms"}}>
+      <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amt</th><th></th></tr></thead>
+        <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
+          <td><select className="in" value={it.pi} onChange={e=>selP(i,+e.target.value)} style={{fontSize:10,padding:"3px"}}>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select></td>
+          <td><input className="in" value={it.cli} onChange={e=>uI(i,"cli",e.target.value)} style={{fontSize:10,padding:"3px",color:"#06b6d4"}}/></td>
+          <td><input className="in" value={it.m} onChange={e=>uI(i,"m",e.target.value)} style={{fontSize:10,padding:"3px"}}/></td>
+          <td><input className="in mn" value={it.w} onChange={e=>uI(i,"w",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
+          <td><input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
+          <td><input className="in mn" type="number" min={1} value={it.qty} onChange={e=>uI(i,"qty",e.target.value)} style={{fontSize:10,padding:"3px",width:32}}/></td>
+          <td><select className="in" value={it.rm} onChange={e=>uI(i,"rm",e.target.value)} style={{fontSize:10,padding:"3px",width:48}}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
+          <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.sqft||"—"}</td>
+          <td><input className="in mn" value={it.rate} onChange={e=>uI(i,"rate",e.target.value)} style={{fontSize:10,padding:"3px",width:44}}/></td>
+          <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
+          <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.gst?fmt(it.gst):"—"}</td>
+          <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
+          <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td></tr>)}
+        <tr style={{background:"#0a0f1a"}}><td colSpan={10} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td></td></tr>
+      </tbody></table></div>
+    </div>
+    <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
+  </div>;
+}
+
+// DEPT TRACKER
+function DeptPage({jobs,s,togDept}){const [ad,sad]=useState(DEPTS[0]);
+  const pen=useMemo(()=>{const r=[];jobs.filter(j=>!s||j.id?.toLowerCase().includes(s.toLowerCase())).forEach(j=>{(j.batches||[]).forEach(b=>{(b.items||[]).forEach(it=>{const col='dept_'+ad.toLowerCase();if(!it[col]){const di=DEPTS.indexOf(ad);const prevCol=di>0?'dept_'+DEPTS[di-1].toLowerCase():null;if(!prevCol||it[prevCol])r.push({jid:j.id,bid:b.id,it,j,b});}});});});return r;},[jobs,ad,s]);
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{DEPTS.map((d,i)=><button key={d} className={`b bs ${ad===d?"bp":""}`} onClick={()=>sad(d)} style={ad!==d?{borderColor:DC[i]+"55",color:DC[i]}:{}}>{d}</button>)}</div>
+    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${DC[DEPTS.indexOf(ad)]}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:DC[DEPTS.indexOf(ad)]}}>{ad} — {pen.length} pending</span></div>
+    <div style={{overflowX:"auto"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Qty</th><th></th></tr></thead><tbody>
+      {pen.map((p,i)=><tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{p.jid}</td><td style={{fontSize:10}}>{p.j.client_name?.slice(0,20)}</td><td style={{fontSize:10,fontWeight:600}}>{p.it.internal_name}</td><td className="mn">{p.it.qty}</td><td><button className="b bg bs" onClick={()=>togDept(p.it.id,ad,true)}>✓</button></td></tr>)}
+      {pen.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
+    </tbody></table></div></div></div>;
+}
+
+// GRN
+function GRNPage({grn,suppliers,materials,team,addGRN}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
+  const add=async()=>{await addGRN({id:"G"+uid(),...f,qty:+f.qty,rate:+f.rate,sqft:+f.sqft});sF(p=>({...p,qty:1,code:"",size:"",length:"",sqft:"",rate:"",invoice_no:"",job_id:""}));};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾ Close":"📦 New Inward"}</button>
+    {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
+      <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
+      <F l="Supplier"><select className="in" value={f.supplier} onChange={e=>sF(p=>({...p,supplier:e.target.value}))}>{suppliers.map(s=><option key={s.id} value={s.name}>{s.name}</option>)}</select></F>
+      <F l="Material"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+      <F l="Code#"><input className="in mn" value={f.code} onChange={e=>sF(p=>({...p,code:e.target.value}))}/></F>
+      <F l="Size"><input className="in mn" value={f.size} onChange={e=>sF(p=>({...p,size:e.target.value}))}/></F>
+      <F l="Length"><input className="in mn" value={f.length} onChange={e=>sF(p=>({...p,length:e.target.value}))}/></F>
+      <F l="Qty"><input className="in mn" type="number" value={f.qty} onChange={e=>sF(p=>({...p,qty:e.target.value}))}/></F>
+      <F l="Unit"><select className="in" value={f.unit} onChange={e=>sF(p=>({...p,unit:e.target.value}))}>{MUNITS.map(u=><option key={u}>{u}</option>)}</select></F>
+      <F l="SqFt"><input className="in mn" value={f.sqft} onChange={e=>sF(p=>({...p,sqft:e.target.value}))}/></F>
+      <F l="Rate"><input className="in mn" value={f.rate} onChange={e=>sF(p=>({...p,rate:e.target.value}))}/></F>
+      <F l="Invoice#"><input className="in mn" value={f.invoice_no} onChange={e=>sF(p=>({...p,invoice_no:e.target.value}))}/></F>
+      <F l="Type"><select className="in" value={f.inward_type} onChange={e=>sF(p=>({...p,inward_type:e.target.value}))}><option>Stock</option><option>Job</option></select></F>
+      <F l="By"><select className="in" value={f.received_by} onChange={e=>sF(p=>({...p,received_by:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+      <F l="QC"><select className="in" value={f.qc} onChange={e=>sF(p=>({...p,qc:e.target.value}))}><option>OK</option><option>Rejected</option></select></F>
+      <F l="📸 Photo"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}}/></F>
+      <F l="📎 PO"><input type="file" accept=".pdf,image/*" className="in" style={{padding:2}}/></F>
+    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save GRN</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Code</th><th>Qty</th><th>Rate</th><th>Inv#</th><th>Type</th><th>By</th><th>QC</th></tr></thead><tbody>
+      {grn.map(g=><tr key={g.id}><td>{g.date}</td><td>{g.supplier}</td><td style={{fontWeight:600}}>{g.material}</td><td className="mn">{g.code}</td><td className="mn">{g.qty} {g.unit}</td><td className="mn">₹{g.rate}</td><td className="mn">{g.invoice_no}</td><td><span className="bd" style={{background:g.inward_type==="Job"?"#e3a00820":"#23863620",color:g.inward_type==="Job"?"#e3a008":"#4ade80"}}>{g.inward_type}</span></td><td>{g.received_by}</td><td style={{color:g.qc==="OK"?"#4ade80":"#f47067"}}>{g.qc}</td></tr>)}
+    </tbody></table></div></div></div>;
+}
+
+// PRINTING
+function PrintPage({logs,machines,materials,team,stock,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",machine:machines[0]?.name||"",operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"roll",waste:0,start_time:"09:00",end_time:"10:00"});
+  const add=async()=>{await addLog({id:"P"+uid(),...f,qty_used:+f.qty_used,waste:+f.waste});};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🖨️ New Print Log"}</button>
+    {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
+      <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
+      <F l="Job#"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))}/></F>
+      <F l="Machine"><select className="in" value={f.machine} onChange={e=>sF(p=>({...p,machine:e.target.value}))}>{machines.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+      <F l="Operator"><select className="in" value={f.operator} onChange={e=>sF(p=>({...p,operator:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+      <F l="Material"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+      <F l={`Qty (Avl:${stock[f.material]||0})`}><input className="in mn" type="number" value={f.qty_used} onChange={e=>sF(p=>({...p,qty_used:e.target.value}))}/></F>
+      <F l="Waste"><input className="in mn" type="number" value={f.waste} onChange={e=>sF(p=>({...p,waste:e.target.value}))}/></F>
+      <F l="Start"><input type="time" className="in" value={f.start_time} onChange={e=>sF(p=>({...p,start_time:e.target.value}))}/></F>
+      <F l="End"><input type="time" className="in" value={f.end_time} onChange={e=>sF(p=>({...p,end_time:e.target.value}))}/></F>
+      <F l="📸 Photo"><input type="file" accept="image/*" capture className="in" style={{padding:2}}/></F>
+    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Machine</th><th>Op</th><th>Material</th><th>Used</th><th>Waste</th><th>Time</th></tr></thead><tbody>
+      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td>{l.machine}</td><td>{l.operator}</td><td style={{fontWeight:600}}>{l.material}</td><td className="mn">{l.qty_used}</td><td className="mn" style={{color:"#f47067"}}>{l.waste}</td><td>{l.start_time}–{l.end_time}</td></tr>)}
+      {logs.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:16}}>No logs yet</td></tr>}
+    </tbody></table></div></div></div>;
+}
+
+// FABRICATION
+function FabPage({logs,materials,team,stock,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",process:FAB_P[0],operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"pcs",waste:0,start_time:"09:00",end_time:"10:00"});
+  const add=async()=>{await addLog({id:"F"+uid(),...f,qty_used:+f.qty_used,waste:+f.waste});};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🔧 New Fab Log"}</button>
+    {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
+      <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
+      <F l="Job#"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))}/></F>
+      <F l="Process"><select className="in" value={f.process} onChange={e=>sF(p=>({...p,process:e.target.value}))}>{FAB_P.map(p=><option key={p}>{p}</option>)}</select></F>
+      <F l="Operator"><select className="in" value={f.operator} onChange={e=>sF(p=>({...p,operator:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+      <F l="Material"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+      <F l={`Qty (Avl:${stock[f.material]||0})`}><input className="in mn" type="number" value={f.qty_used} onChange={e=>sF(p=>({...p,qty_used:e.target.value}))}/></F>
+      <F l="Waste"><input className="in mn" type="number" value={f.waste} onChange={e=>sF(p=>({...p,waste:e.target.value}))}/></F>
+      <F l="Start"><input type="time" className="in" value={f.start_time} onChange={e=>sF(p=>({...p,start_time:e.target.value}))}/></F>
+      <F l="End"><input type="time" className="in" value={f.end_time} onChange={e=>sF(p=>({...p,end_time:e.target.value}))}/></F>
+    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Process</th><th>Op</th><th>Material</th><th>Used</th><th>Waste</th><th>Time</th></tr></thead><tbody>
+      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td style={{fontWeight:600}}>{l.process}</td><td>{l.operator}</td><td>{l.material}</td><td className="mn">{l.qty_used}</td><td className="mn" style={{color:"#f47067"}}>{l.waste}</td><td>{l.start_time}–{l.end_time}</td></tr>)}
+      {logs.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:16}}>No logs</td></tr>}
+    </tbody></table></div></div></div>;
+}
+
+// OUTSOURCE
+function OsPage({logs,agencies,materials,addLog,markReturn}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),agency:agencies[0]?.name||"",material:materials[0]?.name||"",qty_sent:1,challan_no:"",job_id:"",rate:"",expected_return:""});
+  const add=async()=>{await addLog({id:"O"+uid(),...f,qty_sent:+f.qty_sent,rate:+f.rate,returned:false});};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"📤 New Outsource"}</button>
+    {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
+      <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
+      <F l="Agency"><select className="in" value={f.agency} onChange={e=>sF(p=>({...p,agency:e.target.value}))}>{agencies.map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></F>
+      <F l="Job#"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))}/></F>
+      <F l="Material"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+      <F l="Qty"><input className="in mn" type="number" value={f.qty_sent} onChange={e=>sF(p=>({...p,qty_sent:e.target.value}))}/></F>
+      <F l="Challan#"><input className="in mn" value={f.challan_no} onChange={e=>sF(p=>({...p,challan_no:e.target.value}))}/></F>
+      <F l="Rate"><input className="in mn" value={f.rate} onChange={e=>sF(p=>({...p,rate:e.target.value}))}/></F>
+      <F l="📸 Challan"><input type="file" accept="image/*" capture className="in" style={{padding:2}}/></F>
+    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Agency</th><th>Material</th><th>Qty</th><th>Challan</th><th>Job</th><th>Rate</th><th>Status</th><th></th></tr></thead><tbody>
+      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td style={{fontWeight:600}}>{l.agency}</td><td>{l.material}</td><td className="mn">{l.qty_sent}</td><td className="mn">{l.challan_no}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td className="mn">₹{l.rate}</td><td>{l.returned?<span className="bd" style={{background:"#23863620",color:"#4ade80"}}>Ret</span>:<span className="bd" style={{background:"#e3a00820",color:"#e3a008"}}>Out</span>}</td><td>{!l.returned&&<button className="b bg bs" onClick={()=>markReturn(l.id)}>Return</button>}</td></tr>)}
+      {logs.length===0&&<tr><td colSpan={9} style={{textAlign:"center",color:"#64748b",padding:16}}>None</td></tr>}
+    </tbody></table></div></div></div>;
+}
+
+// DISPATCH
+function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
+  const add=async()=>{await addLog({id:"D"+uid(),...f});};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🚚 New Dispatch"}</button>
+    {sf&&<div className="c a" style={{padding:10}}><div className="fg f3">
+      <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
+      <F l="Job#"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))}/></F>
+      <F l="Type"><select className="in" value={f.dispatch_type} onChange={e=>sF(p=>({...p,dispatch_type:e.target.value}))}><option>Delivery Only</option><option>Delivery + Install</option></select></F>
+      <F l="Del Boy"><select className="in" value={f.delivery_boy} onChange={e=>sF(p=>({...p,delivery_boy:e.target.value}))}>{delBoys.map(d=><option key={d.id} value={d.name}>{d.name}</option>)}<option>Other</option></select></F>
+      <F l="Vehicle/Courier"><input className="in" value={f.vehicle} onChange={e=>sF(p=>({...p,vehicle:e.target.value}))}/></F>
+      <F l="LR/Track#"><input className="in mn" value={f.lr_no} onChange={e=>sF(p=>({...p,lr_no:e.target.value}))}/></F>
+      <F l="Challan#"><input className="in mn" value={f.challan_no} onChange={e=>sF(p=>({...p,challan_no:e.target.value}))}/></F>
+      <F l="📸 Challan"><input type="file" accept="image/*" className="in" style={{padding:2}}/></F>
+      <F l="📸 POD"><input type="file" accept="image/*" className="in" style={{padding:2}}/></F>
+      {f.dispatch_type.includes("Install")&&<><F l="Installer"><input className="in" value={f.installer} onChange={e=>sF(p=>({...p,installer:e.target.value}))}/></F><F l="Install Date"><input type="date" className="in" value={f.install_date} onChange={e=>sF(p=>({...p,install_date:e.target.value}))}/></F></>}
+    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Type</th><th>Boy</th><th>Vehicle</th><th>Challan</th><th>LR</th></tr></thead><tbody>
+      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td><span className="bd" style={{background:l.dispatch_type?.includes("Install")?"#8b5cf620":"#10b98120",color:l.dispatch_type?.includes("Install")?"#c084fc":"#4ade80"}}>{l.dispatch_type}</span></td><td>{l.delivery_boy}</td><td>{l.vehicle}</td><td className="mn">{l.challan_no}</td><td className="mn">{l.lr_no}</td></tr>)}
+      {logs.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:16}}>None</td></tr>}
+    </tbody></table></div></div></div>;
+}
+
+// STOCK
+function StockPage({stock,grn,pl,fl}){const rows=Object.entries(stock).filter(([,v])=>v!==0||true).sort((a,b)=>a[0].localeCompare(b[0]));
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
+      <SC l="Inward" v={grn.reduce((s,g)=>s+(+g.qty||0),0)} c="#10b981"/><SC l="Print Used" v={pl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#ef4444" d={30}/><SC l="Fab Used" v={fl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#dc2626" d={60}/><SC l="Materials" v={rows.length} c="#3b82f6" d={90}/>
+    </div>
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Material</th><th>Available</th><th>Status</th></tr></thead><tbody>
+      {rows.map(([m,q])=><tr key={m}><td style={{fontWeight:600}}>{m}</td><td className="mn" style={{fontWeight:700}}>{q}</td><td>{q<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:q<=2?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td></tr>)}
+    </tbody></table></div></div></div>;
+}
+
+// REMINDERS
+function RemPage({jobs}){const rem=jobs.filter(j=>!j.po_number).map(j=>({...j,d:Math.max(0,Math.floor((new Date()-new Date(j.created_at))/864e5))})).sort((a,b)=>b.d-a.d);
+  return <div className="c" style={{padding:0}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Days</th><th></th></tr></thead><tbody>
+    {rem.map(j=><tr key={j.id}><td className="mn" style={{color:"#e3a008",fontWeight:700}}>{j.id}</td><td>{j.client_name?.slice(0,22)}</td><td style={{color:"#64748b"}}>{j.project}</td><td><span style={{color:j.d>30?"#ef4444":"#f59e0b",fontWeight:700}}>{j.d}d</span></td><td><button className="b br bs" onClick={()=>window.open(`mailto:?subject=PO Reminder-${j.id}&body=Dear ${j.contact_person},%0AReminder for PO:%0AJob:${j.id}%0AProject:${j.project}%0APending:${j.d} days%0ARegards,iPrint`)}>📧</button></td></tr>)}
+    {rem.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#4ade80",padding:16}}>All POs received!</td></tr>}
+  </tbody></table></div>;
+}
+
+// CLIENTS
+function CliPage({clients,jobs,s}){const fl=clients.filter(c=>!s||c.name?.toLowerCase().includes(s.toLowerCase()));
+  return <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:7}}>{fl.map(c=>{const cj=jobs.filter(j=>j.client_id===c.id);return <div key={c.id} className="c a" style={{padding:10}}><h4 style={{fontSize:11.5,fontWeight:700}}>{c.name?.slice(0,26)}</h4><p style={{fontSize:10,color:"#64748b"}}>{c.contact} · {c.phone}</p><p style={{fontSize:10,marginTop:3}}><strong>{cj.length}</strong> jobs</p></div>;})}</div>;
+}
+
+// ACCOUNTS
+function AccPage({jobs,batches,items,saveBill,firms}){
+  const ready=[];const billed=[];
+  jobs.forEach(j=>{(j.batches||[]).forEach(b=>{
+    const done=(b.items||[]).length>0&&(b.items||[]).every(it=>DEPTS.slice(0,7).every(d=>it['dept_'+d.toLowerCase()]));
+    const tot=(b.items||[]).reduce((s,it)=>s+(+it.amount||0),0);
+    if(done&&!b.bill_no)ready.push({j,b,tot});
+    if(b.bill_no)billed.push({j,b,tot});
+  });});
+  const [bi,sBi]=useState({});
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    {ready.length>0&&<div className="c" style={{padding:0,borderColor:"#e3a00833"}}><div style={{padding:"6px 8px",borderBottom:"1px solid #1a2030",background:"#18150a"}}><span style={{fontSize:10,color:"#e3a008",fontWeight:700}}>⚡ Ready for Tally ({ready.length})</span></div>
+      <table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Amt</th><th>Tally#</th><th></th></tr></thead><tbody>
+        {ready.map(r=><tr key={r.b.id}><td className="mn" style={{color:"#e3a008",fontWeight:700}}>{r.j.id}</td><td><FB f={r.j.firm} firms={firms}/></td><td>{r.j.client_name?.slice(0,20)}</td><td className="mn" style={{fontWeight:600}}>{fmt(r.tot)}</td><td><input className="in mn" style={{width:110}} value={bi[r.b.id]||""} onChange={e=>sBi(p=>({...p,[r.b.id]:e.target.value}))}/></td><td><button className="b bp bs" onClick={()=>{if(bi[r.b.id])saveBill(r.b.id,bi[r.b.id]);}}>Save</button></td></tr>)}
+      </tbody></table></div>}
+    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9.5,color:"#64748b",fontWeight:600}}>BILLED</span></div>
+      <table><thead><tr><th>Job</th><th>Firm</th><th>Tally#</th><th>Amt</th></tr></thead><tbody>
+        {billed.map((r,i)=><tr key={i}><td className="mn" style={{color:"#e3a008"}}>{r.j.id}</td><td><FB f={r.j.firm} firms={firms}/></td><td className="mn" style={{color:"#06b6d4"}}>{r.b.bill_no}</td><td className="mn">{fmt(r.tot)}</td></tr>)}
+      </tbody></table></div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ROOT APP — Loads master data, then shows Login or MainApp
+// ═══════════════════════════════════════════════════════════
+function RootApp(){
+  const [user,setUser]=useState(null);
+  const [masterData,setMasterData]=useState(null);
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    async function loadMaster(){
+      const [f,c,s,p,m,mac,ag,db,tm] = await Promise.all([
+        sb.from('firms').select('*'),
+        sb.from('clients').select('*').order('name'),
+        sb.from('suppliers').select('*').order('name'),
+        sb.from('products').select('*').order('internal_name'),
+        sb.from('materials').select('*').order('name'),
+        sb.from('machines').select('*'),
+        sb.from('outsource_agencies').select('*'),
+        sb.from('delivery_boys').select('*'),
+        sb.from('team_members').select('*').eq('active',true),
+      ]);
+      setMasterData({
+        firms:f.data||[], clients:c.data||[], suppliers:s.data||[],
+        products:p.data||[], materials:m.data||[], machines:mac.data||[],
+        agencies:ag.data||[], delBoys:db.data||[], team:tm.data||[],
+      });
+      setLoading(false);
+    }
+    loadMaster();
+  },[]);
+
+  if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,background:"#060810"}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading iPrint ERP...</p></div>;
+
+  if(!user) return <Login onLogin={setUser} team={masterData.team}/>;
+  return <MainApp user={user} onLogout={()=>setUser(null)} masterData={masterData}/>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<RootApp/>);
+</script>
+</body>
+</html>
