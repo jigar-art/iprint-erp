@@ -251,13 +251,19 @@ function MainApp({user,onLogout,masterData}){
     }))
   })),[jobs,batches,items]);
 
-  const stats=useMemo(()=>({
-    jobs:fullJobs.length,
-    active:fullJobs.reduce((s,j)=>s+j.batches.filter(b=>b.status!=='Done').length,0),
-    billed:fullJobs.reduce((s,j)=>s+j.batches.filter(b=>b.bill_no).reduce((s2,b)=>s2+b.items.reduce((s3,it)=>s3+(+it.amount||0),0),0),0),
-    poPend:fullJobs.filter(j=>!j.po_number).length,
-    grn:grnData.length,print:pLogs.length,fab:fLogs.length,os:osLogs.length,disp:dLogs.length,
-  }),[fullJobs,grnData,pLogs,fLogs,osLogs,dLogs]);
+  const stats=useMemo(()=>{
+    const sc=(st)=>fullJobs.filter(j=>j.status===st).length;
+    return {
+      jobs:fullJobs.length,
+      active:fullJobs.filter(j=>!['Billing Done','Cancelled','No Bill','Cash Received'].includes(j.status)).length,
+      billed:sc('Billing Done'),
+      poPend:fullJobs.filter(j=>!j.po_number&&!['Billing Done','Cancelled','No Bill','Cash Received'].includes(j.status)).length,
+      printing:sc('Printing'),fab:sc('Fabrication'),install:sc('Installation'),
+      design:sc('Designing'),delivered:sc('Delivered'),billPend:sc('Billing Pending'),
+      quotation:sc('Quotation Sent'),recce:sc('Recce Pending'),
+      grn:grnData.length,os:osLogs.length,disp:dLogs.length,
+    };
+  },[fullJobs,grnData,osLogs,dLogs]);
 
   // Role-based nav
   const allNav=[
@@ -337,7 +343,7 @@ function DashPage({s,stock,sp}){
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Billed" v={fmtK(s.billed)} c="#06b6d4" d={30}/><SC l="GRN" v={s.grn} c="#10b981" d={60}/><SC l="Printing" v={s.print} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Outsource" v={s.os} c="#8b5cf6" d={150}/><SC l="Dispatch" v={s.disp} c="#059669" d={180}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={210}/>
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Quotation Sent" v={s.quotation} c="#3b82f6" d={30}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60}/><SC l="Printing" v={s.printing} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Installation" v={s.install} c="#059669" d={150}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={180}/><SC l="Delivered" v={s.delivered} c="#10b981" d={210}/><SC l="Billed" v={s.billed} c="#4ade80" d={240}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270}/><SC l="Recce Pending" v={s.recce} c="#f59e0b" d={300}/>
     </div>
     {low.length>0&&<div className="c" style={{padding:10,borderColor:"#f4706733"}}><p style={{fontSize:9,color:"#f47067",fontWeight:700,marginBottom:4}}>⚠️ Low Stock</p><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{low.map(([m,q])=><span key={m} style={{background:"#1a0505",border:"1px solid #f4706733",borderRadius:5,padding:"3px 6px",fontSize:9.5}}><strong style={{color:"#f47067"}}>{q}</strong> {m}</span>)}</div></div>}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:5}}>{[{l:"New Job",p:"new",e:"➕"},{l:"Material In",p:"grn",e:"📦"},{l:"Printing",p:"print",e:"🖨️"},{l:"Fabrication",p:"fab",e:"🔧"},{l:"Outsource",p:"os",e:"📤"},{l:"Dispatch",p:"disp",e:"🚚"},{l:"Stock",p:"stock",e:"📊"},{l:"Accounts",p:"acc",e:"🧾"}].map(a=><button key={a.l} className="b" style={{padding:8,justifyContent:"flex-start"}} onClick={()=>sp(a.p)}>{a.e} {a.l}</button>)}</div>
@@ -611,23 +617,22 @@ function CliPage({clients,jobs,s}){const fl=clients.filter(c=>!s||c.name?.toLowe
 
 // ACCOUNTS
 function AccPage({jobs,batches,items,saveBill,firms}){
-  const ready=[];const billed=[];
-  jobs.forEach(j=>{(j.batches||[]).forEach(b=>{
-    const done=(b.items||[]).length>0&&(b.items||[]).every(it=>DEPTS.slice(0,7).every(d=>it['dept_'+d.toLowerCase()]));
-    const tot=(b.items||[]).reduce((s,it)=>s+(+it.amount||0),0);
-    if(done&&!b.bill_no)ready.push({j,b,tot});
-    if(b.bill_no)billed.push({j,b,tot});
-  });});
-  const [bi,sBi]=useState({});
+  const [tab,setTab]=useState('pending');
+  const tabs=[
+    {id:'pending',l:'Billing Pending',c:'#f59e0b',statuses:['Billing Pending','Cash Pending','Proforma Invoice','IC Pending']},
+    {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing','Delivered']},
+    {id:'done',l:'Billing Completed',c:'#4ade80',statuses:['Billing Done','Cash Received','No Bill']},
+  ];
+  const cur=tabs.find(t=>t.id===tab);
+  const filtered=jobs.filter(j=>cur.statuses.includes(j.status));
+  const statusColors={'Billing Pending':'#f59e0b','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f47067','Given for Billing':'#06b6d4','Delivered':'#10b981','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
-    {ready.length>0&&<div className="c" style={{padding:0,borderColor:"#e3a00833"}}><div style={{padding:"6px 8px",borderBottom:"1px solid #1a2030",background:"#18150a"}}><span style={{fontSize:10,color:"#e3a008",fontWeight:700}}>⚡ Ready for Tally ({ready.length})</span></div>
-      <table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Amt</th><th>Tally#</th><th></th></tr></thead><tbody>
-        {ready.map(r=><tr key={r.b.id}><td className="mn" style={{color:"#e3a008",fontWeight:700}}>{r.j.id}</td><td><FB f={r.j.firm} firms={firms}/></td><td>{r.j.client_name?.slice(0,20)}</td><td className="mn" style={{fontWeight:600}}>{fmt(r.tot)}</td><td><input className="in mn" style={{width:110}} value={bi[r.b.id]||""} onChange={e=>sBi(p=>({...p,[r.b.id]:e.target.value}))}/></td><td><button className="b bp bs" onClick={()=>{if(bi[r.b.id])saveBill(r.b.id,bi[r.b.id]);}}>Save</button></td></tr>)}
-      </tbody></table></div>}
-    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9.5,color:"#64748b",fontWeight:600}}>BILLED</span></div>
-      <table><thead><tr><th>Job</th><th>Firm</th><th>Tally#</th><th>Amt</th></tr></thead><tbody>
-        {billed.map((r,i)=><tr key={i}><td className="mn" style={{color:"#e3a008"}}>{r.j.id}</td><td><FB f={r.j.firm} firms={firms}/></td><td className="mn" style={{color:"#06b6d4"}}>{r.b.bill_no}</td><td className="mn">{fmt(r.tot)}</td></tr>)}
-      </tbody></table></div>
+    <div style={{display:"flex",gap:3}}>{tabs.map(t=><button key={t.id} className={`b ${tab===t.id?"bp":""}`} onClick={()=>setTab(t.id)} style={tab!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.statuses.includes(j.status)).length})</button>)}</div>
+    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {filtered.length} jobs</span></div>
+    <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Contact</th><th>PO</th><th>Bill No</th></tr></thead><tbody>
+      {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:(statusColors[j.status]||'#64748b')+'20',color:statusColors[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.contact_person}</td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td></tr>})}
+      {filtered.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#4ade80",padding:20}}>No jobs in this category</td></tr>}
+    </tbody></table></div></div>
   </div>;
 }
 
