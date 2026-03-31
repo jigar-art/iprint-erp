@@ -463,14 +463,31 @@ function NewJobPage({firms,clients,products,team,createJob,sp}){
 }
 
 // DEPT TRACKER
-function DeptPage({jobs,s,togDept}){const [ad,sad]=useState(DEPTS[0]);
-  const pen=useMemo(()=>{const r=[];jobs.filter(j=>!s||j.id?.toLowerCase().includes(s.toLowerCase())).forEach(j=>{(j.batches||[]).forEach(b=>{(b.items||[]).forEach(it=>{const col='dept_'+ad.toLowerCase();if(!it[col]){const di=DEPTS.indexOf(ad);const prevCol=di>0?'dept_'+DEPTS[di-1].toLowerCase():null;if(!prevCol||it[prevCol])r.push({jid:j.id,bid:b.id,it,j,b});}});});});return r;},[jobs,ad,s]);
-  const statusColors={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Recce Pending':'#f59e0b','PO Pending':'#f47067','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f59e0b','Active':'#64748b'};
-  return <div style={{display:"flex",flexDirection:"column",gap:6}}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{DEPTS.map((d,i)=><button key={d} className={`b bs ${ad===d?"bp":""}`} onClick={()=>sad(d)} style={ad!==d?{borderColor:DC[i]+"55",color:DC[i]}:{}}>{d}</button>)}</div>
-    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${DC[DEPTS.indexOf(ad)]}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:DC[DEPTS.indexOf(ad)]}}>{ad} — {pen.length} pending</span></div>
-    <div style={{overflowX:"auto"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Status</th><th>Project</th><th>Qty</th><th></th></tr></thead><tbody>
-      {pen.map((p,i)=><tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{p.jid}</td><td style={{fontSize:10}}>{p.j.client_name?.slice(0,20)}</td><td style={{fontSize:10,fontWeight:600}}>{p.it.internal_name}</td><td><span className="bd" style={{background:(statusColors[p.j.status]||'#64748b')+'20',color:statusColors[p.j.status]||'#64748b'}}>{p.j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{p.j.project?.slice(0,20)}</td><td className="mn">{p.it.qty}</td><td><button className="b bg bs" onClick={()=>togDept(p.it.id,ad,true)}>✓</button></td></tr>)}
-      {pen.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
+function DeptPage({jobs,s,togDept}){
+  const tabs=[
+    {id:'Estimate',l:'Estimate',c:'#3b82f6',statuses:['Quotation Sent','PO Pending','PO Received','Recce Pending','Active']},
+    {id:'Design',l:'Design',c:'#8b5cf6',statuses:['Designing']},
+    {id:'Production',l:'Production',c:'#f59e0b',statuses:[]},
+    {id:'Printing',l:'Printing',c:'#ef4444',statuses:['Printing']},
+    {id:'Fabrication',l:'Fabrication',c:'#dc2626',statuses:['Fabrication']},
+    {id:'Dispatch',l:'Dispatch',c:'#10b981',statuses:['Delivered']},
+    {id:'Installation',l:'Installation',c:'#059669',statuses:['Installation']},
+    {id:'Accounts',l:'Accounts',c:'#06b6d4',statuses:['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending']},
+  ];
+  const [ad,sad]=useState(tabs[0].id);
+  const cur=tabs.find(t=>t.id===ad);
+  const pen=useMemo(()=>{
+    return jobs.filter(j=>{
+      if(s&&!j.id?.toLowerCase().includes(s.toLowerCase())&&!j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
+      return cur.statuses.includes(j.status);
+    });
+  },[jobs,cur,s]);
+  const statusColors={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Recce Pending':'#f59e0b','PO Pending':'#f47067','PO Received':'#4ade80','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f59e0b','Active':'#64748b'};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{tabs.map(t=><button key={t.id} className={`b bs ${ad===t.id?"bp":""}`} onClick={()=>sad(t.id)} style={ad!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.statuses.includes(j.status)).length})</button>)}</div>
+    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {pen.length} jobs</span></div>
+    <div style={{overflowX:"auto",maxHeight:"calc(100vh-160px)"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Status</th><th>Project</th><th>Contact</th></tr></thead><tbody>
+      {pen.map((j,i)=>{const it=(j.batches||[])[0]?.items?.[0];return <tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,fontWeight:600}}>{it?.internal_name||''}</td><td><span className="bd" style={{background:(statusColors[j.status]||'#64748b')+'20',color:statusColors[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,22)}</td><td style={{fontSize:10}}>{j.contact_person}</td></tr>})}
+      {pen.length===0&&<tr><td colSpan={6} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
     </tbody></table></div></div></div>;
 }
 
