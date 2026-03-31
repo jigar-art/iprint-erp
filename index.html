@@ -128,8 +128,7 @@ function MainApp({user,onLogout,masterData}){
   const fetchAll = async (table, order=null) => {
     let all=[], from=0, size=1000;
     while(true){
-      let q=sb.from(table).select('*').range(from,from+size-1);
-      if(order) q=q.order(order,{ascending:false});
+      let q=sb.from(table).select('*').order(order||'id',{ascending:true}).range(from,from+size-1);
       const {data,error}=await q;
       if(error||!data||data.length===0) break;
       all=all.concat(data);
@@ -144,18 +143,19 @@ function MainApp({user,onLogout,masterData}){
     async function load(){
       setLoading(true);
       const [j,b,li,g,pl,fl,ol,dl] = await Promise.all([
-        fetchAll('jobs','created_at'),
-        fetchAll('batches','created_at'),
-        fetchAll('line_items'),
-        fetchAll('grn','created_at'),
-        fetchAll('print_logs','created_at'),
-        fetchAll('fab_logs','created_at'),
-        fetchAll('outsource_logs','created_at'),
-        fetchAll('dispatch_logs','created_at'),
+        fetchAll('jobs','id'),
+        fetchAll('batches','id'),
+        fetchAll('line_items','id'),
+        fetchAll('grn','id'),
+        fetchAll('print_logs','id'),
+        fetchAll('fab_logs','id'),
+        fetchAll('outsource_logs','id'),
+        fetchAll('dispatch_logs','id'),
       ]);
       setJobs(j); setBatches(b); setItems(li);
       setGrnData(g); setPLogs(pl); setFLogs(fl);
       setOsLogs(ol); setDLogs(dl);
+      console.log('Loaded:',j.length,'jobs',b.length,'batches',li.length,'items');
       setLoading(false);
     }
     load();
