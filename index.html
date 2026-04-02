@@ -542,7 +542,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus}){
 }
 
 // GRN
-function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSupplier}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
+function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSupplier}){const [sf,ssf]=useState(false);const [selGrn,setSelGrn]=useState(null);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
   const [newMat,setNewMat]=useState("");const [newSup,setNewSup]=useState("");const [showNewMat,setShowNewMat]=useState(false);const [showNewSup,setShowNewSup]=useState(false);
   const add=async()=>{await addGRN({id:"G"+uid(),...f,qty:+f.qty,rate:+f.rate,sqft:+f.sqft});sF(p=>({...p,qty:1,code:"",size:"",length:"",sqft:"",rate:"",invoice_no:"",job_id:""}));};
   const doAddMat=async()=>{if(!newMat.trim())return;const r=await addNewMaterial(newMat.trim());if(r){sF(p=>({...p,material:r.name}));materials.push(r);setNewMat("");setShowNewMat(false);}};
@@ -570,9 +570,30 @@ function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSuppl
     {showNewMat&&<div style={{display:"flex",gap:4,marginTop:6,padding:6,background:"#060810",borderRadius:6}}><input className="in" placeholder="New material name..." value={newMat} onChange={e=>setNewMat(e.target.value)} style={{flex:1}}/><button className="b bg bs" onClick={doAddMat}>Add Material</button><button className="b bs" onClick={()=>setShowNewMat(false)}>✕</button></div>}
     {showNewSup&&<div style={{display:"flex",gap:4,marginTop:6,padding:6,background:"#060810",borderRadius:6}}><input className="in" placeholder="New supplier name..." value={newSup} onChange={e=>setNewSup(e.target.value)} style={{flex:1}}/><button className="b bg bs" onClick={doAddSup}>Add Supplier</button><button className="b bs" onClick={()=>setShowNewSup(false)}>✕</button></div>}
     <button className="b bp" onClick={add} style={{marginTop:6}}>Save GRN</button></div>}
-    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Code</th><th>Qty</th><th>Rate</th><th>Inv#</th><th>Type</th><th>By</th><th>QC</th></tr></thead><tbody>
-      {grn.map(g=><tr key={g.id}><td>{g.date}</td><td>{g.supplier}</td><td style={{fontWeight:600}}>{g.material}</td><td className="mn">{g.code}</td><td className="mn">{g.qty} {g.unit}</td><td className="mn">₹{g.rate}</td><td className="mn">{g.invoice_no}</td><td><span className="bd" style={{background:g.inward_type==="Job"?"#e3a00820":"#23863620",color:g.inward_type==="Job"?"#e3a008":"#4ade80"}}>{g.inward_type}</span></td><td>{g.received_by}</td><td style={{color:g.qc==="OK"?"#4ade80":"#f47067"}}>{g.qc}</td></tr>)}
-    </tbody></table></div></div></div>;
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Code</th><th>Size</th><th>Qty</th><th>Rate</th><th>SqFt</th><th>Inv#</th><th>Job#</th><th>Type</th><th>By</th><th>QC</th></tr></thead><tbody>
+      {grn.map(g=><tr key={g.id} style={{cursor:"pointer"}} onClick={()=>setSelGrn(g)}><td>{g.date}</td><td>{g.supplier}</td><td style={{fontWeight:600}}>{g.material}</td><td className="mn">{g.code}</td><td className="mn">{g.size}{g.length?' × '+g.length:''}</td><td className="mn">{g.qty} {g.unit}</td><td className="mn">₹{g.rate}</td><td className="mn">{g.sqft||'—'}</td><td className="mn">{g.invoice_no}</td><td className="mn" style={{color:"#e3a008"}}>{g.job_id}</td><td><span className="bd" style={{background:g.inward_type==="Job"?"#e3a00820":"#23863620",color:g.inward_type==="Job"?"#e3a008":"#4ade80"}}>{g.inward_type}</span></td><td>{g.received_by}</td><td style={{color:g.qc==="OK"?"#4ade80":"#f47067"}}>{g.qc}</td></tr>)}
+    </tbody></table></div></div>
+    {selGrn&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setSelGrn(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:600,padding:20}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><h3 style={{fontSize:14,fontWeight:700,color:"#10b981"}}>📦 Material Inward Details</h3><button className="b bs" onClick={()=>setSelGrn(null)}>✕</button></div>
+      <div className="fg f2" style={{gap:10,fontSize:11}}>
+        <div><span style={{color:"#64748b",fontSize:9}}>DATE</span><p style={{fontWeight:600}}>{selGrn.date}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>SUPPLIER</span><p style={{fontWeight:600}}>{selGrn.supplier}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>MATERIAL</span><p style={{fontWeight:700,color:"#e3a008"}}>{selGrn.material}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>CODE</span><p className="mn">{selGrn.code||'—'}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>SIZE × LENGTH</span><p className="mn">{selGrn.size||'—'} × {selGrn.length||'—'}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>QTY</span><p className="mn" style={{fontWeight:700}}>{selGrn.qty} {selGrn.unit}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>TOTAL SQFT</span><p className="mn">{selGrn.sqft||'—'}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>RATE</span><p className="mn">₹{selGrn.rate}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>INVOICE / CHALLAN #</span><p className="mn">{selGrn.invoice_no||'—'}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>JOB #</span><p className="mn" style={{color:"#e3a008"}}>{selGrn.job_id||'—'}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>TYPE</span><p>{selGrn.inward_type}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>RECEIVED BY</span><p>{selGrn.received_by}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>QC STATUS</span><p style={{color:selGrn.qc==="OK"?"#4ade80":"#f47067",fontWeight:700}}>{selGrn.qc}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>PHOTO</span><p>{selGrn.photo_url?<a href={selGrn.photo_url} target="_blank" style={{color:"#3b82f6"}}>📸 View Photo</a>:'No photo uploaded'}</p></div>
+        <div><span style={{color:"#64748b",fontSize:9}}>PO COPY</span><p>{selGrn.po_file_url?<a href={selGrn.po_file_url} target="_blank" style={{color:"#3b82f6"}}>📎 View PO</a>:'No PO uploaded'}</p></div>
+      </div>
+    </div></div>}
+    </div>;
 }
 
 // PRINTING
