@@ -349,7 +349,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} togDept={togDept} addBatchToJob={addBatchToJob} show={show}/>}
           {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus}/>}
@@ -380,9 +380,31 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp}){
+function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJob,show}){
+  const [dq,setDq]=useState("");
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
+  const results=useMemo(()=>{
+    if(!dq||dq.length<2) return [];
+    const q=dq.toLowerCase();
+    return jobs.filter(j=>
+      j.id?.toLowerCase().includes(q)||
+      j.client_name?.toLowerCase().includes(q)||
+      j.project?.toLowerCase().includes(q)||
+      j.po_number?.toLowerCase().includes(q)||
+      j.contact_person?.toLowerCase().includes(q)||
+      (j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q))
+    ).slice(0,20);
+  },[dq,jobs]);
+  const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus}/>});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div className="c" style={{padding:10}}>
+      <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search by Job#, Invoice#, Client, Project, PO#..." value={dq} onChange={e=>setDq(e.target.value)} style={{fontSize:12,padding:"8px 12px",paddingLeft:12}}/></div>
+      {results.length>0&&<div style={{marginTop:6,maxHeight:300,overflowY:"auto"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Invoice</th></tr></thead><tbody>
+        {results.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn||'—'}</td></tr>})}
+      </tbody></table></div>}
+      {dq.length>=2&&results.length===0&&<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>}
+    </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
       <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Quotation Sent" v={s.quotation} c="#3b82f6" d={30}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60}/><SC l="Printing" v={s.printing} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Installation" v={s.install} c="#059669" d={150}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={180}/><SC l="Delivered" v={s.delivered} c="#10b981" d={210}/><SC l="Billed" v={s.billed} c="#4ade80" d={240}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270}/><SC l="Recce Pending" v={s.recce} c="#f59e0b" d={300}/>
     </div>
