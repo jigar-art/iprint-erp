@@ -232,6 +232,47 @@ function MainApp({user,onLogout,masterData}){
     show("Tally invoice saved!");
   },[show]);
 
+  // ─── UPDATE JOB STATUS ─────────────────────────────────────
+  const updateJobStatus = useCallback(async (jobId, newStatus) => {
+    await sb.from('jobs').update({status:newStatus}).eq('id',jobId);
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,status:newStatus}:j));
+    // Also update dept flags based on new status
+    const statusDepts={'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,0,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],
+      'Printing':[1,1,1,0,0,0,0,0],'Fabrication':[1,1,1,1,0,0,0,0],'Installation':[1,1,1,1,1,1,0,0],
+      'Delivered':[1,1,1,1,1,1,1,0],'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
+      'Billing Done':[1,1,1,1,1,1,1,1],'Cash Received':[1,1,1,1,1,1,1,1],'No Bill':[1,1,1,1,1,1,1,1],'Cancelled':[1,1,1,1,1,1,1,1]};
+    const flags=statusDepts[newStatus]||[0,0,0,0,0,0,0,0];
+    const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
+    const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
+    const jobItems=items.filter(i=>i.job_id===jobId);
+    for(const it of jobItems){await sb.from('line_items').update(updates).eq('id',it.id);}
+    setItems(p=>p.map(i=>i.job_id===jobId?{...i,...updates}:i));
+    show("Status updated to "+newStatus);
+  },[show,items]);
+
+  // ─── ADD NEW CLIENT ────────────────────────────────────────
+  const addNewClient = useCallback(async (clientData) => {
+    const {error} = await sb.from('clients').insert(clientData);
+    if(!error){show("Client added!");}
+    return !error;
+  },[show]);
+
+  // ─── ADD NEW MATERIAL ──────────────────────────────────────
+  const addNewMaterial = useCallback(async (name) => {
+    const id='M'+uid();
+    const {error} = await sb.from('materials').insert({id,name,default_unit:'roll',code:'',active:true});
+    if(!error){show("Material added!");}
+    return {id,name};
+  },[show]);
+
+  // ─── ADD NEW SUPPLIER ──────────────────────────────────────
+  const addNewSupplier = useCallback(async (name) => {
+    const id='SUP'+uid();
+    const {error} = await sb.from('suppliers').insert({id,name,contact:'',phone:'',gst:''});
+    if(!error){show("Supplier added!");}
+    return {id,name};
+  },[show]);
+
   // Stock calc
   const stock=useMemo(()=>{
     const s={};
@@ -310,9 +351,9 @@ function MainApp({user,onLogout,masterData}){
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
           {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg}/>}
           {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal}/>}
-          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} createJob={createJob} sp={setPg}/>}
-          {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept}/>}
-          {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN}/>}
+          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs}/>}
+          {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus}/>}
+          {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog}/>}
           {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn}/>}
@@ -320,7 +361,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={fullJobs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
-          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms}/>}
+          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus}/>}
         </div>
       </main>
 
@@ -393,50 +434,62 @@ function JobDetail({j,firms,togDept,addBatchToJob,show}){
 // ═══════════════════════════════════════════════════════════
 // NEW JOB
 // ═══════════════════════════════════════════════════════════
-function NewJobPage({firms,clients,products,team,createJob,sp}){
+function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,sp,jobs}){
   const [fm,sfm]=useState("JXT");
-  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||""});
+  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
   const [su,sSu]=useState("INCH");
-  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0}]);
+  const [showNewCli,setShowNewCli]=useState(false);
+  const [nc,setNc]=useState({name:"",contact:"",phone:""});
+  const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
+  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,mach:"In-house"}]);
 
   const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone}));};
+  const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,billing_name:nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone}));setNc({name:"",contact:"",phone:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
   const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;it.sqft=cSq(w,h,q,su);it.tot=it.rm==="SQFT"?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*.18*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
-  const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0}]);
+  const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,mach:"In-house"}]);
   const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
   const tot=useMemo(()=>{const s=its.reduce((a,x)=>a+x.tot,0),g=its.reduce((a,x)=>a+x.gst,0);return {s,g,t:s+g};},[its]);
-  const jid=`${String(Math.floor(Math.random()*9000+1000))}-2627`;
+  
+  // Sequential job numbering
+  const nextNum=useMemo(()=>{
+    const fyJobs=jobs.filter(j=>j.id?.includes('-2627'));
+    const nums=fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});
+    return String(Math.max(0,...nums)+1).padStart(4,'0');
+  },[jobs]);
+  const jid=`${nextNum}-2627`;
 
   const sub=async()=>{
     if(!f.cn){alert("Select client");return;}
-    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:"50% Advance",status:"Active"};
+    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
-    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,amount:it.amt,dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false}));
+    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false}));
     await createJob(jobData,batchData,lineItems);
   };
 
-  return <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:1050}}>
+  return <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:1100}}>
     <div style={{display:"flex",gap:4}}>{firms.map(f=><button key={f.code} className="b" onClick={()=>sfm(f.code)} style={{flex:1,padding:8,flexDirection:"column",border:`2px solid ${fm===f.code?f.color:"#1a2030"}`,background:fm===f.code?f.color+"15":"transparent"}}><span style={{fontWeight:800,color:f.color,fontSize:12}}>{f.short_name}</span><span style={{fontSize:7,color:"#64748b"}}>{f.gst}</span></button>)}</div>
     <div className="c a" style={{padding:10}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div><p style={{fontSize:8,color:"#64748b"}}>NEW JOB</p><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{jid}</p></div><FB f={fm} firms={firms}/></div>
       <div className="fg f3">
         <F l="Made By"><select className="in" value={f.mb} onChange={e=>sF(p=>({...p,mb:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
         <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
-        <F l="Client"><select className="in" value={f.cl} onChange={e=>selC(e.target.value)}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></F>
+        <F l="Client"><div style={{display:"flex",gap:2}}><select className="in" value={f.cl} onChange={e=>selC(e.target.value)} style={{flex:1}}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewCli(true)}>+</button></div></F>
         <F l="Project"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))}/></F>
         <F l="Contact"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))}/></F>
         <F l="PO #"><input className="in mn" value={f.po} onChange={e=>sF(p=>({...p,po:e.target.value}))}/></F>
         <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={f.da} onChange={e=>sF(p=>({...p,da:e.target.value}))}/></F></div>
         <F l="Size Unit"><select className="in" value={su} onChange={e=>sSu(e.target.value)}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
-        <F l="📎 Upload PO (PDF/Image)"><input type="file" accept=".pdf,.jpg,.png,.jpeg" className="in" style={{padding:3}} onChange={e=>sF(p=>({...p,poFile:e.target.files[0]||null}))}/></F>
-        <F l="Payment Terms"><input className="in" value={f.pt||"50% Advance. Rest within 30 days."} onChange={e=>sF(p=>({...p,pt:e.target.value}))}/></F>
-        <F l="Remark"><input className="in" value={f.remark||""} onChange={e=>sF(p=>({...p,remark:e.target.value}))} placeholder="Any special instructions..."/></F>
+        <F l="📎 Upload PO"><input type="file" accept=".pdf,.jpg,.png,.jpeg" className="in" style={{padding:3}}/></F>
+        <F l="Payment Terms"><input className="in" value={f.pt} onChange={e=>sF(p=>({...p,pt:e.target.value}))}/></F>
+        <F l="Remark"><input className="in" value={f.remark} onChange={e=>sF(p=>({...p,remark:e.target.value}))} placeholder="Special instructions..."/></F>
       </div>
+      {showNewCli&&<div style={{display:"flex",gap:4,marginTop:8,padding:8,background:"#060810",borderRadius:6,alignItems:"flex-end"}}><F l="Client Name"><input className="in" value={nc.name} onChange={e=>setNc(p=>({...p,name:e.target.value}))}/></F><F l="Contact Person"><input className="in" value={nc.contact} onChange={e=>setNc(p=>({...p,contact:e.target.value}))}/></F><F l="Phone"><input className="in" value={nc.phone} onChange={e=>setNc(p=>({...p,phone:e.target.value}))}/></F><button className="b bg bs" onClick={doAddCli}>Save Client</button><button className="b bs" onClick={()=>setShowNewCli(false)}>✕</button></div>}
     </div>
     <div className="c a" style={{padding:0,animationDelay:"50ms"}}>
       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amt</th><th></th></tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
         <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
           <td><select className="in" value={it.pi} onChange={e=>selP(i,+e.target.value)} style={{fontSize:10,padding:"3px"}}>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select></td>
           <td><input className="in" value={it.cli} onChange={e=>uI(i,"cli",e.target.value)} style={{fontSize:10,padding:"3px",color:"#06b6d4"}}/></td>
@@ -450,56 +503,56 @@ function NewJobPage({firms,clients,products,team,createJob,sp}){
           <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
           <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.gst?fmt(it.gst):"—"}</td>
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
+          <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px 3px",width:90}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
           <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td></tr>)}
-        <tr style={{background:"#0a0f1a"}}><td colSpan={10} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td></td></tr>
+        <tr style={{background:"#0a0f1a"}}><td colSpan={10} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
       </tbody></table></div>
     </div>
     <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b" onClick={()=>{
       const firmData=firms.find(x=>x.code===fm)||{};
-      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#e3a008">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div style="grid-column:span 2"><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST 18%</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w||'')+'</td><td class="r">'+(it.h||'')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft||'—')+'</td><td class="r">₹'+it.rate+'</td><td class="r">₹'+it.tot+'</td><td class="r">₹'+it.gst+'</td><td class="r"><b>₹'+it.amt+'</b></td></tr>').join('')}<tr class="total"><td colspan="8" style="text-align:right">TOTAL</td><td class="r">₹${tot.s}</td><td class="r">₹${tot.g}</td><td class="r"><b>₹${tot.t}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||'50% Advance. Rest within 30 days.'}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
+      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#e3a008">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div style="grid-column:span 2"><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST 18%</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w||'')+'</td><td class="r">'+(it.h||'')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft||'—')+'</td><td class="r">₹'+it.rate+'</td><td class="r">₹'+it.tot+'</td><td class="r">₹'+it.gst+'</td><td class="r"><b>₹'+it.amt+'</b></td></tr>').join('')}<tr class="total"><td colspan="8" style="text-align:right">TOTAL</td><td class="r">₹${tot.s}</td><td class="r">₹${tot.g}</td><td class="r"><b>₹${tot.t}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
       const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
     }} style={{gap:6}}>📄 Generate Estimate</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
   </div>;
 }
 
 // DEPT TRACKER
-function DeptPage({jobs,s,togDept}){
+function DeptPage({jobs,s,togDept,updateJobStatus}){
+  const ALL_ST=['Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const tabs=[
-    {id:'Estimate',l:'Estimate',c:'#3b82f6',statuses:['Quotation Sent','PO Pending','PO Received','Recce Pending','Active']},
-    {id:'Design',l:'Design',c:'#8b5cf6',statuses:['Designing']},
-    {id:'Production',l:'Production',c:'#f59e0b',statuses:[]},
-    {id:'Printing',l:'Printing',c:'#ef4444',statuses:['Printing']},
-    {id:'Fabrication',l:'Fabrication',c:'#dc2626',statuses:['Fabrication']},
-    {id:'Dispatch',l:'Dispatch',c:'#10b981',statuses:['Delivered']},
-    {id:'Installation',l:'Installation',c:'#059669',statuses:['Installation']},
-    {id:'Accounts',l:'Accounts',c:'#06b6d4',statuses:['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending']},
+    {id:'Estimate',l:'Estimate',c:'#3b82f6',st:['Quotation Sent','PO Pending','PO Received','Recce Pending','Active']},
+    {id:'Design',l:'Design',c:'#8b5cf6',st:['Designing']},
+    {id:'Printing',l:'Printing',c:'#ef4444',st:['Printing']},
+    {id:'Fabrication',l:'Fabrication',c:'#dc2626',st:['Fabrication']},
+    {id:'Installation',l:'Installation',c:'#059669',st:['Installation']},
+    {id:'Dispatch',l:'Dispatch',c:'#10b981',st:['Delivered']},
+    {id:'Accounts',l:'Accounts',c:'#06b6d4',st:['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending']},
   ];
   const [ad,sad]=useState(tabs[0].id);
   const cur=tabs.find(t=>t.id===ad);
-  const pen=useMemo(()=>{
-    return jobs.filter(j=>{
-      if(s&&!j.id?.toLowerCase().includes(s.toLowerCase())&&!j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
-      return cur.statuses.includes(j.status);
-    });
-  },[jobs,cur,s]);
-  const statusColors={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Recce Pending':'#f59e0b','PO Pending':'#f47067','PO Received':'#4ade80','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f59e0b','Active':'#64748b'};
-  return <div style={{display:"flex",flexDirection:"column",gap:6}}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{tabs.map(t=><button key={t.id} className={`b bs ${ad===t.id?"bp":""}`} onClick={()=>sad(t.id)} style={ad!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.statuses.includes(j.status)).length})</button>)}</div>
+  const pen=useMemo(()=>jobs.filter(j=>{if(s&&!j.id?.toLowerCase().includes(s.toLowerCase())&&!j.client_name?.toLowerCase().includes(s.toLowerCase()))return false;return cur.st.includes(j.status);}),[jobs,cur,s]);
+  const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Recce Pending':'#f59e0b','PO Pending':'#f47067','PO Received':'#4ade80','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f59e0b','Active':'#64748b'};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{tabs.map(t=><button key={t.id} className={`b bs ${ad===t.id?"bp":""}`} onClick={()=>sad(t.id)} style={ad!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.st.includes(j.status)).length})</button>)}</div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {pen.length} jobs</span></div>
-    <div style={{overflowX:"auto",maxHeight:"calc(100vh-160px)"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Status</th><th>Project</th><th>Contact</th></tr></thead><tbody>
-      {pen.map((j,i)=>{const it=(j.batches||[])[0]?.items?.[0];return <tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,fontWeight:600}}>{it?.internal_name||''}</td><td><span className="bd" style={{background:(statusColors[j.status]||'#64748b')+'20',color:statusColors[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,22)}</td><td style={{fontSize:10}}>{j.contact_person}</td></tr>})}
-      {pen.length===0&&<tr><td colSpan={6} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
+    <div style={{overflowX:"auto",maxHeight:"calc(100vh-160px)"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Status</th><th>Project</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
+      {pen.map((j,i)=>{const it=(j.batches||[])[0]?.items?.[0];return <tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,fontWeight:600}}>{it?.internal_name||''}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,22)}</td><td style={{fontSize:10}}>{j.contact_person}</td>
+        <td><select className="in" value={j.status} onChange={e=>updateJobStatus(j.id,e.target.value)} style={{fontSize:9,padding:"2px 4px",width:120}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></td></tr>})}
+      {pen.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
     </tbody></table></div></div></div>;
 }
 
 // GRN
-function GRNPage({grn,suppliers,materials,team,addGRN}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
+function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSupplier}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
+  const [newMat,setNewMat]=useState("");const [newSup,setNewSup]=useState("");const [showNewMat,setShowNewMat]=useState(false);const [showNewSup,setShowNewSup]=useState(false);
   const add=async()=>{await addGRN({id:"G"+uid(),...f,qty:+f.qty,rate:+f.rate,sqft:+f.sqft});sF(p=>({...p,qty:1,code:"",size:"",length:"",sqft:"",rate:"",invoice_no:"",job_id:""}));};
+  const doAddMat=async()=>{if(!newMat.trim())return;const r=await addNewMaterial(newMat.trim());if(r){sF(p=>({...p,material:r.name}));materials.push(r);setNewMat("");setShowNewMat(false);}};
+  const doAddSup=async()=>{if(!newSup.trim())return;const r=await addNewSupplier(newSup.trim());if(r){sF(p=>({...p,supplier:r.name}));suppliers.push(r);setNewSup("");setShowNewSup(false);}};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾ Close":"📦 New Inward"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
-      <F l="Supplier"><select className="in" value={f.supplier} onChange={e=>sF(p=>({...p,supplier:e.target.value}))}>{suppliers.map(s=><option key={s.id} value={s.name}>{s.name}</option>)}</select></F>
-      <F l="Material"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+      <F l="Supplier"><div style={{display:"flex",gap:2}}><select className="in" value={f.supplier} onChange={e=>sF(p=>({...p,supplier:e.target.value}))} style={{flex:1}}>{suppliers.map(s=><option key={s.id} value={s.name}>{s.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewSup(true)}>+</button></div></F>
+      <F l="Material"><div style={{display:"flex",gap:2}}><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))} style={{flex:1}}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewMat(true)}>+</button></div></F>
       <F l="Code#"><input className="in mn" value={f.code} onChange={e=>sF(p=>({...p,code:e.target.value}))}/></F>
       <F l="Size"><input className="in mn" value={f.size} onChange={e=>sF(p=>({...p,size:e.target.value}))}/></F>
       <F l="Length"><input className="in mn" value={f.length} onChange={e=>sF(p=>({...p,length:e.target.value}))}/></F>
@@ -513,7 +566,10 @@ function GRNPage({grn,suppliers,materials,team,addGRN}){const [sf,ssf]=useState(
       <F l="QC"><select className="in" value={f.qc} onChange={e=>sF(p=>({...p,qc:e.target.value}))}><option>OK</option><option>Rejected</option></select></F>
       <F l="📸 Photo"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}}/></F>
       <F l="📎 PO"><input type="file" accept=".pdf,image/*" className="in" style={{padding:2}}/></F>
-    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save GRN</button></div>}
+    </div>
+    {showNewMat&&<div style={{display:"flex",gap:4,marginTop:6,padding:6,background:"#060810",borderRadius:6}}><input className="in" placeholder="New material name..." value={newMat} onChange={e=>setNewMat(e.target.value)} style={{flex:1}}/><button className="b bg bs" onClick={doAddMat}>Add Material</button><button className="b bs" onClick={()=>setShowNewMat(false)}>✕</button></div>}
+    {showNewSup&&<div style={{display:"flex",gap:4,marginTop:6,padding:6,background:"#060810",borderRadius:6}}><input className="in" placeholder="New supplier name..." value={newSup} onChange={e=>setNewSup(e.target.value)} style={{flex:1}}/><button className="b bg bs" onClick={doAddSup}>Add Supplier</button><button className="b bs" onClick={()=>setShowNewSup(false)}>✕</button></div>}
+    <button className="b bp" onClick={add} style={{marginTop:6}}>Save GRN</button></div>}
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Code</th><th>Qty</th><th>Rate</th><th>Inv#</th><th>Type</th><th>By</th><th>QC</th></tr></thead><tbody>
       {grn.map(g=><tr key={g.id}><td>{g.date}</td><td>{g.supplier}</td><td style={{fontWeight:600}}>{g.material}</td><td className="mn">{g.code}</td><td className="mn">{g.qty} {g.unit}</td><td className="mn">₹{g.rate}</td><td className="mn">{g.invoice_no}</td><td><span className="bd" style={{background:g.inward_type==="Job"?"#e3a00820":"#23863620",color:g.inward_type==="Job"?"#e3a008":"#4ade80"}}>{g.inward_type}</span></td><td>{g.received_by}</td><td style={{color:g.qc==="OK"?"#4ade80":"#f47067"}}>{g.qc}</td></tr>)}
     </tbody></table></div></div></div>;
@@ -633,8 +689,9 @@ function CliPage({clients,jobs,s}){const fl=clients.filter(c=>!s||c.name?.toLowe
 }
 
 // ACCOUNTS
-function AccPage({jobs,batches,items,saveBill,firms}){
+function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus}){
   const [tab,setTab]=useState('pending');
+  const [invoices,setInvoices]=useState({});
   const tabs=[
     {id:'pending',l:'Billing Pending',c:'#f59e0b',statuses:['Billing Pending','Cash Pending','Proforma Invoice','IC Pending']},
     {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing','Delivered']},
@@ -642,13 +699,17 @@ function AccPage({jobs,batches,items,saveBill,firms}){
   ];
   const cur=tabs.find(t=>t.id===tab);
   const filtered=jobs.filter(j=>cur.statuses.includes(j.status));
-  const statusColors={'Billing Pending':'#f59e0b','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f47067','Given for Billing':'#06b6d4','Delivered':'#10b981','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
+  const sc={'Billing Pending':'#f59e0b','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f47067','Given for Billing':'#06b6d4','Delivered':'#10b981','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
+  const markBilled=async(j)=>{const inv=invoices[j.id];if(!inv){alert("Enter invoice#");return;}const bid=(j.batches||[])[0]?.id;if(bid)await saveBill(bid,inv);await updateJobStatus(j.id,'Billing Done');setInvoices(p=>({...p,[j.id]:''}));};
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"flex",gap:3}}>{tabs.map(t=><button key={t.id} className={`b ${tab===t.id?"bp":""}`} onClick={()=>setTab(t.id)} style={tab!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.statuses.includes(j.status)).length})</button>)}</div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {filtered.length} jobs</span></div>
-    <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Contact</th><th>PO</th><th>Bill No</th></tr></thead><tbody>
-      {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:(statusColors[j.status]||'#64748b')+'20',color:statusColors[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.contact_person}</td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td></tr>})}
-      {filtered.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#4ade80",padding:20}}>No jobs in this category</td></tr>}
+    <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th>{tab!=='done'&&<><th>Invoice#</th><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}{tab==='done'&&<th>Invoice#</th>}</tr></thead><tbody>
+      {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
+        {tab!=='done'&&<><td><input className="in mn" style={{width:100,fontSize:10}} placeholder="Inv#" value={invoices[j.id]||""} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))}/></td><td><input type="file" accept=".pdf,.jpg,.png" className="in" style={{padding:1,fontSize:9,width:80}}/></td><td><input type="file" accept=".pdf,.jpg,.png" className="in" style={{padding:1,fontSize:9,width:80}}/></td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
+        {tab==='done'&&<td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td>}
+      </tr>})}
+      {filtered.length===0&&<tr><td colSpan={tab!=='done'?10:7} style={{textAlign:"center",color:"#4ade80",padding:20}}>No jobs in this category</td></tr>}
     </tbody></table></div></div>
   </div>;
 }
