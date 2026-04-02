@@ -350,7 +350,7 @@ function MainApp({user,onLogout,masterData}){
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
           {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg}/>}
-          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal}/>}
+          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
@@ -394,23 +394,31 @@ function DashPage({s,stock,sp}){
 // ═══════════════════════════════════════════════════════════
 // ALL JOBS
 // ═══════════════════════════════════════════════════════════
-function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm}){
+function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus}){
   const [ff,sf]=useState("All");
-  const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;return true;});
+  const [fy,setFy]=useState("All");
+  const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526")&&!j.id?.includes("2527"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;});
   
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus}/>});
 
   return <div style={{display:"flex",flexDirection:"column",gap:7}}>
-    <div style={{display:"flex",justifyContent:"space-between",gap:3,flexWrap:"wrap"}}><div style={{display:"flex",gap:2}}>{["All","JPP","JXT","VHD"].map(f=><button key={f} className={`b bs ${ff===f?"bp":""}`} onClick={()=>sf(f)}>{f==="All"?"All":firms.find(x=>x.code===f)?.short_name||f}</button>)}</div><button className="b bp bs" onClick={()=>sp("new")}>➕ New Job</button></div>
-    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Batches</th><th>PO</th><th>By</th><th>%</th></tr></thead><tbody>
-      {fl.map(j=>{const ti=j.batches?.reduce((a,b)=>a+(b.items?.length||0),0)||0;const di=j.batches?.reduce((a,b)=>a+(b.items?.filter(it=>DEPTS.every(d=>it['dept_'+d.toLowerCase()])).length||0),0)||0;const p=ti?Math.round(di/ti*100):0;
-        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td>
-          <td><div style={{display:"flex",alignItems:"center",gap:2}}><div style={{width:30,height:3,background:"#1a2030",borderRadius:2}}><div style={{width:`${p}%`,height:"100%",borderRadius:2,background:p===100?"#4ade80":"#e3a008"}}/></div><span className="mn" style={{fontSize:7}}>{p}%</span></div></td></tr>;})}</tbody></table></div></div>
+    <div style={{display:"flex",justifyContent:"space-between",gap:3,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:2}}>
+        {["All","JPP","JXT","VHD"].map(f=><button key={f} className={`b bs ${ff===f?"bp":""}`} onClick={()=>sf(f)}>{f==="All"?"All":firms.find(x=>x.code===f)?.short_name||f}</button>)}
+        <span style={{borderLeft:"1px solid #1a2030",margin:"0 4px"}}/>
+        {["All","25-26","26-27"].map(f=><button key={f} className={`b bs ${fy===f?"bp":""}`} onClick={()=>setFy(f)}>FY {f}</button>)}
+      </div>
+      <div style={{display:"flex",gap:2}}><span style={{fontSize:10,color:"#64748b",alignSelf:"center"}}>{fl.length} jobs</span><button className="b bp bs" onClick={()=>sp("new")}>➕ New Job</button></div>
+    </div>
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Batches</th><th>PO</th><th>By</th></tr></thead><tbody>
+      {fl.map(j=>{const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
+        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table></div></div>
   </div>;
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus}){
+  const ALL_ST=['Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const fm=firms.find(f=>f.code===j.firm)||{};
@@ -420,7 +428,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show}){
     <div style={{display:"flex",justifyContent:"space-between"}}><div><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:10,color:"#64748b"}}>{j.project} · {j.client_name}</p></div>
       <div style={{display:"flex",gap:2}}><FB f={j.firm} firms={firms}/><button className={`b bs ${vm==="internal"?"bp":""}`} onClick={()=>svm("internal")}>Internal</button><button className={`b bs ${vm==="client"?"bp":""}`} onClick={()=>svm("client")}>DC</button></div></div>
     <div className="fg f3" style={{fontSize:10,background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
-      {[["By",j.made_by],["PO",j.po_number||"⚠️ Pending"],["Contact",j.contact_person],["Delivery",j.delivery_address?.slice(0,40)],["Firm",fm.name],["GST",fm.gst]].map(([k,v])=><div key={k}><span style={{color:"#64748b",fontSize:8}}>{k}</span><p style={{fontWeight:600}}>{v||"—"}</p></div>)}
+      {[["By",j.made_by],["PO",j.po_number||"⚠️ Pending"],["Contact",j.contact_person],["Phone",j.contact_no],["Delivery",j.delivery_address?.slice(0,40)],["Firm",fm.name]].map(([k,v])=><div key={k}><span style={{color:"#64748b",fontSize:8}}>{k}</span><p style={{fontWeight:600}}>{v||"—"}</p></div>)}
+      <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span><select className="in" value={j.status} onChange={e=>{if(updateJobStatus)updateJobStatus(j.id,e.target.value)}} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></div>
+      <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
     </div>
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>{b.bill_no&&<span className="mn" style={{fontSize:9,color:"#06b6d4"}}>{b.bill_no}</span>}</div>
@@ -441,13 +451,14 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const [showNewCli,setShowNewCli]=useState(false);
   const [nc,setNc]=useState({name:"",contact:"",phone:""});
   const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
-  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,mach:"In-house"}]);
+  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house"}]);
 
   const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone}));};
   const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,billing_name:nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone}));setNc({name:"",contact:"",phone:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
-  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;it.sqft=cSq(w,h,q,su);it.tot=it.rm==="SQFT"?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*.18*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
-  const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,mach:"In-house"}]);
+  const GST_OPTS=[0,5,12,18,28];
+  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=it.rm==="SQFT"?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
+  const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house"}]);
   const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
   const tot=useMemo(()=>{const s=its.reduce((a,x)=>a+x.tot,0),g=its.reduce((a,x)=>a+x.gst,0);return {s,g,t:s+g};},[its]);
   
@@ -489,7 +500,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     </div>
     <div className="c a" style={{padding:0,animationDelay:"50ms"}}>
       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
         <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
           <td><select className="in" value={it.pi} onChange={e=>selP(i,+e.target.value)} style={{fontSize:10,padding:"3px"}}>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select></td>
           <td><input className="in" value={it.cli} onChange={e=>uI(i,"cli",e.target.value)} style={{fontSize:10,padding:"3px",color:"#06b6d4"}}/></td>
@@ -501,16 +512,17 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
           <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.sqft||"—"}</td>
           <td><input className="in mn" value={it.rate} onChange={e=>uI(i,"rate",e.target.value)} style={{fontSize:10,padding:"3px",width:44}}/></td>
           <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
+          <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:9,padding:"2px",width:42}}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
           <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.gst?fmt(it.gst):"—"}</td>
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
           <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px 3px",width:90}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
           <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td></tr>)}
-        <tr style={{background:"#0a0f1a"}}><td colSpan={10} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
+        <tr style={{background:"#0a0f1a"}}><td colSpan={10} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
       </tbody></table></div>
     </div>
     <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b" onClick={()=>{
       const firmData=firms.find(x=>x.code===fm)||{};
-      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#e3a008">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div style="grid-column:span 2"><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST 18%</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w||'')+'</td><td class="r">'+(it.h||'')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft||'—')+'</td><td class="r">₹'+it.rate+'</td><td class="r">₹'+it.tot+'</td><td class="r">₹'+it.gst+'</td><td class="r"><b>₹'+it.amt+'</b></td></tr>').join('')}<tr class="total"><td colspan="8" style="text-align:right">TOTAL</td><td class="r">₹${tot.s}</td><td class="r">₹${tot.g}</td><td class="r"><b>₹${tot.t}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
+      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#e3a008">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div style="grid-column:span 2"><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w||'')+'</td><td class="r">'+(it.h||'')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft||'—')+'</td><td class="r">₹'+it.rate+'</td><td class="r">₹'+it.tot+'</td><td class="r">'+(it.gstPct||18)+'%</td><td class="r">₹'+it.gst+'</td><td class="r"><b>₹'+it.amt+'</b></td></tr>').join('')}<tr class="total"><td colspan="8" style="text-align:right">TOTAL</td><td class="r">₹${tot.s}</td><td class="r"></td><td class="r">₹${tot.g}</td><td class="r"><b>₹${tot.t}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
       const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
     }} style={{gap:6}}>📄 Generate Estimate</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
   </div>;
