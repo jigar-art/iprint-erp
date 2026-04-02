@@ -58,6 +58,22 @@ const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ─── FILE UPLOAD HELPER ─────────────────────────────────
+const uploadFile = async (file, folder='general') => {
+  if(!file) return null;
+  const ext = file.name.split('.').pop();
+  const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2,6)}.${ext}`;
+  const {data,error} = await sb.storage.from('Uploads').upload(path, file);
+  if(error){console.error('Upload error:',error);return null;}
+  const {data:urlData} = sb.storage.from('Uploads').getPublicUrl(path);
+  return urlData?.publicUrl || null;
+};
+const uploadMultiple = async (files, folder='general') => {
+  const urls=[];
+  for(const file of files){const url=await uploadFile(file,folder);if(url)urls.push(url);}
+  return urls;
+};
+
 // ─── CONSTANTS ──────────────────────────────────────────────
 const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
 const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
@@ -607,9 +623,9 @@ function DeptPage({jobs,s,togDept,updateJobStatus}){
 }
 
 // GRN
-function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSupplier}){const [sf,ssf]=useState(false);const [selGrn,setSelGrn]=useState(null);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
+function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSupplier}){const [sf,ssf]=useState(false);const [selGrn,setSelGrn]=useState(null);const [photoFile,setPhotoFile]=useState(null);const [poFile,setPoFile]=useState(null);const [saving,setSaving]=useState(false);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
   const [newMat,setNewMat]=useState("");const [newSup,setNewSup]=useState("");const [showNewMat,setShowNewMat]=useState(false);const [showNewSup,setShowNewSup]=useState(false);
-  const add=async()=>{await addGRN({id:"G"+uid(),...f,qty:+f.qty,rate:+f.rate,sqft:+f.sqft});sF(p=>({...p,qty:1,code:"",size:"",length:"",sqft:"",rate:"",invoice_no:"",job_id:""}));};
+  const add=async()=>{setSaving(true);const photoUrl=await uploadFile(photoFile,'grn-photos');const poUrl=await uploadFile(poFile,'grn-po');await addGRN({id:"G"+uid(),...f,qty:+f.qty,rate:+f.rate,sqft:+f.sqft,photo_url:photoUrl,po_file_url:poUrl});sF(p=>({...p,qty:1,code:"",size:"",length:"",sqft:"",rate:"",invoice_no:"",job_id:""}));setPhotoFile(null);setPoFile(null);setSaving(false);};
   const doAddMat=async()=>{if(!newMat.trim())return;const r=await addNewMaterial(newMat.trim());if(r){sF(p=>({...p,material:r.name}));materials.push(r);setNewMat("");setShowNewMat(false);}};
   const doAddSup=async()=>{if(!newSup.trim())return;const r=await addNewSupplier(newSup.trim());if(r){sF(p=>({...p,supplier:r.name}));suppliers.push(r);setNewSup("");setShowNewSup(false);}};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -629,12 +645,12 @@ function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSuppl
       <F l="Type"><select className="in" value={f.inward_type} onChange={e=>sF(p=>({...p,inward_type:e.target.value}))}><option>Stock</option><option>Job</option></select></F>
       <F l="By"><select className="in" value={f.received_by} onChange={e=>sF(p=>({...p,received_by:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
       <F l="QC"><select className="in" value={f.qc} onChange={e=>sF(p=>({...p,qc:e.target.value}))}><option>OK</option><option>Rejected</option></select></F>
-      <F l="📸 Photo"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}}/></F>
-      <F l="📎 PO"><input type="file" accept=".pdf,image/*" className="in" style={{padding:2}}/></F>
+      <F l="📸 Photo"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}} onChange={e=>setPhotoFile(e.target.files[0]||null)}/></F>
+      <F l="📎 PO"><input type="file" accept=".pdf,image/*" className="in" style={{padding:2}} onChange={e=>setPoFile(e.target.files[0]||null)}/></F>
     </div>
     {showNewMat&&<div style={{display:"flex",gap:4,marginTop:6,padding:6,background:"#060810",borderRadius:6}}><input className="in" placeholder="New material name..." value={newMat} onChange={e=>setNewMat(e.target.value)} style={{flex:1}}/><button className="b bg bs" onClick={doAddMat}>Add Material</button><button className="b bs" onClick={()=>setShowNewMat(false)}>✕</button></div>}
     {showNewSup&&<div style={{display:"flex",gap:4,marginTop:6,padding:6,background:"#060810",borderRadius:6}}><input className="in" placeholder="New supplier name..." value={newSup} onChange={e=>setNewSup(e.target.value)} style={{flex:1}}/><button className="b bg bs" onClick={doAddSup}>Add Supplier</button><button className="b bs" onClick={()=>setShowNewSup(false)}>✕</button></div>}
-    <button className="b bp" onClick={add} style={{marginTop:6}}>Save GRN</button></div>}
+    <button className="b bp" onClick={add} style={{marginTop:6}} disabled={saving}>{saving?"⏳ Uploading...":"Save GRN"}</button></div>}
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>Supplier</th><th>Material</th><th>Code</th><th>Size</th><th>Qty</th><th>Rate</th><th>SqFt</th><th>Inv#</th><th>Job#</th><th>Type</th><th>By</th><th>QC</th></tr></thead><tbody>
       {grn.map(g=><tr key={g.id} style={{cursor:"pointer"}} onClick={()=>setSelGrn(g)}><td>{g.date}</td><td>{g.supplier}</td><td style={{fontWeight:600}}>{g.material}</td><td className="mn">{g.code}</td><td className="mn">{g.size}{g.length?' × '+g.length:''}</td><td className="mn">{g.qty} {g.unit}</td><td className="mn">₹{g.rate}</td><td className="mn">{g.sqft||'—'}</td><td className="mn">{g.invoice_no}</td><td className="mn" style={{color:"#e3a008"}}>{g.job_id}</td><td><span className="bd" style={{background:g.inward_type==="Job"?"#e3a00820":"#23863620",color:g.inward_type==="Job"?"#e3a008":"#4ade80"}}>{g.inward_type}</span></td><td>{g.received_by}</td><td style={{color:g.qc==="OK"?"#4ade80":"#f47067"}}>{g.qc}</td></tr>)}
     </tbody></table></div></div>
