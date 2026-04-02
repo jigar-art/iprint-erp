@@ -251,6 +251,11 @@ function MainApp({user,onLogout,masterData}){
   },[show,items]);
 
   // ─── ADD NEW CLIENT ────────────────────────────────────────
+  const updateLineItem = useCallback(async (itemId, updates) => {
+    await sb.from('line_items').update(updates).eq('id',itemId);
+    setItems(p=>p.map(i=>i.id===itemId?{...i,...updates}:i));
+  },[]);
+
   const addNewClient = useCallback(async (clientData) => {
     const {error} = await sb.from('clients').insert(clientData);
     if(!error){show("Client added!");}
@@ -349,8 +354,8 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} togDept={togDept} addBatchToJob={addBatchToJob} show={show}/>}
-          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem}/>}
+          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
@@ -380,7 +385,7 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJob,show}){
+function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJob,show,updateLineItem}){
   const [dq,setDq]=useState("");
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   const results=useMemo(()=>{
@@ -396,7 +401,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJo
     ).slice(0,20);
   },[dq,jobs]);
   const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem}/>});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div className="c" style={{padding:10}}>
       <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search by Job#, Invoice#, Client, Project, PO#..." value={dq} onChange={e=>setDq(e.target.value)} style={{fontSize:12,padding:"8px 12px",paddingLeft:12}}/></div>
@@ -416,12 +421,12 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJo
 // ═══════════════════════════════════════════════════════════
 // ALL JOBS
 // ═══════════════════════════════════════════════════════════
-function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus}){
+function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateLineItem}){
   const [ff,sf]=useState("All");
   const [fy,setFy]=useState("All");
   const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526")&&!j.id?.includes("2527"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;});
   
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem}/>});
 
   return <div style={{display:"flex",flexDirection:"column",gap:7}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:3,flexWrap:"wrap"}}>
@@ -439,14 +444,18 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLineItem}){
   const ALL_ST=['Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
+  const [ed,setEd]=useState(null); // editing item id
+  const [ef,setEf]=useState({}); // edit form
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const fm=firms.find(f=>f.code===j.firm)||{};
   const ab=async()=>{const bd={id:"B"+uid(),job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);};
+  const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||''});};
+  const saveEdit=async(itId)=>{if(updateLineItem)await updateLineItem(itId,ef);setEd(null);show("Item updated!");};
   
-  return <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"70vh",overflowY:"auto"}}>
+  return <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"75vh",overflowY:"auto"}}>
     <div style={{display:"flex",justifyContent:"space-between"}}><div><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:10,color:"#64748b"}}>{j.project} · {j.client_name}</p></div>
       <div style={{display:"flex",gap:2}}><FB f={j.firm} firms={firms}/><button className={`b bs ${vm==="internal"?"bp":""}`} onClick={()=>svm("internal")}>Internal</button><button className={`b bs ${vm==="client"?"bp":""}`} onClick={()=>svm("client")}>DC</button></div></div>
     <div className="fg f3" style={{fontSize:10,background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
@@ -454,10 +463,25 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus}){
       <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span><select className="in" value={j.status} onChange={e=>{if(updateJobStatus)updateJobStatus(j.id,e.target.value)}} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
     </div>
+    <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+      <F l="📎 Delivery Challan"><input type="file" accept=".pdf,.jpg,.png" className="in" style={{padding:2,width:180}}/></F>
+      <F l="📎 Installation Cert"><input type="file" accept=".pdf,.jpg,.png" className="in" style={{padding:2,width:180}}/></F>
+      <F l="📸 Work Photos"><input type="file" accept="image/*" multiple className="in" style={{padding:2,width:180}}/></F>
+    </div>
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>{b.bill_no&&<span className="mn" style={{fontSize:9,color:"#06b6d4"}}>{b.bill_no}</span>}</div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Qty</th><th>Rate</th><th>Amt</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
-        <tbody>{(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);return <tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td className="mn" style={{fontSize:10}}>₹{it.rate}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Size</th><th>Qty</th><th>Rate</th><th>Amt</th><th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+        <tbody>{(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);const isEd=ed===it.id;
+          return isEd?<tr key={it.id} style={{background:"#0a1520"}}><td className="mn" style={{fontSize:9}}>{ii+1}</td>
+            <td><input className="in" value={ef.internal_name} onChange={e=>setEf(p=>({...p,internal_name:e.target.value}))} style={{fontSize:10,padding:"2px 4px"}}/></td>
+            <td><input className="in" value={ef.media} onChange={e=>setEf(p=>({...p,media:e.target.value}))} style={{fontSize:10,padding:"2px 4px"}}/></td>
+            <td><div style={{display:"flex",gap:1}}><input className="in mn" value={ef.width} onChange={e=>setEf(p=>({...p,width:e.target.value}))} style={{width:28,fontSize:9,padding:"2px"}}/><span style={{color:"#64748b"}}>×</span><input className="in mn" value={ef.height} onChange={e=>setEf(p=>({...p,height:e.target.value}))} style={{width:28,fontSize:9,padding:"2px"}}/></div></td>
+            <td><input className="in mn" type="number" value={ef.qty} onChange={e=>setEf(p=>({...p,qty:+e.target.value}))} style={{width:35,fontSize:10,padding:"2px 4px"}}/></td>
+            <td><input className="in mn" type="number" value={ef.rate} onChange={e=>setEf(p=>({...p,rate:+e.target.value}))} style={{width:50,fontSize:10,padding:"2px 4px"}}/></td>
+            <td></td>
+            <td><div style={{display:"flex",gap:2}}><button className="b bg bs" onClick={()=>saveEdit(it.id)}>✓</button><button className="b bs" onClick={()=>setEd(null)}>✕</button></div></td>
+            <td colSpan={8}></td></tr>
+          :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td><td><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
     </div>)}
     {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>}
   </div>;
@@ -468,7 +492,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus}){
 // ═══════════════════════════════════════════════════════════
 function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,sp,jobs}){
   const [fm,sfm]=useState("JXT");
-  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
+  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
   const [su,sSu]=useState("INCH");
   const [showNewCli,setShowNewCli]=useState(false);
   const [nc,setNc]=useState({name:"",contact:"",phone:""});
@@ -482,7 +506,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=it.rm==="SQFT"?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
   const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house"}]);
   const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
-  const tot=useMemo(()=>{const s=its.reduce((a,x)=>a+x.tot,0),g=its.reduce((a,x)=>a+x.gst,0);return {s,g,t:s+g};},[its]);
+  const tot=useMemo(()=>{const s=Math.round(its.reduce((a,x)=>a+x.tot,0)*100)/100,g=Math.round(its.reduce((a,x)=>a+x.gst,0)*100)/100,tq=its.reduce((a,x)=>a+(+x.qty||0),0),tsq=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;return {s,g,t:Math.round((s+g)*100)/100,tq,tsq};},[its]);
   
   // Sequential job numbering
   const nextNum=useMemo(()=>{
@@ -512,9 +536,11 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
         <F l="Project"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))}/></F>
         <F l="Contact"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))}/></F>
         <F l="PO #"><input className="in mn" value={f.po} onChange={e=>sF(p=>({...p,po:e.target.value}))}/></F>
+        <F l="📧 Client Email"><input className="in" type="email" value={f.cemail} onChange={e=>sF(p=>({...p,cemail:e.target.value}))} placeholder="client@company.com"/></F>
         <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={f.da} onChange={e=>sF(p=>({...p,da:e.target.value}))}/></F></div>
         <F l="Size Unit"><select className="in" value={su} onChange={e=>sSu(e.target.value)}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
         <F l="📎 Upload PO"><input type="file" accept=".pdf,.jpg,.png,.jpeg" className="in" style={{padding:3}}/></F>
+        <F l="🎨 Design Reference"><input type="file" accept=".jpg,.png,.jpeg,.pdf" multiple className="in" style={{padding:3}}/></F>
         <F l="Payment Terms"><input className="in" value={f.pt} onChange={e=>sF(p=>({...p,pt:e.target.value}))}/></F>
         <F l="Remark"><input className="in" value={f.remark} onChange={e=>sF(p=>({...p,remark:e.target.value}))} placeholder="Special instructions..."/></F>
       </div>
@@ -539,14 +565,19 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
           <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px 3px",width:90}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
           <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td></tr>)}
-        <tr style={{background:"#0a0f1a"}}><td colSpan={10} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
+        <tr style={{background:"#0a0f1a"}}><td colSpan={6} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4"}}>{tot.tsq||"—"}</td><td></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
       </tbody></table></div>
     </div>
-    <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b" onClick={()=>{
+    <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b" onClick={()=>{
       const firmData=firms.find(x=>x.code===fm)||{};
-      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#e3a008">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div style="grid-column:span 2"><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w||'')+'</td><td class="r">'+(it.h||'')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft||'—')+'</td><td class="r">₹'+it.rate+'</td><td class="r">₹'+it.tot+'</td><td class="r">'+(it.gstPct||18)+'%</td><td class="r">₹'+it.gst+'</td><td class="r"><b>₹'+it.amt+'</b></td></tr>').join('')}<tr class="total"><td colspan="8" style="text-align:right">TOTAL</td><td class="r">₹${tot.s}</td><td class="r"></td><td class="r">₹${tot.g}</td><td class="r"><b>₹${tot.t}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
+      const totQty=its.reduce((a,x)=>a+(+x.qty||0),0);const totSqft=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;
+      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div><b>Email:</b> ${f.cemail||'—'}</div><div><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material/Spec</th><th>Size (W×H)</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w&&it.h?it.w+'×'+it.h+' '+su:'—')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft?it.sqft.toFixed(2):'—')+'</td><td class="r">₹'+(+it.rate).toFixed(2)+'</td><td class="r">₹'+it.tot.toFixed(2)+'</td><td class="r">'+(it.gstPct||18)+'%</td><td class="r">₹'+it.gst.toFixed(2)+'</td><td class="r"><b>₹'+it.amt.toFixed(2)+'</b></td></tr>').join('')}<tr class="total"><td colspan="4" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${tot.s.toFixed(2)}</b></td><td></td><td class="r"><b>₹${tot.g.toFixed(2)}</b></td><td class="r"><b>₹${tot.t.toFixed(2)}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p>${f.remark?'<p style="margin-top:4px"><b>Remark:</b> '+f.remark+'</p>':''}<p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
       const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
-    }} style={{gap:6}}>📄 Generate Estimate</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
+    }} style={{gap:6}}>📄 Estimate PDF</button><button className="b" onClick={()=>{
+      const sub=encodeURIComponent(`Estimate ${jid} - ${f.pr||'Project'} | ${firms.find(x=>x.code===fm)?.short_name||''}`);
+      const body=encodeURIComponent(`Dear ${f.cp||'Sir/Madam'},\n\nPlease find attached the estimate for:\n\nJob#: ${jid}\nProject: ${f.pr||''}\nTotal Amount: ₹${tot.t.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${firms.find(x=>x.code===fm)?.name||'iPrint'}`);
+      window.open(`mailto:${f.cemail||''}?subject=${sub}&body=${body}`);
+    }} style={{gap:6}}>📧 Email to Client</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
   </div>;
 }
 
@@ -631,25 +662,45 @@ function GRNPage({grn,suppliers,materials,team,addGRN,addNewMaterial,addNewSuppl
 }
 
 // PRINTING
-function PrintPage({logs,machines,materials,team,stock,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",machine:machines[0]?.name||"",operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"roll",waste:0,start_time:"09:00",end_time:"10:00"});
-  const add=async()=>{await addLog({id:"P"+uid(),...f,qty_used:+f.qty_used,waste:+f.waste});};
+function PrintPage({logs,machines,materials,team,stock,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",machine:machines[0]?.name||"",operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"roll",waste:0,start_time:"09:00",end_time:"10:00",ink_cyan:0,ink_magenta:0,ink_yellow:0,ink_black:0,ink_white:0,print_sqft:0,notes:""});
+  const add=async()=>{await addLog({id:"P"+uid(),...f,qty_used:+f.qty_used,waste:+f.waste,ink_cyan:+f.ink_cyan,ink_magenta:+f.ink_magenta,ink_yellow:+f.ink_yellow,ink_black:+f.ink_black,ink_white:+f.ink_white,print_sqft:+f.print_sqft});};
+  const totalInk=(+f.ink_cyan||0)+(+f.ink_magenta||0)+(+f.ink_yellow||0)+(+f.ink_black||0)+(+f.ink_white||0);
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🖨️ New Print Log"}</button>
-    {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
+    {sf&&<div className="c a" style={{padding:10}}>
+      <p style={{fontSize:9,color:"#ef4444",fontWeight:700,marginBottom:6}}>JOB & MACHINE</p>
+      <div className="fg f4">
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
       <F l="Job#"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))}/></F>
       <F l="Machine"><select className="in" value={f.machine} onChange={e=>sF(p=>({...p,machine:e.target.value}))}>{machines.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
       <F l="Operator"><select className="in" value={f.operator} onChange={e=>sF(p=>({...p,operator:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+    </div>
+    <p style={{fontSize:9,color:"#ef4444",fontWeight:700,marginTop:8,marginBottom:6}}>MATERIAL CONSUMPTION</p>
+    <div className="fg f4">
       <F l="Material"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}>{materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
-      <F l={`Qty (Avl:${stock[f.material]||0})`}><input className="in mn" type="number" value={f.qty_used} onChange={e=>sF(p=>({...p,qty_used:e.target.value}))}/></F>
-      <F l="Waste"><input className="in mn" type="number" value={f.waste} onChange={e=>sF(p=>({...p,waste:e.target.value}))}/></F>
-      <F l="Start"><input type="time" className="in" value={f.start_time} onChange={e=>sF(p=>({...p,start_time:e.target.value}))}/></F>
-      <F l="End"><input type="time" className="in" value={f.end_time} onChange={e=>sF(p=>({...p,end_time:e.target.value}))}/></F>
-      <F l="📸 Photo"><input type="file" accept="image/*" capture className="in" style={{padding:2}}/></F>
-    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
-    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Machine</th><th>Op</th><th>Material</th><th>Used</th><th>Waste</th><th>Time</th></tr></thead><tbody>
-      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td>{l.machine}</td><td>{l.operator}</td><td style={{fontWeight:600}}>{l.material}</td><td className="mn">{l.qty_used}</td><td className="mn" style={{color:"#f47067"}}>{l.waste}</td><td>{l.start_time}–{l.end_time}</td></tr>)}
-      {logs.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:16}}>No logs yet</td></tr>}
+      <F l={`Qty Used (Avl:${stock[f.material]||0})`}><input className="in mn" type="number" value={f.qty_used} onChange={e=>sF(p=>({...p,qty_used:e.target.value}))}/></F>
+      <F l="Waste/Scrap"><input className="in mn" type="number" value={f.waste} onChange={e=>sF(p=>({...p,waste:e.target.value}))}/></F>
+      <F l="Print Area (SqFt)"><input className="in mn" type="number" value={f.print_sqft} onChange={e=>sF(p=>({...p,print_sqft:e.target.value}))}/></F>
+    </div>
+    <p style={{fontSize:9,color:"#8b5cf6",fontWeight:700,marginTop:8,marginBottom:6}}>🎨 INK CONSUMPTION (ml)</p>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:5}}>
+      <F l="Cyan"><input className="in mn" type="number" value={f.ink_cyan} onChange={e=>sF(p=>({...p,ink_cyan:e.target.value}))} style={{borderColor:"#06b6d4"}}/></F>
+      <F l="Magenta"><input className="in mn" type="number" value={f.ink_magenta} onChange={e=>sF(p=>({...p,ink_magenta:e.target.value}))} style={{borderColor:"#ec4899"}}/></F>
+      <F l="Yellow"><input className="in mn" type="number" value={f.ink_yellow} onChange={e=>sF(p=>({...p,ink_yellow:e.target.value}))} style={{borderColor:"#eab308"}}/></F>
+      <F l="Black"><input className="in mn" type="number" value={f.ink_black} onChange={e=>sF(p=>({...p,ink_black:e.target.value}))} style={{borderColor:"#64748b"}}/></F>
+      <F l="White"><input className="in mn" type="number" value={f.ink_white} onChange={e=>sF(p=>({...p,ink_white:e.target.value}))} style={{borderColor:"#e2e8f0"}}/></F>
+    </div>
+    {totalInk>0&&<p style={{fontSize:10,color:"#8b5cf6",marginTop:2}}>Total ink: <strong>{totalInk} ml</strong></p>}
+    <div className="fg f3" style={{marginTop:6}}>
+      <F l="Start Time"><input type="time" className="in" value={f.start_time} onChange={e=>sF(p=>({...p,start_time:e.target.value}))}/></F>
+      <F l="End Time"><input type="time" className="in" value={f.end_time} onChange={e=>sF(p=>({...p,end_time:e.target.value}))}/></F>
+      <F l="📸 Output Photo"><input type="file" accept="image/*" capture className="in" style={{padding:2}}/></F>
+    </div>
+    <F l="Notes"><input className="in" value={f.notes} onChange={e=>sF(p=>({...p,notes:e.target.value}))} placeholder="Print quality, issues, remarks..."/></F>
+    <button className="b bp" onClick={add} style={{marginTop:6}}>Save Print Log</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Machine</th><th>Op</th><th>Material</th><th>Used</th><th>Waste</th><th>Ink(ml)</th><th>SqFt</th><th>Time</th></tr></thead><tbody>
+      {logs.map(l=>{const ti=(+l.ink_cyan||0)+(+l.ink_magenta||0)+(+l.ink_yellow||0)+(+l.ink_black||0)+(+l.ink_white||0);return <tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td>{l.machine}</td><td>{l.operator}</td><td style={{fontWeight:600}}>{l.material}</td><td className="mn">{l.qty_used}</td><td className="mn" style={{color:"#f47067"}}>{l.waste}</td><td className="mn" style={{color:"#8b5cf6"}}>{ti||'—'}</td><td className="mn">{l.print_sqft||'—'}</td><td>{l.start_time}–{l.end_time}</td></tr>})}
+      {logs.length===0&&<tr><td colSpan={10} style={{textAlign:"center",color:"#64748b",padding:16}}>No logs yet</td></tr>}
     </tbody></table></div></div></div>;
 }
 
