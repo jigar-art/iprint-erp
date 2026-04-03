@@ -329,6 +329,13 @@ function MainApp({user,onLogout,masterData}){
     else show("Error: "+error.message,false);
   },[show]);
 
+  // ─── DELETE LINE ITEM ──────────────────────────────────────
+  const deleteLineItem = useCallback(async (itemId) => {
+    await sb.from('line_items').delete().eq('id',itemId);
+    setItems(p=>p.filter(i=>i.id!==itemId));
+    show("Item deleted");
+  },[show]);
+
   const updateJobFile = useCallback(async (jobId, field, url) => {
     await sb.from('jobs').update({[field]:url}).eq('id',jobId);
     setJobs(p=>p.map(j=>j.id===jobId?{...j,[field]:url}:j));
@@ -455,8 +462,8 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
-          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields}/>}
@@ -473,7 +480,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -488,7 +495,7 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
+function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [dq,setDq]=useState("");
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   const results=useMemo(()=>{
@@ -524,7 +531,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
 // ═══════════════════════════════════════════════════════════
 // ALL JOBS
 // ═══════════════════════════════════════════════════════════
-function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
+function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [ff,sf]=useState("All");
   const [fy,setFy]=useState("All");
   const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;});
@@ -547,7 +554,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [ed,setEd]=useState(null); // editing item id
@@ -561,8 +568,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const saveJF=async()=>{if(updateJobFields){await updateJobFields(j.id,jf);setJfDirty(false);}};
   const fm=firms.find(f=>f.code===j.firm)||{};
   const ab=async()=>{const bd={id:"B"+uid(),job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);};
-  const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||''});};
-  const saveEdit=async(itId)=>{if(updateLineItem)await updateLineItem(itId,ef);setEd(null);show("Item updated!");};
+  const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||'',rate_mode:it.rate_mode||'SQFT'});};
+  const saveEdit=async(itId,extraFields={})=>{if(updateLineItem)await updateLineItem(itId,{...ef,...extraFields});setEd(null);show("Item updated!");};
   const saveNewItem=async(batchId)=>{
     if(!ni.internal_name){show("Enter item name",false);return;}
     const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=+ni.gstPct||18;
@@ -636,19 +643,21 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     </div>
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>{b.bill_no&&<span className="mn" style={{fontSize:9,color:"#06b6d4"}}>{b.bill_no}</span>}</div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Size</th><th>Qty</th><th>Rate</th><th>Amt</th><th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
-        <tbody>{(b.items||[]).length===0&&<tr><td colSpan={8+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Amt</th><th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+        <tbody>{(b.items||[]).length===0&&<tr><td colSpan={10+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);const isEd=ed===it.id;
           return isEd?<tr key={it.id} style={{background:"#0a1520"}}><td className="mn" style={{fontSize:9}}>{ii+1}</td>
             <td><input className="in" value={ef.internal_name} onChange={e=>setEf(p=>({...p,internal_name:e.target.value}))} style={{fontSize:10,padding:"2px 4px"}}/></td>
             <td><input className="in" value={ef.media} onChange={e=>setEf(p=>({...p,media:e.target.value}))} style={{fontSize:10,padding:"2px 4px"}}/></td>
-            <td><div style={{display:"flex",gap:1}}><input className="in mn" value={ef.width} onChange={e=>setEf(p=>({...p,width:e.target.value}))} style={{width:28,fontSize:9,padding:"2px"}}/><span style={{color:"#64748b"}}>×</span><input className="in mn" value={ef.height} onChange={e=>setEf(p=>({...p,height:e.target.value}))} style={{width:28,fontSize:9,padding:"2px"}}/></div></td>
+            <td><div style={{display:"flex",gap:1}}><input className="in mn" value={ef.width} onChange={e=>setEf(p=>({...p,width:e.target.value}))} style={{width:30,fontSize:9,padding:"2px"}}/><span style={{color:"#64748b"}}>×</span><input className="in mn" value={ef.height} onChange={e=>setEf(p=>({...p,height:e.target.value}))} style={{width:30,fontSize:9,padding:"2px"}}/></div></td>
             <td><input className="in mn" type="number" value={ef.qty} onChange={e=>setEf(p=>({...p,qty:+e.target.value}))} style={{width:35,fontSize:10,padding:"2px 4px"}}/></td>
+            <td><select className="in" value={ef.rate_mode||'SQFT'} onChange={e=>setEf(p=>({...p,rate_mode:e.target.value}))} style={{fontSize:8,padding:"1px",width:42}}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
+            <td className="mn" style={{fontSize:9,color:"#64748b"}}>{cSq(ef.width,ef.height,ef.qty,it.size_unit||'INCH')||'—'}</td>
             <td><input className="in mn" type="number" value={ef.rate} onChange={e=>setEf(p=>({...p,rate:+e.target.value}))} style={{width:50,fontSize:10,padding:"2px 4px"}}/></td>
             <td></td>
-            <td><div style={{display:"flex",gap:2}}><button className="b bg bs" onClick={()=>saveEdit(it.id)}>✓</button><button className="b bs" onClick={()=>setEd(null)}>✕</button></div></td>
+            <td><div style={{display:"flex",gap:2}}><button className="b bg bs" onClick={()=>{const w=+ef.width||0,h=+ef.height||0,q=+ef.qty||1,r=+ef.rate||0,rm=ef.rate_mode||'SQFT',su=it.size_unit||'INCH';const sq=cSq(w,h,q,su);const total=rm==='SQFT'?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;const gst=Math.round(total*0.18*100)/100;saveEdit(it.id,{...ef,sqft:sq,total,gst,amount:Math.round((total+gst)*100)/100});}} >✓</button><button className="b bs" onClick={()=>setEd(null)}>✕</button></div></td>
             <td colSpan={8}></td></tr>
-          :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td><td><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+          :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'SQFT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td><td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>{if(confirm('Delete item "'+it.internal_name+'"?'))deleteLineItem(it.id)}}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
