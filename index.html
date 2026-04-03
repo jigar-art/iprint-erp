@@ -754,6 +754,24 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         const body=encodeURIComponent(`Dear ${j.contact_person||'Sir/Madam'},\n\nPlease find attached the ${j.status==='Quotation Sent'?'estimate':'revised estimate'} for:\n\nJob#: ${j.id}\nProject: ${j.project||''}\nTotal Amount: ₹${totAmt.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${fm.name||'iPrint'}`);
         window.open(`mailto:?cc=estimation@juxtapose.co.in&subject=${sub}&body=${body}`);
       }} style={{gap:4}}>📧 Email Estimate</button>
+      <button className="b" onClick={()=>{
+        const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
+        const totQty=allItems.reduce((s,it)=>s+(+it.qty||0),0);
+        const totSqft=Math.round(allItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
+        const psHtml=`<html><head><title>Production Sheet ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}@media print{body{padding:10px}}</style></head><body>`+
+          `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${fm.short_name||''} · ${fm.address||''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${j.id}</p><p style="font-size:10px">Date: ${td()}</p></div></div>`+
+          `<div class="meta"><b>Client:</b><span>${j.client_name||''}</span><b>Project:</b><span>${j.project||''}</span><b>Contact:</b><span>${j.contact_person||''} ${j.contact_no||''}</span><b>PO No:</b><span>${j.po_number||'Pending'}</span><b>Delivery:</b><span>${j.delivery_address||''}</span><b>Firm:</b><span>${fm.name||''}</span><b>Made By:</b><span>${j.made_by||''}</span><b>Status:</b><span>${j.status||''}</span></div>`+
+          (j.batches||[]).map((b,bi)=>{
+            const bItems=(b.items||[]);if(bItems.length===0)return '';
+            return `<div class="batch-hdr">Batch ${bi+1} · ${b.date||''} · ${b.note||''}</div>`+
+              `<table><thead><tr><th>#</th><th>Description</th><th>Material / Media Make</th><th>Size (W×H)</th><th>Unit</th><th>Qty</th><th>SqFt</th><th>Machine</th></tr></thead><tbody>`+
+              bItems.map((it,ii)=>`<tr><td>${ii+1}</td><td style="font-weight:600">${it.internal_name||''}</td><td style="font-size:9px;color:#555">${(it.media||'').slice(0,80)}</td><td class="r">${it.width&&it.height?it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:''):'—'}</td><td>${it.rate_mode||''}</td><td class="r" style="font-weight:700">${it.qty}</td><td class="r">${it.sqft||'—'}</td><td>${it.area||'In-house'}</td></tr>`).join('')+
+              `</tbody></table>`;
+          }).join('')+
+          `<table style="margin-top:8px"><tr class="total"><td colspan="5" style="text-align:right"><b>GRAND TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td></tr></table>`+
+          `<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:30px;font-size:10px;color:#666"><div style="border-top:1px solid #999;padding-top:4px">Prepared By</div><div style="border-top:1px solid #999;padding-top:4px">Production Head</div><div style="border-top:1px solid #999;padding-top:4px">Approved By</div></div></body></html>`;
+        const w=window.open('','_blank');w.document.write(psHtml);w.document.close();w.print();
+      }} style={{gap:4}}>📋 Production Sheet</button>
     </div>
   </div>;
 }
@@ -865,7 +883,18 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       const sub=encodeURIComponent(`Estimate ${jid} - ${f.pr||'Project'} | ${firms.find(x=>x.code===fm)?.short_name||''}`);
       const body=encodeURIComponent(`Dear ${f.cp||'Sir/Madam'},\n\nPlease find attached the estimate for:\n\nJob#: ${jid}\nProject: ${f.pr||''}\nTotal Amount: ₹${tot.t.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${firms.find(x=>x.code===fm)?.name||'iPrint'}`);
       window.open(`mailto:${f.cemail||''}?cc=estimation@juxtapose.co.in&subject=${sub}&body=${body}`);
-    }} style={{gap:6}}>📧 Email to Client</button>}<button className="b bp" onClick={sub} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button></div>
+    }} style={{gap:6}}>📧 Email to Client</button>}<button className="b" onClick={()=>{
+      const firmData=firms.find(x=>x.code===fm)||{};
+      const totQty=its.reduce((a,x)=>a+(+x.qty||0),0);const totSqft=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;
+      const psHtml=`<html><head><title>Production Sheet ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}@media print{body{padding:10px}}</style></head><body>`+
+        `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${firmData.short_name||''} · ${firmData.address||''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div>`+
+        `<div class="meta"><b>Client:</b><span>${f.cn||''}</span><b>Project:</b><span>${f.pr||''}</span><b>Contact:</b><span>${f.cp||''} ${f.cph||''}</span><b>PO No:</b><span>${f.po||'Pending'}</span><b>Delivery:</b><span>${f.da||''}</span><b>Firm:</b><span>${firmData.name||''}</span><b>Made By:</b><span>${f.mb||''}</span></div>`+
+        `<table><thead><tr><th>#</th><th>Description</th><th>Material / Media Make</th><th>Size (W×H ${su})</th><th>Qty</th><th>SqFt</th><th>Machine</th></tr></thead><tbody>`+
+        its.map((it,i)=>`<tr><td>${i+1}</td><td style="font-weight:600">${it.int||''}</td><td style="font-size:9px;color:#555">${it.m||''}</td><td class="r">${it.w&&it.h?it.w+'×'+it.h:'—'}</td><td class="r" style="font-weight:700">${it.qty}</td><td class="r">${it.sqft?it.sqft.toFixed(2):'—'}</td><td>${it.mach||'In-house'}</td></tr>`).join('')+
+        `<tr class="total"><td colspan="4" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td></tr></tbody></table>`+
+        `<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:30px;font-size:10px;color:#666"><div style="border-top:1px solid #999;padding-top:4px">Prepared By</div><div style="border-top:1px solid #999;padding-top:4px">Production Head</div><div style="border-top:1px solid #999;padding-top:4px">Approved By</div></div></body></html>`;
+      const w=window.open('','_blank');w.document.write(psHtml);w.document.close();w.print();
+    }} style={{gap:6}}>📋 Production Sheet</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button></div>
   </div>;
 }
 
