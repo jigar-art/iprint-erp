@@ -458,7 +458,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"20px 10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1050,padding:18,animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -489,7 +489,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
     ).slice(0,20);
   },[dq,jobs]);
   const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div className="c" style={{padding:10}}>
       <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search by Job#, Invoice#, Client, Project, PO#..." value={dq} onChange={e=>setDq(e.target.value)} style={{fontSize:12,padding:"8px 12px",paddingLeft:12}}/></div>
@@ -514,7 +514,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
   const [fy,setFy]=useState("All");
   const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;});
   
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
 
   return <div style={{display:"flex",flexDirection:"column",gap:7}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:3,flexWrap:"wrap"}}>
@@ -565,7 +565,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     setAddingToBatch(null);
   };
   
-  return <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"75vh",overflowY:"auto"}}>
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"flex",justifyContent:"space-between"}}><div><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:10,color:"#64748b"}}>{j.project} · {j.client_name}</p></div>
       <div style={{display:"flex",gap:2}}><FB f={j.firm} firms={firms}/><button className={`b bs ${vm==="internal"?"bp":""}`} onClick={()=>svm("internal")}>Internal</button><button className={`b bs ${vm==="client"?"bp":""}`} onClick={()=>svm("client")}>DC</button></div></div>
     <div className="fg f3" style={{fontSize:10,background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
