@@ -643,65 +643,88 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
               const ws=wb.Sheets[sName];
               const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
               if(!data||data.length<3){skipped++;continue;}
-              // Find header row
+              // Find header row — scan for row with Sr No + Description/Job Description
               let hRow=-1;
-              for(let i=0;i<Math.min(20,data.length);i++){
+              for(let i=0;i<Math.min(25,data.length);i++){
                 const txt=data[i].map(c=>String(c||'').toLowerCase()).join(' ');
-                if(/(sr\.?\s*no|sl\.?\s*no)/.test(txt)&&/(description|particular|job desc|item)/.test(txt)){hRow=i;break;}
+                if(/(sr\.?\s*no|sl\.?\s*no)/.test(txt)&&/(description|particular|job desc)/.test(txt)){hRow=i;break;}
                 if(/(description|particular)/.test(txt)&&/(qty|quantity|unit|sqft|rate)/.test(txt)){hRow=i;break;}
               }
               if(hRow<0){skipped++;continue;}
               const headers=data[hRow].map(c=>String(c||'').toLowerCase().trim());
+              // Also check sub-header row (row after header may have W/H)
+              const subRow=hRow+1<data.length?data[hRow+1].map(c=>String(c||'').toLowerCase().trim()):[];
+              const hasSubHeader=subRow.some(c=>/^[wh]$/.test(c))&&!subRow.some(c=>/^\d+$/.test(c));
+              const dataStart=hasSubHeader?hRow+2:hRow+1;
+              
               const findCol=(patterns)=>{for(const p of patterns){const idx=headers.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
-              const cDesc=findCol([/description|particular|job desc/]);
+              const cDesc=findCol([/job desc|description|particular/]);
               const cQty=findCol([/^qty|quantit/]);
               const cRate=findCol([/rate\s*sqft|supply.*rate|^rate$/]);
-              const cTotal=findCol([/^total$|total\s*amount/]);
+              const cTotal=findCol([/^total$|total\s*amount|^total amount$/]);
               const cGst=findCol([/gst/]);
-              const cW=findCol([/^w$|width|size.*foot/]);
-              const cH=findCol([/^h$|height/]);
               const cMedia=findCol([/media|material|spec/]);
-              let poNum='';
+              const cSqft=findCol([/^sqft$/]);
+              // W/H: check sub-header first, then main header, then "size in foot" pattern
+              let cW=subRow.indexOf('w');if(cW<0)cW=findCol([/^w$/,/width/]);
+              let cH=subRow.indexOf('h');if(cH<0)cH=findCol([/^h$/,/height/]);
+              // If SIZE IN FOOT found and no W/H, assume W is that col and H is next
+              if(cW<0){const sizeCol=findCol([/size.*foot|size.*in/]);if(sizeCol>=0){cW=sizeCol;cH=sizeCol+1;}}
+              
+              // Extract metadata from rows above header
+              let poNum='',delivAddr='';
               for(let i=0;i<hRow;i++){
-                const k=String(data[i][0]||'').toLowerCase();
-                const v=String(data[i][1]||'');
-                if(k.includes('po number')||k.includes('po no'))poNum=v;
+                const k=String(data[i][0]||'').toLowerCase().trim();
+                const v=String(data[i][1]||'').trim();
+                if(/po\s*number|po\s*no/.test(k))poNum=v;
+                if(/delivery\s*address/.test(k))delivAddr=v;
               }
+              
               const lineItems=[];
               const batchId="B"+uid();
-              for(let r=hRow+1;r<data.length;r++){
+              for(let r=dataStart;r<data.length;r++){
                 const row=data[r];
                 const srVal=String(row[0]||'').trim();
-                if(!srVal||/^(total|sub|gst|terms|note|nan)/i.test(srVal))continue;
+                // Skip total/summary/terms rows
+                if(/^(total|sub\s*total|gst|terms|note|nan|basic|eastimate|general)/i.test(srVal))continue;
+                if(!srVal)continue;
+                
                 const desc=cDesc>=0?String(row[cDesc]||''):'';
-                if(!desc&&!srVal.match(/^\d+$/))continue;
+                // Must have a numeric sr# with a description, or at least a description
+                const isNumSr=/^\d+$/.test(srVal);
+                if(!desc&&!isNumSr)continue;
+                
                 const qty=cQty>=0?(+row[cQty]||0):1;
                 if(qty<=0)continue;
                 const rate=cRate>=0?(+row[cRate]||0):0;
                 const total=cTotal>=0?(+row[cTotal]||0):0;
                 const gst=cGst>=0?(+row[cGst]||0):0;
+                const sqftVal=cSqft>=0?(+row[cSqft]||0):0;
                 const w=cW>=0?String(row[cW]||''):'';
                 const h=cH>=0?String(row[cH]||''):'';
-                const media=cMedia>=0?String(row[cMedia]||'').slice(0,100):'';
-                const sqft=(+w||0)*(+h||0)*qty;
+                const media=cMedia>=0?String(row[cMedia]||'').slice(0,150):'';
+                const calcSqft=sqftVal||(+w||0)*(+h||0)*qty;
+                
                 lineItems.push({id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:lineItems.length+1,product_id:"",
-                  internal_name:desc.slice(0,150)||sName,client_name:desc.slice(0,150)||sName,media,
-                  width:w,height:h,size_unit:'FOOT',qty,rate_mode:sqft?'SQFT':'UNIT',rate,sqft:Math.round(sqft*100)/100,
-                  total:total||Math.round(sqft*rate*100)/100,gst,amount:Math.round((total+gst)*100)/100||0,
+                  internal_name:(desc||srVal).slice(0,150),client_name:(desc||srVal).slice(0,150),media,
+                  width:w,height:h,size_unit:'FOOT',qty,rate_mode:calcSqft?'SQFT':'UNIT',rate,
+                  sqft:Math.round(calcSqft*100)/100,
+                  total:total||Math.round(calcSqft*rate*100)/100,gst,
+                  amount:total&&gst?Math.round((total+gst)*100)/100:Math.round((total||calcSqft*rate)*1.18*100)/100||0,
                   area:'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
                   dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false});
               }
               if(lineItems.length===0){skipped++;continue;}
               batchesWithItems.push({
-                batch:{id:batchId,job_id:j.id,date:td(),note:sName+(poNum?' | PO:'+poNum:''),bill_no:"",status:"New"},
+                batch:{id:batchId,job_id:j.id,date:td(),note:sName+(poNum?' | PO:'+poNum:'')+(delivAddr?' | '+delivAddr.slice(0,50):''),bill_no:"",status:"New"},
                 items:lineItems
               });
             }
             if(batchesWithItems.length>0){
               const imported=await importBatches(batchesWithItems);
-              show(imported+" batch(es) imported with items"+(skipped?" ("+skipped+" skipped)":"")+"! Close & reopen to see.");
+              show(imported+" batch(es) imported with items! Close & reopen to see.");
             } else {
-              show("No valid sheets found to import",false);
+              show("No valid sheets found ("+skipped+" skipped). Check that sheets have Sr No + Description columns.",false);
             }
           }catch(ex){show("Import error: "+ex.message,false);}
         }}/>
