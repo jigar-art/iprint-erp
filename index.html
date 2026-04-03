@@ -572,7 +572,87 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLin
         <div style={{display:"flex",gap:4,marginTop:6}}><button className="b bg" onClick={()=>saveNewItem(b.id)}>✓ Save Item</button><button className="b" onClick={()=>setAddingToBatch(null)}>Cancel</button></div>
       </div>:<div style={{padding:"4px 8px",borderTop:"1px solid #0c1017"}}><button className="b bp bs" onClick={()=>setAddingToBatch(b.id)}>➕ Add Item</button></div>}
     </div>)}
-    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>}
+    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
+      <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
+        <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
+          const file=e.target.files[0];if(!file)return;
+          try{
+            const buf=await file.arrayBuffer();
+            const wb=XLSX.read(buf,{type:'array'});
+            let imported=0,skipped=0;
+            for(const sName of wb.SheetNames){
+              const ws=wb.Sheets[sName];
+              const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+              if(!data||data.length<3){skipped++;continue;}
+              // Find header row
+              let hRow=-1;
+              for(let i=0;i<Math.min(20,data.length);i++){
+                const txt=data[i].map(c=>String(c||'').toLowerCase()).join(' ');
+                if(/(sr\.?\s*no|sl\.?\s*no)/.test(txt)&&/(description|particular|job desc|item)/.test(txt)){hRow=i;break;}
+                if(/(description|particular)/.test(txt)&&/(qty|quantity|unit|sqft|rate)/.test(txt)){hRow=i;break;}
+              }
+              if(hRow<0){skipped++;continue;}
+              const headers=data[hRow].map(c=>String(c||'').toLowerCase().trim());
+              // Find key columns
+              const findCol=(patterns)=>{for(const p of patterns){const idx=headers.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
+              const cDesc=findCol([/description|particular|job desc/]);
+              const cQty=findCol([/^qty|quantit/]);
+              const cRate=findCol([/rate\s*sqft|supply.*rate|^rate$/]);
+              const cTotal=findCol([/^total$|total\s*amount/]);
+              const cGst=findCol([/gst/]);
+              const cW=findCol([/^w$|width|size.*foot/]);
+              const cH=findCol([/^h$|height/]);
+              const cMedia=findCol([/media|material|spec/]);
+              // Extract job metadata from rows above header
+              let batchNote=sName;
+              let poNum='',deliveryAddr='';
+              for(let i=0;i<hRow;i++){
+                const k=String(data[i][0]||'').toLowerCase();
+                const v=String(data[i][1]||'');
+                if(k.includes('po number')||k.includes('po no'))poNum=v;
+                if(k.includes('delivery'))deliveryAddr=v;
+              }
+              // Parse line items (skip sub-headers and totals)
+              const lineItems=[];
+              for(let r=hRow+1;r<data.length;r++){
+                const row=data[r];
+                const srVal=String(row[0]||'').trim();
+                if(!srVal||/^(total|sub|gst|terms|note|nan)/i.test(srVal))continue;
+                // Must have a numeric sr or valid description
+                const desc=cDesc>=0?String(row[cDesc]||''):'';
+                if(!desc&&!srVal.match(/^\d+$/))continue;
+                const qty=cQty>=0?(+row[cQty]||0):1;
+                if(qty<=0)continue;
+                const rate=cRate>=0?(+row[cRate]||0):0;
+                const total=cTotal>=0?(+row[cTotal]||0):0;
+                const gst=cGst>=0?(+row[cGst]||0):0;
+                const w=cW>=0?String(row[cW]||''):'';
+                const h=cH>=0?String(row[cH]||''):'';
+                const media=cMedia>=0?String(row[cMedia]||'').slice(0,100):'';
+                const sqft=(+w||0)*(+h||0)*qty;
+                lineItems.push({id:"LI"+uid(),batch_id:"",job_id:j.id,sr:lineItems.length+1,product_id:"",
+                  internal_name:desc.slice(0,150)||sName,client_name:desc.slice(0,150)||sName,media:media,
+                  width:w,height:h,size_unit:'FOOT',qty,rate_mode:sqft?'SQFT':'UNIT',rate,sqft:Math.round(sqft*100)/100,
+                  total:total||Math.round(sqft*rate*100)/100,gst,amount:Math.round((total+gst)*100)/100||0,
+                  area:'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
+                  dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false});
+              }
+              if(lineItems.length===0){skipped++;continue;}
+              // Create batch
+              const batchId="B"+uid();
+              const batchData={id:batchId,job_id:j.id,date:td(),note:batchNote+(poNum?' | PO:'+poNum:''),bill_no:"",status:"New"};
+              lineItems.forEach(li=>{li.batch_id=batchId;});
+              await sb.from('batches').insert(batchData);
+              await sb.from('line_items').insert(lineItems);
+              imported++;
+            }
+            show(imported+" batch(es) imported"+(skipped?" ("+skipped+" sheets skipped)":""));
+            // Refresh — user needs to close and reopen the job
+            if(imported>0)show("Close & reopen job to see new batches");
+          }catch(ex){show("Import error: "+ex.message,false);}
+        }}/>
+      </label>
+    </div>}
     <div style={{display:"flex",gap:4,flexWrap:"wrap",borderTop:"1px solid #1a2030",paddingTop:8,marginTop:4}}>
       <button className="b" onClick={()=>{
         const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
