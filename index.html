@@ -378,7 +378,7 @@ function MainApp({user,onLogout,masterData}){
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
           {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} updateJobFile={updateJobFile}/>}
           {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} updateJobFile={updateJobFile}/>}
-          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs}/>}
+          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog}/>}
@@ -513,7 +513,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLin
 // ═══════════════════════════════════════════════════════════
 // NEW JOB
 // ═══════════════════════════════════════════════════════════
-function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,sp,jobs}){
+function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,sp,jobs,user}){
   const [fm,sfm]=useState("JXT");
   const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
   const [su,sSu]=useState("INCH");
@@ -596,11 +596,11 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       const totQty=its.reduce((a,x)=>a+(+x.qty||0),0);const totSqft=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;
       const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div><b>Email:</b> ${f.cemail||'—'}</div><div><b>Delivery:</b> ${f.da||''}</div></div><table><thead><tr><th>#</th><th>Description</th><th>Material/Spec</th><th>Size (W×H)</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>'<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td><td>'+(it.m||'')+'</td><td class="r">'+(it.w&&it.h?it.w+'×'+it.h+' '+su:'—')+'</td><td class="r">'+it.qty+'</td><td class="r">'+(it.sqft?it.sqft.toFixed(2):'—')+'</td><td class="r">₹'+(+it.rate).toFixed(2)+'</td><td class="r">₹'+it.tot.toFixed(2)+'</td><td class="r">'+(it.gstPct||18)+'%</td><td class="r">₹'+it.gst.toFixed(2)+'</td><td class="r"><b>₹'+it.amt.toFixed(2)+'</b></td></tr>').join('')}<tr class="total"><td colspan="4" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${tot.s.toFixed(2)}</b></td><td></td><td class="r"><b>₹${tot.g.toFixed(2)}</b></td><td class="r"><b>₹${tot.t.toFixed(2)}</b></td></tr></tbody></table><div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p>${f.remark?'<p style="margin-top:4px"><b>Remark:</b> '+f.remark+'</p>':''}<p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
       const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
-    }} style={{gap:6}}>📄 Estimate PDF</button><button className="b" onClick={()=>{
+    }} style={{gap:6}}>📄 Estimate PDF</button>{user?.name?.includes('RUCHITA')&&<button className="b" onClick={()=>{
       const sub=encodeURIComponent(`Estimate ${jid} - ${f.pr||'Project'} | ${firms.find(x=>x.code===fm)?.short_name||''}`);
       const body=encodeURIComponent(`Dear ${f.cp||'Sir/Madam'},\n\nPlease find attached the estimate for:\n\nJob#: ${jid}\nProject: ${f.pr||''}\nTotal Amount: ₹${tot.t.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${firms.find(x=>x.code===fm)?.name||'iPrint'}`);
       window.open(`mailto:${f.cemail||''}?cc=estimation@juxtapose.co.in&subject=${sub}&body=${body}`);
-    }} style={{gap:6}}>📧 Email to Client</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
+    }} style={{gap:6}}>📧 Email to Client</button>}<button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
   </div>;
 }
 
