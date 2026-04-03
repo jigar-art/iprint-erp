@@ -573,9 +573,9 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
         <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
-          <td><select className="in" value={it.pi} onChange={e=>selP(i,+e.target.value)} style={{fontSize:10,padding:"3px"}}>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select></td>
+          <td><div style={{display:"flex",gap:1}}><select className="in" value={it.pi} onChange={e=>selP(i,+e.target.value)} style={{fontSize:9,padding:"2px",width:70}}>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select><input className="in" value={it.int} onChange={e=>uI(i,"int",e.target.value)} placeholder="or type..." style={{fontSize:9,padding:"2px 3px",width:70}}/></div></td>
           <td><input className="in" value={it.cli} onChange={e=>uI(i,"cli",e.target.value)} style={{fontSize:10,padding:"3px",color:"#06b6d4"}}/></td>
-          <td><input className="in" value={it.m} onChange={e=>uI(i,"m",e.target.value)} style={{fontSize:10,padding:"3px"}}/></td>
+          <td><input className="in" value={it.m} onChange={e=>uI(i,"m",e.target.value)} placeholder="Material/spec..." style={{fontSize:10,padding:"3px"}}/></td>
           <td><input className="in mn" value={it.w} onChange={e=>uI(i,"w",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
           <td><input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
           <td><input className="in mn" type="number" min={1} value={it.qty} onChange={e=>uI(i,"qty",e.target.value)} style={{fontSize:10,padding:"3px",width:32}}/></td>
@@ -599,7 +599,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     }} style={{gap:6}}>📄 Estimate PDF</button><button className="b" onClick={()=>{
       const sub=encodeURIComponent(`Estimate ${jid} - ${f.pr||'Project'} | ${firms.find(x=>x.code===fm)?.short_name||''}`);
       const body=encodeURIComponent(`Dear ${f.cp||'Sir/Madam'},\n\nPlease find attached the estimate for:\n\nJob#: ${jid}\nProject: ${f.pr||''}\nTotal Amount: ₹${tot.t.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${firms.find(x=>x.code===fm)?.name||'iPrint'}`);
-      window.open(`mailto:${f.cemail||''}?subject=${sub}&body=${body}`);
+      window.open(`mailto:${f.cemail||''}?cc=estimation@juxtapose.co.in&subject=${sub}&body=${body}`);
     }} style={{gap:6}}>📧 Email to Client</button><button className="b bp" onClick={sub} style={{padding:"7px 18px"}}>Create {jid}</button></div>
   </div>;
 }
