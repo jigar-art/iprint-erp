@@ -288,8 +288,13 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── UPDATE JOB STATUS ─────────────────────────────────────
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
-    await sb.from('jobs').update({status:newStatus}).eq('id',jobId);
-    setJobs(p=>p.map(j=>j.id===jobId?{...j,status:newStatus}:j));
+    // Record status change date
+    const job=jobs.find(j=>j.id===jobId);
+    const existingDates=job?.status_dates||{};
+    const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
+    const newDates={...existingDates,[statusKey]:td()};
+    await sb.from('jobs').update({status:newStatus,status_dates:newDates}).eq('id',jobId);
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j));
     // Also update dept flags based on new status
     const statusDepts={'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,0,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],
       'Printing':[1,1,1,0,0,0,0,0],'Fabrication':[1,1,1,1,0,0,0,0],'Installation':[1,1,1,1,1,1,0,0],
@@ -301,8 +306,8 @@ function MainApp({user,onLogout,masterData}){
     const jobItems=items.filter(i=>i.job_id===jobId);
     for(const it of jobItems){await sb.from('line_items').update(updates).eq('id',it.id);}
     setItems(p=>p.map(i=>i.job_id===jobId?{...i,...updates}:i));
-    show("Status updated to "+newStatus);
-  },[show,items]);
+    show("Status → "+newStatus+" ("+td()+")");
+  },[show,items,jobs]);
 
   // ─── UPDATE JOB FIELDS (client details, PO, delivery etc) ──
   const updateJobFields = useCallback(async (jobId, fields) => {
@@ -594,6 +599,27 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       <div><span style={{color:"#64748b",fontSize:8}}>BY</span><p style={{fontWeight:600,fontSize:10}}>{j.made_by||'—'}</p></div>
       {jfDirty&&<div style={{gridColumn:"span 3"}}><button className="b bg" onClick={saveJF} style={{width:"100%",justifyContent:"center",padding:6}}>💾 Save Changes</button></div>}
     </div>
+    {(()=>{const sd=j.status_dates||{};const steps=[
+      {k:'quotation_sent',l:'Quotation',c:'#3b82f6',e:'📝'},{k:'po_received',l:'PO Received',c:'#4ade80',e:'📋'},
+      {k:'designing',l:'Design',c:'#8b5cf6',e:'🎨'},{k:'printing',l:'Printing',c:'#ef4444',e:'🖨️'},
+      {k:'fabrication',l:'Fabrication',c:'#dc2626',e:'🔧'},{k:'installation',l:'Installation',c:'#059669',e:'🔩'},
+      {k:'delivered',l:'Dispatch',c:'#10b981',e:'🚚'},{k:'billing_pending',l:'Billing Pending',c:'#06b6d4',e:'📑'},
+      {k:'given_for_billing',l:'Given for Billing',c:'#06b6d4',e:'📤'},{k:'billing_done',l:'Billed',c:'#4ade80',e:'✅'},
+      {k:'cash_received',l:'Cash Received',c:'#4ade80',e:'💰'}
+    ];const hasAny=steps.some(s=>sd[s.k]);
+    return hasAny?<div style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:"6px 10px",overflowX:"auto"}}>
+      <p style={{fontSize:8,color:"#64748b",fontWeight:600,marginBottom:6}}>📅 WORKFLOW TIMELINE</p>
+      <div style={{display:"flex",gap:0,alignItems:"center",minWidth:"fit-content"}}>
+        {steps.map((s,i)=>{const d=sd[s.k];const active=!!d;return <React.Fragment key={s.k}>
+          {i>0&&<div style={{width:20,height:2,background:active?"#1a2030":"#0c1017",flexShrink:0}}/>}
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,flexShrink:0,opacity:active?1:0.25,minWidth:50}}>
+            <div style={{width:20,height:20,borderRadius:10,background:active?s.c+"30":"#1a2030",border:`2px solid ${active?s.c:"#1a2030"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8}}>{s.e}</div>
+            <span style={{fontSize:7,fontWeight:600,color:active?s.c:"#475569",textAlign:"center",lineHeight:1.1}}>{s.l}</span>
+            {d&&<span className="mn" style={{fontSize:7,color:"#94a3b8"}}>{d}</span>}
+          </div>
+        </React.Fragment>;})}
+      </div>
+    </div>:null;})()}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
       {[{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"}].map(sec=>{
         const raw=j[sec.field];const urls=Array.isArray(raw)?raw:raw?[raw]:[];
