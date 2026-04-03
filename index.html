@@ -340,6 +340,16 @@ function MainApp({user,onLogout,masterData}){
     show(newUrls.length+" file(s) uploaded!");
   },[show,jobs]);
 
+  // ─── REMOVE A FILE FROM JOB ARRAY ─────────────────────────
+  const removeJobFile = useCallback(async (jobId, field, urlToRemove) => {
+    const job=jobs.find(j=>j.id===jobId);
+    const existing=Array.isArray(job?.[field])?job[field]:job?.[field]?[job[field]]:[];
+    const updated=existing.filter(u=>u!==urlToRemove);
+    await sb.from('jobs').update({[field]:updated}).eq('id',jobId);
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,[field]:updated}:j));
+    show("File removed");
+  },[show,jobs]);
+
   const addNewClient = useCallback(async (clientData) => {
     const {error} = await sb.from('clients').insert(clientData);
     if(!error){show("Client added!");}
@@ -440,8 +450,8 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>}
-          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields}/>}
@@ -453,12 +463,12 @@ function MainApp({user,onLogout,masterData}){
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={fullJobs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
-          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} show={show}/>}
+          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -473,7 +483,7 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
+function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [dq,setDq]=useState("");
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   const results=useMemo(()=>{
@@ -509,7 +519,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
 // ═══════════════════════════════════════════════════════════
 // ALL JOBS
 // ═══════════════════════════════════════════════════════════
-function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
+function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [ff,sf]=useState("All");
   const [fy,setFy]=useState("All");
   const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;});
@@ -532,7 +542,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [ed,setEd]=useState(null); // editing item id
@@ -589,7 +599,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         const raw=j[sec.field];const urls=Array.isArray(raw)?raw:raw?[raw]:[];
         return <div key={sec.field} style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:6}}>
           <span style={{color:"#64748b",fontSize:8,fontWeight:600,display:"block",marginBottom:3}}>{sec.l} ({urls.length})</span>
-          {urls.length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:4}}>{urls.map((u,i)=><a key={i} href={u} target="_blank" style={{color:"#3b82f6",fontSize:9,background:"#3b82f610",padding:"2px 5px",borderRadius:3}}>{sec.icon}{i+1}</a>)}</div>}
+          {urls.length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:4}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:2,background:"#3b82f610",padding:"2px 4px",borderRadius:3}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>{sec.icon}{i+1}</a><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0,lineHeight:1}} onClick={()=>{if(confirm('Remove this file?'))removeJobFile(j.id,sec.field,u);}}>✕</button></span>)}</div>}
           <input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" multiple className="in" style={{padding:2,fontSize:9}} onChange={async e=>{
             const files=[...e.target.files];if(!files.length)return;
             const newUrls=await uploadMultiple(files,sec.folder);
@@ -1137,7 +1147,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {filtered.length} jobs{sq?` matching "${sq}"`:''}</span></div>
     <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th>{tab!=='done'&&<><th>Invoice#</th><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}{tab==='done'&&<th>Invoice#</th>}</tr></thead><tbody>
       {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
-        {tab!=='done'&&<><td><input className="in mn" style={{width:100,fontSize:10}} placeholder="Inv#" value={invoices[j.id]||""} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))}/></td><td>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div>{urls.map((u,i)=><a key={i} href={u} target="_blank" style={{color:"#3b82f6",fontSize:8,marginRight:2}}>📄{i+1}</a>)}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div>{urls.map((u,i)=><a key={i} href={u} target="_blank" style={{color:"#3b82f6",fontSize:8,marginRight:2}}>📄{i+1}</a>)}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
+        {tab!=='done'&&<><td><input className="in mn" style={{width:100,fontSize:10}} placeholder="Inv#" value={invoices[j.id]||""} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))}/></td><td>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div style={{display:"flex",flexWrap:"wrap",gap:1,alignItems:"center"}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:1}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:8}}>📄{i+1}</a><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:7,padding:0}} onClick={()=>{if(confirm('Remove?'))removeJobFile(j.id,'dc_file_url',u)}}>✕</button></span>)}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:60}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div style={{display:"flex",flexWrap:"wrap",gap:1,alignItems:"center"}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:1}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:8}}>📄{i+1}</a><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:7,padding:0}} onClick={()=>{if(confirm('Remove?'))removeJobFile(j.id,'ic_file_url',u)}}>✕</button></span>)}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:60}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
         {tab==='done'&&<td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td>}
       </tr>})}
       {filtered.length===0&&<tr><td colSpan={tab!=='done'?10:7} style={{textAlign:"center",color:"#4ade80",padding:20}}>No jobs in this category</td></tr>}
