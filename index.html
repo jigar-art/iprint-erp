@@ -487,7 +487,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -561,7 +561,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [ed,setEd]=useState(null); // editing item id
@@ -569,6 +569,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const [addingToBatch,setAddingToBatch]=useState(null); // batch id being added to
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'INCH',rate_mode:'SQFT',gstPct:18});
+  // Role-based access control
+  const role=user?.role||'admin';
+  const prodRoles=['production','printing','fabrication','designer','dispatch'];
+  const isProd=prodRoles.includes(role);
+  const canSeeRates=!isProd;
   const [jf,setJf]=useState({client_name:j.client_name||'',contact_person:j.contact_person||'',contact_no:j.contact_no||'',po_number:j.po_number||'',delivery_address:j.delivery_address||'',client_gst:j.client_gst||'',billing_name:j.billing_name||'',payment_terms:j.payment_terms||'',project:j.project||''});
   const [jfDirty,setJfDirty]=useState(false);
   const setJF=(k,v)=>{setJf(p=>({...p,[k]:v}));setJfDirty(true);};
@@ -598,15 +603,15 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     <div style={{display:"flex",justifyContent:"space-between"}}><div><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:10,color:"#64748b"}}>{j.project} · {j.client_name}</p></div>
       <div style={{display:"flex",gap:2}}><FB f={j.firm} firms={firms}/><button className={`b bs ${vm==="internal"?"bp":""}`} onClick={()=>svm("internal")}>Internal</button><button className={`b bs ${vm==="client"?"bp":""}`} onClick={()=>svm("client")}>DC</button></div></div>
     <div className="fg f3" style={{fontSize:10,background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
-      <F l="Client Name"><input className="in" value={jf.client_name} onChange={e=>setJF('client_name',e.target.value)} style={{fontSize:10}}/></F>
+      <F l="Client Name"><input className="in" value={jf.client_name} onChange={e=>setJF('client_name',e.target.value)} style={{fontSize:10}} readOnly={isProd}/></F>
       <F l="Project"><input className="in" value={jf.project} onChange={e=>setJF('project',e.target.value)} style={{fontSize:10}}/></F>
-      <F l="Contact Person"><input className="in" value={jf.contact_person} onChange={e=>setJF('contact_person',e.target.value)} style={{fontSize:10}}/></F>
-      <F l="Phone"><input className="in" value={jf.contact_no} onChange={e=>setJF('contact_no',e.target.value)} style={{fontSize:10}}/></F>
-      <F l="PO Number"><input className="in mn" value={jf.po_number} onChange={e=>setJF('po_number',e.target.value)} style={{fontSize:10}}/></F>
-      <F l="Client GST"><input className="in mn" value={jf.client_gst} onChange={e=>setJF('client_gst',e.target.value)} placeholder="27XXXXX..." style={{fontSize:10}}/></F>
-      <F l="Billing Name"><input className="in" value={jf.billing_name} onChange={e=>setJF('billing_name',e.target.value)} style={{fontSize:10}}/></F>
+      {canSeeRates&&<F l="Contact Person"><input className="in" value={jf.contact_person} onChange={e=>setJF('contact_person',e.target.value)} style={{fontSize:10}}/></F>}
+      {canSeeRates&&<F l="Phone"><input className="in" value={jf.contact_no} onChange={e=>setJF('contact_no',e.target.value)} style={{fontSize:10}}/></F>}
+      <F l="PO Number"><input className="in mn" value={jf.po_number} onChange={e=>setJF('po_number',e.target.value)} style={{fontSize:10}} readOnly={isProd}/></F>
+      {canSeeRates&&<F l="Client GST"><input className="in mn" value={jf.client_gst} onChange={e=>setJF('client_gst',e.target.value)} placeholder="27XXXXX..." style={{fontSize:10}}/></F>}
+      {canSeeRates&&<F l="Billing Name"><input className="in" value={jf.billing_name} onChange={e=>setJF('billing_name',e.target.value)} style={{fontSize:10}}/></F>}
       <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={jf.delivery_address} onChange={e=>setJF('delivery_address',e.target.value)} style={{fontSize:10}}/></F></div>
-      <F l="Payment Terms"><input className="in" value={jf.payment_terms} onChange={e=>setJF('payment_terms',e.target.value)} style={{fontSize:10}}/></F>
+      {canSeeRates&&<F l="Payment Terms"><input className="in" value={jf.payment_terms} onChange={e=>setJF('payment_terms',e.target.value)} style={{fontSize:10}}/></F>}
       <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span><select className="in" value={j.status} onChange={e=>{if(updateJobStatus)updateJobStatus(j.id,e.target.value)}} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></div>
       <div><span style={{color:"#64748b",fontSize:8}}>FIRM</span><p style={{fontWeight:600,fontSize:10}}>{fm.name||'—'}</p></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600,fontSize:10}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
@@ -653,8 +658,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     </div>
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>{b.bill_no&&<span className="mn" style={{fontSize:9,color:"#06b6d4"}}>{b.bill_no}</span>}</div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Amt</th><th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
-        <tbody>{(b.items||[]).length===0&&<tr><td colSpan={10+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+        <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?10:8)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);const isEd=ed===it.id;
           return isEd?<tr key={it.id} style={{background:"#0a1520"}}><td className="mn" style={{fontSize:9}}>{ii+1}</td>
             <td><input className="in" value={ef.internal_name} onChange={e=>setEf(p=>({...p,internal_name:e.target.value}))} style={{fontSize:10,padding:"2px 4px"}}/></td>
@@ -663,11 +668,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
             <td><input className="in mn" type="number" value={ef.qty} onChange={e=>setEf(p=>({...p,qty:+e.target.value}))} style={{width:35,fontSize:10,padding:"2px 4px"}}/></td>
             <td><select className="in" value={ef.rate_mode||'SQFT'} onChange={e=>setEf(p=>({...p,rate_mode:e.target.value}))} style={{fontSize:8,padding:"1px",width:42}}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
             <td className="mn" style={{fontSize:9,color:"#64748b"}}>{cSq(ef.width,ef.height,ef.qty,it.size_unit||'INCH')||'—'}</td>
-            <td><input className="in mn" type="number" value={ef.rate} onChange={e=>setEf(p=>({...p,rate:+e.target.value}))} style={{width:50,fontSize:10,padding:"2px 4px"}}/></td>
-            <td></td>
+            {canSeeRates&&<td><input className="in mn" type="number" value={ef.rate} onChange={e=>setEf(p=>({...p,rate:+e.target.value}))} style={{width:50,fontSize:10,padding:"2px 4px"}}/></td>}
+            {canSeeRates&&<td></td>}
             <td><div style={{display:"flex",gap:2}}><button className="b bg bs" onClick={()=>{const w=+ef.width||0,h=+ef.height||0,q=+ef.qty||1,r=+ef.rate||0,rm=ef.rate_mode||'SQFT',su=it.size_unit||'INCH';const sq=cSq(w,h,q,su);const total=rm==='SQFT'?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;const gst=Math.round(total*0.18*100)/100;saveEdit(it.id,{...ef,sqft:sq,total,gst,amount:Math.round((total+gst)*100)/100});}} >✓</button><button className="b bs" onClick={()=>setEd(null)}>✕</button></div></td>
             <td colSpan={8}></td></tr>
-          :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'SQFT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td><td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>{if(confirm('Delete item "'+it.internal_name+'"?'))deleteLineItem(it.id)}}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+          :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'SQFT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>{if(confirm('Delete item "'+it.internal_name+'"?'))deleteLineItem(it.id)}}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
@@ -786,7 +791,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       </label>
     </div>}
     <div style={{display:"flex",gap:4,flexWrap:"wrap",borderTop:"1px solid #1a2030",paddingTop:8,marginTop:4}}>
-      <button className="b" onClick={()=>{
+      {canSeeRates&&<button className="b" onClick={()=>{
         const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
         const totSub=allItems.reduce((s,it)=>s+(+it.total||0),0);
         const totGst=allItems.reduce((s,it)=>s+(+it.gst||0),0);
@@ -801,21 +806,21 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           `<tr class="total"><td colspan="5" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${totSub.toFixed(2)}</b></td><td class="r"><b>₹${totGst.toFixed(2)}</b></td><td class="r"><b>₹${totAmt.toFixed(2)}</b></td></tr></tbody></table>`+
           `<div class="terms"><p><b>Terms & Conditions:</b></p><p>${j.payment_terms||'50% Advance. Rest within 30 days.'}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${fm.name||''}</p></div></body></html>`;
         const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
-      }} style={{gap:4}}>📄 Estimate PDF</button>
-      <button className="b" onClick={()=>{
+      }} style={{gap:4}}>📄 Estimate PDF</button>}
+      {canSeeRates&&<button className="b" onClick={()=>{
         const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
         const totAmt=allItems.reduce((s,it)=>s+(+it.amount||0),0);
         const sub=encodeURIComponent(`${j.status==='Quotation Sent'?'Estimate':'Revised Estimate'} ${j.id} - ${j.project||'Project'} | ${fm.short_name||''}`);
         const body=encodeURIComponent(`Dear ${j.contact_person||'Sir/Madam'},\n\nPlease find attached the ${j.status==='Quotation Sent'?'estimate':'revised estimate'} for:\n\nJob#: ${j.id}\nProject: ${j.project||''}\nTotal Amount: ₹${totAmt.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${fm.name||'iPrint'}`);
         window.open(`mailto:?cc=estimation@juxtapose.co.in&subject=${sub}&body=${body}`);
-      }} style={{gap:4}}>📧 Email Estimate</button>
+      }} style={{gap:4}}>📧 Email Estimate</button>}
       <button className="b" onClick={()=>{
         const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
         const totQty=allItems.reduce((s,it)=>s+(+it.qty||0),0);
         const totSqft=Math.round(allItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
         const psHtml=`<html><head><title>Production Sheet ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}@media print{body{padding:10px}}</style></head><body>`+
           `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${fm.short_name||''} · ${fm.address||''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${j.id}</p><p style="font-size:10px">Date: ${td()}</p></div></div>`+
-          `<div class="meta"><b>Client:</b><span>${j.client_name||''}</span><b>Project:</b><span>${j.project||''}</span><b>Contact:</b><span>${j.contact_person||''} ${j.contact_no||''}</span><b>PO No:</b><span>${j.po_number||'Pending'}</span><b>Delivery:</b><span>${j.delivery_address||''}</span><b>Firm:</b><span>${fm.name||''}</span><b>Made By:</b><span>${j.made_by||''}</span><b>Status:</b><span>${j.status||''}</span></div>`+
+          `<div class="meta"><b>Client:</b><span>${j.client_name||''}</span><b>Project:</b><span>${j.project||''}</span><b>PO No:</b><span>${j.po_number||'Pending'}</span><b>Delivery:</b><span>${j.delivery_address||''}</span><b>Firm:</b><span>${fm.name||''}</span><b>Made By:</b><span>${j.made_by||''}</span><b>Status:</b><span>${j.status||''}</span></div>`+
           (j.batches||[]).map((b,bi)=>{
             const bItems=(b.items||[]);if(bItems.length===0)return '';
             return `<div class="batch-hdr">Batch ${bi+1} · ${b.date||''} · ${b.note||''}</div>`+
