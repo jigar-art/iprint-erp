@@ -1086,18 +1086,26 @@ function CliPage({clients,jobs,s}){const fl=clients.filter(c=>!s||c.name?.toLowe
 function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFile,appendJobFiles,show}){
   const [tab,setTab]=useState('pending');
   const [invoices,setInvoices]=useState({});
+  const [sq,setSq]=useState('');
   const tabs=[
     {id:'pending',l:'Billing Pending',c:'#f59e0b',statuses:['Billing Pending','Cash Pending','Proforma Invoice','IC Pending']},
     {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing','Delivered']},
     {id:'done',l:'Billing Completed',c:'#4ade80',statuses:['Billing Done','Cash Received','No Bill']},
   ];
   const cur=tabs.find(t=>t.id===tab);
-  const filtered=jobs.filter(j=>cur.statuses.includes(j.status));
+  const filtered=jobs.filter(j=>{
+    if(!cur.statuses.includes(j.status))return false;
+    if(sq){const q=sq.toLowerCase();return j.id?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q)||(j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q));}
+    return true;
+  });
   const sc={'Billing Pending':'#f59e0b','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f47067','Given for Billing':'#06b6d4','Delivered':'#10b981','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
   const markBilled=async(j)=>{const inv=invoices[j.id];if(!inv){alert("Enter invoice#");return;}const bid=(j.batches||[])[0]?.id;if(bid)await saveBill(bid,inv);await updateJobStatus(j.id,'Billing Done');setInvoices(p=>({...p,[j.id]:''}));};
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
-    <div style={{display:"flex",gap:3}}>{tabs.map(t=><button key={t.id} className={`b ${tab===t.id?"bp":""}`} onClick={()=>setTab(t.id)} style={tab!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.statuses.includes(j.status)).length})</button>)}</div>
-    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {filtered.length} jobs</span></div>
+    <div style={{display:"flex",justifyContent:"space-between",gap:4,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:3}}>{tabs.map(t=><button key={t.id} className={`b ${tab===t.id?"bp":""}`} onClick={()=>setTab(t.id)} style={tab!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.statuses.includes(j.status)).length})</button>)}</div>
+      <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search Job#, Client, PO..." value={sq} onChange={e=>setSq(e.target.value)} style={{width:200,fontSize:10,paddingLeft:8}}/>{sq&&<button style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:10}} onClick={()=>setSq('')}>✕</button>}</div>
+    </div>
+    <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {filtered.length} jobs{sq?` matching "${sq}"`:''}</span></div>
     <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th>{tab!=='done'&&<><th>Invoice#</th><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}{tab==='done'&&<th>Invoice#</th>}</tr></thead><tbody>
       {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
         {tab!=='done'&&<><td><input className="in mn" style={{width:100,fontSize:10}} placeholder="Inv#" value={invoices[j.id]||""} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))}/></td><td>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div>{urls.map((u,i)=><a key={i} href={u} target="_blank" style={{color:"#3b82f6",fontSize:8,marginRight:2}}>📄{i+1}</a>)}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div>{urls.map((u,i)=><a key={i} href={u} target="_blank" style={{color:"#3b82f6",fontSize:8,marginRight:2}}>📄{i+1}</a>)}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
