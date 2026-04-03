@@ -141,10 +141,11 @@ function MainApp({user,onLogout,masterData}){
   const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
 
   // Helper: fetch ALL rows from a table (paginate past 1000 limit)
-  const fetchAll = async (table, order=null) => {
+  const fetchAll = async (table, order=null, filter=null) => {
     let all=[], from=0, size=1000;
     while(true){
       let q=sb.from(table).select('*').order(order||'id',{ascending:true}).range(from,from+size-1);
+      if(filter) q=filter(q);
       const {data,error}=await q;
       if(error||!data||data.length===0) break;
       all=all.concat(data);
@@ -154,25 +155,31 @@ function MainApp({user,onLogout,masterData}){
     return all;
   };
 
-  // Load data from Supabase
+  // Load data from Supabase — jobs first (fast), then items in background
   useEffect(()=>{
     async function load(){
       setLoading(true);
-      const [j,b,li,g,pl,fl,ol,dl] = await Promise.all([
+      // Phase 1: Load jobs + small tables (fast)
+      const [j,g,pl,fl,ol,dl] = await Promise.all([
         fetchAll('jobs','id'),
-        fetchAll('batches','id'),
-        fetchAll('line_items','id'),
         fetchAll('grn','id'),
         fetchAll('print_logs','id'),
         fetchAll('fab_logs','id'),
         fetchAll('outsource_logs','id'),
         fetchAll('dispatch_logs','id'),
       ]);
-      setJobs(j); setBatches(b); setItems(li);
-      setGrnData(g); setPLogs(pl); setFLogs(fl);
+      setJobs(j); setGrnData(g); setPLogs(pl); setFLogs(fl);
       setOsLogs(ol); setDLogs(dl);
-      console.log('Loaded:',j.length,'jobs',b.length,'batches',li.length,'items');
+      console.log('Phase 1: Loaded',j.length,'jobs');
       setLoading(false);
+      
+      // Phase 2: Load batches + line items in background
+      const [b,li] = await Promise.all([
+        fetchAll('batches','id'),
+        fetchAll('line_items','id'),
+      ]);
+      setBatches(b); setItems(li);
+      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items');
     }
     load();
   },[]);
