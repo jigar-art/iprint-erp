@@ -10,6 +10,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',system-ui,sans-serif;background:#060810;color:#e2e8f0;overflow:hidden}
@@ -870,75 +871,199 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
 }
 
 // ═══════════════════════════════════════════════════════════
-// BOQ IMPORT — Upload Excel/CSV, map columns, fill rates
+// BOQ IMPORT — Smart Excel/CSV parser for client BOQs
 // ═══════════════════════════════════════════════════════════
 function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,user}){
   const [step,setStep]=useState(1);
-  const [raw,setRaw]=useState([]);
-  const [headers,setHeaders]=useState([]);
-  const [mapping,setMapping]=useState({desc:'',qty:'',width:'',height:'',unit:'',material:''});
+  const [sheets,setSheets]=useState([]);
+  const [selSheets,setSelSheets]=useState([]);
+  const [parsedItems,setParsedItems]=useState([]);
   const [its,setIts]=useState([]);
   const [fm,sfm]=useState("JXT");
   const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
   const [su,sSu]=useState("INCH");
   const [submitting,setSubmitting]=useState(false);
   const [err,setErr]=useState("");
+  const [fileName,setFileName]=useState("");
 
-  const parseCSV=(text)=>{
-    const lines=text.split('\n').map(l=>l.split(',').map(c=>c.trim().replace(/^"|"$/g,'')));
-    if(lines.length<2)return;
-    setHeaders(lines[0]);setRaw(lines.slice(1).filter(r=>r.some(c=>c)));
-    // Auto-detect mapping
-    const h=lines[0].map(x=>x.toLowerCase());
-    const mp={desc:'',qty:'',width:'',height:'',unit:'',material:''};
-    h.forEach((col,i)=>{
-      if(/desc|item|product|name|particular/.test(col))mp.desc=String(i);
-      if(/qty|quantity|nos|number/.test(col)&&!mp.qty)mp.qty=String(i);
-      if(/width|w\b/.test(col))mp.width=String(i);
-      if(/height|h\b|length/.test(col))mp.height=String(i);
-      if(/unit|uom/.test(col))mp.unit=String(i);
-      if(/material|media|spec/.test(col))mp.material=String(i);
-    });
-    setMapping(mp);setStep(2);
+  // Smart size parser — handles all formats: "Width- 16in Height- 24in", "8\"x12\"", "3ftx4ft", "1177.5MM x350.3MM"
+  const parseSize=(sizeStr)=>{
+    if(!sizeStr||typeof sizeStr!=='string') return {w:'',h:''};
+    const s=sizeStr.replace(/\\n/g,' ').replace(/\n/g,' ').trim();
+    // Pattern: Width- 16in Height- 24in / Width:15 Inch Height:4 Inch
+    const wm=s.match(/width[:\-\s]*(\d+\.?\d*)\s*(in|inch|mm|ft)?/i);
+    const hm=s.match(/height[:\-\s]*(\d+\.?\d*)\s*(in|inch|mm|ft)?/i);
+    if(wm&&hm) return {w:wm[1],h:hm[1]};
+    // Pattern: 3ftx4ft / 8"x12" / 8\"x12\" / 1177.5MM x 350.3MM
+    const xm=s.match(/(\d+\.?\d*)\s*(?:"|"|ft|in|inch|mm|cm|')?\s*[x×]\s*(\d+\.?\d*)\s*(?:"|"|ft|in|inch|mm|cm|')?/i);
+    if(xm) return {w:xm[1],h:xm[2]};
+    // Pattern: just "54 Inch Height" (single dimension)
+    const single=s.match(/(\d+\.?\d*)\s*(in|inch|mm|ft)/i);
+    if(single) return {w:single[1],h:''};
+    return {w:'',h:''};
+  };
+
+  // Auto-detect header row (may not be row 0 — JPMC has 8 rows of company info)
+  const findHeaderRow=(data)=>{
+    for(let i=0;i<Math.min(15,data.length);i++){
+      const row=data[i];if(!row)continue;
+      const txt=row.map(c=>String(c||'').toLowerCase()).join(' ');
+      if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(description|particular|specification)/.test(txt)) return i;
+      if(/(description|particular)/.test(txt)&&/(qty|quantity|unit|uom)/.test(txt)) return i;
+    }
+    return 0;
+  };
+
+  // Smart column detector — finds columns by fuzzy matching headers
+  const detectColumns=(headers)=>{
+    const h=headers.map(x=>String(x||'').toLowerCase().replace(/[\s\n]/g,' ').trim());
+    const find=(patterns)=>{for(const p of patterns){const idx=h.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
+    return {
+      sr:find([/^sl|^sr|^s\.?\s*no|^#/]),
+      desc:find([/description|particular/]),
+      spec:find([/^specification/]),
+      wallNo:find([/wall.*no|location|zone/]),
+      floor:find([/^floor$/]),
+      size:find([/size.*in|size.*\(/]),
+      width:find([/width/]),
+      height:find([/height/]),
+      uom:find([/uom|umo|^unit$/]),
+      qty:find([/^qty|quantit/]),
+      supplyRate:find([/supply.*rate|^rate$/]),
+      installRate:find([/install.*rate/]),
+      totalAmt:find([/total.*amount|total.*amt/]),
+      remarks:find([/remark/]),
+      refImage:find([/ref.*image|^image/]),
+    };
+  };
+
+  // Parse an Excel sheet into standardized items
+  const parseSheet=(data,sheetName)=>{
+    if(!data||data.length<2) return [];
+    const hRow=findHeaderRow(data);
+    const headers=data[hRow];
+    const cols=detectColumns(headers);
+    const items=[];
+    let lastFloor='';
+    for(let r=hRow+1;r<data.length;r++){
+      const row=data[r];
+      if(!row||row.every(c=>c===null||c===undefined||c===''))continue;
+      // Skip summary/total rows
+      const firstCellStr=String(row[0]||'').toLowerCase().trim();
+      if(/^(sub\s*total|basic|gst|total|general\s*point|note)/i.test(firstCellStr))continue;
+      
+      const desc=cols.desc>-1?String(row[cols.desc]||''):'';
+      const spec=cols.spec>-1?String(row[cols.spec]||''):'';
+      const wallNo=cols.wallNo>-1?String(row[cols.wallNo]||''):'';
+      const floor=cols.floor>-1?String(row[cols.floor]||''):'';
+      if(floor&&floor!=='nan')lastFloor=floor.replace(/\\n/g,' ');
+      if(!desc&&!wallNo&&!spec)continue;
+      if(/^nan$/i.test(desc)&&!wallNo&&!spec)continue;
+
+      let w='',h='';
+      if(cols.width>-1&&cols.height>-1){
+        w=String(row[cols.width]||'');h=String(row[cols.height]||'');
+      } else if(cols.size>-1){
+        const parsed=parseSize(String(row[cols.size]||''));
+        w=parsed.w;h=parsed.h;
+      }
+      // Also try parsing size from description (e.g. "Floor Directory 8\"x12\"", "Framed Artwork 3ftx4ft")
+      if(!w&&!h&&desc){
+        const descSize=parseSize(desc);
+        w=descSize.w;h=descSize.h;
+      }
+      
+      const qty=cols.qty>-1?(+row[cols.qty]||0):0;
+      if(qty<=0)continue;
+      const uom=cols.uom>-1?String(row[cols.uom]||'Nos'):'Nos';
+      const remarks=cols.remarks>-1?String(row[cols.remarks]||''):'';
+      const sRate=cols.supplyRate>-1?(+row[cols.supplyRate]||0):0;
+      const iRate=cols.installRate>-1?(+row[cols.installRate]||0):0;
+
+      // Build label: [Floor] [WallNo]: Description
+      let label=desc.slice(0,100);
+      if(wallNo&&!/^nan$/i.test(wallNo)) label=wallNo.replace(/\\n/g,' ').trim()+': '+label;
+      if(lastFloor) label=lastFloor+' — '+label;
+      
+      // Material: combine spec + remarks
+      let mat=(spec&&!/^nan$/i.test(spec)?spec.replace(/\\n/g,' ').slice(0,80):'');
+      if(remarks&&!/^nan$/i.test(remarks)){
+        mat=mat?(mat+' | '+remarks.replace(/\\n/g,' ').slice(0,60)):remarks.replace(/\\n/g,' ').slice(0,80);
+      }
+
+      items.push({
+        sr:items.length+1,sheet:sheetName,desc:label.replace(/\\n/g,' '),fullDesc:desc+(spec?'\n\nSpec: '+spec:''),wallNo,floor:lastFloor,
+        w:String(w).replace(/[^0-9.]/g,''),h:String(h).replace(/[^0-9.]/g,''),
+        qty,uom:uom.trim().replace(/^nan$/i,'Nos'),
+        remarks:mat,supplyRate:sRate?String(sRate):'',installRate:iRate?String(iRate):'',
+      });
+    }
+    return items;
   };
 
   const handleFile=async(e)=>{
-    const file=e.target.files[0];if(!file)return;setErr("");
-    const ext=file.name.split('.').pop().toLowerCase();
-    if(ext==='csv'||ext==='txt'){
-      const text=await file.text();parseCSV(text);
-    } else if(ext==='xlsx'||ext==='xls'){
-      setErr("For Excel files: please save as CSV first (File → Save As → CSV), then upload the CSV. Direct .xlsx parsing requires a server-side library.");
-    } else if(ext==='pdf'){
-      setErr("PDF BOQ import: Copy the table from PDF into Excel/Google Sheets, save as CSV, then upload here.");
-    } else {
-      setErr("Unsupported format. Please upload .csv file.");
+    const file=e.target.files[0];if(!file)return;setErr("");setFileName(file.name);
+    try{
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array'});
+      const allSheets=wb.SheetNames.map(name=>{
+        const ws=wb.Sheets[name];
+        const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        return {name,data,rowCount:data.length-1};
+      }).filter(s=>s.rowCount>0);
+      setSheets(allSheets);
+      setSelSheets(allSheets.map(s=>s.name));
+      setStep(2);
+    }catch(ex){
+      setErr("Could not read file: "+ex.message);
     }
   };
 
-  const buildItems=()=>{
-    const items=raw.map((r,i)=>{
-      const desc=mapping.desc?r[+mapping.desc]||'':'Item '+(i+1);
-      const qty=mapping.qty?+r[+mapping.qty]||1:1;
-      const w=mapping.width?r[+mapping.width]||'':'';
-      const h=mapping.height?r[+mapping.height]||'':'';
-      const mat=mapping.material?r[+mapping.material]||'':'';
-      return {id:uid(),sr:i+1,int:desc,cli:desc,m:mat,w,h,qty,rm:"SQFT",rate:"",sqft:cSq(w,h,qty,su),tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""};
-    }).filter(it=>it.int&&it.int!=='Item 1'||it.qty>0);
-    setIts(items);setStep(3);
+  const buildFromSheets=()=>{
+    let all=[];
+    for(const s of sheets){
+      if(!selSheets.includes(s.name))continue;
+      const items=parseSheet(s.data,s.name);
+      all=all.concat(items);
+    }
+    // Re-number
+    all.forEach((it,i)=>{it.sr=i+1;});
+    setParsedItems(all);
+    // Convert to job line items
+    setIts(all.map(it=>{
+      const sr=+it.supplyRate||0;const ir=+it.installRate||0;const combinedRate=sr+ir;
+      const uomMap={'sq ft':'SQFT','sqft':'SQFT','sft':'SQFT','set':'SET','nos':'NOS','num':'NOS','lot':'LOT','rft':'RFT'};
+      const rm=uomMap[it.uom.toLowerCase()]||'UNIT';
+      const sqft=cSq(it.w,it.h,it.qty,su);
+      const tot=rm==='SQFT'&&sqft?Math.round(sqft*combinedRate*100)/100:Math.round(it.qty*combinedRate*100)/100;
+      const gst=Math.round(tot*0.18*100)/100;
+      return {
+        id:uid(),sr:it.sr,int:it.desc,cli:it.desc,m:it.remarks||'',w:it.w,h:it.h,
+        qty:it.qty,rm,rate:combinedRate||'',sqft,
+        tot:combinedRate?tot:0,gst:combinedRate?gst:0,amt:combinedRate?Math.round((tot+gst)*100)/100:0,
+        gstPct:18,mach:'In-house',imgUrl:'',
+        supplyRate:it.supplyRate,installRate:it.installRate,fullDesc:it.fullDesc,
+      };
+    }));
+    setStep(3);
   };
 
-  const uI=(i,k,v)=>{setIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=it.rm==="SQFT"?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
+  const uI=(i,k,v)=>{setIts(p=>{const n=[...p];const it={...n[i],[k]:v};
+    const w=+it.w||0,h=+it.h||0,q=+it.qty||1;const gp=+(it.gstPct||18);
+    const sr=+it.supplyRate||0;const ir=+it.installRate||0;const combinedRate=sr+ir;
+    it.rate=combinedRate||+it.rate||0;
+    it.sqft=cSq(w,h,q,su);
+    it.tot=it.rm==="SQFT"?Math.round(it.sqft*it.rate*100)/100:Math.round(q*it.rate*100)/100;
+    it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
   const rI=i=>setIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
-  const aI=()=>setIts(p=>[...p,{id:uid(),sr:p.length+1,int:"",cli:"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
+  const aI=()=>setIts(p=>[...p,{id:uid(),sr:p.length+1,int:"",cli:"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:"",supplyRate:"",installRate:"",fullDesc:""}]);
 
   const tot=useMemo(()=>{const s=Math.round(its.reduce((a,x)=>a+x.tot,0)*100)/100,g=Math.round(its.reduce((a,x)=>a+x.gst,0)*100)/100,tq=its.reduce((a,x)=>a+(+x.qty||0),0),tsq=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;return{s,g,t:Math.round((s+g)*100)/100,tq,tsq};},[its]);
 
   const curFY=useMemo(()=>{const n=new Date();const m=n.getMonth(),y=n.getFullYear();return m>=3?`${String(y).slice(2)}${String(y+1).slice(2)}`:`${String(y-1).slice(2)}${String(y).slice(2)}`;},[]); 
   const nextNum=useMemo(()=>{const fyJobs=jobs.filter(j=>j.id?.includes('-'+curFY));const nums=fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});return String(Math.max(0,...nums)+1).padStart(4,'0');},[jobs,curFY]);
   const jid=`${nextNum}-${curFY}`;
-
-  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone}));};
+  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||''}));};
 
   const submitJob=async()=>{
     if(!f.cn){alert("Select client");return;}
@@ -946,7 +1071,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     setSubmitting(true);
     const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
     const batchId="B"+uid();
-    const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import",bill_no:"",status:"New"};
+    const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
     const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
     await createJob(jobData,batchData,lineItems);
     setSubmitting(false);
@@ -954,83 +1079,105 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 
   const GST_OPTS=[0,5,12,18,28];
   const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
+  const [expRow,setExpRow]=useState(null);
 
-  return <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:1100}}>
-    <div style={{display:"flex",gap:4,alignItems:"center"}}>
-      <div style={{display:"flex",gap:2}}>{[1,2,3].map(s=><div key={s} style={{width:24,height:24,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,background:step>=s?"#e3a008":"#1a2030",color:step>=s?"#060810":"#64748b"}}>{s}</div>)}</div>
-      <span style={{fontSize:11,fontWeight:600,color:"#e3a008"}}>{step===1?"Upload BOQ":step===2?"Map Columns":"Fill Rates & Create"}</span>
+  return <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:1200}}>
+    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+      {[{n:1,l:"Upload"},{n:2,l:"Sheets"},{n:3,l:"Fill Rates"}].map(s=><div key={s.n} style={{display:"flex",alignItems:"center",gap:3}}>
+        <div style={{width:22,height:22,borderRadius:11,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,background:step>=s.n?"#e3a008":"#1a2030",color:step>=s.n?"#060810":"#64748b"}}>{s.n}</div>
+        <span style={{fontSize:10,fontWeight:600,color:step>=s.n?"#e3a008":"#64748b"}}>{s.l}</span>
+        {s.n<3&&<span style={{color:"#1a2030",margin:"0 2px"}}>→</span>}
+      </div>)}
+      {fileName&&<span style={{marginLeft:"auto",fontSize:9,color:"#64748b"}}>📄 {fileName}</span>}
     </div>
 
-    {step===1&&<div className="c a" style={{padding:20,textAlign:"center"}}>
-      <div style={{fontSize:36,marginBottom:8}}>📥</div>
-      <h3 style={{fontSize:14,fontWeight:700,marginBottom:4}}>Import BOQ / Bill of Quantities</h3>
-      <p style={{fontSize:10,color:"#64748b",marginBottom:16}}>Upload a CSV file with item descriptions, quantities, and sizes. We'll auto-detect columns and let you map them.</p>
-      <label style={{display:"inline-flex",alignItems:"center",gap:6,padding:"10px 20px",background:"#e3a008",color:"#060810",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer"}}>
-        📂 Choose CSV File
-        <input type="file" accept=".csv,.txt,.xlsx,.xls,.pdf" style={{display:"none"}} onChange={handleFile}/>
+    {step===1&&<div className="c a" style={{padding:24,textAlign:"center"}}>
+      <div style={{fontSize:40,marginBottom:8}}>📥</div>
+      <h3 style={{fontSize:15,fontWeight:700,marginBottom:4}}>Import Client BOQ</h3>
+      <p style={{fontSize:10.5,color:"#94a3b8",marginBottom:16,maxWidth:450,margin:"0 auto 16px"}}>Upload the client's Excel BOQ file. We'll auto-detect sheets, columns, sizes, quantities — you just fill rates and create the job.</p>
+      <label style={{display:"inline-flex",alignItems:"center",gap:6,padding:"10px 24px",background:"#e3a008",color:"#060810",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",transition:"all .15s"}}>
+        📂 Choose Excel / CSV File
+        <input type="file" accept=".xlsx,.xls,.csv,.txt" style={{display:"none"}} onChange={handleFile}/>
       </label>
-      <p style={{fontSize:9,color:"#64748b",marginTop:10}}>Supports: CSV (recommended). For Excel → Save As CSV first.</p>
-      {err&&<p style={{color:"#f47067",fontSize:11,marginTop:8,background:"#f4706710",padding:"6px 10px",borderRadius:6}}>{err}</p>}
+      <p style={{fontSize:9,color:"#475569",marginTop:12}}>Supports: .xlsx .xls .csv — Auto-parses multi-sheet BOQs with any column layout</p>
+      {err&&<div style={{color:"#f47067",fontSize:11,marginTop:10,background:"#f4706710",padding:"8px 12px",borderRadius:6,textAlign:"left"}}>{err}</div>}
     </div>}
 
     {step===2&&<>
-      <div className="c a" style={{padding:10}}>
-        <p style={{fontSize:10,fontWeight:700,color:"#e3a008",marginBottom:6}}>MAP COLUMNS — {raw.length} rows detected</p>
-        <p style={{fontSize:9,color:"#64748b",marginBottom:8}}>Match your CSV columns to iPrint fields. We auto-detected what we could.</p>
-        <div className="fg f3">
-          {[{k:'desc',l:'Description/Item *'},{k:'qty',l:'Quantity'},{k:'width',l:'Width'},{k:'height',l:'Height'},{k:'unit',l:'Unit'},{k:'material',l:'Material/Spec'}].map(fld=>
-            <F key={fld.k} l={fld.l}><select className="in" value={mapping[fld.k]} onChange={e=>setMapping(p=>({...p,[fld.k]:e.target.value}))}><option value="">— Skip —</option>{headers.map((h,i)=><option key={i} value={String(i)}>{h}</option>)}</select></F>
-          )}
-          <F l="Size Unit"><select className="in" value={su} onChange={e=>sSu(e.target.value)}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
-        </div>
+      <div className="c a" style={{padding:12}}>
+        <p style={{fontSize:10,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 {sheets.length} SHEET(S) DETECTED — Select which to import</p>
+        {sheets.map(s=>{const hRow=findHeaderRow(s.data);const cols=detectColumns(s.data[hRow]||[]);const detected=Object.entries(cols).filter(([,v])=>v>=0).map(([k])=>k);
+          return <div key={s.name} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:6,marginBottom:4,background:selSheets.includes(s.name)?"#18150a":"#0c1017",border:`1px solid ${selSheets.includes(s.name)?"#e3a00833":"#1a2030"}`,cursor:"pointer"}} onClick={()=>setSelSheets(p=>p.includes(s.name)?p.filter(x=>x!==s.name):[...p,s.name])}>
+            <div className={`ck ${selSheets.includes(s.name)?"on":""}`} style={{flexShrink:0}}>{selSheets.includes(s.name)?"✓":""}</div>
+            <div style={{flex:1}}>
+              <span style={{fontWeight:600,fontSize:11}}>{s.name}</span>
+              <span style={{fontSize:9,color:"#64748b",marginLeft:6}}>{s.rowCount} rows · header row {hRow+1}</span>
+            </div>
+            <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{detected.map(d=><span key={d} className="bd" style={{background:"#23863620",color:"#4ade80",fontSize:7}}>{d}</span>)}</div>
+          </div>;
+        })}
         <div style={{marginTop:8}}>
-          <p style={{fontSize:9,color:"#64748b",marginBottom:4}}>PREVIEW (first 5 rows)</p>
-          <div style={{overflowX:"auto"}}><table><thead><tr>{headers.map((h,i)=><th key={i} style={{fontSize:8}}>{h}</th>)}</tr></thead><tbody>
-            {raw.slice(0,5).map((r,i)=><tr key={i}>{r.map((c,j)=><td key={j} style={{fontSize:9}}>{c?.slice(0,30)}</td>)}</tr>)}
-          </tbody></table></div>
+          <p style={{fontSize:9,color:"#64748b",marginBottom:4}}>PREVIEW — {sheets[0]?.name}</p>
+          <div style={{overflowX:"auto",maxHeight:180}}>{(()=>{const hr=findHeaderRow(sheets[0]?.data||[]);return <table><thead><tr>{(sheets[0]?.data[hr]||[]).map((h,i)=><th key={i} style={{fontSize:7,whiteSpace:"nowrap"}}>{String(h||'').slice(0,20)}</th>)}</tr></thead><tbody>
+            {(sheets[0]?.data||[]).slice(hr+1,hr+6).map((r,i)=><tr key={i}>{r.map((c,j)=><td key={j} style={{fontSize:8,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{String(c||'').slice(0,40)}</td>)}</tr>)}
+          </tbody></table>})()}</div>
         </div>
-        <div style={{display:"flex",gap:4,marginTop:8}}><button className="b" onClick={()=>setStep(1)}>← Back</button><button className="b bp" onClick={buildItems} disabled={!mapping.desc}>Build Items →</button></div>
+        <div style={{display:"flex",gap:4,marginTop:8}}>
+          <button className="b" onClick={()=>{setStep(1);setSheets([]);setFileName("");}}>← Back</button>
+          <button className="b bp" onClick={buildFromSheets} disabled={selSheets.length===0}>Parse {selSheets.length} sheet(s) →</button>
+        </div>
       </div>
     </>}
 
     {step===3&&<>
-      <div style={{display:"flex",gap:4}}>{firms.map(fi=><button key={fi.code} className="b" onClick={()=>sfm(fi.code)} style={{flex:1,padding:6,flexDirection:"column",border:`2px solid ${fm===fi.code?fi.color:"#1a2030"}`,background:fm===fi.code?fi.color+"15":"transparent"}}><span style={{fontWeight:800,color:fi.color,fontSize:11}}>{fi.short_name}</span></button>)}</div>
+      <div style={{display:"flex",gap:3}}>{firms.map(fi=><button key={fi.code} className="b" onClick={()=>sfm(fi.code)} style={{flex:1,padding:6,flexDirection:"column",border:`2px solid ${fm===fi.code?fi.color:"#1a2030"}`,background:fm===fi.code?fi.color+"15":"transparent"}}><span style={{fontWeight:800,color:fi.color,fontSize:11}}>{fi.short_name}</span></button>)}</div>
       <div className="c a" style={{padding:10}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div><p style={{fontSize:8,color:"#64748b"}}>BOQ IMPORT → NEW JOB</p><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{jid}</p></div><span className="bd" style={{background:"#8b5cf620",color:"#8b5cf6"}}>📥 {its.length} items imported</span></div>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div><p style={{fontSize:8,color:"#64748b"}}>BOQ IMPORT → NEW JOB</p><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{jid}</p></div><span className="bd" style={{background:"#8b5cf620",color:"#8b5cf6"}}>📥 {its.length} items from {selSheets.length} sheet(s)</span></div>
         <div className="fg f3">
-          <F l="Client"><select className="in" value={f.cl} onChange={e=>selC(e.target.value)}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></F>
-          <F l="Project"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))}/></F>
+          <F l="Client *"><select className="in" value={f.cl} onChange={e=>selC(e.target.value)}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></F>
+          <F l="Project *"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))} placeholder="e.g. Branding & Signage"/></F>
           <F l="Contact"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))}/></F>
           <F l="PO #"><input className="in mn" value={f.po} onChange={e=>sF(p=>({...p,po:e.target.value}))}/></F>
           <F l="Made By"><select className="in" value={f.mb} onChange={e=>sF(p=>({...p,mb:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
           <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
+          <F l="Size Unit"><select className="in" value={su} onChange={e=>{sSu(e.target.value);setIts(p=>p.map(it=>({...it,sqft:cSq(it.w,it.h,it.qty,e.target.value)})));}}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
+          <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={f.da} onChange={e=>sF(p=>({...p,da:e.target.value}))}/></F></div>
         </div>
       </div>
       <div className="c a" style={{padding:0,animationDelay:"50ms"}}>
-        <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length}) — Fill rates below</span><button className="b bp bs" onClick={aI}>➕</button></div>
-        <div style={{overflowX:"auto",maxHeight:"calc(100vh-280px)"}}><table><thead><tr><th>#</th><th>Internal/DC Name</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate ₹</th><th>Total</th><th>GST%</th><th>GST</th><th>Amount</th><th>Machine</th><th></th></tr></thead>
-          <tbody>{its.map((it,i)=><tr key={it.id} style={{background:!it.rate?"#1a050508":"transparent"}}>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030",alignItems:"center"}}>
+          <span style={{fontSize:9,color:"#64748b",fontWeight:600}}>FILL RATES ({its.length} items) — Items without rates highlighted</span>
+          <div style={{display:"flex",gap:2}}>
+            <span className="mn" style={{fontSize:11,fontWeight:700,color:"#e3a008"}}>{fmt(tot.t)}</span>
+            <button className="b bp bs" onClick={aI}>➕</button>
+          </div>
+        </div>
+        <div style={{overflowX:"auto",maxHeight:"calc(100vh-310px)"}}><table><thead><tr><th>#</th><th style={{minWidth:160}}>Description</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>UOM</th><th>SqFt</th><th style={{minWidth:60}}>Supply ₹</th><th style={{minWidth:60}}>Install ₹</th><th>Total</th><th>GST%</th><th>Amt</th><th>Machine</th><th></th></tr></thead>
+          <tbody>{its.map((it,i)=><React.Fragment key={it.id}>
+            <tr style={{background:(!it.supplyRate&&!it.rate)?"#1a050508":"transparent",cursor:"pointer"}} onClick={()=>setExpRow(expRow===i?null:i)}>
             <td className="mn" style={{fontSize:9}}>{it.sr}</td>
-            <td><input className="in" value={it.int} onChange={e=>{setIts(p=>{const n=[...p];n[i]={...n[i],int:e.target.value,cli:e.target.value};return n;});}} style={{fontSize:10,padding:"3px",minWidth:120}}/></td>
-            <td><input className="in" value={it.m} onChange={e=>{setIts(p=>{const n=[...p];n[i]={...n[i],m:e.target.value};return n;});}} style={{fontSize:10,padding:"3px",width:80}}/></td>
-            <td><input className="in mn" value={it.w} onChange={e=>uI(i,"w",e.target.value)} style={{width:38,fontSize:10,padding:"3px"}}/></td>
-            <td><input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{width:38,fontSize:10,padding:"3px"}}/></td>
-            <td><input className="in mn" type="number" min={1} value={it.qty} onChange={e=>uI(i,"qty",e.target.value)} style={{width:35,fontSize:10,padding:"3px"}}/></td>
-            <td><select className="in" value={it.rm} onChange={e=>uI(i,"rm",e.target.value)} style={{fontSize:9,padding:"2px",width:48}}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
-            <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.sqft||"—"}</td>
-            <td><input className="in mn" value={it.rate} onChange={e=>uI(i,"rate",e.target.value)} style={{width:50,fontSize:10,padding:"3px",borderColor:!it.rate?"#f4706744":"#1a2030"}} placeholder="₹"/></td>
-            <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
-            <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:9,padding:"2px",width:42}}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
-            <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.gst?fmt(it.gst):"—"}</td>
+            <td style={{fontSize:10,fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.int}{it.int?.length>40&&<span style={{color:"#e3a008",fontSize:8,marginLeft:3}}>▸</span>}</td>
+            <td><input className="in" value={it.m} onChange={e=>{setIts(p=>{const n=[...p];n[i]={...n[i],m:e.target.value};return n;});}} style={{fontSize:9,padding:"2px",width:70}} onClick={e=>e.stopPropagation()}/></td>
+            <td><input className="in mn" value={it.w} onChange={e=>uI(i,"w",e.target.value)} style={{width:36,fontSize:9,padding:"2px"}} onClick={e=>e.stopPropagation()}/></td>
+            <td><input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{width:36,fontSize:9,padding:"2px"}} onClick={e=>e.stopPropagation()}/></td>
+            <td className="mn" style={{fontSize:10,fontWeight:600}}>{it.qty}</td>
+            <td><select className="in" value={it.rm} onChange={e=>uI(i,"rm",e.target.value)} style={{fontSize:8,padding:"1px",width:44}} onClick={e=>e.stopPropagation()}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
+            <td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||"—"}</td>
+            <td><input className="in mn" value={it.supplyRate} onChange={e=>uI(i,"supplyRate",e.target.value)} style={{width:55,fontSize:10,padding:"3px",borderColor:!it.supplyRate&&!it.rate?"#f4706744":"#1a2030"}} placeholder="₹" onClick={e=>e.stopPropagation()}/></td>
+            <td><input className="in mn" value={it.installRate} onChange={e=>uI(i,"installRate",e.target.value)} style={{width:55,fontSize:10,padding:"3px"}} placeholder="₹" onClick={e=>e.stopPropagation()}/></td>
+            <td className="mn" style={{fontSize:10,fontWeight:600}}>{it.tot?fmt(it.tot):"—"}</td>
+            <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:8,padding:"1px",width:36}} onClick={e=>e.stopPropagation()}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
             <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
-            <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px",width:80}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
-            <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td>
-          </tr>)}
-          <tr style={{background:"#0a0f1a"}}><td colSpan={5} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4"}}>{tot.tsq||"—"}</td><td></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
+            <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:8,padding:"1px",width:70}} onClick={e=>e.stopPropagation()}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
+            <td>{its.length>1&&<button className="b bs" onClick={(e)=>{e.stopPropagation();rI(i);}} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td>
+          </tr>
+          {expRow===i&&<tr><td colSpan={15} style={{background:"#0a0f1a",padding:"6px 10px"}}><p style={{fontSize:9,color:"#64748b",marginBottom:2}}>FULL DESCRIPTION</p><p style={{fontSize:10,color:"#c9d1d9",lineHeight:1.5,whiteSpace:"pre-wrap"}}>{it.fullDesc||it.int}</p><div style={{display:"flex",gap:8,marginTop:4,fontSize:9}}><input className="in" value={it.int} onChange={e=>{setIts(p=>{const n=[...p];n[i]={...n[i],int:e.target.value,cli:e.target.value};return n;});}} style={{flex:1,fontSize:10}} placeholder="Edit short name..."/></div></td></tr>}
+          </React.Fragment>)}
+          <tr style={{background:"#0a0f1a"}}><td colSpan={5} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4"}}>{tot.tsq||"—"}</td><td colSpan={2}></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
         </tbody></table></div>
       </div>
-      <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-        <button className="b" onClick={()=>{setStep(1);setIts([]);setRaw([]);}}>← Start Over</button>
+      <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}>
+        <button className="b" onClick={()=>{setStep(1);setIts([]);setSheets([]);setFileName("");}}>← Start Over</button>
         <button className="b" onClick={()=>sp("jobs")}>Cancel</button>
         <button className="b bp" onClick={submitJob} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button>
       </div>
