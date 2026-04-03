@@ -131,6 +131,7 @@ function MainApp({user,onLogout,masterData}){
   const [fLogs,setFLogs]=useState([]);
   const [osLogs,setOsLogs]=useState([]);
   const [dLogs,setDLogs]=useState([]);
+  const [expenses,setExpenses]=useState([]);
   const [pg,setPg]=useState("dash");
   const [toast,setToast]=useState(null);
   const [search,setSearch]=useState("");
@@ -160,16 +161,17 @@ function MainApp({user,onLogout,masterData}){
     async function load(){
       setLoading(true);
       // Phase 1: Load jobs + small tables (fast)
-      const [j,g,pl,fl,ol,dl] = await Promise.all([
+      const [j,g,pl,fl,ol,dl,ex] = await Promise.all([
         fetchAll('jobs','id'),
         fetchAll('grn','id'),
         fetchAll('print_logs','id'),
         fetchAll('fab_logs','id'),
         fetchAll('outsource_logs','id'),
         fetchAll('dispatch_logs','id'),
+        fetchAll('expenses','id'),
       ]);
       setJobs(j); setGrnData(g); setPLogs(pl); setFLogs(fl);
-      setOsLogs(ol); setDLogs(dl);
+      setOsLogs(ol); setDLogs(dl); setExpenses(ex);
       console.log('Phase 1: Loaded',j.length,'jobs');
       setLoading(false);
       
@@ -246,6 +248,17 @@ function MainApp({user,onLogout,masterData}){
   const addDispatch = useCallback(async (data) => {
     const {error} = await sb.from('dispatch_logs').insert(data);
     if(!error){setDLogs(p=>[data,...p]);show("Dispatch logged!");}
+  },[show]);
+
+  // ─── EXPENSES ──────────────────────────────────────────────
+  const addExpense = useCallback(async (data) => {
+    const {error} = await sb.from('expenses').insert(data);
+    if(!error){setExpenses(p=>[data,...p]);show("Expense saved!");}
+    else show("Error: "+error.message,false);
+  },[show]);
+  const deleteExpense = useCallback(async (id) => {
+    await sb.from('expenses').delete().eq('id',id);
+    setExpenses(p=>p.filter(e=>e.id!==id));show("Expense deleted");
   },[show]);
 
   // ─── UPDATE BATCH BILL ────────────────────────────────────
@@ -355,6 +368,8 @@ function MainApp({user,onLogout,masterData}){
     {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales"]},
     {id:"cli",l:"Clients",e:"👥",roles:["admin","sales"]},
     {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
+    {id:"reports",l:"Reports",e:"📈",roles:["admin","sales","accounts"]},
+    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
   ];
   const nav=allNav.filter(n=>n.roles.includes(user.role));
 
@@ -396,6 +411,8 @@ function MainApp({user,onLogout,masterData}){
           {pg==="rem"&&<RemPage jobs={fullJobs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
           {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus}/>}
+          {pg==="reports"&&<ReportsPage jobs={fullJobs} batches={batches} items={items} grn={grnData} pLogs={pLogs} fLogs={fLogs} osLogs={osLogs} dLogs={dLogs} expenses={expenses} firms={firms} stock={stock}/>}
+          {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
         </div>
       </main>
 
@@ -765,8 +782,8 @@ function FabPage({logs,materials,team,stock,addLog}){const [sf,ssf]=useState(fal
 }
 
 // OUTSOURCE
-function OsPage({logs,agencies,materials,addLog,markReturn}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),agency:agencies[0]?.name||"",material:materials[0]?.name||"",qty_sent:1,challan_no:"",job_id:"",rate:"",expected_return:""});
-  const add=async()=>{await addLog({id:"O"+uid(),...f,qty_sent:+f.qty_sent,rate:+f.rate,returned:false});};
+function OsPage({logs,agencies,materials,addLog,markReturn}){const [sf,ssf]=useState(false);const [challanFile,setOsChallan]=useState(null);const [saving,setSaving]=useState(false);const [f,sF]=useState({date:td(),agency:agencies[0]?.name||"",material:materials[0]?.name||"",qty_sent:1,challan_no:"",job_id:"",rate:"",expected_return:""});
+  const add=async()=>{setSaving(true);const cUrl=await uploadFile(challanFile,'os-challan');await addLog({id:"O"+uid(),...f,qty_sent:+f.qty_sent,rate:+f.rate,returned:false,challan_photo_url:cUrl});setOsChallan(null);setSaving(false);};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"📤 New Outsource"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
@@ -777,8 +794,8 @@ function OsPage({logs,agencies,materials,addLog,markReturn}){const [sf,ssf]=useS
       <F l="Qty"><input className="in mn" type="number" value={f.qty_sent} onChange={e=>sF(p=>({...p,qty_sent:e.target.value}))}/></F>
       <F l="Challan#"><input className="in mn" value={f.challan_no} onChange={e=>sF(p=>({...p,challan_no:e.target.value}))}/></F>
       <F l="Rate"><input className="in mn" value={f.rate} onChange={e=>sF(p=>({...p,rate:e.target.value}))}/></F>
-      <F l="📸 Challan"><input type="file" accept="image/*" capture className="in" style={{padding:2}}/></F>
-    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
+      <F l="📸 Challan"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}} onChange={e=>setOsChallan(e.target.files[0]||null)}/></F>
+    </div><button className="b bp" onClick={add} style={{marginTop:6}} disabled={saving}>{saving?"⏳ Uploading...":"Save"}</button></div>}
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Agency</th><th>Material</th><th>Qty</th><th>Challan</th><th>Job</th><th>Rate</th><th>Status</th><th></th></tr></thead><tbody>
       {logs.map(l=><tr key={l.id}><td>{l.date}</td><td style={{fontWeight:600}}>{l.agency}</td><td>{l.material}</td><td className="mn">{l.qty_sent}</td><td className="mn">{l.challan_no}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td className="mn">₹{l.rate}</td><td>{l.returned?<span className="bd" style={{background:"#23863620",color:"#4ade80"}}>Ret</span>:<span className="bd" style={{background:"#e3a00820",color:"#e3a008"}}>Out</span>}</td><td>{!l.returned&&<button className="b bg bs" onClick={()=>markReturn(l.id)}>Return</button>}</td></tr>)}
       {logs.length===0&&<tr><td colSpan={9} style={{textAlign:"center",color:"#64748b",padding:16}}>None</td></tr>}
@@ -786,8 +803,8 @@ function OsPage({logs,agencies,materials,addLog,markReturn}){const [sf,ssf]=useS
 }
 
 // DISPATCH
-function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
-  const add=async()=>{await addLog({id:"D"+uid(),...f});};
+function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [challanFile,setChallanFile]=useState(null);const [podFile,setPodFile]=useState(null);const [saving,setSaving]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
+  const add=async()=>{setSaving(true);const cUrl=await uploadFile(challanFile,'dispatch-challan');const pUrl=await uploadFile(podFile,'dispatch-pod');await addLog({id:"D"+uid(),...f,challan_photo_url:cUrl,pod_photo_url:pUrl});setChallanFile(null);setPodFile(null);setSaving(false);};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🚚 New Dispatch"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f3">
@@ -798,13 +815,13 @@ function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [f
       <F l="Vehicle/Courier"><input className="in" value={f.vehicle} onChange={e=>sF(p=>({...p,vehicle:e.target.value}))}/></F>
       <F l="LR/Track#"><input className="in mn" value={f.lr_no} onChange={e=>sF(p=>({...p,lr_no:e.target.value}))}/></F>
       <F l="Challan#"><input className="in mn" value={f.challan_no} onChange={e=>sF(p=>({...p,challan_no:e.target.value}))}/></F>
-      <F l="📸 Challan"><input type="file" accept="image/*" className="in" style={{padding:2}}/></F>
-      <F l="📸 POD"><input type="file" accept="image/*" className="in" style={{padding:2}}/></F>
+      <F l="📸 Challan"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}} onChange={e=>setChallanFile(e.target.files[0]||null)}/></F>
+      <F l="📸 POD"><input type="file" accept="image/*" capture="environment" className="in" style={{padding:2}} onChange={e=>setPodFile(e.target.files[0]||null)}/></F>
       {f.dispatch_type.includes("Install")&&<><F l="Installer"><input className="in" value={f.installer} onChange={e=>sF(p=>({...p,installer:e.target.value}))}/></F><F l="Install Date"><input type="date" className="in" value={f.install_date} onChange={e=>sF(p=>({...p,install_date:e.target.value}))}/></F></>}
-    </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
-    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Type</th><th>Boy</th><th>Vehicle</th><th>Challan</th><th>LR</th></tr></thead><tbody>
-      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td><span className="bd" style={{background:l.dispatch_type?.includes("Install")?"#8b5cf620":"#10b98120",color:l.dispatch_type?.includes("Install")?"#c084fc":"#4ade80"}}>{l.dispatch_type}</span></td><td>{l.delivery_boy}</td><td>{l.vehicle}</td><td className="mn">{l.challan_no}</td><td className="mn">{l.lr_no}</td></tr>)}
-      {logs.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:16}}>None</td></tr>}
+    </div><button className="b bp" onClick={add} style={{marginTop:6}} disabled={saving}>{saving?"⏳ Uploading...":"Save"}</button></div>}
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Type</th><th>Boy</th><th>Vehicle</th><th>Challan</th><th>LR</th><th>📎</th></tr></thead><tbody>
+      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td><span className="bd" style={{background:l.dispatch_type?.includes("Install")?"#8b5cf620":"#10b98120",color:l.dispatch_type?.includes("Install")?"#c084fc":"#4ade80"}}>{l.dispatch_type}</span></td><td>{l.delivery_boy}</td><td>{l.vehicle}</td><td className="mn">{l.challan_no}</td><td className="mn">{l.lr_no}</td><td style={{display:"flex",gap:3}}>{l.challan_photo_url&&<a href={l.challan_photo_url} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📸Ch</a>}{l.pod_photo_url&&<a href={l.pod_photo_url} target="_blank" style={{color:"#10b981",fontSize:9}}>📸POD</a>}</td></tr>)}
+      {logs.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:16}}>None</td></tr>}
     </tbody></table></div></div></div>;
 }
 
@@ -854,6 +871,251 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus}){
         {tab==='done'&&<td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td>}
       </tr>})}
       {filtered.length===0&&<tr><td colSpan={tab!=='done'?10:7} style={{textAlign:"center",color:"#4ade80",padding:20}}>No jobs in this category</td></tr>}
+    </tbody></table></div></div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// REPORTS & ANALYTICS
+// ═══════════════════════════════════════════════════════════
+function ReportsPage({jobs,batches,items,grn,pLogs,fLogs,osLogs,dLogs,expenses,firms,stock}){
+  const [tab,setTab]=useState('overview');
+  const [period,setPeriod]=useState('all');
+  const now=new Date();const cm=now.getMonth(),cy=now.getFullYear();
+  const inP=(d)=>{if(!d||period==='all')return true;const dt=new Date(d);if(period==='month')return dt.getMonth()===cm&&dt.getFullYear()===cy;if(period==='quarter'){const qm=cm-cm%3;return dt.getFullYear()===cy&&dt.getMonth()>=qm&&dt.getMonth()<qm+3;}if(period==='fy'){const fys=cm>=3?cy:cy-1;return dt>=new Date(fys,3,1)&&dt<=new Date(fys+1,2,31);}return true;};
+
+  const activeJobs=jobs.filter(j=>inP(j.created_at));
+  const billedJobs=activeJobs.filter(j=>['Billing Done','Cash Received'].includes(j.status));
+  const totalRevenue=billedJobs.reduce((s,j)=>(j.batches||[]).reduce((bs,b)=>(b.items||[]).reduce((is,it)=>is+(+it.amount||0),bs),s),0);
+  const pendingRevenue=activeJobs.filter(j=>['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Delivered'].includes(j.status)).reduce((s,j)=>(j.batches||[]).reduce((bs,b)=>(b.items||[]).reduce((is,it)=>is+(+it.amount||0),bs),s),0);
+  const totalExpenses=expenses.filter(e=>inP(e.date)).reduce((s,e)=>s+(+e.amount||0),0);
+  const materialCost=grn.filter(g=>inP(g.date)).reduce((s,g)=>s+(+g.qty||0)*(+g.rate||0),0);
+
+  const pipeline=[
+    {l:'Quotation',c:'#3b82f6',v:activeJobs.filter(j=>j.status==='Quotation Sent').length},
+    {l:'Design',c:'#8b5cf6',v:activeJobs.filter(j=>j.status==='Designing').length},
+    {l:'Printing',c:'#ef4444',v:activeJobs.filter(j=>j.status==='Printing').length},
+    {l:'Fabrication',c:'#dc2626',v:activeJobs.filter(j=>j.status==='Fabrication').length},
+    {l:'Installation',c:'#059669',v:activeJobs.filter(j=>j.status==='Installation').length},
+    {l:'Delivered',c:'#10b981',v:activeJobs.filter(j=>j.status==='Delivered').length},
+    {l:'Billing',c:'#06b6d4',v:activeJobs.filter(j=>['Billing Pending','Given for Billing'].includes(j.status)).length},
+    {l:'Billed',c:'#4ade80',v:billedJobs.length},
+  ];
+  const maxPip=Math.max(...pipeline.map(p=>p.v),1);
+
+  const firmStats=firms.map(f=>{const fj=activeJobs.filter(j=>j.firm===f.code);const rev=fj.filter(j=>['Billing Done','Cash Received'].includes(j.status)).reduce((s,j)=>(j.batches||[]).reduce((bs,b)=>(b.items||[]).reduce((is,it)=>is+(+it.amount||0),bs),s),0);return{name:f.short_name,color:f.color,jobs:fj.length,rev};});
+
+  const months=[];for(let i=5;i>=0;i--){const d=new Date(cy,cm-i,1);months.push({m:d.getMonth(),y:d.getFullYear(),l:d.toLocaleString('en',{month:'short'})});}
+  const monthlyJobs=months.map(m=>({...m,v:jobs.filter(j=>{const d=new Date(j.created_at);return d.getMonth()===m.m&&d.getFullYear()===m.y;}).length}));
+  const maxMJ=Math.max(...monthlyJobs.map(m=>m.v),1);
+  const monthlyRev=months.map(m=>{const mj=jobs.filter(j=>{const d=new Date(j.created_at);return d.getMonth()===m.m&&d.getFullYear()===m.y&&['Billing Done','Cash Received'].includes(j.status);});return{...m,v:mj.reduce((s,j)=>(j.batches||[]).reduce((bs,b)=>(b.items||[]).reduce((is,it)=>is+(+it.amount||0),bs),s),0)};});
+  const maxMR=Math.max(...monthlyRev.map(m=>m.v),1);
+
+  const clientMap={};activeJobs.forEach(j=>{if(!j.client_name)return;if(!clientMap[j.client_name])clientMap[j.client_name]={n:j.client_name,jobs:0,rev:0};clientMap[j.client_name].jobs++;const jr=(j.batches||[]).reduce((bs,b)=>(b.items||[]).reduce((is,it)=>is+(+it.amount||0),bs),0);clientMap[j.client_name].rev+=jr;});
+  const topClients=Object.values(clientMap).sort((a,b)=>b.rev-a.rev).slice(0,12);
+  const maxCR=Math.max(...topClients.map(c=>c.rev),1);
+
+  const matUsage={};pLogs.filter(l=>inP(l.date)).forEach(l=>{matUsage[l.material]=(matUsage[l.material]||0)+(+l.qty_used||0);});
+  fLogs.filter(l=>inP(l.date)).forEach(l=>{matUsage[l.material]=(matUsage[l.material]||0)+(+l.qty_used||0);});
+  const topMats=Object.entries(matUsage).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  const maxMU=Math.max(...topMats.map(m=>m[1]),1);
+
+  const expCats={};expenses.filter(e=>inP(e.date)).forEach(e=>{expCats[e.category||'Other']=(expCats[e.category||'Other']||0)+(+e.amount||0);});
+  const expArr=Object.entries(expCats).sort((a,b)=>b[1]-a[1]);
+  const maxEC=Math.max(...expArr.map(e=>e[1]),1);
+
+  const inkUsed=pLogs.filter(l=>inP(l.date)).reduce((s,l)=>({c:s.c+(+l.ink_cyan||0),m:s.m+(+l.ink_magenta||0),y:s.y+(+l.ink_yellow||0),k:s.k+(+l.ink_black||0),w:s.w+(+l.ink_white||0)}),{c:0,m:0,y:0,k:0,w:0});
+  const totalInk=inkUsed.c+inkUsed.m+inkUsed.y+inkUsed.k+inkUsed.w;
+
+  const lowStock=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).sort((a,b)=>a[1]-b[1]).slice(0,10);
+  const osPending=osLogs.filter(l=>!l.returned&&inP(l.date));
+
+  const tabDef=[{id:'overview',l:'Overview',e:'📊'},{id:'pipeline',l:'Pipeline',e:'🔄'},{id:'revenue',l:'Revenue',e:'💰'},{id:'material',l:'Materials',e:'📦'},{id:'expense',l:'Cost Analysis',e:'💸'}];
+
+  const Bar=({v,max,c,h=16})=><div style={{flex:1,background:"#1a2030",borderRadius:3,height:h,overflow:"hidden"}}><div style={{width:`${Math.max((v/max)*100,2)}%`,height:"100%",background:`linear-gradient(90deg,${c},${c}88)`,borderRadius:3,transition:"width .4s"}}/></div>;
+
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+      <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{tabDef.map(t=><button key={t.id} className={`b bs ${tab===t.id?"bp":""}`} onClick={()=>setTab(t.id)}>{t.e} {t.l}</button>)}</div>
+      <div style={{display:"flex",gap:2}}>{[{id:'month',l:'Month'},{id:'quarter',l:'Quarter'},{id:'fy',l:'FY'},{id:'all',l:'All'}].map(p=><button key={p.id} className={`b bs ${period===p.id?"bp":""}`} onClick={()=>setPeriod(p.id)}>{p.l}</button>)}</div>
+    </div>
+
+    {tab==='overview'&&<>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:7}}>
+        <SC l="Total Jobs" v={activeJobs.length} c="#e3a008"/>
+        <SC l="Billed Revenue" v={fmtK(totalRevenue)} c="#4ade80" d={30}/>
+        <SC l="Pending Revenue" v={fmtK(pendingRevenue)} c="#f59e0b" d={60}/>
+        <SC l="Material Cost" v={fmtK(materialCost)} c="#ef4444" d={90}/>
+        <SC l="Expenses" v={fmtK(totalExpenses)} c="#dc2626" d={120}/>
+        <SC l="Gross Profit" v={fmtK(totalRevenue-materialCost-totalExpenses)} c={totalRevenue-materialCost-totalExpenses>0?"#4ade80":"#f47067"} d={150}/>
+        <SC l="Print Logs" v={pLogs.filter(l=>inP(l.date)).length} c="#8b5cf6" d={180}/>
+        <SC l="Dispatches" v={dLogs.filter(l=>inP(l.date)).length} c="#10b981" d={210}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:10}}>📈 JOBS PER MONTH</p>
+          <div style={{display:"flex",alignItems:"flex-end",gap:8,height:100}}>{monthlyJobs.map((m,i)=><div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}><span className="mn" style={{fontSize:9,color:"#e3a008",fontWeight:700}}>{m.v}</span><div style={{width:"100%",background:"linear-gradient(180deg,#e3a008,#ca8a04)",borderRadius:3,height:`${Math.max((m.v/maxMJ)*80,2)}px`,transition:"height .3s"}}/><span style={{fontSize:8,color:"#64748b"}}>{m.l}</span></div>)}</div>
+        </div>
+        <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:10}}>🏢 FIRM BREAKDOWN</p>
+          {firmStats.map((f,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><span className="bd" style={{background:f.color+"20",color:f.color,minWidth:36,textAlign:"center"}}>{f.name}</span><span style={{fontSize:10,width:52}}>{f.jobs} jobs</span><Bar v={f.rev} max={Math.max(...firmStats.map(x=>x.rev),1)} c={f.color}/><span className="mn" style={{fontSize:10,fontWeight:700,color:f.color,minWidth:60,textAlign:"right"}}>{fmtK(f.rev)}</span></div>)}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:6}}>⚠️ LOW STOCK ({lowStock.length})</p>
+          {lowStock.length>0?lowStock.map(([m,q])=><div key={m} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:10}}>{m}</span><span className="mn" style={{fontSize:10,fontWeight:700,color:q<=0?"#f47067":"#f59e0b"}}>{q}</span></div>):<p style={{fontSize:10,color:"#4ade80"}}>All materials OK</p>}
+        </div>
+        <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:6}}>📤 OUTSOURCE PENDING ({osPending.length})</p>
+          {osPending.slice(0,6).map(l=><div key={l.id} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:10}}>{l.agency} — <span className="mn" style={{color:"#e3a008"}}>{l.job_id}</span></span><span style={{fontSize:10}}>{l.material} ×{l.qty_sent}</span></div>)}
+          {osPending.length===0&&<p style={{fontSize:10,color:"#4ade80"}}>All returned</p>}
+        </div>
+      </div>
+    </>}
+
+    {tab==='pipeline'&&<div className="c" style={{padding:14}}>
+      <p style={{fontSize:10,color:"#64748b",fontWeight:700,marginBottom:14}}>🔄 JOB PIPELINE — {activeJobs.length} active jobs</p>
+      {pipeline.map((p,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+        <span style={{fontSize:10,fontWeight:600,color:p.c,width:85,textAlign:"right"}}>{p.l}</span>
+        <div style={{flex:1,background:"#1a2030",borderRadius:5,height:26,overflow:"hidden"}}><div style={{width:`${Math.max((p.v/maxPip)*100,3)}%`,height:"100%",background:`linear-gradient(90deg,${p.c},${p.c}66)`,borderRadius:5,transition:"width .4s",display:"flex",alignItems:"center",paddingLeft:8}}>{p.v>0&&<span className="mn" style={{fontSize:11,fontWeight:700,color:"#fff"}}>{p.v}</span>}</div></div>
+        <span className="mn" style={{fontSize:11,fontWeight:700,color:p.c,width:30}}>{p.v}</span>
+      </div>)}
+      <div style={{marginTop:14,borderTop:"1px solid #1a2030",paddingTop:10}}>
+        <p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:8}}>STATUS BREAKDOWN</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:4}}>
+          {['Quotation Sent','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Billing Done','Cash Received','Cancelled','No Bill'].map(st=>{
+            const cnt=activeJobs.filter(j=>j.status===st).length;
+            const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b'};
+            return cnt>0?<div key={st} style={{display:"flex",alignItems:"center",gap:4,fontSize:10}}><span className="bd" style={{background:(sc[st]||'#64748b')+'20',color:sc[st]||'#64748b'}}>{cnt}</span><span style={{color:"#94a3b8"}}>{st}</span></div>:null;
+          })}
+        </div>
+      </div>
+    </div>}
+
+    {tab==='revenue'&&<>
+      <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:10}}>💰 MONTHLY REVENUE</p>
+        <div style={{display:"flex",alignItems:"flex-end",gap:8,height:110}}>{monthlyRev.map((m,i)=><div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}><span className="mn" style={{fontSize:8,color:"#4ade80",fontWeight:700}}>{m.v>0?fmtK(m.v):''}</span><div style={{width:"100%",background:"linear-gradient(180deg,#4ade80,#16a34a)",borderRadius:3,height:`${Math.max((m.v/maxMR)*85,2)}px`,transition:"height .3s"}}/><span style={{fontSize:8,color:"#64748b"}}>{m.l}</span></div>)}</div>
+      </div>
+      <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:8}}>🏆 TOP CLIENTS BY REVENUE</p>
+        <table><thead><tr><th>#</th><th>Client</th><th>Jobs</th><th>Revenue</th><th style={{width:"30%"}}></th></tr></thead><tbody>
+          {topClients.map((c,i)=><tr key={i}><td style={{fontWeight:700,color:"#e3a008"}}>{i+1}</td><td style={{fontSize:10,fontWeight:600}}>{c.n?.slice(0,28)}</td><td className="mn">{c.jobs}</td><td className="mn" style={{fontWeight:700,color:"#4ade80"}}>{fmtK(c.rev)}</td><td><Bar v={c.rev} max={maxCR} c="#4ade80" h={10}/></td></tr>)}
+          {topClients.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:16}}>No data</td></tr>}
+        </tbody></table>
+      </div>
+    </>}
+
+    {tab==='material'&&<>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:7}}>
+        <SC l="GRN Entries" v={grn.filter(g=>inP(g.date)).length} c="#10b981"/>
+        <SC l="Print Logs" v={pLogs.filter(l=>inP(l.date)).length} c="#ef4444" d={30}/>
+        <SC l="Fab Logs" v={fLogs.filter(l=>inP(l.date)).length} c="#dc2626" d={60}/>
+        <SC l="Total Ink" v={`${totalInk}ml`} c="#8b5cf6" d={90}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:8}}>📦 TOP MATERIALS CONSUMED</p>
+          {topMats.map(([m,q],i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}><span style={{fontSize:10,width:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m}</span><Bar v={q} max={maxMU} c="#ef4444"/><span className="mn" style={{fontSize:10,fontWeight:700,minWidth:36,textAlign:"right"}}>{q}</span></div>)}
+          {topMats.length===0&&<p style={{fontSize:10,color:"#64748b"}}>No data</p>}
+        </div>
+        <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:8}}>🎨 INK USAGE BREAKDOWN</p>
+          {[{l:'Cyan',v:inkUsed.c,c:'#06b6d4'},{l:'Magenta',v:inkUsed.m,c:'#ec4899'},{l:'Yellow',v:inkUsed.y,c:'#eab308'},{l:'Black',v:inkUsed.k,c:'#64748b'},{l:'White',v:inkUsed.w,c:'#e2e8f0'}].map((ink,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><span style={{fontSize:10,width:60,color:ink.c,fontWeight:600}}>{ink.l}</span><Bar v={ink.v} max={Math.max(inkUsed.c,inkUsed.m,inkUsed.y,inkUsed.k,inkUsed.w,1)} c={ink.c}/><span className="mn" style={{fontSize:10,fontWeight:700,minWidth:50,textAlign:"right"}}>{ink.v}ml</span></div>)}
+        </div>
+      </div>
+    </>}
+
+    {tab==='expense'&&<>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:7}}>
+        <SC l="Material Cost" v={fmtK(materialCost)} c="#ef4444"/>
+        <SC l="Outsource Cost" v={fmtK(osLogs.filter(l=>inP(l.date)).reduce((s,l)=>s+(+l.qty_sent||0)*(+l.rate||0),0))} c="#f59e0b" d={30}/>
+        <SC l="Expenses" v={fmtK(totalExpenses)} c="#dc2626" d={60}/>
+        <SC l="Total Cost" v={fmtK(materialCost+totalExpenses)} c="#f47067" d={90}/>
+        <SC l="Revenue" v={fmtK(totalRevenue)} c="#4ade80" d={120}/>
+        <SC l="Margin" v={totalRevenue>0?Math.round((totalRevenue-materialCost-totalExpenses)/totalRevenue*100)+"%":"—"} c={totalRevenue-materialCost-totalExpenses>0?"#4ade80":"#f47067"} d={150}/>
+      </div>
+      <div className="c" style={{padding:10}}><p style={{fontSize:9,color:"#64748b",fontWeight:700,marginBottom:8}}>📊 EXPENSE CATEGORIES</p>
+        {expArr.map(([cat,amt],i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><span style={{fontSize:10,fontWeight:600,width:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cat}</span><Bar v={amt} max={maxEC} c="#dc2626"/><span className="mn" style={{fontSize:10,fontWeight:700,minWidth:60,textAlign:"right"}}>{fmtK(amt)}</span></div>)}
+        {expArr.length===0&&<p style={{fontSize:10,color:"#64748b"}}>No expenses logged yet</p>}
+      </div>
+    </>}
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPENSES TRACKER
+// ═══════════════════════════════════════════════════════════
+function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
+  const CATS=["Material Purchase","Transport","Labour","Rent","Electricity","Fuel","Office Supplies","Food & Tea","Maintenance","Salary Advance","Petty Cash","Tools","Ink Purchase","Outsource Payment","Other"];
+  const PAY_MODES=["Cash","UPI","Bank Transfer","Cheque","Card","Credit"];
+  const [sf,ssf]=useState(false);
+  const [receiptFile,setReceiptFile]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [filter,setFilter]=useState('all');
+  const [fMonth,setFMonth]=useState('all');
+  const [f,sF]=useState({date:td(),category:CATS[0],description:"",amount:"",paid_to:"",payment_mode:"Cash",firm:firms[0]?.code||"",job_id:"",approved_by:team[0]?.name||"",notes:""});
+
+  const add=async()=>{if(!f.amount||!f.description){alert("Fill amount & description");return;}setSaving(true);const rUrl=await uploadFile(receiptFile,'expense-receipts');await addExpense({id:"EX"+uid(),...f,amount:+f.amount,receipt_url:rUrl});sF(p=>({...p,description:"",amount:"",paid_to:"",job_id:"",notes:""}));setReceiptFile(null);setSaving(false);};
+
+  const filtered=expenses.filter(e=>{if(filter!=='all'&&e.category!==filter)return false;if(fMonth!=='all'){const d=new Date(e.date);const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');if(key!==fMonth)return false;}return true;}).sort((a,b)=>b.date?.localeCompare(a.date));
+
+  const totalFiltered=filtered.reduce((s,e)=>s+(+e.amount||0),0);
+  const monthSet=new Set();expenses.forEach(e=>{if(e.date){const d=new Date(e.date);monthSet.add(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));}});
+  const monthOpts=[...monthSet].sort().reverse();
+
+  const catTotals={};filtered.forEach(e=>{catTotals[e.category||'Other']=(catTotals[e.category||'Other']||0)+(+e.amount||0);});
+
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+      <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾ Close":"💸 New Expense"}</button>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <span className="mn" style={{fontSize:12,fontWeight:700,color:"#e3a008"}}>{fmt(totalFiltered)}</span>
+        <span style={{fontSize:9,color:"#64748b"}}>{filtered.length} entries</span>
+      </div>
+    </div>
+
+    {sf&&<div className="c a" style={{padding:10}}>
+      <p style={{fontSize:9,color:"#dc2626",fontWeight:700,marginBottom:6}}>💸 LOG EXPENSE</p>
+      <div className="fg f4">
+        <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
+        <F l="Category"><select className="in" value={f.category} onChange={e=>sF(p=>({...p,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></F>
+        <F l="Amount ₹ *"><input className="in mn" type="number" value={f.amount} onChange={e=>sF(p=>({...p,amount:e.target.value}))} placeholder="0"/></F>
+        <F l="Paid To"><input className="in" value={f.paid_to} onChange={e=>sF(p=>({...p,paid_to:e.target.value}))} placeholder="Name/Vendor"/></F>
+        <div style={{gridColumn:"span 2"}}><F l="Description *"><input className="in" value={f.description} onChange={e=>sF(p=>({...p,description:e.target.value}))} placeholder="What was this expense for?"/></F></div>
+        <F l="Payment Mode"><select className="in" value={f.payment_mode} onChange={e=>sF(p=>({...p,payment_mode:e.target.value}))}>{PAY_MODES.map(m=><option key={m}>{m}</option>)}</select></F>
+        <F l="Firm"><select className="in" value={f.firm} onChange={e=>sF(p=>({...p,firm:e.target.value}))}><option value="">General</option>{firms.map(fm=><option key={fm.code} value={fm.code}>{fm.short_name}</option>)}</select></F>
+        <F l="Job# (optional)"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))} placeholder="Link to job"/></F>
+        <F l="Approved By"><select className="in" value={f.approved_by} onChange={e=>sF(p=>({...p,approved_by:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+        <F l="📸 Receipt"><input type="file" accept="image/*,.pdf" capture="environment" className="in" style={{padding:2}} onChange={e=>setReceiptFile(e.target.files[0]||null)}/></F>
+        <F l="Notes"><input className="in" value={f.notes} onChange={e=>sF(p=>({...p,notes:e.target.value}))} placeholder="Extra details..."/></F>
+      </div>
+      <button className="b bp" onClick={add} style={{marginTop:8}} disabled={saving}>{saving?"⏳ Saving...":"Save Expense"}</button>
+    </div>}
+
+    <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+      <select className="in" value={filter} onChange={e=>setFilter(e.target.value)} style={{width:160,fontSize:10}}>
+        <option value="all">All Categories</option>
+        {CATS.map(c=><option key={c} value={c}>{c}</option>)}
+      </select>
+      <select className="in" value={fMonth} onChange={e=>setFMonth(e.target.value)} style={{width:120,fontSize:10}}>
+        <option value="all">All Months</option>
+        {monthOpts.map(m=><option key={m} value={m}>{m}</option>)}
+      </select>
+    </div>
+
+    {Object.keys(catTotals).length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+      {Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=><span key={cat} style={{background:"#1a0505",border:"1px solid #dc262633",borderRadius:5,padding:"3px 7px",fontSize:9.5}}><strong style={{color:"#dc2626"}}>{fmtK(amt)}</strong> <span style={{color:"#94a3b8"}}>{cat}</span></span>)}
+    </div>}
+
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh - 220px)"}}><table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Paid To</th><th>Mode</th><th>Firm</th><th>Job</th><th>By</th><th>📎</th><th></th></tr></thead><tbody>
+      {filtered.map(e=><tr key={e.id}>
+        <td>{e.date}</td>
+        <td><span className="bd" style={{background:"#dc262620",color:"#f87171"}}>{e.category}</span></td>
+        <td style={{fontSize:10,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.description}</td>
+        <td className="mn" style={{fontWeight:700,color:"#dc2626"}}>{fmt(e.amount)}</td>
+        <td style={{fontSize:10}}>{e.paid_to}</td>
+        <td><span className="bd" style={{background:e.payment_mode==='Cash'?"#f59e0b20":"#3b82f620",color:e.payment_mode==='Cash'?"#f59e0b":"#3b82f6"}}>{e.payment_mode}</span></td>
+        <td>{e.firm&&<FB f={e.firm} firms={firms}/>}</td>
+        <td className="mn" style={{fontSize:10,color:"#e3a008"}}>{e.job_id||'—'}</td>
+        <td style={{fontSize:10}}>{e.approved_by}</td>
+        <td>{e.receipt_url?<a href={e.receipt_url} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📸</a>:'—'}</td>
+        <td><button className="b br bs" onClick={()=>{if(confirm('Delete this expense?'))deleteExpense(e.id)}} style={{fontSize:8,padding:"1px 4px"}}>✕</button></td>
+      </tr>)}
+      {filtered.length===0&&<tr><td colSpan={11} style={{textAlign:"center",color:"#64748b",padding:20}}>No expenses found</td></tr>}
     </tbody></table></div></div>
   </div>;
 }
