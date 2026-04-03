@@ -304,6 +304,13 @@ function MainApp({user,onLogout,masterData}){
     show("Status updated to "+newStatus);
   },[show,items]);
 
+  // ─── UPDATE JOB FIELDS (client details, PO, delivery etc) ──
+  const updateJobFields = useCallback(async (jobId, fields) => {
+    await sb.from('jobs').update(fields).eq('id',jobId);
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,...fields}:j));
+    show("Job details saved!");
+  },[show]);
+
   // ─── ADD NEW CLIENT ────────────────────────────────────────
   const updateLineItem = useCallback(async (itemId, updates) => {
     await sb.from('line_items').update(updates).eq('id',itemId);
@@ -433,11 +440,11 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>}
-          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>}
+          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
-          {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus}/>}
+          {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog}/>}
           {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog}/>}
@@ -446,7 +453,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={fullJobs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
-          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} show={show}/>}
+          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} show={show}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
         </div>
       </main>
@@ -466,7 +473,7 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJob,show,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
+function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
   const [dq,setDq]=useState("");
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   const results=useMemo(()=>{
@@ -482,7 +489,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJo
     ).slice(0,20);
   },[dq,jobs]);
   const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div className="c" style={{padding:10}}>
       <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search by Job#, Invoice#, Client, Project, PO#..." value={dq} onChange={e=>setDq(e.target.value)} style={{fontSize:12,padding:"8px 12px",paddingLeft:12}}/></div>
@@ -502,12 +509,12 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,togDept,addBatchToJo
 // ═══════════════════════════════════════════════════════════
 // ALL JOBS
 // ═══════════════════════════════════════════════════════════
-function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
+function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
   const [ff,sf]=useState("All");
   const [fy,setFy]=useState("All");
   const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;});
   
-  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>});
+  const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,x:<JobDetail j={j} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles}/>});
 
   return <div style={{display:"flex",flexDirection:"column",gap:7}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:3,flexWrap:"wrap"}}>
@@ -525,7 +532,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,importBatches,updateJobFile,appendJobFiles}){
   const ALL_ST=['Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [ed,setEd]=useState(null); // editing item id
@@ -533,6 +540,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLin
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const [addingToBatch,setAddingToBatch]=useState(null); // batch id being added to
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'INCH',rate_mode:'SQFT',gstPct:18});
+  const [jf,setJf]=useState({client_name:j.client_name||'',contact_person:j.contact_person||'',contact_no:j.contact_no||'',po_number:j.po_number||'',delivery_address:j.delivery_address||'',client_gst:j.client_gst||'',billing_name:j.billing_name||'',payment_terms:j.payment_terms||'',project:j.project||''});
+  const [jfDirty,setJfDirty]=useState(false);
+  const setJF=(k,v)=>{setJf(p=>({...p,[k]:v}));setJfDirty(true);};
+  const saveJF=async()=>{if(updateJobFields){await updateJobFields(j.id,jf);setJfDirty(false);}};
   const fm=firms.find(f=>f.code===j.firm)||{};
   const ab=async()=>{const bd={id:"B"+uid(),job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);};
   const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||''});};
@@ -558,9 +569,20 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLin
     <div style={{display:"flex",justifyContent:"space-between"}}><div><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:10,color:"#64748b"}}>{j.project} · {j.client_name}</p></div>
       <div style={{display:"flex",gap:2}}><FB f={j.firm} firms={firms}/><button className={`b bs ${vm==="internal"?"bp":""}`} onClick={()=>svm("internal")}>Internal</button><button className={`b bs ${vm==="client"?"bp":""}`} onClick={()=>svm("client")}>DC</button></div></div>
     <div className="fg f3" style={{fontSize:10,background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
-      {[["By",j.made_by],["PO",j.po_number||"⚠️ Pending"],["Contact",j.contact_person],["Phone",j.contact_no],["Delivery",j.delivery_address?.slice(0,40)],["Firm",fm.name]].map(([k,v])=><div key={k}><span style={{color:"#64748b",fontSize:8}}>{k}</span><p style={{fontWeight:600}}>{v||"—"}</p></div>)}
+      <F l="Client Name"><input className="in" value={jf.client_name} onChange={e=>setJF('client_name',e.target.value)} style={{fontSize:10}}/></F>
+      <F l="Project"><input className="in" value={jf.project} onChange={e=>setJF('project',e.target.value)} style={{fontSize:10}}/></F>
+      <F l="Contact Person"><input className="in" value={jf.contact_person} onChange={e=>setJF('contact_person',e.target.value)} style={{fontSize:10}}/></F>
+      <F l="Phone"><input className="in" value={jf.contact_no} onChange={e=>setJF('contact_no',e.target.value)} style={{fontSize:10}}/></F>
+      <F l="PO Number"><input className="in mn" value={jf.po_number} onChange={e=>setJF('po_number',e.target.value)} style={{fontSize:10}}/></F>
+      <F l="Client GST"><input className="in mn" value={jf.client_gst} onChange={e=>setJF('client_gst',e.target.value)} placeholder="27XXXXX..." style={{fontSize:10}}/></F>
+      <F l="Billing Name"><input className="in" value={jf.billing_name} onChange={e=>setJF('billing_name',e.target.value)} style={{fontSize:10}}/></F>
+      <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={jf.delivery_address} onChange={e=>setJF('delivery_address',e.target.value)} style={{fontSize:10}}/></F></div>
+      <F l="Payment Terms"><input className="in" value={jf.payment_terms} onChange={e=>setJF('payment_terms',e.target.value)} style={{fontSize:10}}/></F>
       <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span><select className="in" value={j.status} onChange={e=>{if(updateJobStatus)updateJobStatus(j.id,e.target.value)}} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></div>
-      <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
+      <div><span style={{color:"#64748b",fontSize:8}}>FIRM</span><p style={{fontWeight:600,fontSize:10}}>{fm.name||'—'}</p></div>
+      <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600,fontSize:10}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
+      <div><span style={{color:"#64748b",fontSize:8}}>BY</span><p style={{fontWeight:600,fontSize:10}}>{j.made_by||'—'}</p></div>
+      {jfDirty&&<div style={{gridColumn:"span 3"}}><button className="b bg" onClick={saveJF} style={{width:"100%",justifyContent:"center",padding:6}}>💾 Save Changes</button></div>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
       {[{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"}].map(sec=>{
