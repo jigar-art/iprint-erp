@@ -517,6 +517,31 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateLin
           :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td><td style={{fontSize:9.5,color:"#8b949e"}}>{it.media?.slice(0,20)}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td><td><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
     </div>)}
     {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>}
+    <div style={{display:"flex",gap:4,flexWrap:"wrap",borderTop:"1px solid #1a2030",paddingTop:8,marginTop:4}}>
+      <button className="b" onClick={()=>{
+        const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
+        const totSub=allItems.reduce((s,it)=>s+(+it.total||0),0);
+        const totGst=allItems.reduce((s,it)=>s+(+it.gst||0),0);
+        const totAmt=allItems.reduce((s,it)=>s+(+it.amount||0),0);
+        const totQty=allItems.reduce((s,it)=>s+(+it.qty||0),0);
+        const totSqft=Math.round(allItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
+        const estHtml=`<html><head><title>Estimate ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:60px;max-height:60px;border-radius:3px}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}@media print{body{padding:10px}}</style></head><body>`+
+          `<div class="hdr"><div><h1>${fm.short_name||''}</h1><p style="font-size:10px;color:#666">${fm.address||''}</p><p style="font-size:10px;color:#666">GST: ${fm.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${j.id}</p><p style="font-size:10px">Date: ${td()}</p></div></div>`+
+          `<div class="info"><div><b>Client:</b> ${j.client_name||''}</div><div><b>Contact:</b> ${j.contact_person||''} ${j.contact_no||''}</div><div><b>Project:</b> ${j.project||''}</div><div><b>PO #:</b> ${j.po_number||'—'}</div><div><b>Delivery:</b> ${j.delivery_address||''}</div><div><b>Firm:</b> ${fm.name||''}</div></div>`+
+          `<table><thead><tr><th>#</th><th>Description</th><th>Image</th><th>Material/Spec</th><th>Size (W×H)</th><th>Qty</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST</th><th>Amount</th></tr></thead><tbody>`+
+          allItems.map((it,i)=>`<tr><td>${i+1}</td><td>${vm==='internal'?(it.internal_name||''):(it.client_name||'')}</td><td>${it.img_url?'<img src="'+it.img_url+'"/>':'—'}</td><td>${it.media||''}</td><td class="r">${it.width&&it.height?it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:''):'—'}</td><td class="r">${it.qty}</td><td class="r">${it.sqft||'—'}</td><td class="r">₹${(+it.rate||0).toFixed(2)}</td><td class="r">₹${(+it.total||0).toFixed(2)}</td><td class="r">₹${(+it.gst||0).toFixed(2)}</td><td class="r"><b>₹${(+it.amount||0).toFixed(2)}</b></td></tr>`).join('')+
+          `<tr class="total"><td colspan="5" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${totSub.toFixed(2)}</b></td><td class="r"><b>₹${totGst.toFixed(2)}</b></td><td class="r"><b>₹${totAmt.toFixed(2)}</b></td></tr></tbody></table>`+
+          `<div class="terms"><p><b>Terms & Conditions:</b></p><p>${j.payment_terms||'50% Advance. Rest within 30 days.'}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${fm.name||''}</p></div></body></html>`;
+        const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
+      }} style={{gap:4}}>📄 Estimate PDF</button>
+      <button className="b" onClick={()=>{
+        const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
+        const totAmt=allItems.reduce((s,it)=>s+(+it.amount||0),0);
+        const sub=encodeURIComponent(`${j.status==='Quotation Sent'?'Estimate':'Revised Estimate'} ${j.id} - ${j.project||'Project'} | ${fm.short_name||''}`);
+        const body=encodeURIComponent(`Dear ${j.contact_person||'Sir/Madam'},\n\nPlease find attached the ${j.status==='Quotation Sent'?'estimate':'revised estimate'} for:\n\nJob#: ${j.id}\nProject: ${j.project||''}\nTotal Amount: ₹${totAmt.toFixed(2)} (incl GST)\n\nKindly review and share your PO at the earliest.\n\nRegards,\n${fm.name||'iPrint'}`);
+        window.open(`mailto:?cc=estimation@juxtapose.co.in&subject=${sub}&body=${body}`);
+      }} style={{gap:4}}>📧 Email Estimate</button>
+    </div>
   </div>;
 }
 
