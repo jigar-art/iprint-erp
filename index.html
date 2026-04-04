@@ -288,26 +288,37 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── UPDATE JOB STATUS ─────────────────────────────────────
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
-    // Record status change date
-    const job=jobs.find(j=>j.id===jobId);
-    const existingDates=job?.status_dates||{};
-    const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
-    const newDates={...existingDates,[statusKey]:td()};
+    // Optimistic UI update FIRST, then DB
+    let skip=false;
+    let newDates={};
+    setJobs(prev=>{
+      const job=prev.find(j=>j.id===jobId);
+      if(!job||job.status===newStatus){skip=true;return prev;}
+      const existingDates=job.status_dates||{};
+      const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
+      newDates={...existingDates,[statusKey]:td()};
+      return prev.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j);
+    });
+    if(skip)return;
+    
+    // Single DB write for status
     await sb.from('jobs').update({status:newStatus,status_dates:newDates}).eq('id',jobId);
-    setJobs(p=>p.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j));
-    // Also update dept flags based on new status
+    
+    // Dept flags - single bulk update via job_id filter (not per-item)
     const statusDepts={'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,0,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],
       'Printing':[1,1,1,0,0,0,0,0],'Fabrication':[1,1,1,1,0,0,0,0],'Installation':[1,1,1,1,1,1,0,0],
       'Delivered':[1,1,1,1,1,1,1,0],'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
       'Billing Done':[1,1,1,1,1,1,1,1],'Cash Received':[1,1,1,1,1,1,1,1],'No Bill':[1,1,1,1,1,1,1,1],'Cancelled':[1,1,1,1,1,1,1,1]};
-    const flags=statusDepts[newStatus]||[0,0,0,0,0,0,0,0];
-    const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
-    const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
-    const jobItems=items.filter(i=>i.job_id===jobId);
-    for(const it of jobItems){await sb.from('line_items').update(updates).eq('id',it.id);}
-    setItems(p=>p.map(i=>i.job_id===jobId?{...i,...updates}:i));
-    show("Status → "+newStatus+" ("+td()+")");
-  },[show,items,jobs]);
+    const flags=statusDepts[newStatus];
+    if(flags){
+      const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
+      const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
+      // Single Supabase call for ALL items of this job
+      await sb.from('line_items').update(updates).eq('job_id',jobId);
+      setItems(prev=>prev.map(i=>i.job_id===jobId?{...i,...updates}:i));
+    }
+    show("Status → "+newStatus);
+  },[show]);
 
   // ─── UPDATE JOB FIELDS (client details, PO, delivery etc) ──
   const updateJobFields = useCallback(async (jobId, fields) => {
@@ -612,7 +623,14 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       {canSeeRates&&<F l="Billing Name"><input className="in" value={jf.billing_name} onChange={e=>setJF('billing_name',e.target.value)} style={{fontSize:10}}/></F>}
       <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={jf.delivery_address} onChange={e=>setJF('delivery_address',e.target.value)} style={{fontSize:10}}/></F></div>
       {canSeeRates&&<F l="Payment Terms"><input className="in" value={jf.payment_terms} onChange={e=>setJF('payment_terms',e.target.value)} style={{fontSize:10}}/></F>}
-      <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span><select className="in" value={j.status} onChange={e=>{if(updateJobStatus)updateJobStatus(j.id,e.target.value)}} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></div>
+      <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span>
+        <div style={{display:"flex",gap:2,alignItems:"center",marginTop:2}}>
+          <span className="bd" style={{background:(({'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b'})[j.status]||'#64748b')+'20',color:({'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b'})[j.status]||'#64748b',fontSize:10,padding:"3px 8px"}}>{j.status}</span>
+          <select className="in" style={{fontSize:9,padding:"2px",width:100}} defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change status from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}}>
+            <option value="">Change →</option>{ALL_ST.filter(st=>st!==j.status).map(st=><option key={st} value={st}>{st}</option>)}
+          </select>
+        </div>
+      </div>
       <div><span style={{color:"#64748b",fontSize:8}}>FIRM</span><p style={{fontWeight:600,fontSize:10}}>{fm.name||'—'}</p></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600,fontSize:10}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BY</span><p style={{fontWeight:600,fontSize:10}}>{j.made_by||'—'}</p></div>
@@ -978,7 +996,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus}){
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {pen.length} jobs</span></div>
     <div style={{overflowX:"auto",maxHeight:"calc(100vh-160px)"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Status</th><th>Project</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
       {pen.map((j,i)=>{const it=(j.batches||[])[0]?.items?.[0];return <tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,fontWeight:600}}>{it?.internal_name||''}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,22)}</td><td style={{fontSize:10}}>{j.contact_person}</td>
-        <td><select className="in" value={j.status} onChange={e=>updateJobStatus(j.id,e.target.value)} style={{fontSize:9,padding:"2px 4px",width:120}}>{ALL_ST.map(st=><option key={st}>{st}</option>)}</select></td></tr>})}
+        <td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:120}}><option value="">Change →</option>{ALL_ST.filter(st=>st!==j.status).map(st=><option key={st} value={st}>{st}</option>)}</select></td></tr>})}
       {pen.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
     </tbody></table></div></div></div>;
 }
