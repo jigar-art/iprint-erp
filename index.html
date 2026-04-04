@@ -101,6 +101,7 @@ function Login({onLogin,team}){
     if(!member){setErr('Select your name');return;}
     if(member.pin&&member.pin!==pin){setErr('Wrong PIN');return;}
     onLogin(member);
+    window.__currentUser=member;
   };
   return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
     <div className="a" style={{width:340,padding:32,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
@@ -288,36 +289,44 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── UPDATE JOB STATUS ─────────────────────────────────────
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
-    // Optimistic UI update FIRST, then DB
-    let skip=false;
-    let newDates={};
-    setJobs(prev=>{
-      const job=prev.find(j=>j.id===jobId);
-      if(!job||job.status===newStatus){skip=true;return prev;}
-      const existingDates=job.status_dates||{};
-      const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
-      newDates={...existingDates,[statusKey]:td()};
-      return prev.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j);
-    });
-    if(skip)return;
+    // Check if actually changing
+    let currentJob=null;
+    setJobs(prev=>{currentJob=prev.find(j=>j.id===jobId);return prev;});
+    if(!currentJob||currentJob.status===newStatus)return;
     
-    // Single DB write for status
-    await sb.from('jobs').update({status:newStatus,status_dates:newDates}).eq('id',jobId);
+    // DB WRITE FIRST — only update UI if DB succeeds
+    const {error}=await sb.from('jobs').update({status:newStatus}).eq('id',jobId);
+    if(error){
+      show("❌ FAILED to save status: "+error.message,false);
+      return;
+    }
     
-    // Dept flags - single bulk update via job_id filter (not per-item)
-    const statusDepts={'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,0,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],
-      'Printing':[1,1,1,0,0,0,0,0],'Fabrication':[1,1,1,1,0,0,0,0],'Installation':[1,1,1,1,1,1,0,0],
+    // DB succeeded — now update React state
+    const existingDates=currentJob.status_dates||{};
+    const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
+    const now=new Date();
+    const timeStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+    const userName=window.__currentUser?.name||'Unknown';
+    const newDates={...existingDates,[statusKey]:timeStr+' by '+userName};
+    setJobs(prev=>prev.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j));
+    
+    // Try saving dates (non-critical)
+    sb.from('jobs').update({status_dates:newDates}).eq('id',jobId).then(()=>{}).catch(()=>{});
+    
+    // Dept flags - single bulk update
+    const statusDepts={'Draft':[0,0,0,0,0,0,0,0],'Active':[1,0,0,0,0,0,0,0],'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,1,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],'PO Received':[1,0,0,0,0,0,0,0],
+      'Printing':[1,1,1,1,0,0,0,0],'Fabrication':[1,1,1,1,1,0,0,0],'Installation':[1,1,1,1,1,1,1,0],
       'Delivered':[1,1,1,1,1,1,1,0],'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
       'Billing Done':[1,1,1,1,1,1,1,1],'Cash Received':[1,1,1,1,1,1,1,1],'No Bill':[1,1,1,1,1,1,1,1],'Cancelled':[1,1,1,1,1,1,1,1]};
     const flags=statusDepts[newStatus];
     if(flags){
       const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
       const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
-      // Single Supabase call for ALL items of this job
-      await sb.from('line_items').update(updates).eq('job_id',jobId);
-      setItems(prev=>prev.map(i=>i.job_id===jobId?{...i,...updates}:i));
+      sb.from('line_items').update(updates).eq('job_id',jobId).then(()=>{
+        setItems(prev=>prev.map(i=>i.job_id===jobId?{...i,...updates}:i));
+      });
     }
-    show("Status → "+newStatus);
+    show("✅ Status saved → "+newStatus);
   },[show]);
 
   // ─── UPDATE JOB FIELDS (client details, PO, delivery etc) ──
@@ -514,6 +523,22 @@ function MainApp({user,onLogout,masterData}){
 function SC({l,v,s,c="#e3a008",d=0}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}</p><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
 function FB({f,firms}){const fm=firms?.find(x=>x.code===f);return fm?<span className="bd" style={{background:fm.color+"20",color:fm.color}}>{fm.short_name}</span>:null;}
 function Ck({on,onClick}){return <div className={`ck ${on?"on":""}`} onClick={onClick}>{on?"✓":""}</div>;}
+function StatusTip({j,children}){
+  const [show,setShow]=useState(false);
+  const sd=j.status_dates||{};
+  const entries=Object.entries(sd).filter(([k,v])=>v);
+  const labels={draft:'Draft',active:'Active',quotation_sent:'Quotation Sent',po_pending:'PO Pending',po_received:'PO Received',recce_pending:'Recce Pending',designing:'Designing',printing:'Printing',fabrication:'Fabrication',installation:'Installation',delivered:'Delivered',billing_pending:'Billing Pending',given_for_billing:'Given for Billing',cash_pending:'Cash Pending',proforma_invoice:'Proforma Invoice',ic_pending:'IC Pending',billing_done:'Billing Done',cash_received:'Cash Received',no_bill:'No Bill',cancelled:'Cancelled'};
+  return <div style={{position:"relative",display:"inline-block"}} onMouseEnter={()=>setShow(true)} onMouseLeave={()=>setShow(false)}>
+    {children}
+    {show&&entries.length>0&&<div style={{position:"absolute",left:0,top:"100%",zIndex:50,background:"#161d2e",border:"1px solid #2a3548",borderRadius:8,padding:"8px 12px",minWidth:220,maxWidth:320,boxShadow:"0 8px 24px rgba(0,0,0,.5)",pointerEvents:"none"}}>
+      <p style={{fontSize:8,fontWeight:700,color:"#e3a008",marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>📅 Status History — {j.id}</p>
+      {entries.map(([k,v])=><div key={k} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"2px 0",borderBottom:"1px solid #1a2030"}}>
+        <span style={{fontSize:9,fontWeight:600,color:"#c9d1d9"}}>{labels[k]||k}</span>
+        <span style={{fontSize:8,color:"#8b949e",textAlign:"right"}}>{v}</span>
+      </div>)}
+    </div>}
+  </div>;
+}
 function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b",fontWeight:600,textTransform:"uppercase",display:"block",marginBottom:1}}>{l}</label>{children}</div>;}
 
 // ═══════════════════════════════════════════════════════════
@@ -540,7 +565,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
     <div className="c" style={{padding:10}}>
       <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search by Job#, Invoice#, Client, Project, PO#..." value={dq} onChange={e=>setDq(e.target.value)} style={{fontSize:12,padding:"8px 12px",paddingLeft:12}}/></div>
       {results.length>0&&<div style={{marginTop:6,maxHeight:300,overflowY:"auto"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Invoice</th></tr></thead><tbody>
-        {results.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn||'—'}</td></tr>})}
+        {results.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn||'—'}</td></tr>})}
       </tbody></table></div>}
       {dq.length>=2&&results.length===0&&<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>}
     </div>
@@ -573,7 +598,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
     </div>
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Batches</th><th>PO</th><th>By</th></tr></thead><tbody>
       {fl.map(j=>{const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
-        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table></div></div>
+        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table></div></div>
   </div>;
 }
 
@@ -1016,7 +1041,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus}){
   return <div style={{display:"flex",flexDirection:"column",gap:6}}><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{tabs.map(t=><button key={t.id} className={`b bs ${ad===t.id?"bp":""}`} onClick={()=>sad(t.id)} style={ad!==t.id?{borderColor:t.c+"55",color:t.c}:{}}>{t.l} ({jobs.filter(j=>t.st.includes(j.status)).length})</button>)}</div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {pen.length} jobs</span></div>
     <div style={{overflowX:"auto",maxHeight:"calc(100vh-160px)"}}><table><thead><tr><th>Job</th><th>Client</th><th>Product</th><th>Status</th><th>Project</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
-      {pen.map((j,i)=>{const it=(j.batches||[])[0]?.items?.[0];return <tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,fontWeight:600}}>{it?.internal_name||''}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,22)}</td><td style={{fontSize:10}}>{j.contact_person}</td>
+      {pen.map((j,i)=>{const it=(j.batches||[])[0]?.items?.[0];return <tr key={i}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,fontWeight:600}}>{it?.internal_name||''}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,22)}</td><td style={{fontSize:10}}>{j.contact_person}</td>
         <td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:120}}><option value="">Change →</option>{ALL_ST.filter(st=>st!==j.status).map(st=><option key={st} value={st}>{st}</option>)}</select></td></tr>})}
       {pen.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#4ade80",padding:20}}>🎉 All done!</td></tr>}
     </tbody></table></div></div></div>;
@@ -1235,7 +1260,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     </div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {filtered.length} jobs{sq?` matching "${sq}"`:''}</span></div>
     <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th>{tab!=='done'&&<><th>Invoice#</th><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}{tab==='done'&&<th>Invoice#</th>}</tr></thead><tbody>
-      {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{j.id}</td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
+      {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
         {tab!=='done'&&<><td><input className="in mn" style={{width:100,fontSize:10}} placeholder="Inv#" value={invoices[j.id]||""} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))}/></td><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this DC file?'))removeJobFile(j.id,'dc_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this IC file?'))removeJobFile(j.id,'ic_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
         {tab==='done'&&<td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td>}
       </tr>})}
