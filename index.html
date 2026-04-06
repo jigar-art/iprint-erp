@@ -190,14 +190,33 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── CREATE JOB ───────────────────────────────────────────
   const createJob = useCallback(async (jobData, batchData, lineItemsData) => {
-    const {error:je} = await sb.from('jobs').insert(jobData);
-    if(je){show("Error: "+je.message,false);return;}
+    // Retry with incremented ID if duplicate key
+    let attempts=0;
+    let finalJobData={...jobData};
+    while(attempts<5){
+      const {error:je} = await sb.from('jobs').insert(finalJobData);
+      if(!je)break;
+      if(je.message?.includes('duplicate key')||je.message?.includes('unique constraint')){
+        attempts++;
+        // Increment the number part
+        const parts=finalJobData.id.split('-');
+        const num=parseInt(parts[0])||0;
+        const newId=String(num+attempts).padStart(4,'0')+'-'+parts.slice(1).join('-');
+        finalJobData={...finalJobData,id:newId};
+        // Also update batch and items with new job_id
+        batchData={...batchData,job_id:newId};
+        lineItemsData=lineItemsData.map(li=>({...li,job_id:newId}));
+        continue;
+      }
+      show("Error: "+je.message,false);return;
+    }
+    if(attempts>=5){show("Error: Could not generate unique Job#. Please try again.",false);return;}
     const {error:be} = await sb.from('batches').insert(batchData);
     if(lineItemsData.length>0) await sb.from('line_items').insert(lineItemsData);
-    setJobs(p=>[jobData,...p]);
+    setJobs(p=>[finalJobData,...p]);
     setBatches(p=>[batchData,...p]);
     setItems(p=>[...lineItemsData,...p]);
-    show("Job created successfully!");
+    show("Job "+finalJobData.id+" created successfully!");
     setPg("jobs");
   },[show]);
 
@@ -454,8 +473,8 @@ function MainApp({user,onLogout,masterData}){
   const allNav=[
     {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
     {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"]},
-    {id:"new",l:"New Job",e:"➕",roles:["admin","sales"]},
-    {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"]},
+    {id:"new",l:"New Job",e:"➕",roles:["admin","sales"],users:["JIGAR","RUCHITA","AMOL"]},
+    {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","RUCHITA","AMOL"]},
     {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer"]},
     {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts"]},
     {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing","designer"]},
@@ -468,7 +487,11 @@ function MainApp({user,onLogout,masterData}){
     {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
   ];
-  const nav=allNav.filter(n=>n.roles.includes(user.role));
+  const nav=allNav.filter(n=>{
+    if(!n.roles.includes(user.role))return false;
+    if(n.users){const uName=(user.name||'').toUpperCase();return n.users.some(u=>uName.includes(u));}
+    return true;
+  });
 
   if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading iPrint ERP...</p></div>;
 
@@ -922,11 +945,14 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   
   // Sequential job numbering — FY auto-detect based on current date
   const curFY=useMemo(()=>{const n=new Date();const m=n.getMonth(),y=n.getFullYear();return m>=3?`${String(y).slice(2)}${String(y+1).slice(2)}`:`${String(y-1).slice(2)}${String(y).slice(2)}`;},[]); 
+  const [dbMaxNum,setDbMaxNum]=useState(0);
+  useEffect(()=>{sb.from('jobs').select('id').like('id','%-'+curFY).then(({data})=>{if(data){const nums=data.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});setDbMaxNum(Math.max(0,...nums));}});},[curFY]);
   const nextNum=useMemo(()=>{
     const fyJobs=jobs.filter(j=>j.id?.includes('-'+curFY));
-    const nums=fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});
-    return String(Math.max(0,...nums)+1).padStart(4,'0');
-  },[jobs,curFY]);
+    const memNums=fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});
+    const memMax=Math.max(0,...memNums);
+    return String(Math.max(memMax,dbMaxNum)+1).padStart(4,'0');
+  },[jobs,curFY,dbMaxNum]);
   const jid=`${nextNum}-${curFY}`;
 
   const sub=async(isDraft=false)=>{
