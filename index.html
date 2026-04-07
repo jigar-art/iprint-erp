@@ -1772,8 +1772,158 @@ function RootApp(){
 
   if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,background:"#060810"}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading iPrint ERP...</p></div>;
 
+  // CLIENT PORTAL — if URL has ?client=CODE
+  const urlP=new URLSearchParams(window.location.search);
+  const cCode=urlP.get('client');
+  if(cCode) return <ClientPortal code={cCode}/>;
+
   if(!user) return <Login onLogin={setUser} team={masterData.team}/>;
   return <MainApp user={user} onLogout={()=>setUser(null)} masterData={masterData}/>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLIENT PORTAL — Dept login + status view + notes
+// ═══════════════════════════════════════════════════════════
+function ClientPortal({code}){
+  const [jobs,setJobs]=useState([]);const [batches,setBatches]=useState([]);const [items,setItems]=useState([]);
+  const [firm,setFirm]=useState(null);const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState('all');const [selJob,setSelJob]=useState(null);
+  const [dept,setDept]=useState(null);
+  const [noteText,setNoteText]=useState({});const [notes,setNotes]=useState({});
+
+  const portalConfigs={
+    'ANA':{name:'ANA Designs',match:['ANA DESIGNS'],depts:[
+      {id:'design',name:'Design Team',icon:'🎨',st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending']},
+      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing','Fabrication','Installation','Delivered']},
+      {id:'purchase',name:'Purchase Team',icon:'📦',st:null},
+      {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice']},
+    ]},
+  };
+  const config=portalConfigs[code.toUpperCase()];
+
+  useEffect(()=>{
+    if(!config||!dept)return;
+    async function load(){
+      setLoading(true);
+      let allJobs=[];
+      for(const pattern of config.match){
+        const {data:j}=await sb.from('jobs').select('*').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});
+        if(j)allJobs=[...allJobs,...j];
+      }
+      const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});
+      setJobs(allJobs);
+      const jids=allJobs.map(x=>x.id);
+      if(jids.length>0){
+        const {data:b}=await sb.from('batches').select('*').in('job_id',jids);
+        if(b){setBatches(b);const bids=b.map(x=>x.id);
+          if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,rate_mode,sqft,img_url,dept_estimate,dept_design,dept_production,dept_printing,dept_fabrication,dept_dispatch,dept_installation,dept_accounts').in('batch_id',bids);if(li)setItems(li);}}
+        if(allJobs[0]?.firm){const {data:f}=await sb.from('firms').select('*').eq('code',allJobs[0].firm).single();if(f)setFirm(f);}
+      }
+      try{const {data:n}=await sb.from('client_notes').select('*').in('job_id',jids).order('created_at',{ascending:false});
+        if(n){const g={};n.forEach(x=>{if(!g[x.job_id])g[x.job_id]=[];g[x.job_id].push(x);});setNotes(g);}
+      }catch(e){}
+      setLoading(false);
+    }
+    load();
+  },[code,dept]);
+
+  const full=jobs.map(j=>({...j,batches:batches.filter(b=>b.job_id===j.id).map(b=>({...b,items:items.filter(i=>i.batch_id===b.id)}))}));
+  const sc={'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b','PO Pending':'#f47067','Recce Pending':'#f59e0b'};
+  const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing',l:'Design',e:'🎨'},{k:'printing',l:'Print',e:'🖨️'},{k:'fabrication',l:'Fab',e:'🔧'},{k:'installation',l:'Install',e:'🔩'},{k:'delivered',l:'Done',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
+  const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Active':0,'Recce Pending':0,'Designing':1,'Printing':2,'Fabrication':3,'Installation':4,'Delivered':5,'Billing Pending':5,'Given for Billing':5,'Billing Done':6,'Cash Received':6}[st]??-1);
+  const deptTabs=[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))];
+  const curTab=deptTabs.find(t=>t.id===tab);
+  const filtered=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;
+
+  const addNote=async(jobId)=>{
+    const text=noteText[jobId];if(!text?.trim())return;
+    const note={id:'N'+Date.now(),job_id:jobId,dept:dept.name,text:text.trim(),created_at:new Date().toISOString()};
+    try{await sb.from('client_notes').insert(note);}catch(e){}
+    setNotes(p=>({...p,[jobId]:[note,...(p[jobId]||[])]}));
+    setNoteText(p=>({...p,[jobId]:''}));
+  };
+
+  if(!config) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}><div style={{textAlign:"center",padding:40}}><p style={{fontSize:48}}>🔒</p><h2 style={{color:"#f47067",fontSize:18}}>Invalid Portal Link</h2><p style={{color:"#64748b",fontSize:12,marginTop:8}}>Contact your iPrint representative for access.</p></div></div>;
+
+  if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
+    <div style={{width:400,padding:36,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
+      <div style={{width:56,height:56,borderRadius:12,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:20,color:"#060810",margin:"0 auto 16px"}}>iP</div>
+      <h1 style={{fontSize:20,fontWeight:800,color:"#e3a008",marginBottom:4}}>{config.name}</h1>
+      <p style={{fontSize:11,color:"#64748b",marginBottom:24}}>Client Portal · Select your department</p>
+      <div style={{display:"grid",gap:8}}>
+        {config.depts.map(d=><button key={d.id} onClick={()=>setDept(d)} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .15s"}} onMouseEnter={e=>e.target.style.borderColor='#e3a008'} onMouseLeave={e=>e.target.style.borderColor='#1a2030'}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
+      </div>
+    </div>
+  </div>;
+
+  if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,background:"#060810"}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading {dept.name} view...</p></div>;
+
+  return <div style={{minHeight:"100vh",background:"#060810",color:"#c9d1d9"}}>
+    <header style={{background:"#0c1017",borderBottom:"2px solid #e3a00833",padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:34,height:34,borderRadius:8,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#060810"}}>iP</div>
+        <div><h1 style={{fontSize:15,fontWeight:800,color:"#e3a008",margin:0}}>{config.name}</h1><p style={{fontSize:10,color:"#64748b",margin:0}}>{dept.icon} {dept.name} · {firm?.name||'iPrint'}</p></div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:10,color:"#64748b"}}>{filtered.length} jobs</span>
+        <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer"}}>↩ Switch Dept</button>
+      </div>
+    </header>
+    <div style={{padding:"14px 20px"}}>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14}}>
+        {deptTabs.map(t=>{const cnt=t.st?full.filter(j=>t.st.includes(j.status)).length:full.length;return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>{t.icon} {t.l} <span style={{background:"#1a2030",borderRadius:8,padding:"1px 6px",fontSize:9}}>{cnt}</span></button>;})}
+      </div>
+      <div style={{display:"grid",gap:8}}>
+        {filtered.map(j=>{const idx=pipeIdx(j.status);const allItems=(j.batches||[]).flatMap(b=>b.items||[]);const sd=j.status_dates||{};const jN=notes[j.id]||[];const isOpen=selJob===j.id;
+          return <div key={j.id} style={{background:"#0c1017",border:`1px solid ${isOpen?'#e3a00855':'#1a2030'}`,borderRadius:10,overflow:"hidden",transition:"border .2s"}}>
+            <div style={{padding:"12px 14px",cursor:"pointer"}} onClick={()=>setSelJob(isOpen?null:j.id)}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                <div><p style={{fontSize:13,fontWeight:700,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:11,fontWeight:600}}>{j.project||'—'}</p><p style={{fontSize:9,color:"#64748b"}}>{j.delivery_address?.slice(0,55)||''}</p></div>
+                <div style={{textAlign:"right"}}><span style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b',padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:700,display:"inline-block"}}>{j.status}</span>
+                  {jN.length>0&&<p style={{fontSize:8,color:"#8b5cf6",marginTop:3}}>💬 {jN.length} note{jN.length>1?'s':''}</p>}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:0,alignItems:"center",margin:"6px 0"}}>
+                {pipeline.map((s,i)=>{const active=i<=idx;const cur=i===idx;return <React.Fragment key={s.k}>
+                  {i>0&&<div style={{flex:1,height:2,background:active?'#e3a008':'#1a2030'}}/>}
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1,flexShrink:0}} title={sd[s.k]||''}>
+                    <div style={{width:20,height:20,borderRadius:10,background:active?(cur?'#e3a008':'#e3a00840'):'#1a2030',border:`2px solid ${active?'#e3a008':'#1a2030'}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:cur?'#060810':'#64748b',fontWeight:700}}>{active?'✓':s.e}</div>
+                    <span style={{fontSize:6,color:active?'#e3a008':'#475569',fontWeight:600}}>{s.l}</span>
+                    {sd[s.k]&&<span style={{fontSize:5,color:"#64748b"}}>{String(sd[s.k]).split(' by')[0]?.slice(0,11)}</span>}
+                  </div>
+                </React.Fragment>;})}
+              </div>
+            </div>
+            {isOpen&&<div style={{borderTop:"1px solid #1a2030",padding:"10px 14px",background:"#080c14"}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:10,marginBottom:8}}>
+                <div><span style={{color:"#64748b"}}>PO:</span> {j.po_number||'Pending'}</div>
+                <div><span style={{color:"#64748b"}}>Firm:</span> {firm?.name||'—'}</div>
+                <div><span style={{color:"#64748b"}}>Items:</span> {allItems.length}</div>
+                <div><span style={{color:"#64748b"}}>Client:</span> {j.client_name}</div>
+              </div>
+              {allItems.length>0&&<table style={{width:"100%",borderCollapse:"collapse",marginBottom:8}}><thead><tr style={{borderBottom:"1px solid #1a2030"}}><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>#</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Item</th>{allItems.some(it=>it.img_url)&&<th style={{padding:"3px",fontSize:8,color:"#64748b"}}>Img</th>}<th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Spec</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Size</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Qty</th></tr></thead><tbody>
+                {allItems.map((it,i)=><tr key={it.id} style={{borderBottom:"1px solid #0c1017"}}><td style={{padding:"3px",fontSize:9}}>{i+1}</td><td style={{padding:"3px",fontSize:10,fontWeight:600}}>{it.client_name||it.internal_name}</td>{allItems.some(x=>x.img_url)&&<td style={{padding:"2px"}}>{it.img_url?<a href={it.img_url} target="_blank"><img src={it.img_url} style={{width:24,height:24,objectFit:"cover",borderRadius:3}}/></a>:'—'}</td>}<td style={{padding:"3px",fontSize:9,color:"#8b949e"}}>{it.media?.slice(0,20)||'—'}</td><td style={{padding:"3px",fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td style={{padding:"3px",fontSize:10,fontWeight:700}}>{it.qty}</td></tr>)}
+              </tbody></table>}
+              {allItems.some(it=>it.img_url)&&<div style={{marginTop:6,marginBottom:8}}><p style={{fontSize:9,color:"#64748b",fontWeight:600,marginBottom:4}}>Design References</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{allItems.filter(it=>it.img_url).map((it,i)=><a key={i} href={it.img_url} target="_blank" rel="noopener"><img src={it.img_url} style={{width:50,height:50,objectFit:"cover",borderRadius:4,border:"1px solid #1a2030"}}/></a>)}</div></div>}
+              <div style={{borderTop:"1px solid #1a2030",paddingTop:8}}>
+                <p style={{fontSize:9,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>💬 Notes & Approvals</p>
+                {jN.map(n=><div key={n.id} style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:6,padding:"6px 8px",marginBottom:4}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,fontWeight:700,color:"#e3a008"}}>{n.dept}</span><span style={{fontSize:7,color:"#64748b"}}>{new Date(n.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</span></div>
+                  <p style={{fontSize:10,marginTop:2,color:"#c9d1d9"}}>{n.text}</p>
+                </div>)}
+                {jN.length===0&&<p style={{fontSize:9,color:"#475569",marginBottom:4}}>No notes yet. Add the first one below.</p>}
+                <div style={{display:"flex",gap:4,marginTop:4}}>
+                  <input style={{flex:1,padding:"7px 10px",borderRadius:6,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:11,outline:"none"}} placeholder={"Add note as "+dept.name+"..."} value={noteText[j.id]||''} onChange={e=>setNoteText(p=>({...p,[j.id]:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')addNote(j.id);}}/>
+                  <button onClick={()=>addNote(j.id)} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"#8b5cf6",color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}}>Send</button>
+                </div>
+              </div>
+            </div>}
+          </div>;})}
+        {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#64748b"}}><p style={{fontSize:32}}>✨</p><p>No projects in this category</p></div>}
+      </div>
+    </div>
+    <footer style={{textAlign:"center",padding:"16px",borderTop:"1px solid #1a2030",marginTop:20}}><p style={{fontSize:9,color:"#475569"}}>Powered by iPrint ERP · {firm?.name||''} · {new Date().getFullYear()}</p></footer>
+  </div>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<RootApp/>);
