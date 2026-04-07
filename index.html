@@ -226,6 +226,21 @@ function MainApp({user,onLogout,masterData}){
     if(!error) {setBatches(p=>[batchData,...p]); show("Batch added!");}
   },[show]);
 
+  const deleteBatch = useCallback(async (batchId) => {
+    // Delete all items in batch first, then batch
+    await sb.from('line_items').delete().eq('batch_id',batchId);
+    await sb.from('batches').delete().eq('id',batchId);
+    setItems(p=>p.filter(i=>i.batch_id!==batchId));
+    setBatches(p=>p.filter(b=>b.id!==batchId));
+    show("Batch deleted");
+  },[show]);
+
+  const updateBatchNote = useCallback(async (batchId, note) => {
+    await sb.from('batches').update({note}).eq('id',batchId);
+    setBatches(p=>p.map(b=>b.id===batchId?{...b,note}:b));
+    show("Batch note updated");
+  },[show]);
+
   // ─── IMPORT MULTIPLE BATCHES + ITEMS (from Excel) ─────────
   const importBatches = useCallback(async (batchesWithItems) => {
     let imported=0;
@@ -558,7 +573,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -648,7 +663,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [ed,setEd]=useState(null); // editing item id
@@ -756,7 +771,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     </div>
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
-        <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
+        <div style={{display:"flex",alignItems:"center",gap:4}}>
+          <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
+          <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
+          <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>{if(confirm('Delete Batch '+(bi+1)+' "'+b.note+'" and all its items?\nThis cannot be undone.'))deleteBatch(b.id);}}>🗑️</button>
+        </div>
         <div style={{display:"flex",alignItems:"center",gap:4}}>
           {b.bill_no?<span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
           :canSeeRates&&<div style={{display:"flex",gap:2,alignItems:"center"}}><input className="in mn" placeholder="Invoice#" style={{width:90,fontSize:9,padding:"2px 4px"}} onKeyDown={e=>{if(e.key==='Enter'&&e.target.value){saveBill(b.id,e.target.value);e.target.value='';}}} /><button className="b bg bs" style={{fontSize:8,padding:"2px 6px"}} onClick={e=>{const inp=e.target.previousSibling;if(inp?.value){saveBill(b.id,inp.value);inp.value='';}}}>Save Inv</button></div>}
