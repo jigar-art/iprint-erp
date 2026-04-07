@@ -320,31 +320,27 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── UPDATE JOB STATUS ─────────────────────────────────────
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
-    // Check if actually changing
-    let currentJob=null;
-    setJobs(prev=>{currentJob=prev.find(j=>j.id===jobId);return prev;});
-    if(!currentJob||currentJob.status===newStatus)return;
-    
-    // DB WRITE FIRST — only update UI if DB succeeds
-    const {error}=await sb.from('jobs').update({status:newStatus}).eq('id',jobId);
-    if(error){
-      show("❌ FAILED to save status: "+error.message,false);
-      return;
-    }
-    
-    // DB succeeded — now update React state
-    const existingDates=currentJob.status_dates||{};
-    const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
+    // Instant UI update — don't wait for DB
+    let skip=false;
+    let newDates={};
     const now=new Date();
     const timeStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
     const userName=window.__currentUser?.name||'Unknown';
-    const newDates={...existingDates,[statusKey]:timeStr+' by '+userName};
-    setJobs(prev=>prev.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j));
     
-    // Try saving dates (non-critical)
-    sb.from('jobs').update({status_dates:newDates}).eq('id',jobId).then(()=>{}).catch(()=>{});
+    setJobs(prev=>{
+      const job=prev.find(j=>j.id===jobId);
+      if(!job||job.status===newStatus){skip=true;return prev;}
+      const existingDates=job.status_dates||{};
+      const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
+      newDates={...existingDates,[statusKey]:timeStr+' by '+userName};
+      return prev.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j);
+    });
+    if(skip)return;
     
-    // Dept flags - single bulk update
+    // Show toast IMMEDIATELY
+    show("✅ Status → "+newStatus);
+    
+    // Dept flags — update React state instantly
     const statusDepts={'Draft':[0,0,0,0,0,0,0,0],'Active':[1,0,0,0,0,0,0,0],'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,1,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],'PO Received':[1,0,0,0,0,0,0,0],
       'Printing':[1,1,1,1,0,0,0,0],'Fabrication':[1,1,1,1,1,0,0,0],'Installation':[1,1,1,1,1,1,1,0],
       'Delivered':[1,1,1,1,1,1,1,0],'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
@@ -353,11 +349,22 @@ function MainApp({user,onLogout,masterData}){
     if(flags){
       const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
       const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
-      sb.from('line_items').update(updates).eq('job_id',jobId).then(()=>{
-        setItems(prev=>prev.map(i=>i.job_id===jobId?{...i,...updates}:i));
-      });
+      setItems(prev=>prev.map(i=>i.job_id===jobId?{...i,...updates}:i));
     }
-    show("✅ Status saved → "+newStatus);
+    
+    // ALL DB writes in parallel — non-blocking background
+    const dbOps=[
+      sb.from('jobs').update({status:newStatus,status_dates:newDates}).eq('id',jobId),
+    ];
+    if(flags){
+      const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
+      const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
+      dbOps.push(sb.from('line_items').update(updates).eq('job_id',jobId));
+    }
+    Promise.all(dbOps).then(results=>{
+      const err=results.find(r=>r.error);
+      if(err){show("⚠️ DB sync issue — refresh to verify",false);}
+    }).catch(()=>{show("⚠️ Network error — refresh to verify",false);});
   },[show]);
 
   // ─── UPDATE JOB FIELDS (client details, PO, delivery etc) ──
