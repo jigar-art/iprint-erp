@@ -702,7 +702,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const itemData={id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:1,product_id:"",
       internal_name:ni.internal_name,client_name:ni.client_name||ni.internal_name,media:ni.media,
       width:ni.width,height:ni.height,size_unit:ni.size_unit,qty:q,rate_mode:ni.rate_mode,rate:r,
-      sqft,total,gst,amount:Math.round((total+gst)*100)/100,area:"In-house",
+      sqft,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100,area:"In-house",
       dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
       dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false};
     await addLineItem(itemData);
@@ -1003,13 +1003,15 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
 
   const sub=async(isDraft=false)=>{
     if(!f.cn){alert("Select client");return;}
+    if(!isDraft&&its.length===0){alert("Add at least one item before creating a job.");return;}
+    if(!isDraft&&!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
     setSubmitting(true);
     const poUrl=await uploadFile(poFile,'po');
     const designUrls=designFiles.length>0?await uploadMultiple(designFiles,'design-refs'):[];
     const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
-    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
     await createJob(jobData,batchData,lineItems);
     setSubmitting(false);
   };
@@ -1583,11 +1585,12 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const submitJob=async()=>{
     if(!f.cn){alert("Select client");return;}
     if(its.length===0){alert("No items");return;}
+    if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
     setSubmitting(true);
     const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
-    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
     await createJob(jobData,batchData,lineItems);
     setSubmitting(false);
   };
