@@ -1340,7 +1340,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
   const [sq,setSq]=useState('');
   const [statusFilter,setStatusFilter]=useState('All');
   const tabs=[
-    {id:'pending',l:'Billing Pending',c:'#f59e0b',statuses:['Billing Pending','Given for Billing','Delivered','Cash Pending','Proforma Invoice','IC Pending']},
+    {id:'pending',l:'All Pending',c:'#f59e0b',statuses:['Billing Pending','Given for Billing','Delivered','Cash Pending','Proforma Invoice','IC Pending']},
     {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing','Delivered']},
     {id:'done',l:'Billing Completed',c:'#4ade80',statuses:['Billing Done','Cash Received','No Bill']},
   ];
