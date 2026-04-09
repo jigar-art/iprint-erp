@@ -524,6 +524,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
+    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales"]},
   ];
   const nav=allNav.filter(n=>{
     if(!n.roles.includes(user.role))return false;
@@ -572,6 +573,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
+          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal}/>}
         </div>
       </main>
 
@@ -1889,6 +1891,180 @@ function RootApp(){
 
 // ═══════════════════════════════════════════════════════════
 // BACKUP — One-click database export
+// ═══════════════════════════════════════════════════════════
+// BANKING CRM PAGE
+// ═══════════════════════════════════════════════════════════
+function BankCRMPage({show,jobs,sm}){
+  const [sites,setSites]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState('ALL');
+  const [search,setSearch]=useState('');
+  const [stFilter,setStFilter]=useState('All');
+  const [stateFilter,setStateFilter]=useState('All');
+  const [page,setPage]=useState(0);
+  const pageSize=50;
+
+  // Load banking sites from Supabase
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      let all=[],from=0,sz=1000;
+      while(true){
+        const {data,error}=await sb.from('banking_sites').select('*').order('id').range(from,from+sz-1);
+        if(error||!data||!data.length)break;
+        all=all.concat(data);
+        if(data.length<sz)break;
+        from+=sz;
+      }
+      setSites(all);setLoading(false);
+      console.log('Banking CRM: loaded',all.length,'sites');
+    })();
+  },[]);
+
+  // Projects
+  const projects=useMemo(()=>{
+    const p={};sites.forEach(s=>{if(!p[s.project])p[s.project]=0;p[s.project]++;});
+    return Object.entries(p).sort((a,b)=>b[1]-a[1]);
+  },[sites]);
+
+  // Filtered sites
+  const filtered=useMemo(()=>{
+    let f=sites;
+    if(tab!=='ALL')f=f.filter(s=>s.project===tab);
+    if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
+    if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
+    if(search){const q=search.toLowerCase();f=f.filter(s=>
+      s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||
+      s.city?.toLowerCase().includes(q)||s.state?.toLowerCase().includes(q)||
+      s.vendor_name?.toLowerCase().includes(q)||s.job_no?.toLowerCase().includes(q)||
+      s.billing_status?.toLowerCase().includes(q)||s.district?.toLowerCase().includes(q)
+    );}
+    return f;
+  },[sites,tab,stFilter,stateFilter,search]);
+
+  // Stats
+  const stats=useMemo(()=>{
+    const f=tab==='ALL'?sites:sites.filter(s=>s.project===tab);
+    return {
+      total:f.length,
+      invoiced:f.filter(s=>s.billing_category==='Invoiced').length,
+      givenForBilling:f.filter(s=>s.billing_category==='Given for Billing').length,
+      pending:f.filter(s=>!s.billing_category||['Photo Pending','Work/PO Pending','Billing Pending','Other'].includes(s.billing_category)).length,
+      completed:f.filter(s=>s.work_category==='Completed').length,
+      photoReceived:f.filter(s=>s.photo_status?.includes('Received')).length,
+      photoPending:f.filter(s=>!s.photo_status||s.photo_status.includes('Pending')||s.photo_status==='').length,
+    };
+  },[sites,tab]);
+
+  // Unique states for filter
+  const states=useMemo(()=>{
+    const s=new Set();sites.forEach(r=>{if(r.state)s.add(r.state);});
+    return [...s].sort();
+  },[sites]);
+
+  // Billing categories for filter
+  const billingCats=useMemo(()=>{
+    const s=new Set();sites.forEach(r=>{if(r.billing_category)s.add(r.billing_category);});
+    return [...s].sort();
+  },[sites]);
+
+  // Update a site field
+  const updateSite=async(id,field,value)=>{
+    const {error}=await sb.from('banking_sites').update({[field]:value}).eq('id',id);
+    if(!error){setSites(p=>p.map(s=>s.id===id?{...s,[field]:value}:s));show('Updated!');}
+    else show('Error: '+error.message,false);
+  };
+
+  // Export to Excel
+  const exportExcel=()=>{
+    const data=filtered.map((s,i)=>({
+      'Sr':i+1,'Job#':s.job_no||'','PO#':s.po_number||'','ATM ID':s.atm_id||'',
+      'Address':s.site_address||'','City':s.city||'','District':s.district||'',
+      'State':s.state||'','Pincode':s.pincode||'','Vendor':s.vendor_name||'',
+      'Installation':s.installation_status||'','Photos':s.photo_status||'',
+      'Billing Status':s.billing_status||'','Billing Category':s.billing_category||'',
+      'Work Category':s.work_category||''
+    }));
+    const ws=XLSX.utils.json_to_sheet(data);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,tab==='ALL'?'All Sites':tab.slice(0,31));
+    XLSX.writeFile(wb,`Banking_CRM_${tab.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    show('Excel exported!');
+  };
+
+  // Paginated
+  const paged=filtered.slice(page*pageSize,(page+1)*pageSize);
+  const totalPages=Math.ceil(filtered.length/pageSize);
+
+  if(loading)return <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:40}}><div className="loader"></div><span style={{marginLeft:8,color:'#64748b'}}>Loading Banking CRM...</span></div>;
+
+  return <div style={{display:'flex',flexDirection:'column',gap:8}}>
+    {/* Project Tabs */}
+    <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
+      <button className={`b bs ${tab==='ALL'?'bp':''}`} onClick={()=>{setTab('ALL');setPage(0);}}>All ({sites.length})</button>
+      {projects.map(([p,c])=><button key={p} className={`b bs ${tab===p?'bp':''}`} onClick={()=>{setTab(p);setPage(0);}} style={{fontSize:9}}>{p} ({c})</button>)}
+    </div>
+
+    {/* Stats Cards */}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5}}>
+      <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
+    </div>
+
+    {/* Filters + Search + Export */}
+    <div className="c" style={{padding:8,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+      <select className="in" value={stFilter} onChange={e=>{setStFilter(e.target.value);setPage(0);}} style={{fontSize:10,padding:'4px 6px',width:130}}>
+        <option value="All">All Billing ({filtered.length})</option>
+        {billingCats.map(c=><option key={c} value={c}>{c}</option>)}
+      </select>
+      <select className="in" value={stateFilter} onChange={e=>{setStateFilter(e.target.value);setPage(0);}} style={{fontSize:10,padding:'4px 6px',width:130}}>
+        <option value="All">All States</option>
+        {states.map(s=><option key={s} value={s}>{s}</option>)}
+      </select>
+      <input className="in" placeholder="🔍 Search ATM, City, Vendor, Job#..." value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}} style={{flex:1,fontSize:10,padding:'4px 8px',minWidth:150}}/>
+      <button className="b bg bs" onClick={exportExcel} style={{fontSize:9}}>📥 Export Excel</button>
+      <span style={{fontSize:9,color:'#64748b'}}>{filtered.length} sites</span>
+    </div>
+
+    {/* Sites Table */}
+    <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
+      <table><thead><tr>
+        <th style={{width:30}}>#</th><th>Job#</th><th>ATM ID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
+        <th>Vendor</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th>
+      </tr></thead><tbody>
+      {paged.map((s,i)=>{
+        const billingColor=s.billing_category==='Invoiced'?'#4ade80':s.billing_category==='Given for Billing'?'#06b6d4':'#f59e0b';
+        return <tr key={s.id}>
+          <td className="mn" style={{fontSize:9}}>{page*pageSize+i+1}</td>
+          <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=jobs.find(j=>j.id?.includes(s.job_no));if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
+          <td style={{fontSize:9,color:'#8b5cf6',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.atm_id}>{s.atm_id||'—'}</td>
+          <td style={{fontSize:9,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_address}>{s.site_address?.slice(0,50)||'—'}</td>
+          <td style={{fontSize:9}}>{s.city||s.district||'—'}</td>
+          <td style={{fontSize:9,color:'#64748b'}}>{s.state?.slice(0,12)||'—'}</td>
+          <td style={{fontSize:9,maxWidth:80,overflow:'hidden',textOverflow:'ellipsis'}} title={s.vendor_name}>{s.vendor_name?.slice(0,15)||'—'}</td>
+          <td><select className="in" value={s.installation_status||''} onChange={e=>updateSite(s.id,'installation_status',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:70,color:s.installation_status==='Completed'?'#4ade80':s.installation_status==='Duplicate'?'#64748b':'#f59e0b'}}>
+            <option value="">—</option><option value="Completed">Completed</option><option value="Pending">Pending</option><option value="Duplicate">Duplicate</option><option value="In Progress">In Progress</option>
+          </select></td>
+          <td><select className="in" value={s.photo_status||''} onChange={e=>updateSite(s.id,'photo_status',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:75,color:s.photo_status?.includes('Received')?'#4ade80':'#f59e0b'}}>
+            <option value="">—</option><option value="Photo Received">Received</option><option value="Photo Pending">Pending</option><option value="Duplicate">Duplicate</option>
+          </select></td>
+          <td style={{fontSize:8,color:'#06b6d4'}}>{s.billing_status?.slice(0,12)||'—'}</td>
+          <td><span className="bd" style={{background:billingColor+'20',color:billingColor,fontSize:8}}>{s.billing_category||'Pending'}</span></td>
+          <td><select className="in" value={s.work_category||''} onChange={e=>updateSite(s.id,'work_category',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:70,color:s.work_category==='Completed'?'#4ade80':'#f59e0b'}}>
+            <option value="">—</option><option value="Completed">Completed</option><option value="Pending">Pending</option><option value="Duplicate">Duplicate</option>
+          </select></td>
+        </tr>;})}
+      </tbody></table>
+    </div>
+
+    {/* Pagination */}
+    {totalPages>1&&<div style={{display:'flex',justifyContent:'center',gap:4,alignItems:'center'}}>
+      <button className="b bs" disabled={page===0} onClick={()=>setPage(p=>p-1)}>← Prev</button>
+      <span className="mn" style={{fontSize:10,color:'#64748b'}}>Page {page+1} of {totalPages}</span>
+      <button className="b bs" disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</button>
+    </div>}
+  </div>;
+}
+
 // ═══════════════════════════════════════════════════════════
 function BackupPage(){
   const [status,setStatus]=useState('');
