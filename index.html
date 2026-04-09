@@ -227,13 +227,27 @@ function MainApp({user,onLogout,masterData}){
   },[show]);
 
   const deleteBatch = useCallback(async (batchId) => {
+    const batchItems = items.filter(i=>i.batch_id===batchId);
+    const totalAmt = batchItems.reduce((s,i)=>s+(+i.amount||0),0);
+    const batch = batches.find(b=>b.id===batchId);
+    const jobId = batch?.job_id||batchItems[0]?.job_id||'';
+    const role = user?.role||'';
+    const isAdmin = ['admin','sales'].includes(role);
+    // Block non-admins from deleting batches with items
+    if(batchItems.length > 0 && !isAdmin){show("⚠️ Only admins can delete batches with items. Ask JIGAR/RUCHITA.",false);return;}
+    // Enhanced confirmation
+    const msg = `⚠️ DELETE ENTIRE BATCH?\n\n"${batch?.note||'Batch'}" — ${batchItems.length} items\nTotal value: ₹${totalAmt.toFixed(2)}\nJob: ${jobId}\n\n⛔ ALL ${batchItems.length} items will be permanently deleted.\n\nType DELETE to confirm:`;
+    const typed = prompt(msg);
+    if(typed !== 'DELETE'){if(typed!==null)show("Cancelled — type DELETE exactly to confirm",false);return;}
     // Delete all items in batch first, then batch
     await sb.from('line_items').delete().eq('batch_id',batchId);
     await sb.from('batches').delete().eq('id',batchId);
     setItems(p=>p.filter(i=>i.batch_id!==batchId));
     setBatches(p=>p.filter(b=>b.id!==batchId));
+    // Audit log
+    try{await sb.from('client_notes').insert({id:'N'+Date.now(),job_id:jobId,dept:'SYSTEM',text:`🗑️ Batch deleted by ${user?.name||'Unknown'}: "${batch?.note||'Batch'}" (${batchItems.length} items, ₹${totalAmt.toFixed(2)} total)`,created_at:new Date().toISOString()});}catch(e){}
     show("Batch deleted");
-  },[show]);
+  },[show,items,batches,user]);
 
   const updateBatchNote = useCallback(async (batchId, note) => {
     await sb.from('batches').update({note}).eq('id',batchId);
@@ -407,10 +421,25 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── DELETE LINE ITEM ──────────────────────────────────────
   const deleteLineItem = useCallback(async (itemId) => {
+    // Find the item to check its value
+    const item = items.find(i=>i.id===itemId);
+    if(!item){show("Item not found",false);return;}
+    const amt = +item.amount||0;
+    const role = user?.role||'';
+    const isAdmin = ['admin','sales'].includes(role);
+    // Block non-admins from deleting items with financial data
+    if(amt > 0 && !isAdmin){show("⚠️ Only admins can delete items with pricing. Ask JIGAR/RUCHITA.",false);return;}
+    // Enhanced confirmation with amount warning
+    const msg = amt > 0
+      ? `⚠️ DELETE ITEM?\n\n"${item.internal_name}"\nQty: ${item.qty} | Amount: ₹${amt.toFixed(2)}\nJob: ${item.job_id}\n\nThis amount will be lost permanently.\nAre you sure?`
+      : `Delete item "${item.internal_name}"?`;
+    if(!confirm(msg))return;
     await sb.from('line_items').delete().eq('id',itemId);
     setItems(p=>p.filter(i=>i.id!==itemId));
+    // Audit log
+    try{await sb.from('client_notes').insert({id:'N'+Date.now(),job_id:item.job_id,dept:'SYSTEM',text:`🗑️ Item deleted by ${user?.name||'Unknown'}: "${item.internal_name}" (Qty:${item.qty}, Amt:₹${amt.toFixed(2)})`,created_at:new Date().toISOString()});}catch(e){}
     show("Item deleted");
-  },[show]);
+  },[show,items,user]);
 
   const updateJobFile = useCallback(async (jobId, field, url) => {
     await sb.from('jobs').update({[field]:url}).eq('id',jobId);
@@ -841,7 +870,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         <div style={{display:"flex",alignItems:"center",gap:4}}>
           <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
           <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
-          <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>{if(confirm('Delete Batch '+(bi+1)+' "'+b.note+'" and all its items?\nThis cannot be undone.'))deleteBatch(b.id);}}>🗑️</button>
+          <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4}}>
           {b.bill_no?<span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
@@ -865,7 +894,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
             <td colSpan={8}></td></tr>
           :<tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
-            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} onClick={()=>startEdit(it)}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>{if(confirm('Delete item "'+it.internal_name+'"?'))deleteLineItem(it.id)}}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} onClick={()=>startEdit(it)}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
