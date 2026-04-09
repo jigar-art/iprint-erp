@@ -1030,7 +1030,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
 // ═══════════════════════════════════════════════════════════
 function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,sp,jobs,user}){
   const [fm,sfm]=useState("JXT");
-  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
+  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:"",cgst:"",bname:""});
   const [su,sSu]=useState("INCH");
   const [showNewCli,setShowNewCli]=useState(false);
   const [nc,setNc]=useState({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});
@@ -1040,8 +1040,8 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
   const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
 
-  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone}));};
-  const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
+  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||p.cemail,cgst:c.gst||'',bname:c.billing_name||c.name}));};
+  const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email,cgst:nc.gst||'',bname:nc.billing_name||nc.name.trim()}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
   const GST_OPTS=[0,5,12,18,28];
   const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=(it.rm==="SQFT"&&it.sqft>0)?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
@@ -1063,12 +1063,22 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
 
   const sub=async(isDraft=false)=>{
     if(!f.cn){alert("Select client");return;}
-    if(!isDraft&&its.length===0){alert("Add at least one item before creating a job.");return;}
-    if(!isDraft&&!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
+    if(!isDraft){
+      const missing=[];
+      if(!f.pr.trim())missing.push("Project / Site Name");
+      if(!f.cp.trim())missing.push("Contact Person");
+      if(!f.cph.trim())missing.push("Contact Number");
+      if(!f.da.trim())missing.push("Delivery Address");
+      if(!f.cgst.trim())missing.push("Client GST Number");
+      if(!f.bname.trim())missing.push("Billing Entity");
+      if(missing.length>0){alert("⚠️ Please fill all mandatory fields:\n\n• "+missing.join("\n• "));return;}
+      if(its.length===0){alert("Add at least one item before creating a job.");return;}
+      if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr}\nBilling: ${f.bname}\nGST: ${f.cgst}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
+    }
     setSubmitting(true);
     const poUrl=await uploadFile(poFile,'po');
     const designUrls=designFiles.length>0?await uploadMultiple(designFiles,'design-refs'):[];
-    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
+    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
     const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
@@ -1083,12 +1093,15 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       <div className="fg f3">
         <F l="Made By"><select className="in" value={f.mb} onChange={e=>sF(p=>({...p,mb:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
         <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
-        <F l="Client"><div style={{display:"flex",gap:2}}><select className="in" value={f.cl} onChange={e=>selC(e.target.value)} style={{flex:1}}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewCli(true)}>+</button></div></F>
-        <F l="Project"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))}/></F>
-        <F l="Contact"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))}/></F>
+        <F l="Client *"><div style={{display:"flex",gap:2}}><select className="in" value={f.cl} onChange={e=>selC(e.target.value)} style={{flex:1}}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewCli(true)}>+</button></div></F>
+        <F l="Project / Site Name *"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))} placeholder="Required"/></F>
+        <F l="Contact Person *"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))} placeholder="Required"/></F>
+        <F l="Contact Number *"><input className="in" value={f.cph} onChange={e=>sF(p=>({...p,cph:e.target.value}))} placeholder="Required"/></F>
         <F l="PO #"><input className="in mn" value={f.po} onChange={e=>sF(p=>({...p,po:e.target.value}))}/></F>
         <F l="📧 Client Email"><input className="in" type="email" value={f.cemail} onChange={e=>sF(p=>({...p,cemail:e.target.value}))} placeholder="client@company.com"/></F>
-        <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={f.da} onChange={e=>sF(p=>({...p,da:e.target.value}))}/></F></div>
+        <div style={{gridColumn:"span 2"}}><F l="Delivery Address *"><input className="in" value={f.da} onChange={e=>sF(p=>({...p,da:e.target.value}))} placeholder="Required"/></F></div>
+        <F l="Client GST Number *"><input className="in mn" value={f.cgst} onChange={e=>sF(p=>({...p,cgst:e.target.value}))} placeholder="27XXXXX... (Required)"/></F>
+        <F l="Billing Entity *"><input className="in" value={f.bname} onChange={e=>sF(p=>({...p,bname:e.target.value}))} placeholder="Billing name (Required)"/></F>
         <F l="Size Unit"><select className="in" value={su} onChange={e=>sSu(e.target.value)}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
         <F l="📎 Upload PO"><input type="file" accept=".pdf,.jpg,.png,.jpeg" className="in" style={{padding:3}} onChange={e=>setPoFile(e.target.files[0]||null)}/>{poFile&&<span style={{fontSize:8,color:"#4ade80"}}>✓ {poFile.name.slice(0,20)}</span>}</F>
         <F l="🎨 Design Reference"><input type="file" accept=".jpg,.png,.jpeg,.pdf" multiple className="in" style={{padding:3}} onChange={e=>setDesignFiles([...e.target.files])}/>{designFiles.length>0&&<span style={{fontSize:8,color:"#4ade80"}}>✓ {designFiles.length} file(s)</span>}</F>
