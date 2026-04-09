@@ -570,7 +570,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={fullJobs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
-          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show}/>}
+          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
@@ -1394,7 +1394,7 @@ function CliPage({clients,jobs,s}){const fl=clients.filter(c=>!s||c.name?.toLowe
 }
 
 // ACCOUNTS
-function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFile,appendJobFiles,removeJobFile,show}){
+function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFile,appendJobFiles,removeJobFile,show,addBatchToJob}){
   const [tab,setTab]=useState('pending');
   const [invoices,setInvoices]=useState({});
   const [sq,setSq]=useState('');
@@ -1412,18 +1412,38 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     return true;
   });
   const sc={'Billing Pending':'#f59e0b','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f47067','Given for Billing':'#06b6d4','Delivered':'#10b981','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
-  const markBilled=async(j)=>{
-    const inv=invoices[j.id];
+  const addInvoice=async(j)=>{
+    const inv=(invoices[j.id]||'').trim();
     if(!inv){alert("Enter invoice# first");return;}
-    // Save invoice to ALL batches of this job
+    // Find a batch without bill_no, or create a new one
     const jBatches=(j.batches||[]);
-    for(const b of jBatches){
-      if(!b.bill_no)saveBill(b.id,inv);
+    const emptyBatch=jBatches.find(b=>!b.bill_no);
+    if(emptyBatch){
+      saveBill(emptyBatch.id,inv);
+    } else {
+      // Create a new batch for this invoice
+      const bid="B"+uid();
+      const bd={id:bid,job_id:j.id,date:td(),note:"Invoice: "+inv,bill_no:inv,status:"Done"};
+      if(addBatchToJob) await addBatchToJob(bd);
     }
-    // Change status to Billing Done
-    updateJobStatus(j.id,'Billing Done');
     setInvoices(p=>({...p,[j.id]:''}));
-    show("✅ "+j.id+" → Billing Done (Inv: "+inv+")");
+    show("✅ Invoice "+inv+" added to "+j.id);
+  };
+  const markBilled=async(j)=>{
+    const existingInv=(j.batches||[]).map(b=>b.bill_no).filter(Boolean);
+    if(existingInv.length===0){alert("Add at least one invoice# first");return;}
+    updateJobStatus(j.id,'Billing Done');
+    show("✅ "+j.id+" → Billing Done ("+existingInv.length+" invoice(s))");
+  };
+  const InvChips=({j,editable})=>{
+    const bills=(j.batches||[]).map(b=>b.bill_no).filter(Boolean);
+    return <div style={{display:'flex',flexWrap:'wrap',gap:2,alignItems:'center'}}>
+      {bills.map((b,i)=><span key={i} className="bd" style={{background:'#06b6d420',color:'#06b6d4',fontSize:9,padding:'1px 6px'}}>{b}</span>)}
+      {editable&&<div style={{display:'flex',gap:2,alignItems:'center',marginTop:bills.length?2:0}}>
+        <input className="in mn" style={{width:90,fontSize:9,padding:'2px 4px'}} placeholder="New Inv#" value={invoices[j.id]||''} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')addInvoice(j);}}/>
+        <button className="b bg bs" style={{fontSize:8,padding:'2px 6px',whiteSpace:'nowrap'}} onClick={()=>addInvoice(j)}>➕ Add</button>
+      </div>}
+    </div>;
   };
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"flex",justifyContent:"space-between",gap:4,flexWrap:"wrap"}}>
@@ -1433,14 +1453,14 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
           <option value="All">All Statuses ({cur.statuses.reduce((c,st)=>c+jobs.filter(j=>j.status===st).length,0)})</option>
           {cur.statuses.map(st=>{const cnt=jobs.filter(j=>j.status===st).length;return <option key={st} value={st}>{st} ({cnt})</option>;})}
         </select>
-        <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search Job#, Client, PO..." value={sq} onChange={e=>setSq(e.target.value)} style={{width:180,fontSize:10,paddingLeft:8}}/>{sq&&<button style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:10}} onClick={()=>setSq('')}>✕</button>}</div>
+        <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search Job#, Client, PO, Inv#..." value={sq} onChange={e=>setSq(e.target.value)} style={{width:200,fontSize:10,paddingLeft:8}}/>{sq&&<button style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:10}} onClick={()=>setSq('')}>✕</button>}</div>
       </div>
     </div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{statusFilter!=='All'?statusFilter:cur.l} — {filtered.length} jobs{sq?` matching "${sq}"`:''}</span></div>
-    <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th>{tab!=='done'&&<><th>Invoice#</th><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}{tab==='done'&&<th>Invoice#</th>}</tr></thead><tbody>
-      {filtered.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
-        {tab!=='done'&&<><td><input className="in mn" style={{width:100,fontSize:10}} placeholder="Inv#" value={invoices[j.id]||""} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))}/></td><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this DC file?'))removeJobFile(j.id,'dc_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this IC file?'))removeJobFile(j.id,'ic_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
-        {tab==='done'&&<td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn}</td>}
+    <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th><th>Invoices</th>{tab!=='done'&&<><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}</tr></thead><tbody>
+      {filtered.map(j=>{ return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
+        <td style={{minWidth:140}}><InvChips j={j} editable={tab!=='done'}/></td>
+        {tab!=='done'&&<><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this DC file?'))removeJobFile(j.id,'dc_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this IC file?'))removeJobFile(j.id,'ic_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
       </tr>})}
       {filtered.length===0&&<tr><td colSpan={tab!=='done'?10:7} style={{textAlign:"center",color:"#4ade80",padding:20}}>No jobs in this category</td></tr>}
     </tbody></table></div></div>
