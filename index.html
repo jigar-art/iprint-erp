@@ -2284,6 +2284,7 @@ function ClientPortal({code}){
   const [showNewJob,setShowNewJob]=useState(false);
   const [submittingJob,setSubmittingJob]=useState(false);
   const [poEdits,setPoEdits]=useState({});
+  const [portalSearch,setPortalSearch]=useState('');
   const [showBOQ,setShowBOQ]=useState(false);
   const [boqStep,setBoqStep]=useState(1);
   const [boqItems,setBoqItems]=useState([]);
@@ -2341,7 +2342,7 @@ function ClientPortal({code}){
   const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Active':0,'Recce Pending':0,'Designing':1,'Printing':2,'Fabrication':3,'Installation':4,'Delivered':5,'Billing Pending':5,'Given for Billing':5,'Billing Done':6,'Cash Received':6}[st]??-1);
   const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null}];
   const curTab=deptTabs.find(t=>t.id===tab)||deptTabs[0];
-  const filtered=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;
+  const filtered=(()=>{let f=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;if(portalSearch){const q=portalSearch.toLowerCase();f=f.filter(j=>j.id?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.delivery_address?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q));}return f;})();
 
   const addNote=async(jobId)=>{
     const text=noteText[jobId];if(!text?.trim())return;
@@ -2700,9 +2701,9 @@ function ClientPortal({code}){
   if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
     <div style={{width:420,padding:36,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:20}}>
-        {config.logo&&<img src={config.logo} style={{width:56,height:56,borderRadius:10,objectFit:"cover"}} alt={config.name}/>}
+        <div style={{width:56,height:56,borderRadius:10,background:"#e3a008",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:"#fff",letterSpacing:-0.5}}>ANA</div>
         <span style={{fontSize:22,color:"#475569",fontWeight:300}}>×</span>
-        <div style={{width:56,height:56,borderRadius:10,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:20,color:"#060810"}}>iP</div>
+        <div style={{width:56,height:56,borderRadius:10,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontWeight:900,fontSize:11,color:"#060810",lineHeight:1}}>iPrint<sup style={{fontSize:6,verticalAlign:"super"}}>TM</sup></span></div>
       </div>
       <h1 style={{fontSize:20,fontWeight:800,color:"#e3a008",marginBottom:2}}>{config.name}</h1>
       <p style={{fontSize:10,color:"#64748b",marginBottom:4}}>in collaboration with</p>
@@ -2730,11 +2731,15 @@ function ClientPortal({code}){
         <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer"}}>↩ Switch Dept</button>
       </div>
     </header>
-    <div style={{padding:"14px 20px"}}>
-      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14}}>
-        {deptTabs.map(t=>{const cnt=t.st?full.filter(j=>t.st.includes(j.status)).length:full.length;return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>{t.icon} {t.l} <span style={{background:"#1a2030",borderRadius:8,padding:"1px 6px",fontSize:9}}>{cnt}</span></button>;})}
+    <div style={{padding:"14px 20px",display:"flex",flexDirection:"column",height:"calc(100vh - 60px)",overflow:"hidden"}}>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+          {deptTabs.map(t=>{const cnt=t.st?full.filter(j=>t.st.includes(j.status)).length:full.length;return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>{t.icon} {t.l} <span style={{background:"#1a2030",borderRadius:8,padding:"1px 6px",fontSize:9}}>{cnt}</span></button>;})}
+        </div>
+        <div style={{position:"relative"}}><input style={{padding:"7px 12px 7px 30px",borderRadius:8,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:12,outline:"none",width:250}} placeholder="🔍 Search project, job#, address, PO..." value={portalSearch} onChange={e=>setPortalSearch(e.target.value)}/>{portalSearch&&<button onClick={()=>setPortalSearch('')} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12}}>✕</button>}</div>
       </div>
-      <div style={{display:"grid",gap:8}}>
+      {portalSearch&&<p style={{fontSize:10,color:"#64748b",marginBottom:6}}>{filtered.length} result{filtered.length!==1?'s':''} for "{portalSearch}"</p>}
+      <div style={{flex:1,overflowY:"auto",display:"grid",gap:8,alignContent:"start"}}>
         {filtered.map(j=>{const idx=pipeIdx(j.status);const allItems=(j.batches||[]).flatMap(b=>b.items||[]);const sd=j.status_dates||{};const jN=notes[j.id]||[];const isOpen=selJob===j.id;
           return <div key={j.id} style={{background:"#0c1017",border:`1px solid ${isOpen?'#e3a00855':'#1a2030'}`,borderRadius:10,overflow:"hidden",transition:"border .2s"}}>
             <div style={{padding:"12px 14px",cursor:"pointer"}} onClick={()=>setSelJob(isOpen?null:j.id)}>
