@@ -2281,6 +2281,12 @@ function ClientPortal({code}){
   const [tab,setTab]=useState('all');const [selJob,setSelJob]=useState(null);
   const [dept,setDept]=useState(null);
   const [noteText,setNoteText]=useState({});const [notes,setNotes]=useState({});
+  const [showNewJob,setShowNewJob]=useState(false);
+  const [submittingJob,setSubmittingJob]=useState(false);
+  const [cjf,setCjf]=useState({project:'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:''});
+  const [cjItems,setCjItems]=useState([{id:Date.now()+'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
+  const [cjFiles,setCjFiles]=useState([]);
+  const [cjMsg,setCjMsg]=useState('');
 
   const portalConfigs={
     'ANA':{name:'ANA Designs',match:['ANA DESIGNS'],depts:[
@@ -2334,6 +2340,165 @@ function ClientPortal({code}){
     setNoteText(p=>({...p,[jobId]:''}));
   };
 
+  // ── Client Job Submission ──
+  const addCjItem=()=>setCjItems(p=>[...p,{id:Date.now()+'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
+  const removeCjItem=(i)=>setCjItems(p=>p.filter((_,x)=>x!==i));
+  const updateCjItem=(i,k,v)=>setCjItems(p=>{const n=[...p];n[i]={...n[i],[k]:v};return n;});
+
+  const submitClientJob=async()=>{
+    const missing=[];
+    if(!cjf.project.trim())missing.push('Project / Site Name');
+    if(!cjf.contact_person.trim())missing.push('Contact Person');
+    if(!cjf.contact_no.trim())missing.push('Contact Number');
+    if(!cjf.delivery_address.trim())missing.push('Delivery Address');
+    if(cjItems.every(it=>!it.desc.trim()))missing.push('At least one item description');
+    if(missing.length>0){alert('⚠️ Please fill:\n\n• '+missing.join('\n• '));return;}
+
+    setSubmittingJob(true);
+    try{
+      // Generate job ID with CR- prefix (Client Request)
+      const now=new Date();const m=now.getMonth(),y=now.getFullYear();
+      const fy=m>=3?`${String(y).slice(2)}${String(y+1).slice(2)}`:`${String(y-1).slice(2)}${String(y).slice(2)}`;
+      const {data:existing}=await sb.from('jobs').select('id').like('id','%-'+fy);
+      const nums=(existing||[]).map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});
+      const nextNum=String(Math.max(0,...nums)+1).padStart(4,'0');
+      const jid=nextNum+'-'+fy;
+
+      // Upload artwork files
+      const artworkUrls=[];
+      for(const file of cjFiles){
+        const url=await uploadFile(file,'client-artworks');
+        if(url)artworkUrls.push(url);
+      }
+
+      // Build remark with WeTransfer links
+      let fullRemark='[CLIENT SUBMITTED via Portal — '+config.name+']';
+      if(cjf.remark.trim())fullRemark+='\nClient Note: '+cjf.remark.trim();
+      if(cjf.wetransfer_links.trim())fullRemark+='\n\n📎 ARTWORK LINKS:\n'+cjf.wetransfer_links.trim();
+      if(artworkUrls.length)fullRemark+='\n\n📎 UPLOADED FILES ('+artworkUrls.length+'):\n'+artworkUrls.join('\n');
+
+      // Find client matching portal config
+      const clientMatch=config.match[0]||config.name;
+
+      // Create job
+      const jobData={id:jid,firm:'JXT',client_name:clientMatch,project:cjf.project,delivery_address:cjf.delivery_address,
+        contact_person:cjf.contact_person,contact_no:cjf.contact_no,client_email:cjf.email,
+        made_by:'CLIENT PORTAL',po_number:cjf.po_number,billing_name:clientMatch,client_gst:'',
+        payment_terms:'',status:'Active',remark:fullRemark,
+        design_ref_urls:artworkUrls};
+      await sb.from('jobs').insert(jobData);
+
+      // Create batch & items
+      const batchId='B'+Date.now()+Math.random().toString(36).slice(2,5);
+      await sb.from('batches').insert({id:batchId,job_id:jid,date:td(),note:'Client Submitted',bill_no:'',status:'New'});
+
+      const lineItems=cjItems.filter(it=>it.desc.trim()).map((it,i)=>({
+        id:'LI'+Date.now()+i+Math.random().toString(36).slice(2,5),
+        batch_id:batchId,job_id:jid,sr:i+1,product_id:'',
+        internal_name:it.desc,client_name:it.desc,media:it.material,
+        width:it.width,height:it.height,size_unit:it.size_unit,
+        qty:+it.qty||1,rate_mode:'UNIT',rate:0,sqft:0,total:0,gst:0,gstPct:18,amount:0,
+        area:'In-house',
+        dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
+        dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,
+        img_url:''
+      }));
+      if(lineItems.length)await sb.from('line_items').insert(lineItems);
+
+      // Add a note so iPrint team sees it
+      await sb.from('client_notes').insert({id:'N'+Date.now(),job_id:jid,dept:'CLIENT — '+config.name,
+        text:'🆕 New job submitted by client.\nProject: '+cjf.project+'\nContact: '+cjf.contact_person+' ('+cjf.contact_no+')\nDelivery: '+cjf.delivery_address+(cjf.wetransfer_links?'\nArtwork links: '+cjf.wetransfer_links:''),
+        created_at:new Date().toISOString()});
+
+      // Reset form & reload
+      setCjMsg('✅ Job '+jid+' submitted successfully! Our team will review it shortly.');
+      setCjf({project:'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:''});
+      setCjItems([{id:Date.now()+'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
+      setCjFiles([]);
+
+      // Refresh jobs list
+      setTimeout(()=>{setShowNewJob(false);setCjMsg('');
+        let allJobs=[];
+        (async()=>{
+          for(const pattern of config.match){
+            const {data:j}=await sb.from('jobs').select('*').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});
+            if(j)allJobs=[...allJobs,...j];
+          }
+          const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});
+          setJobs(allJobs);
+          const jids=allJobs.map(x=>x.id);
+          if(jids.length>0){
+            const {data:b}=await sb.from('batches').select('*').in('job_id',jids);
+            if(b){setBatches(b);const bids=b.map(x=>x.id);
+              if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,rate_mode,sqft,img_url,dept_estimate,dept_design,dept_production,dept_printing,dept_fabrication,dept_dispatch,dept_installation,dept_accounts').in('batch_id',bids);if(li)setItems(li);}}
+          }
+        })();
+      },3000);
+
+    }catch(e){alert('Error submitting job: '+(e.message||e));}
+    setSubmittingJob(false);
+  };
+
+  // ── New Job Form UI ──
+  const NewJobForm=()=><div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:16,overflowY:'auto'}} onClick={()=>setShowNewJob(false)}>
+    <div style={{background:'#0c1017',border:'1px solid #e3a00844',borderRadius:14,width:'100%',maxWidth:800,padding:20,margin:'10px 0'}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+        <div><h3 style={{fontSize:16,fontWeight:800,color:'#e3a008',margin:0}}>📋 Submit New Job Request</h3><p style={{fontSize:10,color:'#64748b',margin:'2px 0 0'}}>Fill in the details below. Our team will review and confirm.</p></div>
+        <button onClick={()=>setShowNewJob(false)} style={{background:'none',border:'1px solid #1a2030',borderRadius:6,color:'#8b949e',fontSize:14,padding:'4px 10px',cursor:'pointer'}}>✕</button>
+      </div>
+      {cjMsg&&<div style={{background:'#10b98120',border:'1px solid #10b98155',borderRadius:8,padding:'12px 14px',marginBottom:12}}><p style={{color:'#10b981',fontSize:12,fontWeight:700}}>{cjMsg}</p></div>}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.project} onChange={e=>setCjf(p=>({...p,project:e.target.value}))} placeholder="e.g. Store Branding - Andheri"/></div>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>PO Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.po_number} onChange={e=>setCjf(p=>({...p,po_number:e.target.value}))} placeholder="Optional"/></div>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Person *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_person} onChange={e=>setCjf(p=>({...p,contact_person:e.target.value}))} placeholder="Your name"/></div>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Number *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_no} onChange={e=>setCjf(p=>({...p,contact_no:e.target.value}))} placeholder="Phone number"/></div>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Email</label><input type="email" style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.email} onChange={e=>setCjf(p=>({...p,email:e.target.value}))} placeholder="client@company.com"/></div>
+        <div style={{gridColumn:'span 2'}}><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Delivery Address *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.delivery_address} onChange={e=>setCjf(p=>({...p,delivery_address:e.target.value}))} placeholder="Full delivery address"/></div>
+      </div>
+
+      <div style={{borderTop:'1px solid #1a2030',paddingTop:12,marginBottom:10}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+          <p style={{fontSize:12,fontWeight:700,color:'#e3a008'}}>📦 Items</p>
+          <button onClick={addCjItem} style={{padding:'4px 10px',borderRadius:6,border:'1px solid #e3a00855',background:'#e3a00815',color:'#e3a008',fontSize:10,fontWeight:700,cursor:'pointer'}}>➕ Add Item</button>
+        </div>
+        {cjItems.map((it,i)=><div key={it.id} style={{background:'#060810',border:'1px solid #1a2030',borderRadius:8,padding:10,marginBottom:6}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+            <span style={{fontSize:10,fontWeight:700,color:'#e3a008'}}>Item {i+1}</span>
+            {cjItems.length>1&&<button onClick={()=>removeCjItem(i)} style={{background:'none',border:'none',color:'#f47067',fontSize:11,cursor:'pointer',padding:'2px 6px'}}>✕ Remove</button>}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr',gap:6}}>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Description *</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.desc} onChange={e=>updateCjItem(i,'desc',e.target.value)} placeholder="Item name / description"/></div>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Qty</label><input type="number" style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.qty} onChange={e=>updateCjItem(i,'qty',e.target.value)} min="1"/></div>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Width</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.width} onChange={e=>updateCjItem(i,'width',e.target.value)} placeholder="W"/></div>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Height</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.height} onChange={e=>updateCjItem(i,'height',e.target.value)} placeholder="H"/></div>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Unit</label><select style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.size_unit} onChange={e=>updateCjItem(i,'size_unit',e.target.value)}><option>MM</option><option>INCH</option><option>FT</option><option>CM</option></select></div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginTop:6}}>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Material / Spec</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.material} onChange={e=>updateCjItem(i,'material',e.target.value)} placeholder="e.g. Vinyl, ACP, Flex..."/></div>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Notes</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.notes} onChange={e=>updateCjItem(i,'notes',e.target.value)} placeholder="Special instructions for this item"/></div>
+          </div>
+        </div>)}
+      </div>
+
+      <div style={{borderTop:'1px solid #1a2030',paddingTop:12,marginBottom:10}}>
+        <p style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:8}}>🎨 Artwork & Files</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+          <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Upload Artwork Files</label><input type="file" accept=".jpg,.jpeg,.png,.pdf,.ai,.psd,.cdr,.eps,.svg,.zip,.rar" multiple style={{width:'100%',padding:6,borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:10,marginTop:3}} onChange={e=>setCjFiles([...e.target.files])}/>{cjFiles.length>0&&<p style={{fontSize:9,color:'#4ade80',marginTop:3}}>✓ {cjFiles.length} file(s) selected</p>}</div>
+          <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>WeTransfer / Google Drive Links</label><textarea style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:11,outline:'none',marginTop:3,minHeight:60,resize:'vertical',fontFamily:'inherit'}} value={cjf.wetransfer_links} onChange={e=>setCjf(p=>({...p,wetransfer_links:e.target.value}))} placeholder={"Paste WeTransfer, Google Drive, or Dropbox links here...\nOne link per line"}/></div>
+        </div>
+      </div>
+
+      <div style={{borderTop:'1px solid #1a2030',paddingTop:12}}>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Additional Remarks</label><textarea style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:11,outline:'none',marginTop:3,minHeight:50,resize:'vertical',fontFamily:'inherit'}} value={cjf.remark} onChange={e=>setCjf(p=>({...p,remark:e.target.value}))} placeholder="Any special instructions, timelines, or notes..."/></div>
+      </div>
+
+      <div style={{display:'flex',gap:8,marginTop:14}}>
+        <button onClick={submitClientJob} disabled={submittingJob} style={{flex:1,padding:'12px 20px',borderRadius:8,border:'none',background:submittingJob?'#475569':'linear-gradient(135deg,#e3a008,#ca8a04)',color:submittingJob?'#8b949e':'#060810',fontSize:13,fontWeight:800,cursor:submittingJob?'wait':'pointer'}}>{submittingJob?'⏳ Submitting...':'📤 Submit Job Request'}</button>
+        <button onClick={()=>setShowNewJob(false)} style={{padding:'12px 20px',borderRadius:8,border:'1px solid #1a2030',background:'transparent',color:'#8b949e',fontSize:12,cursor:'pointer'}}>Cancel</button>
+      </div>
+    </div>
+  </div>;
+
   if(!config) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}><div style={{textAlign:"center",padding:40}}><p style={{fontSize:48}}>🔒</p><h2 style={{color:"#f47067",fontSize:18}}>Invalid Portal Link</h2><p style={{color:"#64748b",fontSize:12,marginTop:8}}>Contact your iPrint representative for access.</p></div></div>;
 
   if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
@@ -2356,6 +2521,7 @@ function ClientPortal({code}){
         <div><h1 style={{fontSize:15,fontWeight:800,color:"#e3a008",margin:0}}>{config.name}</h1><p style={{fontSize:10,color:"#64748b",margin:0}}>{dept.icon} {dept.name} · {firm?.name||'iPrint'}</p></div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <button onClick={()=>setShowNewJob(true)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>➕ Submit New Job</button>
         <span style={{fontSize:10,color:"#64748b"}}>{filtered.length} jobs</span>
         <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer"}}>↩ Switch Dept</button>
       </div>
@@ -2413,6 +2579,7 @@ function ClientPortal({code}){
         {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#64748b"}}><p style={{fontSize:32}}>✨</p><p>No projects in this category</p></div>}
       </div>
     </div>
+    {showNewJob&&<NewJobForm/>}
     <footer style={{textAlign:"center",padding:"16px",borderTop:"1px solid #1a2030",marginTop:20}}><p style={{fontSize:9,color:"#475569"}}>Powered by iPrint ERP · {firm?.name||''} · {new Date().getFullYear()}</p></footer>
   </div>;
 }
