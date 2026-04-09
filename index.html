@@ -2283,17 +2283,28 @@ function ClientPortal({code}){
   const [noteText,setNoteText]=useState({});const [notes,setNotes]=useState({});
   const [showNewJob,setShowNewJob]=useState(false);
   const [submittingJob,setSubmittingJob]=useState(false);
+  const [poEdits,setPoEdits]=useState({});
+  const [showBOQ,setShowBOQ]=useState(false);
+  const [boqStep,setBoqStep]=useState(1);
+  const [boqItems,setBoqItems]=useState([]);
+  const [boqFile,setBoqFile]=useState(null);
+  const [boqPO,setBoqPO]=useState(null);
+  const [boqForm,setBoqForm]=useState({project:'',po_number:'',contact_person:'',contact_no:'',delivery_address:'',remark:''});
+  const [boqSubmitting,setBoqSubmitting]=useState(false);
+  const [boqMsg,setBoqMsg]=useState('');
   const [cjf,setCjf]=useState({project:'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:'',site_contact_person:'',site_contact_no:'',design_coord_person:'',design_coord_no:''});
   const [cjItems,setCjItems]=useState([{id:Date.now()+'',type:'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
   const [cjFiles,setCjFiles]=useState([]);
   const [cjMsg,setCjMsg]=useState('');
 
   const portalConfigs={
-    'ANA':{name:'ANA Designs',match:['ANA DESIGNS'],depts:[
-      {id:'design',name:'Design Team',icon:'🎨',st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending']},
-      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing','Fabrication','Installation','Delivered']},
-      {id:'purchase',name:'Purchase Team',icon:'📦',st:null},
-      {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice']},
+    'ANA':{name:'ANA Designs',match:['ANA DESIGNS'],
+      logo:'https://idjeniwznjiaanaxcjvg.supabase.co/storage/v1/object/public/Uploads/logos/ana-logo.jpg',
+      depts:[
+      {id:'design',name:'Design Team',icon:'🎨',st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending'],seeAll:false},
+      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing','Fabrication','Installation','Delivered'],seeAll:false},
+      {id:'purchase',name:'Purchase Team',icon:'📦',st:null,seeAll:true,canEditPO:true},
+      {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice'],seeAll:false},
     ]},
   };
   const config=portalConfigs[code.toUpperCase()];
@@ -2328,8 +2339,8 @@ function ClientPortal({code}){
   const sc={'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b','PO Pending':'#f47067','Recce Pending':'#f59e0b'};
   const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing',l:'Design',e:'🎨'},{k:'printing',l:'Print',e:'🖨️'},{k:'fabrication',l:'Fab',e:'🔧'},{k:'installation',l:'Install',e:'🔩'},{k:'delivered',l:'Done',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
   const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Active':0,'Recce Pending':0,'Designing':1,'Printing':2,'Fabrication':3,'Installation':4,'Delivered':5,'Billing Pending':5,'Given for Billing':5,'Billing Done':6,'Cash Received':6}[st]??-1);
-  const deptTabs=[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))];
-  const curTab=deptTabs.find(t=>t.id===tab);
+  const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null}];
+  const curTab=deptTabs.find(t=>t.id===tab)||deptTabs[0];
   const filtered=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;
 
   const addNote=async(jobId)=>{
@@ -2338,6 +2349,11 @@ function ClientPortal({code}){
     try{await sb.from('client_notes').insert(note);}catch(e){}
     setNotes(p=>({...p,[jobId]:[note,...(p[jobId]||[])]}));
     setNoteText(p=>({...p,[jobId]:''}));
+  };
+
+  const savePO=async(jobId,poNum)=>{
+    const {error}=await sb.from('jobs').update({po_number:poNum}).eq('id',jobId);
+    if(!error){setJobs(p=>p.map(j=>j.id===jobId?{...j,po_number:poNum}:j));setPoEdits(p=>({...p,[jobId]:undefined}));}
   };
 
   // ── Client Job Submission ──
@@ -2518,16 +2534,184 @@ function ClientPortal({code}){
     </div>
   </div>;
 
+  // ── BOQ Import for Purchase ──
+  const parseBOQFile=(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    setBoqFile(file);
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const data=new Uint8Array(ev.target.result);
+        const wb=XLSX.read(data,{type:'array'});
+        const allItems=[];
+        wb.SheetNames.forEach(sn=>{
+          const ws=wb.Sheets[sn];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          if(rows.length<2)return;
+          // Find header row
+          let hRow=0;
+          for(let i=0;i<Math.min(15,rows.length);i++){
+            const txt=rows[i].map(c=>String(c||'').toLowerCase()).join(' ');
+            if(/(description|particular)/.test(txt)&&/(qty|quantity|uom|unit)/.test(txt)){hRow=i;break;}
+          }
+          const headers=rows[hRow].map(x=>String(x||'').toLowerCase().replace(/[\s\n]/g,' ').trim());
+          const find=(pats)=>{for(const p of pats){const idx=headers.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
+          const ci={desc:find([/description|particular/]),qty:find([/^qty|quantit/]),size:find([/size/]),width:find([/width/]),height:find([/height/]),uom:find([/uom|^unit$/]),spec:find([/specification|material/]),remarks:find([/remark/])};
+          for(let r=hRow+1;r<rows.length;r++){
+            const row=rows[r];if(!row||row.every(c=>!c&&c!==0))continue;
+            const desc=ci.desc>-1?String(row[ci.desc]||'').replace(/\n/g,' ').trim():'';
+            if(!desc||/^(sub\s*total|total|gst|note)/i.test(desc))continue;
+            const qty=ci.qty>-1?(+row[ci.qty]||0):0;
+            if(qty<=0)continue;
+            let w='',h='';
+            if(ci.width>-1&&ci.height>-1){w=String(row[ci.width]||'');h=String(row[ci.height]||'');}
+            else if(ci.size>-1){const s=String(row[ci.size]||'');const m=s.match(/(\d+\.?\d*)\s*[x×]\s*(\d+\.?\d*)/i);if(m){w=m[1];h=m[2];}}
+            const spec=ci.spec>-1?String(row[ci.spec]||'').replace(/\n/g,' ').slice(0,80):'';
+            const rem=ci.remarks>-1?String(row[ci.remarks]||'').replace(/\n/g,' ').slice(0,60):'';
+            allItems.push({id:'BI'+Date.now()+r,desc:desc.slice(0,100),qty,w,h,spec,remarks:rem,sheet:sn,include:true});
+          }
+        });
+        setBoqItems(allItems);
+        if(allItems.length>0)setBoqStep(2);
+        else alert('No valid items found in the file. Check that it has Description and Qty columns.');
+      }catch(ex){alert('Error reading file: '+ex.message);}
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const submitBOQ=async()=>{
+    const incl=boqItems.filter(it=>it.include);
+    if(incl.length===0){alert('Select at least one item');return;}
+    if(!boqForm.project.trim()){alert('Enter project name');return;}
+    setBoqSubmitting(true);
+    try{
+      const now=new Date();const m=now.getMonth(),y=now.getFullYear();
+      const fy=m>=3?`${String(y).slice(2)}${String(y+1).slice(2)}`:`${String(y-1).slice(2)}${String(y).slice(2)}`;
+      const {data:existing}=await sb.from('jobs').select('id').like('id','%-'+fy);
+      const nums=(existing||[]).map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});
+      const nextNum=String(Math.max(0,...nums)+1).padStart(4,'0');
+      const jid=nextNum+'-'+fy;
+
+      // Upload PO file
+      let poUrl='';
+      if(boqPO){poUrl=await uploadFile(boqPO,'po-uploads')||'';}
+
+      const remark='[BOQ IMPORT via Client Portal — '+config.name+' Purchase]\nFile: '+(boqFile?.name||'—')+'\nItems: '+incl.length+(boqForm.remark?'\nNote: '+boqForm.remark:'');
+      const clientMatch=config.match[0]||config.name;
+      const jobData={id:jid,firm:'JXT',client_name:clientMatch,project:boqForm.project,delivery_address:boqForm.delivery_address,
+        contact_person:boqForm.contact_person,contact_no:boqForm.contact_no,
+        made_by:'CLIENT PORTAL (Purchase)',po_number:boqForm.po_number,billing_name:clientMatch,client_gst:'',
+        payment_terms:'',status:'Active',remark,po_file_url:poUrl?[poUrl]:[],design_ref_urls:[]};
+      await sb.from('jobs').insert(jobData);
+
+      const batchId='B'+Date.now()+Math.random().toString(36).slice(2,5);
+      await sb.from('batches').insert({id:batchId,job_id:jid,date:td(),note:'BOQ Import — '+boqForm.project,bill_no:'',status:'New'});
+
+      const lineItems=incl.map((it,i)=>({
+        id:'LI'+Date.now()+i+Math.random().toString(36).slice(2,5),
+        batch_id:batchId,job_id:jid,sr:i+1,product_id:'',
+        internal_name:it.desc,client_name:it.desc,media:it.spec||'',
+        width:it.w,height:it.h,size_unit:'MM',qty:+it.qty||1,rate_mode:'UNIT',rate:0,sqft:0,total:0,gst:0,gstPct:18,amount:0,
+        area:'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
+        dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:''}));
+      if(lineItems.length)await sb.from('line_items').insert(lineItems);
+
+      await sb.from('client_notes').insert({id:'N'+Date.now(),job_id:jid,dept:'PURCHASE — '+config.name,
+        text:'📦 BOQ imported by Purchase Team.\nJob: '+jid+'\nProject: '+boqForm.project+'\nPO#: '+(boqForm.po_number||'—')+'\nItems: '+incl.length+(poUrl?'\n📎 PO Copy attached':''),
+        created_at:new Date().toISOString()});
+
+      setBoqMsg('✅ Job '+jid+' created with '+incl.length+' items!'+(poUrl?' PO copy uploaded.':''));
+      setBoqStep(3);
+      // Refresh after delay
+      setTimeout(()=>{setShowBOQ(false);setBoqStep(1);setBoqItems([]);setBoqFile(null);setBoqPO(null);setBoqMsg('');
+        setBoqForm({project:'',po_number:'',contact_person:'',contact_no:'',delivery_address:'',remark:''});
+        (async()=>{let allJobs=[];for(const pattern of config.match){const {data:j}=await sb.from('jobs').select('*').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});if(j)allJobs=[...allJobs,...j];}
+        const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});setJobs(allJobs);
+        const jids=allJobs.map(x=>x.id);if(jids.length>0){const {data:b}=await sb.from('batches').select('*').in('job_id',jids);
+        if(b){setBatches(b);const bids=b.map(x=>x.id);if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,rate_mode,sqft,img_url,dept_estimate,dept_design,dept_production,dept_printing,dept_fabrication,dept_dispatch,dept_installation,dept_accounts').in('batch_id',bids);if(li)setItems(li);}}}})();
+      },4000);
+    }catch(ex){alert('Error: '+ex.message);}
+    setBoqSubmitting(false);
+  };
+
+  const BOQModal=()=><div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:16,overflowY:'auto'}} onClick={()=>setShowBOQ(false)}>
+    <div style={{background:'#0c1017',border:'1px solid #3b82f644',borderRadius:14,width:'100%',maxWidth:850,padding:20,margin:'10px 0'}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+        <div><h3 style={{fontSize:16,fontWeight:800,color:'#3b82f6',margin:0}}>📊 Import BOQ & Upload PO</h3><p style={{fontSize:10,color:'#64748b',margin:'2px 0 0'}}>Upload your Bill of Quantities (Excel/CSV). Items will be parsed and a new job created.</p></div>
+        <button onClick={()=>setShowBOQ(false)} style={{background:'none',border:'1px solid #1a2030',borderRadius:6,color:'#8b949e',fontSize:14,padding:'4px 10px',cursor:'pointer'}}>✕</button>
+      </div>
+
+      {boqStep===1&&<div>
+        <div style={{background:'#060810',border:'2px dashed #3b82f644',borderRadius:10,padding:30,textAlign:'center',marginBottom:14}}>
+          <p style={{fontSize:28,marginBottom:8}}>📁</p>
+          <p style={{fontSize:12,fontWeight:700,color:'#3b82f6',marginBottom:4}}>Upload BOQ Excel / CSV File</p>
+          <p style={{fontSize:9,color:'#64748b',marginBottom:12}}>Supported: .xlsx, .xls, .csv — must have Description & Qty columns</p>
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={parseBOQFile} style={{padding:8,borderRadius:6,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11}}/>
+        </div>
+      </div>}
+
+      {boqStep===2&&<div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+          <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.project} onChange={e=>setBoqForm(p=>({...p,project:e.target.value}))} placeholder="e.g. SBI ATM Branding"/></div>
+          <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>PO Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.po_number} onChange={e=>setBoqForm(p=>({...p,po_number:e.target.value}))} placeholder="PO#"/></div>
+          <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Person</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.contact_person} onChange={e=>setBoqForm(p=>({...p,contact_person:e.target.value}))}/></div>
+          <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.contact_no} onChange={e=>setBoqForm(p=>({...p,contact_no:e.target.value}))}/></div>
+          <div style={{gridColumn:'span 2'}}><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Delivery Address</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.delivery_address} onChange={e=>setBoqForm(p=>({...p,delivery_address:e.target.value}))}/></div>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:9,color:'#64748b',fontWeight:600}}>📎 Upload PO Copy (PDF/Image)</label>
+          <input type="file" accept=".pdf,.jpg,.png,.jpeg" onChange={e=>setBoqPO(e.target.files[0]||null)} style={{width:'100%',padding:6,borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:10,marginTop:3}}/>
+          {boqPO&&<p style={{fontSize:9,color:'#4ade80',marginTop:3}}>✓ {boqPO.name}</p>}
+        </div>
+        <div style={{background:'#060810',border:'1px solid #1a2030',borderRadius:8,padding:10,marginBottom:12}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+            <p style={{fontSize:11,fontWeight:700,color:'#3b82f6'}}>📋 {boqItems.filter(x=>x.include).length} / {boqItems.length} items selected from {boqFile?.name}</p>
+            <button onClick={()=>setBoqItems(p=>p.map(it=>({...it,include:!p.every(x=>x.include)})))} style={{fontSize:9,padding:'3px 8px',borderRadius:4,border:'1px solid #1a2030',background:'transparent',color:'#8b949e',cursor:'pointer'}}>{boqItems.every(x=>x.include)?'Deselect All':'Select All'}</button>
+          </div>
+          <div style={{maxHeight:300,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{borderBottom:'1px solid #1a2030'}}><th style={{padding:3,fontSize:8,color:'#64748b',textAlign:'center',width:30}}>✓</th><th style={{padding:3,fontSize:8,color:'#64748b',textAlign:'left'}}>Description</th><th style={{padding:3,fontSize:8,color:'#64748b'}}>Size</th><th style={{padding:3,fontSize:8,color:'#64748b'}}>Qty</th><th style={{padding:3,fontSize:8,color:'#64748b'}}>Spec</th></tr></thead>
+              <tbody>{boqItems.map((it,i)=><tr key={it.id} style={{borderBottom:'1px solid #0c1017',opacity:it.include?1:0.4}}>
+                <td style={{padding:3,textAlign:'center'}}><input type="checkbox" checked={it.include} onChange={()=>setBoqItems(p=>{const n=[...p];n[i]={...n[i],include:!n[i].include};return n;})}/></td>
+                <td style={{padding:3,fontSize:10,maxWidth:250,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={it.desc}>{it.desc}</td>
+                <td style={{padding:3,fontSize:9,color:'#8b949e'}}>{it.w&&it.h?it.w+'×'+it.h:''}</td>
+                <td style={{padding:3,fontSize:10,fontWeight:700,textAlign:'center'}}>{it.qty}</td>
+                <td style={{padding:3,fontSize:9,color:'#8b949e',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={it.spec}>{it.spec?.slice(0,25)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button onClick={submitBOQ} disabled={boqSubmitting} style={{flex:1,padding:'12px 20px',borderRadius:8,border:'none',background:boqSubmitting?'#475569':'linear-gradient(135deg,#3b82f6,#2563eb)',color:'#fff',fontSize:13,fontWeight:800,cursor:boqSubmitting?'wait':'pointer'}}>{boqSubmitting?'⏳ Creating Job...':'📤 Create Job with '+boqItems.filter(x=>x.include).length+' Items'}</button>
+          <button onClick={()=>{setBoqStep(1);setBoqItems([]);setBoqFile(null);}} style={{padding:'12px 16px',borderRadius:8,border:'1px solid #1a2030',background:'transparent',color:'#8b949e',fontSize:11,cursor:'pointer'}}>↩ Re-upload</button>
+        </div>
+      </div>}
+
+      {boqStep===3&&<div style={{textAlign:'center',padding:30}}>
+        <p style={{fontSize:40,marginBottom:10}}>✅</p>
+        <p style={{fontSize:14,fontWeight:700,color:'#4ade80'}}>{boqMsg}</p>
+        <p style={{fontSize:10,color:'#64748b',marginTop:8}}>The job is now visible in iPrint ERP. Ruchita can download the PO copy from the job detail.</p>
+      </div>}
+    </div>
+  </div>;
+
   if(!config) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}><div style={{textAlign:"center",padding:40}}><p style={{fontSize:48}}>🔒</p><h2 style={{color:"#f47067",fontSize:18}}>Invalid Portal Link</h2><p style={{color:"#64748b",fontSize:12,marginTop:8}}>Contact your iPrint representative for access.</p></div></div>;
 
   if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
-    <div style={{width:400,padding:36,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
-      <div style={{width:56,height:56,borderRadius:12,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:20,color:"#060810",margin:"0 auto 16px"}}>iP</div>
-      <h1 style={{fontSize:20,fontWeight:800,color:"#e3a008",marginBottom:4}}>{config.name}</h1>
-      <p style={{fontSize:11,color:"#64748b",marginBottom:24}}>Client Portal · Select your department</p>
-      <div style={{display:"grid",gap:8}}>
-        {config.depts.map(d=><button key={d.id} onClick={()=>setDept(d)} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .15s"}} onMouseEnter={e=>e.target.style.borderColor='#e3a008'} onMouseLeave={e=>e.target.style.borderColor='#1a2030'}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
+    <div style={{width:420,padding:36,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:20}}>
+        {config.logo&&<img src={config.logo} style={{width:56,height:56,borderRadius:10,objectFit:"cover"}} alt={config.name}/>}
+        <span style={{fontSize:22,color:"#475569",fontWeight:300}}>×</span>
+        <div style={{width:56,height:56,borderRadius:10,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:20,color:"#060810"}}>iP</div>
       </div>
+      <h1 style={{fontSize:20,fontWeight:800,color:"#e3a008",marginBottom:2}}>{config.name}</h1>
+      <p style={{fontSize:10,color:"#64748b",marginBottom:4}}>in collaboration with</p>
+      <p style={{fontSize:13,fontWeight:700,color:"#ca8a04",marginBottom:20}}>iPrint · Juxtapose</p>
+      <p style={{fontSize:11,color:"#64748b",marginBottom:20}}>Select your department to continue</p>
+      <div style={{display:"grid",gap:8}}>
+        {config.depts.map(d=><button key={d.id} onClick={()=>{setDept(d);setTab(d.seeAll?'all':d.id);}} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .15s"}} onMouseEnter={e=>e.target.style.borderColor='#e3a008'} onMouseLeave={e=>e.target.style.borderColor='#1a2030'}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
+      </div>
+      <p style={{fontSize:8,color:"#333",marginTop:16}}>Powered by iPrint ERP</p>
     </div>
   </div>;
 
@@ -2541,6 +2725,7 @@ function ClientPortal({code}){
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
         <button onClick={()=>setShowNewJob(true)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>➕ Submit New Job</button>
+        {dept?.canEditPO&&<button onClick={()=>setShowBOQ(true)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid #3b82f655",background:"linear-gradient(135deg,#3b82f620,#2563eb10)",color:"#3b82f6",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>📊 Import BOQ</button>}
         <span style={{fontSize:10,color:"#64748b"}}>{filtered.length} jobs</span>
         <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer"}}>↩ Switch Dept</button>
       </div>
@@ -2572,11 +2757,12 @@ function ClientPortal({code}){
             </div>
             {isOpen&&<div style={{borderTop:"1px solid #1a2030",padding:"10px 14px",background:"#080c14"}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:10,marginBottom:8}}>
-                <div><span style={{color:"#64748b"}}>PO:</span> {j.po_number||'Pending'}</div>
+                <div><span style={{color:"#64748b"}}>PO:</span> {dept?.canEditPO?<span style={{display:'inline-flex',gap:3,alignItems:'center'}}><input style={{padding:'3px 6px',borderRadius:4,border:'1px solid #1a2030',background:'#060810',color:'#4ade80',fontSize:10,width:120,outline:'none',fontFamily:'monospace'}} value={poEdits[j.id]!=null?poEdits[j.id]:(j.po_number||'')} onChange={e=>setPoEdits(p=>({...p,[j.id]:e.target.value}))} placeholder="Enter PO#" onKeyDown={e=>{if(e.key==='Enter')savePO(j.id,e.target.value);}}/>{poEdits[j.id]!=null&&poEdits[j.id]!==(j.po_number||'')&&<button onClick={()=>savePO(j.id,poEdits[j.id])} style={{padding:'2px 8px',borderRadius:4,border:'none',background:'#4ade80',color:'#060810',fontSize:8,fontWeight:700,cursor:'pointer'}}>Save</button>}</span>:<span style={{color:j.po_number?'#4ade80':'#f47067'}}>{j.po_number||'Pending'}</span>}</div>
                 <div><span style={{color:"#64748b"}}>Firm:</span> {firm?.name||'—'}</div>
                 <div><span style={{color:"#64748b"}}>Items:</span> {allItems.length}</div>
                 <div><span style={{color:"#64748b"}}>Client:</span> {j.client_name}</div>
               </div>
+              {(()=>{const poUrls=Array.isArray(j.po_file_url)?j.po_file_url:j.po_file_url?[j.po_file_url]:[];return poUrls.length>0?<div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}}><span style={{fontSize:9,color:'#64748b',fontWeight:600}}>📎 PO:</span>{poUrls.map((u,i)=><a key={i} href={u} target="_blank" rel="noopener" style={{fontSize:9,color:'#3b82f6',background:'#3b82f615',padding:'2px 8px',borderRadius:4,border:'1px solid #3b82f633'}}>📄 PO Copy {poUrls.length>1?i+1:''} ↓</a>)}</div>:null;})()}
               {allItems.length>0&&<table style={{width:"100%",borderCollapse:"collapse",marginBottom:8}}><thead><tr style={{borderBottom:"1px solid #1a2030"}}><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>#</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Item</th>{allItems.some(it=>it.img_url)&&<th style={{padding:"3px",fontSize:8,color:"#64748b"}}>Img</th>}<th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Spec</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Size</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Qty</th></tr></thead><tbody>
                 {allItems.map((it,i)=><tr key={it.id} style={{borderBottom:"1px solid #0c1017"}}><td style={{padding:"3px",fontSize:9}}>{i+1}</td><td style={{padding:"3px",fontSize:10,fontWeight:600}}>{it.client_name||it.internal_name}</td>{allItems.some(x=>x.img_url)&&<td style={{padding:"2px"}}>{it.img_url?<a href={it.img_url} target="_blank"><img src={it.img_url} style={{width:24,height:24,objectFit:"cover",borderRadius:3}}/></a>:'—'}</td>}<td style={{padding:"3px",fontSize:9,color:"#8b949e"}}>{it.media?.slice(0,20)||'—'}</td><td style={{padding:"3px",fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td style={{padding:"3px",fontSize:10,fontWeight:700}}>{it.qty}</td></tr>)}
               </tbody></table>}
@@ -2599,6 +2785,7 @@ function ClientPortal({code}){
       </div>
     </div>
     {showNewJob&&<NewJobForm/>}
+    {showBOQ&&<BOQModal/>}
     <footer style={{textAlign:"center",padding:"16px",borderTop:"1px solid #1a2030",marginTop:20}}><p style={{fontSize:9,color:"#475569"}}>Powered by iPrint ERP · {firm?.name||''} · {new Date().getFullYear()}</p></footer>
   </div>;
 }
