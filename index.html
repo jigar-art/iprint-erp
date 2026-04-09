@@ -2731,7 +2731,7 @@ function ClientPortal({code}){
         <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer"}}>↩ Switch Dept</button>
       </div>
     </header>
-    <div style={{padding:"14px 20px",display:"flex",flexDirection:"column",height:"calc(100vh - 60px)",overflow:"hidden"}}>
+    <div style={{padding:"14px 20px"}}>
       <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,alignItems:"center",justifyContent:"space-between"}}>
         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
           {deptTabs.map(t=>{const cnt=t.st?full.filter(j=>t.st.includes(j.status)).length:full.length;return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>{t.icon} {t.l} <span style={{background:"#1a2030",borderRadius:8,padding:"1px 6px",fontSize:9}}>{cnt}</span></button>;})}
@@ -2739,7 +2739,7 @@ function ClientPortal({code}){
         <div style={{position:"relative"}}><input style={{padding:"7px 12px 7px 30px",borderRadius:8,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:12,outline:"none",width:250}} placeholder="🔍 Search project, job#, address, PO..." value={portalSearch} onChange={e=>setPortalSearch(e.target.value)}/>{portalSearch&&<button onClick={()=>setPortalSearch('')} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12}}>✕</button>}</div>
       </div>
       {portalSearch&&<p style={{fontSize:10,color:"#64748b",marginBottom:6}}>{filtered.length} result{filtered.length!==1?'s':''} for "{portalSearch}"</p>}
-      <div style={{flex:1,overflowY:"auto",display:"grid",gap:8,alignContent:"start"}}>
+      <div style={{maxHeight:"calc(100vh - 140px)",overflowY:"auto",display:"grid",gap:8}}>
         {filtered.map(j=>{const idx=pipeIdx(j.status);const allItems=(j.batches||[]).flatMap(b=>b.items||[]);const sd=j.status_dates||{};const jN=notes[j.id]||[];const isOpen=selJob===j.id;
           return <div key={j.id} style={{background:"#0c1017",border:`1px solid ${isOpen?'#e3a00855':'#1a2030'}`,borderRadius:10,overflow:"hidden",transition:"border .2s"}}>
             <div style={{padding:"12px 14px",cursor:"pointer"}} onClick={()=>setSelJob(isOpen?null:j.id)}>
