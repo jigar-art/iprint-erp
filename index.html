@@ -2026,6 +2026,26 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
       <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
     </div>
 
+    {/* Linked ERP Jobs Summary */}
+    {(()=>{
+      const BANKING_CLIENTS=['DIEBOLD','CMS','OKI','NCR','NUVAMA','NUVAMA WEALTH','J M FINANCE','JM FINANCE','J.M. FINANCE','HITACHI','EDELWEISS','NIDO'];
+      const isBk=(cn)=>{if(!cn)return false;const u=cn.toUpperCase();return BANKING_CLIENTS.some(b=>u.includes(b));};
+      const bJobs=jobs.filter(j=>isBk(j.client_name));
+      const erpActive=bJobs.filter(j=>!['Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status));
+      const erpBilled=bJobs.filter(j=>['Billing Done','Cash Received'].includes(j.status));
+      const erpBillPend=bJobs.filter(j=>['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending'].includes(j.status));
+      return <div className="c" style={{padding:8}}>
+        <p style={{fontSize:9,color:'#64748b',marginBottom:4}}>📋 ERP JOBS (Banking Clients)</p>
+        <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+          <span style={{fontSize:11}}><strong style={{color:'#3b82f6'}}>{bJobs.length}</strong> <span style={{fontSize:9,color:'#64748b'}}>Total Jobs</span></span>
+          <span style={{fontSize:11}}><strong style={{color:'#e3a008'}}>{erpActive.length}</strong> <span style={{fontSize:9,color:'#64748b'}}>Active</span></span>
+          <span style={{fontSize:11}}><strong style={{color:'#06b6d4'}}>{erpBillPend.length}</strong> <span style={{fontSize:9,color:'#64748b'}}>Billing Pending</span></span>
+          <span style={{fontSize:11}}><strong style={{color:'#4ade80'}}>{erpBilled.length}</strong> <span style={{fontSize:9,color:'#64748b'}}>Billed</span></span>
+          <span style={{fontSize:9,color:'#475569',alignSelf:'center'}}>| CRM tracks {stats.total} individual ATM sites across these jobs</span>
+        </div>
+      </div>;
+    })()}
+
     {/* Filters + Search + Export + Add */}
     <div className="c" style={{padding:8,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
       <select className="in" value={stFilter} onChange={e=>{setStFilter(e.target.value);setPage(0);}} style={{fontSize:10,padding:'4px 6px',width:130}}>
