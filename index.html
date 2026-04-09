@@ -573,7 +573,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
-          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal}/>}
+          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
         </div>
       </main>
 
@@ -1894,7 +1894,7 @@ function RootApp(){
 // ═══════════════════════════════════════════════════════════
 // BANKING CRM PAGE
 // ═══════════════════════════════════════════════════════════
-function BankCRMPage({show,jobs,sm}){
+function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
   const [sites,setSites]=useState([]);
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState('ALL');
@@ -1902,6 +1902,8 @@ function BankCRMPage({show,jobs,sm}){
   const [stFilter,setStFilter]=useState('All');
   const [stateFilter,setStateFilter]=useState('All');
   const [page,setPage]=useState(0);
+  const [showAddSite,setShowAddSite]=useState(false);
+  const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});
   const pageSize=50;
 
   // Load banking sites from Supabase
@@ -1992,6 +1994,20 @@ function BankCRMPage({show,jobs,sm}){
     show('Excel exported!');
   };
 
+  // Add new site to CRM
+  const addSite=async()=>{
+    if(!newSite.project||!newSite.client||!newSite.bank){show('Fill Project, Client & Bank',false);return;}
+    const id='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
+    const rec={...newSite,id};
+    const {error}=await sb.from('banking_sites').insert(rec);
+    if(!error){setSites(p=>[rec,...p]);setShowAddSite(false);setNewSite({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});show('Site added!');}
+    else show('Error: '+error.message,false);
+  };
+
+  // Project options for dropdown
+  const projectOpts=['NCR SBI BRANDING','NCR SBI GSB','NCR PNB GSB','NCR BOB GSB','CMS SBI GSB+LOLLIPOP','CMS SBI BRANDING','CMS BOB GSB+BRANDING','Diebold HDFC GSB'];
+  const clientBankMap={'NCR SBI BRANDING':['NCR','SBI'],'NCR SBI GSB':['NCR','SBI'],'NCR PNB GSB':['NCR','PNB'],'NCR BOB GSB':['NCR','BOB'],'CMS SBI GSB+LOLLIPOP':['CMS','SBI'],'CMS SBI BRANDING':['CMS','SBI'],'CMS BOB GSB+BRANDING':['CMS','BOB'],'Diebold HDFC GSB':['Diebold','HDFC']};
+
   // Paginated
   const paged=filtered.slice(page*pageSize,(page+1)*pageSize);
   const totalPages=Math.ceil(filtered.length/pageSize);
@@ -2010,7 +2026,7 @@ function BankCRMPage({show,jobs,sm}){
       <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
     </div>
 
-    {/* Filters + Search + Export */}
+    {/* Filters + Search + Export + Add */}
     <div className="c" style={{padding:8,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
       <select className="in" value={stFilter} onChange={e=>{setStFilter(e.target.value);setPage(0);}} style={{fontSize:10,padding:'4px 6px',width:130}}>
         <option value="All">All Billing ({filtered.length})</option>
@@ -2021,9 +2037,43 @@ function BankCRMPage({show,jobs,sm}){
         {states.map(s=><option key={s} value={s}>{s}</option>)}
       </select>
       <input className="in" placeholder="🔍 Search ATM, City, Vendor, Job#..." value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}} style={{flex:1,fontSize:10,padding:'4px 8px',minWidth:150}}/>
-      <button className="b bg bs" onClick={exportExcel} style={{fontSize:9}}>📥 Export Excel</button>
+      <button className="b bg bs" onClick={exportExcel} style={{fontSize:9}}>📥 Export</button>
+      <button className="b bp bs" onClick={()=>setShowAddSite(true)} style={{fontSize:9}}>➕ Add Site</button>
+      <button className="b bs" onClick={()=>sp('new')} style={{fontSize:9,borderColor:'#3b82f6',color:'#3b82f6'}}>➕ New Job</button>
       <span style={{fontSize:9,color:'#64748b'}}>{filtered.length} sites</span>
     </div>
+
+    {/* Add Site Form */}
+    {showAddSite&&<div className="c a" style={{padding:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+        <h4 style={{fontSize:12,fontWeight:700,color:'#e3a008'}}>➕ Add New Banking Site</h4>
+        <button className="b bs" onClick={()=>setShowAddSite(false)}>✕</button>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Project *</label><select className="in" value={newSite.project} onChange={e=>{const p=e.target.value;const cb=clientBankMap[p]||['',''];setNewSite(s=>({...s,project:p,client:cb[0],bank:cb[1]}));}} style={{fontSize:10}}>
+          <option value="">Select Project</option>{projectOpts.map(p=><option key={p}>{p}</option>)}
+        </select></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Client</label><input className="in" value={newSite.client} readOnly style={{fontSize:10,color:'#64748b'}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Bank</label><input className="in" value={newSite.bank} readOnly style={{fontSize:10,color:'#64748b'}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Job #</label><input className="in" value={newSite.job_no} onChange={e=>setNewSite(s=>({...s,job_no:e.target.value}))} placeholder="e.g. 0921" style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>PO #</label><input className="in" value={newSite.po_number} onChange={e=>setNewSite(s=>({...s,po_number:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>ATM ID</label><input className="in" value={newSite.atm_id} onChange={e=>setNewSite(s=>({...s,atm_id:e.target.value}))} style={{fontSize:10}}/></div>
+        <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Site Address</label><input className="in" value={newSite.site_address} onChange={e=>setNewSite(s=>({...s,site_address:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>City</label><input className="in" value={newSite.city} onChange={e=>setNewSite(s=>({...s,city:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>District</label><input className="in" value={newSite.district} onChange={e=>setNewSite(s=>({...s,district:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><input className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Pincode</label><input className="in" value={newSite.pincode} onChange={e=>setNewSite(s=>({...s,pincode:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Name</label><input className="in" value={newSite.vendor_name} onChange={e=>setNewSite(s=>({...s,vendor_name:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Contact</label><input className="in" value={newSite.vendor_contact} onChange={e=>setNewSite(s=>({...s,vendor_contact:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Installation</label><select className="in" value={newSite.installation_status} onChange={e=>setNewSite(s=>({...s,installation_status:e.target.value}))} style={{fontSize:10}}>
+          <option value="Pending">Pending</option><option value="Completed">Completed</option><option value="In Progress">In Progress</option>
+        </select></div>
+      </div>
+      <div style={{display:'flex',gap:6,marginTop:8}}>
+        <button className="b bp" onClick={addSite} style={{fontSize:11}}>💾 Save Site</button>
+        <button className="b bs" onClick={()=>setShowAddSite(false)} style={{fontSize:11}}>Cancel</button>
+      </div>
+    </div>}
 
     {/* Sites Table */}
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
