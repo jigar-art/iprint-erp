@@ -1903,6 +1903,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
   const [stateFilter,setStateFilter]=useState('All');
   const [page,setPage]=useState(0);
   const [showAddSite,setShowAddSite]=useState(false);
+  const [customProject,setCustomProject]=useState(false);
   const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});
   const pageSize=50;
 
@@ -2000,7 +2001,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     const id='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
     const rec={...newSite,id};
     const {error}=await sb.from('banking_sites').insert(rec);
-    if(!error){setSites(p=>[rec,...p]);setShowAddSite(false);setNewSite({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});show('Site added!');}
+    if(!error){setSites(p=>[rec,...p]);setShowAddSite(false);setCustomProject(false);setNewSite({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});show('Site added!');}
     else show('Error: '+error.message,false);
   };
 
@@ -2067,14 +2068,14 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     {showAddSite&&<div className="c a" style={{padding:12}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
         <h4 style={{fontSize:12,fontWeight:700,color:'#e3a008'}}>➕ Add New Banking Site</h4>
-        <button className="b bs" onClick={()=>setShowAddSite(false)}>✕</button>
+        <button className="b bs" onClick={()=>{setShowAddSite(false);setCustomProject(false);}}>✕</button>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:6}}>
-        <div><label style={{fontSize:8,color:'#64748b'}}>Project *</label><select className="in" value={newSite.project} onChange={e=>{const p=e.target.value;const cb=clientBankMap[p]||['',''];setNewSite(s=>({...s,project:p,client:cb[0],bank:cb[1]}));}} style={{fontSize:10}}>
-          <option value="">Select Project</option>{projectOpts.map(p=><option key={p}>{p}</option>)}
-        </select></div>
-        <div><label style={{fontSize:8,color:'#64748b'}}>Client</label><input className="in" value={newSite.client} readOnly style={{fontSize:10,color:'#64748b'}}/></div>
-        <div><label style={{fontSize:8,color:'#64748b'}}>Bank</label><input className="in" value={newSite.bank} readOnly style={{fontSize:10,color:'#64748b'}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Project *</label>{customProject?<div style={{display:'flex',gap:2}}><input className="in" value={newSite.project} onChange={e=>setNewSite(s=>({...s,project:e.target.value}))} placeholder="Enter new project name" style={{fontSize:10,flex:1}} autoFocus/><button className="b bs" onClick={()=>{setCustomProject(false);setNewSite(s=>({...s,project:'',client:'',bank:''}));}} style={{fontSize:8,padding:'2px 5px'}} title="Back to list">✕</button></div>:<select className="in" value={newSite.project} onChange={e=>{const p=e.target.value;if(p==='__CUSTOM__'){setCustomProject(true);setNewSite(s=>({...s,project:'',client:'',bank:''}));return;}const cb=clientBankMap[p]||['',''];setNewSite(s=>({...s,project:p,client:cb[0],bank:cb[1]}));}} style={{fontSize:10}}>
+          <option value="">Select Project</option>{projectOpts.map(p=><option key={p}>{p}</option>)}<option value="__CUSTOM__">➕ New Project...</option>
+        </select>}</div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Client{customProject?' *':''}</label><input className="in" value={newSite.client} readOnly={!customProject} onChange={e=>setNewSite(s=>({...s,client:e.target.value}))} placeholder={customProject?"Enter client name":""} style={{fontSize:10,color:customProject?'#e6edf3':'#64748b'}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Bank{customProject?' *':''}</label><input className="in" value={newSite.bank} readOnly={!customProject} onChange={e=>setNewSite(s=>({...s,bank:e.target.value}))} placeholder={customProject?"Enter bank name":""} style={{fontSize:10,color:customProject?'#e6edf3':'#64748b'}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Job #</label><input className="in" value={newSite.job_no} onChange={e=>setNewSite(s=>({...s,job_no:e.target.value}))} placeholder="e.g. 0921" style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>PO #</label><input className="in" value={newSite.po_number} onChange={e=>setNewSite(s=>({...s,po_number:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>ATM ID</label><input className="in" value={newSite.atm_id} onChange={e=>setNewSite(s=>({...s,atm_id:e.target.value}))} style={{fontSize:10}}/></div>
@@ -2091,7 +2092,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
       </div>
       <div style={{display:'flex',gap:6,marginTop:8}}>
         <button className="b bp" onClick={addSite} style={{fontSize:11}}>💾 Save Site</button>
-        <button className="b bs" onClick={()=>setShowAddSite(false)} style={{fontSize:11}}>Cancel</button>
+        <button className="b bs" onClick={()=>{setShowAddSite(false);setCustomProject(false);}} style={{fontSize:11}}>Cancel</button>
       </div>
     </div>}
 
