@@ -694,7 +694,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       {dq.length>=2&&results.length===0&&<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60}/><SC l="Printing" v={s.printing} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Installation" v={s.install} c="#059669" d={150}/><SC l="Dispatch" v={s.delivered} c="#10b981" d={180}/><SC l="Billing" v={s.billPend} c="#06b6d4" d={210}/><SC l="Billed" v={s.billed} c="#4ade80" d={240}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60}/><SC l="Printing" v={s.printing} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Installation" v={s.install} c="#059669" d={150}/><SC l="Dispatch" v={s.delivered} c="#10b981" d={180}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210}/><SC l="Billed" v={s.billed} c="#4ade80" d={240}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
