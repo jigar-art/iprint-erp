@@ -781,7 +781,21 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [jf,setJf]=useState({client_name:j.client_name||'',contact_person:j.contact_person||'',contact_no:j.contact_no||'',po_number:j.po_number||'',delivery_address:j.delivery_address||'',client_gst:j.client_gst||'',billing_name:j.billing_name||'',payment_terms:j.payment_terms||'',project:j.project||'',client_email:j.client_email||'',remark:j.remark||'',firm:j.firm||''});
   const [jfDirty,setJfDirty]=useState(false);
   const setJF=(k,v)=>{setJf(p=>({...p,[k]:v}));setJfDirty(true);};
-  const saveJF=async()=>{if(updateJobFields){const ok=await updateJobFields(j.id,jf);if(ok!==false)setJfDirty(false);}};
+  const saveJF=async()=>{
+    if(!updateJobFields)return;
+    // Check if delivery address changed — require confirmation + audit
+    const oldAddr=(j.delivery_address||'').trim();
+    const newAddr=(jf.delivery_address||'').trim();
+    if(oldAddr!==newAddr && oldAddr){
+      if(!confirm('⚠️ DELIVERY ADDRESS CHANGE\n\nJob: '+j.id+'\n\nOLD:\n'+oldAddr+'\n\nNEW:\n'+newAddr+'\n\nChanged by: '+(user?.name||'Unknown')+'\n\nAre you sure you want to update the delivery address?'))return;
+      // Audit log for delivery address change
+      try{await sb.from('client_notes').insert({id:'N'+Date.now(),job_id:j.id,dept:'SYSTEM',
+        text:'📍 Delivery address changed by '+(user?.name||'Unknown')+':\n\nOLD: '+oldAddr+'\nNEW: '+newAddr,
+        created_at:new Date().toISOString()});}catch(e){}
+    }
+    const ok=await updateJobFields(j.id,jf);
+    if(ok!==false)setJfDirty(false);
+  };
   const fm=firms.find(f=>f.code===(jf.firm||j.firm))||{};
   const ab=async()=>{const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);};
   const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||'',rate_mode:it.rate_mode||'UNIT',size_unit:it.size_unit||'MM',gstPct:it.gstPct!=null?it.gstPct:18});};
@@ -814,7 +828,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       <F l="PO Number"><input className="in mn" value={jf.po_number} onChange={e=>setJF('po_number',e.target.value)} style={{fontSize:10}} readOnly={isProd}/></F>
       {canSeeRates&&<F l="Client GST"><input className="in mn" value={jf.client_gst} onChange={e=>setJF('client_gst',e.target.value)} placeholder="27XXXXX..." style={{fontSize:10}}/></F>}
       {canSeeRates&&<F l="Billing Name"><input className="in" value={jf.billing_name} onChange={e=>setJF('billing_name',e.target.value)} style={{fontSize:10}}/></F>}
-      <div style={{gridColumn:"span 2"}}><F l="Delivery Address"><input className="in" value={jf.delivery_address} onChange={e=>setJF('delivery_address',e.target.value)} style={{fontSize:10}}/></F></div>
+      <div style={{gridColumn:"span 3"}}><F l="Delivery Address 📍"><textarea className="in" value={jf.delivery_address} onChange={e=>setJF('delivery_address',e.target.value)} style={{fontSize:10,minHeight:38,resize:"vertical",fontFamily:"inherit",lineHeight:1.4,width:"100%"}}/></F></div>
       {canSeeRates&&<F l="Payment Terms"><input className="in" value={jf.payment_terms} onChange={e=>setJF('payment_terms',e.target.value)} style={{fontSize:10}}/></F>}
       {canSeeRates&&<F l="Client Email"><input className="in" value={jf.client_email} onChange={e=>setJF('client_email',e.target.value)} placeholder="client@company.com" style={{fontSize:10}} type="email"/></F>}
       <F l="Remark"><input className="in" value={jf.remark} onChange={e=>setJF('remark',e.target.value)} placeholder="Special instructions..." style={{fontSize:10}}/></F>
