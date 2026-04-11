@@ -1586,19 +1586,19 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const [err,setErr]=useState("");
   const [fileName,setFileName]=useState("");
 
-  // Smart size parser — handles all formats: "Width- 16in Height- 24in", "8\"x12\"", "3ftx4ft", "1177.5MM x350.3MM"
+  // Smart size parser — handles all formats: "Width- 16in Height- 24in", "8\"x12\"", "3ftx4ft", "1177.5MM x350.3MM", "18″ × 24″"
   const parseSize=(sizeStr)=>{
     if(!sizeStr||typeof sizeStr!=='string') return {w:'',h:''};
-    const s=sizeStr.replace(/\\n/g,' ').replace(/\n/g,' ').trim();
+    const s=sizeStr.replace(/\\n/g,' ').replace(/\n/g,' ').replace(/[″″]/g,'"').replace(/['']/g,"'").trim();
     // Pattern: Width- 16in Height- 24in / Width:15 Inch Height:4 Inch
     const wm=s.match(/width[:\-\s]*(\d+\.?\d*)\s*(in|inch|mm|ft)?/i);
     const hm=s.match(/height[:\-\s]*(\d+\.?\d*)\s*(in|inch|mm|ft)?/i);
     if(wm&&hm) return {w:wm[1],h:hm[1]};
-    // Pattern: 3ftx4ft / 8"x12" / 8\"x12\" / 1177.5MM x 350.3MM
-    const xm=s.match(/(\d+\.?\d*)\s*(?:"|"|ft|in|inch|mm|cm|')?\s*[x×]\s*(\d+\.?\d*)\s*(?:"|"|ft|in|inch|mm|cm|')?/i);
+    // Pattern: 3ftx4ft / 8"x12" / 18″ × 24″ / 1177.5MM x 350.3MM
+    const xm=s.match(/(\d+\.?\d*)\s*(?:"|"|″|ft|in|inch|mm|cm|')?\s*[x×]\s*(\d+\.?\d*)\s*(?:"|"|″|ft|in|inch|mm|cm|')?/i);
     if(xm) return {w:xm[1],h:xm[2]};
     // Pattern: just "54 Inch Height" (single dimension)
-    const single=s.match(/(\d+\.?\d*)\s*(in|inch|mm|ft)/i);
+    const single=s.match(/(\d+\.?\d*)\s*(in|inch|mm|ft|"|″)/i);
     if(single) return {w:single[1],h:''};
     return {w:'',h:''};
   };
@@ -1608,32 +1608,42 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     for(let i=0;i<Math.min(15,data.length);i++){
       const row=data[i];if(!row)continue;
       const txt=row.map(c=>String(c||'').toLowerCase()).join(' ');
-      if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(description|particular|specification)/.test(txt)) return i;
-      if(/(description|particular)/.test(txt)&&/(qty|quantity|unit|uom)/.test(txt)) return i;
+      if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(description|particular|specification|item|job desc)/.test(txt)) return i;
+      if(/(description|particular|item|job desc)/.test(txt)&&/(qty|quantity|unit|uom|nos|sqft|sft)/.test(txt)) return i;
+      if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(qty|quantity|unit|uom|rate|amount)/.test(txt)) return i;
     }
     return 0;
   };
 
   // Smart column detector — finds columns by fuzzy matching headers
-  const detectColumns=(headers)=>{
+  // Also checks the row BELOW for split headers (e.g. "SIZES IN INCHES" → "WIDTH" | "HEIGHT")
+  const detectColumns=(headers,nextRow)=>{
     const h=headers.map(x=>String(x||'').toLowerCase().replace(/[\s\n]/g,' ').trim());
+    const h2=nextRow?nextRow.map(x=>String(x||'').toLowerCase().replace(/[\s\n]/g,' ').trim()):[];
     const find=(patterns)=>{for(const p of patterns){const idx=h.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
+    const find2=(patterns)=>{for(const p of patterns){const idx=h2.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
+    let width=find([/^width$/,/width/]);
+    let height=find([/^height$/,/height/]);
+    // Check next row for split headers like "SIZES IN INCHES" → next row has WIDTH|HEIGHT
+    if(width<0&&h2.length>0){width=find2([/^width$/,/width/]);}
+    if(height<0&&h2.length>0){height=find2([/^height$/,/height/]);}
     return {
       sr:find([/^sl|^sr|^s\.?\s*no|^#/]),
-      desc:find([/description|particular/]),
-      spec:find([/^specification/]),
+      desc:find([/description|particular|^item$|job desc/]),
+      spec:find([/^specification|^material/]),
       wallNo:find([/wall.*no|location|zone/]),
       floor:find([/^floor$/]),
-      size:find([/size.*in|size.*\(/]),
-      width:find([/width/]),
-      height:find([/height/]),
-      uom:find([/uom|umo|^unit$/]),
-      qty:find([/^qty|quantit/]),
-      supplyRate:find([/supply.*rate|^rate$/]),
+      size:find([/size.*in|size.*\(|^uom$|^umo$/]),
+      width,height,
+      uom:find([/uom|umo|^unit$|^units$/]),
+      qty:find([/^qty|quantit|^nos$/]),
+      supplyRate:find([/supply.*rate|^rate$|unit rate/]),
       installRate:find([/install.*rate/]),
-      totalAmt:find([/total.*amount|total.*amt/]),
+      totalAmt:find([/total.*amount|total.*amt|^amount$/]),
       remarks:find([/remark/]),
       refImage:find([/ref.*image|^image/]),
+      length:find([/^length$/]),
+      breadth:find([/^breadth$/]),
     };
   };
 
@@ -1642,15 +1652,22 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     if(!data||data.length<2) return [];
     const hRow=findHeaderRow(data);
     const headers=data[hRow];
-    const cols=detectColumns(headers);
+    const nextRow=data[hRow+1]||[];
+    const cols=detectColumns(headers,nextRow);
+    // Check if next row is a sub-header (e.g. WIDTH|HEIGHT under "SIZES IN INCHES")
+    const nextRowTxt=(nextRow||[]).map(c=>String(c||'').toLowerCase().trim()).join(' ');
+    const hasSplitHeader=/width|height|breadth/.test(nextRowTxt)&&cols.desc>-1;
+    const startRow=hasSplitHeader?hRow+2:hRow+1;
     const items=[];
     let lastFloor='';
-    for(let r=hRow+1;r<data.length;r++){
+    for(let r=startRow;r<data.length;r++){
       const row=data[r];
       if(!row||row.every(c=>c===null||c===undefined||c===''))continue;
       // Skip summary/total rows
-      const firstCellStr=String(row[0]||'').toLowerCase().trim();
-      if(/^(sub\s*total|basic|gst|total|general\s*point|note)/i.test(firstCellStr))continue;
+      const allCellsTxt=row.map(c=>String(c||'').toLowerCase().trim()).join(' ');
+      if(/^(sub\s*total|basic|gst|total|general\s*point|note|grand total)/i.test(String(row[0]||'').trim()))continue;
+      if(/^(sub\s*total|total|grand total)/i.test(allCellsTxt.slice(0,20)))continue;
+      // Skip section headers (no qty, just category names)
       
       const desc=cols.desc>-1?String(row[cols.desc]||''):'';
       const spec=cols.spec>-1?String(row[cols.spec]||''):'';
@@ -1663,15 +1680,17 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       let w='',h='';
       if(cols.width>-1&&cols.height>-1){
         w=String(row[cols.width]||'');h=String(row[cols.height]||'');
+      } else if(cols.length>-1&&(cols.height>-1||cols.breadth>-1)){
+        w=String(row[cols.length]||'');h=String(row[cols.breadth>-1?cols.breadth:cols.height]||'');
       } else if(cols.size>-1){
         const parsed=parseSize(String(row[cols.size]||''));
         w=parsed.w;h=parsed.h;
       }
-      // Also try parsing size from description (e.g. "Floor Directory 8\"x12\"", "Framed Artwork 3ftx4ft")
-      if(!w&&!h&&desc){
-        const descSize=parseSize(desc);
-        w=descSize.w;h=descSize.h;
-      }
+      // Also try parsing size from description or spec (e.g. "18″ × 24″")
+      if(!w&&!h&&desc){const descSize=parseSize(desc);w=descSize.w;h=descSize.h;}
+      if(!w&&!h&&spec){const specSize=parseSize(spec);w=specSize.w;h=specSize.h;}
+      // Try UOM column for size (some BOQs put size in UOM like '18″ × 24″')
+      if(!w&&!h&&cols.uom>-1){const uomSize=parseSize(String(row[cols.uom]||''));w=uomSize.w;h=uomSize.h;}
       
       const qty=cols.qty>-1?(+row[cols.qty]||0):0;
       if(qty<=0)continue;
@@ -1732,7 +1751,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     // Convert to job line items
     setIts(all.map(it=>{
       const sr=+it.supplyRate||0;const ir=+it.installRate||0;const combinedRate=sr+ir;
-      const uomMap={'sq ft':'SQFT','sqft':'SQFT','sft':'SQFT','set':'SET','nos':'NOS','num':'NOS','lot':'LOT','rft':'RFT'};
+      const uomMap={'sq ft':'SQFT','sqft':'SQFT','sft':'SQFT','sqm':'SQFT','sq.ft':'SQFT','set':'SET','nos':'NOS','num':'NOS','no':'NOS','pcs':'NOS','lot':'LOT','ls':'LOT','rft':'RFT','rm':'RFT','lm':'RFT'};
       const rm=uomMap[it.uom.toLowerCase()]||'UNIT';
       const sqft=cSq(it.w,it.h,it.qty,su);
       const tot=rm==='SQFT'&&sqft?Math.round(sqft*combinedRate*100)/100:Math.round(it.qty*combinedRate*100)/100;
