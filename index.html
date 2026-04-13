@@ -599,9 +599,9 @@ function MainApp({user,onLogout,masterData}){
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
-          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog}/>}
-          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog}/>}
-          {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn}/>}
+          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={fullJobs} sm={setModal}/>}
+          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog} jobs={fullJobs} sm={setModal}/>}
+          {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={fullJobs} sm={setModal}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={fullJobs}/>}
@@ -1410,10 +1410,21 @@ function GRNPage({grn,suppliers,materials,team,addGRN,updateGRN,deleteGRN,addNew
 }
 
 // PRINTING
-function PrintPage({logs,machines,materials,team,stock,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",machine:machines[0]?.name||"",operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"roll",waste:0,start_time:"09:00",end_time:"10:00",ink_cyan:0,ink_magenta:0,ink_yellow:0,ink_black:0,ink_white:0,print_sqft:0,notes:""});
+function PrintPage({logs,machines,materials,team,stock,addLog,jobs,sm}){const [sf,ssf]=useState(false);const [showQ,setShowQ]=useState(true);const [f,sF]=useState({date:td(),job_id:"",machine:machines[0]?.name||"",operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"roll",waste:0,start_time:"09:00",end_time:"10:00",ink_cyan:0,ink_magenta:0,ink_yellow:0,ink_black:0,ink_white:0,print_sqft:0,notes:""});
+  const queue=(jobs||[]).filter(j=>j.status==='Printing');
+  const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   const add=async()=>{await addLog({id:"P"+uid(),...f,qty_used:+f.qty_used,waste:+f.waste,ink_cyan:+f.ink_cyan,ink_magenta:+f.ink_magenta,ink_yellow:+f.ink_yellow,ink_black:+f.ink_black,ink_white:+f.ink_white,print_sqft:+f.print_sqft});};
   const totalInk=(+f.ink_cyan||0)+(+f.ink_magenta||0)+(+f.ink_yellow||0)+(+f.ink_black||0)+(+f.ink_white||0);
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div className="c" style={{padding:0}}>
+      <div style={{padding:"6px 10px",borderBottom:"2px solid #ef4444",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowQ(p=>!p)}>
+        <span style={{fontSize:11,fontWeight:700,color:"#ef4444"}}>🖨️ Jobs in Printing — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
+      </div>
+      {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Items</th><th>Contact</th></tr></thead><tbody>
+        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td></tr>})}
+        {queue.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:12}}>No jobs in Printing</td></tr>}
+      </tbody></table></div>}
+    </div>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🖨️ New Print Log"}</button>
     {sf&&<div className="c a" style={{padding:10}}>
       <p style={{fontSize:9,color:"#ef4444",fontWeight:700,marginBottom:6}}>JOB & MACHINE</p>
@@ -1453,9 +1464,20 @@ function PrintPage({logs,machines,materials,team,stock,addLog}){const [sf,ssf]=u
 }
 
 // FABRICATION
-function FabPage({logs,materials,team,stock,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",process:FAB_P[0],operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"pcs",waste:0,start_time:"09:00",end_time:"10:00"});
+function FabPage({logs,materials,team,stock,addLog,jobs,sm}){const [sf,ssf]=useState(false);const [showQ,setShowQ]=useState(true);const [f,sF]=useState({date:td(),job_id:"",process:FAB_P[0],operator:team[0]?.name||"",material:materials[0]?.name||"",qty_used:1,unit:"pcs",waste:0,start_time:"09:00",end_time:"10:00"});
+  const queue=(jobs||[]).filter(j=>j.status==='Fabrication');
+  const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   const add=async()=>{await addLog({id:"F"+uid(),...f,qty_used:+f.qty_used,waste:+f.waste});};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div className="c" style={{padding:0}}>
+      <div style={{padding:"6px 10px",borderBottom:"2px solid #dc2626",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowQ(p=>!p)}>
+        <span style={{fontSize:11,fontWeight:700,color:"#dc2626"}}>🔧 Jobs in Fabrication — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
+      </div>
+      {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Items</th><th>Contact</th></tr></thead><tbody>
+        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td></tr>})}
+        {queue.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:12}}>No jobs in Fabrication</td></tr>}
+      </tbody></table></div>}
+    </div>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🔧 New Fab Log"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
@@ -1475,9 +1497,20 @@ function FabPage({logs,materials,team,stock,addLog}){const [sf,ssf]=useState(fal
 }
 
 // OUTSOURCE
-function OsPage({logs,agencies,materials,addLog,markReturn}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),agency:agencies[0]?.name||"",material:materials[0]?.name||"",qty_sent:1,challan_no:"",job_id:"",rate:"",expected_return:""});
+function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm}){const [sf,ssf]=useState(false);const [showQ,setShowQ]=useState(true);const [f,sF]=useState({date:td(),agency:agencies[0]?.name||"",material:materials[0]?.name||"",qty_sent:1,challan_no:"",job_id:"",rate:"",expected_return:""});
+  const queue=(jobs||[]).filter(j=>['Printing','Fabrication','Installation'].includes(j.status));
+  const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   const add=async()=>{await addLog({id:"O"+uid(),...f,qty_sent:+f.qty_sent,rate:+f.rate,returned:false});};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div className="c" style={{padding:0}}>
+      <div style={{padding:"6px 10px",borderBottom:"2px solid #f59e0b",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowQ(p=>!p)}>
+        <span style={{fontSize:11,fontWeight:700,color:"#f59e0b"}}>📤 Active Jobs (Print/Fab/Install) — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
+      </div>
+      {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Status</th><th>Contact</th></tr></thead><tbody>
+        {queue.map(j=><tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:j.status==='Printing'?'#ef444420':j.status==='Fabrication'?'#dc262620':'#05966920',color:j.status==='Printing'?'#ef4444':j.status==='Fabrication'?'#dc2626':'#059669',fontSize:8}}>{j.status}</span></td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td></tr>)}
+        {queue.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:12}}>No active jobs</td></tr>}
+      </tbody></table></div>}
+    </div>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"📤 New Outsource"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
