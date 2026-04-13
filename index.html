@@ -852,11 +852,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const fm=firms.find(f=>f.code===(jf.firm||j.firm))||{};
   const ab=async()=>{const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);};
   const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||'',rate_mode:it.rate_mode||'UNIT',size_unit:it.size_unit||'MM',gstPct:it.gstPct!=null?it.gstPct:18});};
-  const [localItems,setLocalItems]=useState(()=>(j.batches||[]).flatMap(b=>(b.items||[])));
-  const jItemsKey=(j.batches||[]).map(b=>b.id).join(',');
-  useEffect(()=>{setLocalItems((j.batches||[]).flatMap(b=>(b.items||[])));},[jItemsKey]);
-  const getItems=(batchId)=>localItems.filter(i=>i.batch_id===batchId);
-  const saveEdit=async(itId,extraFields={})=>{try{const mergedUpdates={...ef,...extraFields};const {error}=await sb.from('line_items').update(mergedUpdates).eq('id',itId);if(error){show("⚠️ SAVE FAILED: "+error.message+". Try again.",false);return;}setLocalItems(p=>p.map(i=>i.id===itId?{...i,...mergedUpdates}:i));setEd(null);show("✅ Item saved!");}catch(e){show("⚠️ Error: "+(e.message||e),false);}};
+  const saveEdit=async(itId,extraFields={})=>{try{const mergedUpdates={...ef,...extraFields};const {error}=await sb.from('line_items').update(mergedUpdates).eq('id',itId);if(error){show("⚠️ SAVE FAILED: "+error.message+". Try again.",false);return;}const bts=(j.batches||[]);for(const b of bts){const it=(b.items||[]).find(i=>i.id===itId);if(it){Object.assign(it,mergedUpdates);break;}}setEd(null);show("✅ Item saved!");}catch(e){show("⚠️ Error: "+(e.message||e),false);}};
   const saveNewItem=async(batchId)=>{
     if(!ni.internal_name){show("Enter item name",false);return;}
     const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=+ni.gstPct||18;
@@ -954,8 +950,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         </div>
       </div>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
-        <tbody>{getItems(b.id).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
-        {getItems(b.id).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);const isEd=ed===it.id;
+        <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
+        {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);const isEd=ed===it.id;
           return isEd?<tr key={it.id} style={{background:"#0a1520"}}><td className="mn" style={{fontSize:9}}>{ii+1}</td>
             <td><input className="in" value={ef.internal_name} onChange={e=>setEf(p=>({...p,internal_name:e.target.value}))} style={{fontSize:10,padding:"2px 4px",minWidth:80}}/></td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f6",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
