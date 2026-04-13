@@ -1916,14 +1916,29 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 // EXPENSES TRACKER
 // ═══════════════════════════════════════════════════════════
 function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
-  const CATS=["Material Purchase","Transport","Labour","Rent","Electricity","Fuel","Office Supplies","Food & Tea","Maintenance","Salary Advance","Petty Cash","Tools","Ink Purchase","Outsource Payment","Other"];
+  const DEFAULT_CATS=["Material Purchase","Transport","Labour","Rent","Electricity","Fuel","Office Supplies","Food & Tea","Maintenance","Salary Advance","Petty Cash","Tools","Ink Purchase","Outsource Payment","Other"];
+  // Build dynamic categories from existing expenses + defaults
+  const allCats=useMemo(()=>{
+    const s=new Set(DEFAULT_CATS);
+    expenses.forEach(e=>{if(e.category)s.add(e.category);});
+    return [...s].sort();
+  },[expenses]);
   const PAY_MODES=["Cash","UPI","Bank Transfer","Cheque","Card","Credit"];
   const [sf,ssf]=useState(false);
   const [receiptFile,setReceiptFile]=useState(null);
   const [saving,setSaving]=useState(false);
   const [filter,setFilter]=useState('all');
   const [fMonth,setFMonth]=useState('all');
-  const [f,sF]=useState({date:td(),category:CATS[0],description:"",amount:"",paid_to:"",payment_mode:"Cash",firm:firms[0]?.code||"",job_id:"",approved_by:team[0]?.name||"",notes:""});
+  const [addingCat,setAddingCat]=useState(false);
+  const [newCat,setNewCat]=useState('');
+  const [f,sF]=useState({date:td(),category:DEFAULT_CATS[0],description:"",amount:"",paid_to:"",payment_mode:"Cash",firm:firms[0]?.code||"",job_id:"",approved_by:team[0]?.name||"",notes:""});
+
+  // Get unique "Paid To" names from existing expenses for suggestions
+  const paidToNames=useMemo(()=>{
+    const s=new Set();
+    expenses.forEach(e=>{if(e.paid_to&&e.paid_to.trim())s.add(e.paid_to.trim());});
+    return [...s].sort();
+  },[expenses]);
 
   const add=async()=>{if(!f.amount||!f.description){alert("Fill amount & description");return;}setSaving(true);const rUrl=await uploadFile(receiptFile,'expense-receipts');await addExpense({id:"EX"+uid(),...f,amount:+f.amount,receipt_url:rUrl});sF(p=>({...p,description:"",amount:"",paid_to:"",job_id:"",notes:""}));setReceiptFile(null);setSaving(false);};
 
@@ -1948,9 +1963,9 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
       <p style={{fontSize:9,color:"#dc2626",fontWeight:700,marginBottom:6}}>💸 LOG EXPENSE</p>
       <div className="fg f4">
         <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
-        <F l="Category"><select className="in" value={f.category} onChange={e=>sF(p=>({...p,category:e.target.value}))}>{CATS.map(c=><option key={c}>{c}</option>)}</select></F>
+        <F l="Category">{addingCat?<div style={{display:"flex",gap:3}}><input className="in" value={newCat} onChange={e=>setNewCat(e.target.value)} placeholder="New category name" autoFocus style={{flex:1}}/><button className="b bp" style={{fontSize:8,padding:"2px 6px"}} onClick={()=>{if(newCat.trim()){sF(p=>({...p,category:newCat.trim()}));setAddingCat(false);setNewCat('');}}} >✓</button><button className="b bs" style={{fontSize:8,padding:"2px 4px"}} onClick={()=>{setAddingCat(false);setNewCat('');}}>✕</button></div>:<div style={{display:"flex",gap:3}}><select className="in" value={f.category} onChange={e=>{if(e.target.value==='__ADD__'){setAddingCat(true);}else sF(p=>({...p,category:e.target.value}));}} style={{flex:1}}>{allCats.map(c=><option key={c}>{c}</option>)}<option value="__ADD__">➕ Add New Category...</option></select></div>}</F>
         <F l="Amount ₹ *"><input className="in mn" type="number" value={f.amount} onChange={e=>sF(p=>({...p,amount:e.target.value}))} placeholder="0"/></F>
-        <F l="Paid To"><input className="in" value={f.paid_to} onChange={e=>sF(p=>({...p,paid_to:e.target.value}))} placeholder="Name/Vendor"/></F>
+        <F l="Paid To"><div style={{position:"relative"}}><input className="in" list="paidToList" value={f.paid_to} onChange={e=>sF(p=>({...p,paid_to:e.target.value}))} placeholder="Name/Vendor — type or select"/><datalist id="paidToList">{paidToNames.map(n=><option key={n} value={n}/>)}</datalist></div></F>
         <div style={{gridColumn:"span 2"}}><F l="Description *"><input className="in" value={f.description} onChange={e=>sF(p=>({...p,description:e.target.value}))} placeholder="What was this expense for?"/></F></div>
         <F l="Payment Mode"><select className="in" value={f.payment_mode} onChange={e=>sF(p=>({...p,payment_mode:e.target.value}))}>{PAY_MODES.map(m=><option key={m}>{m}</option>)}</select></F>
         <F l="Firm"><select className="in" value={f.firm} onChange={e=>sF(p=>({...p,firm:e.target.value}))}><option value="">General</option>{firms.map(fm=><option key={fm.code} value={fm.code}>{fm.short_name}</option>)}</select></F>
@@ -1965,7 +1980,7 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
     <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
       <select className="in" value={filter} onChange={e=>setFilter(e.target.value)} style={{width:160,fontSize:10}}>
         <option value="all">All Categories</option>
-        {CATS.map(c=><option key={c} value={c}>{c}</option>)}
+        {allCats.map(c=><option key={c} value={c}>{c}</option>)}
       </select>
       <select className="in" value={fMonth} onChange={e=>setFMonth(e.target.value)} style={{width:120,fontSize:10}}>
         <option value="all">All Months</option>
