@@ -191,6 +191,7 @@ function MainApp({user,onLogout,masterData}){
   const [col,setCol]=useState(false);
   const [loading,setLoading]=useState(true);
   const [modal,setModal]=useState(null);
+  const [fyFilter,setFyFilter]=useState('2627'); // default to current FY
 
   const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
   window._showToast=show;
@@ -572,12 +573,18 @@ function MainApp({user,onLogout,masterData}){
     }))
   })),[jobs,batches,items]);
 
+  // FY filter: filter jobs by financial year suffix in job ID
+  const filteredJobs = useMemo(()=>{
+    if(fyFilter==='all') return fullJobs;
+    return fullJobs.filter(j=>j.id?.endsWith('-'+fyFilter));
+  },[fullJobs,fyFilter]);
+
   const stats=useMemo(()=>{
-    const sc=(st)=>fullJobs.filter(j=>j.status===st).length;
-    const scm=(sts)=>fullJobs.filter(j=>sts.includes(j.status)).length;
+    const sc=(st)=>filteredJobs.filter(j=>j.status===st).length;
+    const scm=(sts)=>filteredJobs.filter(j=>sts.includes(j.status)).length;
     return {
-      jobs:fullJobs.length,
-      active:fullJobs.filter(j=>!['Billing Done','Cancelled','No Bill','Cash Received'].includes(j.status)).length,
+      jobs:filteredJobs.length,
+      active:filteredJobs.filter(j=>!['Billing Done','Cancelled','No Bill','Cash Received'].includes(j.status)).length,
       draft:sc('Draft'),
       estimate:scm(['Quotation Sent','PO Pending','PO Received','Recce Pending','Active','Draft']),
       design:sc('Designing'),
@@ -587,10 +594,10 @@ function MainApp({user,onLogout,masterData}){
       delivered:sc('Delivered'),
       billPend:scm(['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending']),
       billed:scm(['Billing Done','Cash Received']),
-      poPend:fullJobs.filter(j=>!j.po_number&&!['Billing Done','Cancelled','No Bill','Cash Received','Draft'].includes(j.status)).length,
+      poPend:filteredJobs.filter(j=>!j.po_number&&!['Billing Done','Cancelled','No Bill','Cash Received','Draft'].includes(j.status)).length,
       grn:grnData.length,os:osLogs.length,disp:dLogs.length,
     };
-  },[fullJobs,grnData,osLogs,dLogs]);
+  },[filteredJobs,grnData,osLogs,dLogs]);
 
   // Role-based nav
   const allNav=[
@@ -641,26 +648,29 @@ function MainApp({user,onLogout,masterData}){
       <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
         <header style={{height:38,borderBottom:"1px solid #1a2030",display:"flex",alignItems:"center",padding:"0 12px",gap:8,flexShrink:0}}>
           <h2 style={{fontWeight:700,fontSize:12,flex:1}}>{nav.find(n=>n.id===pg)?.l||"iPrint"}</h2>
+          <div style={{display:"flex",gap:2,alignItems:"center"}}>
+            {[{id:'2526',l:'FY 25-26'},{id:'2627',l:'FY 26-27'},{id:'all',l:'All Years'}].map(fy=><button key={fy.id} className={`b bs ${fyFilter===fy.id?'bp':''}`} onClick={()=>setFyFilter(fy.id)} style={{fontSize:8,padding:"2px 7px",lineHeight:"14px"}}>{fy.l}</button>)}
+          </div>
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={fullJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
-          {pg==="jobs"&&<JobsPage jobs={fullJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="jobs"&&<JobsPage jobs={filteredJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
-          {pg==="dept"&&<DeptPage jobs={fullJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal}/>}
+          {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
-          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={fullJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
-          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog} jobs={fullJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
-          {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={fullJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
+          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
+          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
+          {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
-          {pg==="rem"&&<RemPage jobs={fullJobs}/>}
-          {pg==="cli"&&<CliPage clients={clients} jobs={fullJobs} s={search}/>}
-          {pg==="acc"&&<AccPage jobs={fullJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
+          {pg==="rem"&&<RemPage jobs={filteredJobs}/>}
+          {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
+          {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
-          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
+          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={filteredJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
         </div>
       </main>
