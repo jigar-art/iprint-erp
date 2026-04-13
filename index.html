@@ -560,7 +560,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales"]},
-    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"]},
+    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
   ];
   const nav=allNav.filter(n=>{
     if(!n.roles.includes(user.role))return false;
