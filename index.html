@@ -277,8 +277,10 @@ function MainApp({user,onLogout,masterData}){
   // ─── TOGGLE DEPT ──────────────────────────────────────────
   const togDept = useCallback(async (itemId, dept, newVal) => {
     const col = 'dept_'+dept.toLowerCase();
-    await sb.from('line_items').update({[col]:newVal}).eq('id',itemId);
-  },[]);
+    const {error}=await sb.from('line_items').update({[col]:newVal}).eq('id',itemId);
+    if(error){show("⚠️ Failed to update dept checkbox",false);return;}
+    setItems(p=>p.map(i=>i.id===itemId?{...i,[col]:newVal}:i));
+  },[show]);
 
   // ─── ADD GRN ──────────────────────────────────────────────
   const addGRN = useCallback(async (data) => {
@@ -808,8 +810,6 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [vm,svm]=useState("internal");
   const [ed,setEd]=useState(null); // editing item id
   const [ef,setEf]=useState({}); // edit form
-  const [tick,setTick]=useState(0); // force re-render counter
-  const localTogDept=(itemId,dept,newVal)=>{const col='dept_'+dept.toLowerCase();const bts=(j.batches||[]);for(const b of bts){const it=(b.items||[]).find(i=>i.id===itemId);if(it){it[col]=newVal;break;}}togDept(itemId,dept,newVal);setTick(t=>t+1);};
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const [addingToBatch,setAddingToBatch]=useState(null); // batch id being added to
   const [pdfMode,setPdfMode]=useState(null); // 'estimate'|'production'|null
@@ -851,7 +851,42 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   };
   const fm=firms.find(f=>f.code===(jf.firm||j.firm))||{};
   const ab=async()=>{const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);};
-  const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||'',rate_mode:it.rate_mode||'UNIT',size_unit:it.size_unit||'MM',gstPct:it.gstPct!=null?it.gstPct:18});};
+  const startEdit=(it)=>{
+    const d=document.createElement('dialog');d.style.cssText='background:#0c1017;border:1px solid #e3a008;border-radius:12px;padding:16px;width:400px;max-width:90vw;color:#c9d1d9;';
+    d.innerHTML=`<p style="font-size:12px;font-weight:700;color:#e3a008;margin:0 0 10px">✏️ Edit: ${(it.internal_name||'').replace(/</g,'&lt;')}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div style="grid-column:span 2"><label style="font-size:8px;color:#64748b">Item Name</label><input id="_eName" class="in" value="${(it.internal_name||'').replace(/"/g,'&quot;')}" style="width:100%;font-size:11px"/></div>
+      <div style="grid-column:span 2"><label style="font-size:8px;color:#64748b">Material</label><input id="_eMedia" class="in" value="${(it.media||'').replace(/"/g,'&quot;')}" style="width:100%;font-size:11px"/></div>
+      <div><label style="font-size:8px;color:#64748b">Width</label><input id="_eW" class="in mn" value="${it.width||''}" style="width:100%;font-size:11px"/></div>
+      <div><label style="font-size:8px;color:#64748b">Height</label><input id="_eH" class="in mn" value="${it.height||''}" style="width:100%;font-size:11px"/></div>
+      <div><label style="font-size:8px;color:#64748b">Size Unit</label><select id="_eSU" class="in" style="width:100%">${SIZES.map(u=>'<option'+(u===(it.size_unit||'MM')?' selected':'')+'>'+u+'</option>').join('')}</select></div>
+      <div><label style="font-size:8px;color:#64748b">Qty</label><input id="_eQ" class="in mn" type="number" value="${it.qty||1}" style="width:100%;font-size:11px"/></div>
+      <div><label style="font-size:8px;color:#64748b">Rate Mode</label><select id="_eRM" class="in" style="width:100%">${RATES.map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')}</select></div>
+      <div><label style="font-size:8px;color:#64748b">Rate ₹</label><input id="_eR" class="in mn" type="number" value="${it.rate||0}" style="width:100%;font-size:11px"/></div>
+      <div><label style="font-size:8px;color:#64748b">GST %</label><select id="_eGST" class="in" style="width:100%">${[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')}</select></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>`;
+    document.body.appendChild(d);d.showModal();
+    d.querySelector('#_eCancel').onclick=()=>{d.close();d.remove();};
+    d.querySelector('#_eSave').onclick=async()=>{
+      const w=Math.round((+d.querySelector('#_eW').value||0)*100)/100;
+      const h=Math.round((+d.querySelector('#_eH').value||0)*100)/100;
+      const q=+d.querySelector('#_eQ').value||1;
+      const r=+d.querySelector('#_eR').value||0;
+      const rm=d.querySelector('#_eRM').value||'UNIT';
+      const su=d.querySelector('#_eSU').value||'MM';
+      const gp=+d.querySelector('#_eGST').value||18;
+      const sq=cSq(w,h,q,su);
+      const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;
+      const gst=Math.round(total*(gp/100)*100)/100;
+      const updates={internal_name:d.querySelector('#_eName').value,media:d.querySelector('#_eMedia').value,width:String(w||d.querySelector('#_eW').value),height:String(h||d.querySelector('#_eH').value),qty:q,rate:r,rate_mode:rm,size_unit:su,sqft:sq,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100};
+      try{const {error}=await sb.from('line_items').update(updates).eq('id',it.id);
+        if(error){show("⚠️ SAVE FAILED: "+error.message,false);return;}
+        Object.assign(it,updates);d.close();d.remove();show("✅ Item saved!");
+      }catch(e){show("⚠️ Error: "+e.message,false);}
+    };
+    d.addEventListener('close',()=>d.remove());
+  };
   const saveEdit=async(itId,extraFields={})=>{try{const mergedUpdates={...ef,...extraFields};const {error}=await sb.from('line_items').update(mergedUpdates).eq('id',itId);if(error){show("⚠️ SAVE FAILED: "+error.message+". Try again.",false);return;}const bts=(j.batches||[]);for(const b of bts){const it=(b.items||[]).find(i=>i.id===itId);if(it){Object.assign(it,mergedUpdates);break;}}setEd(null);show("✅ Item saved!");}catch(e){show("⚠️ Error: "+(e.message||e),false);}};
   const saveNewItem=async(batchId)=>{
     if(!ni.internal_name){show("Enter item name",false);return;}
@@ -954,7 +989,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);
           return <tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
-            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} onClick={()=>startEdit(it)}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>localTogDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} onClick={()=>startEdit(it)}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" onClick={()=>startEdit(it)} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
@@ -972,30 +1007,6 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         <div style={{display:"flex",gap:4,marginTop:6}}><button className="b bg" onClick={()=>saveNewItem(b.id)}>✓ Save Item</button><button className="b" onClick={()=>setAddingToBatch(null)}>Cancel</button></div>
       </div>:<div style={{padding:"4px 8px",borderTop:"1px solid #0c1017"}}><button className="b bp bs" onClick={()=>setAddingToBatch(b.id)}>➕ Add Item</button></div>}
     </div>)}
-    {ed&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:150,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setEd(null)}>
-      <div style={{background:"#0c1017",border:"1px solid #e3a008",borderRadius:12,padding:16,width:"100%",maxWidth:420,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-          <p style={{fontSize:12,fontWeight:700,color:"#e3a008"}}>✏️ Edit Item</p>
-          <button className="b bs" onClick={()=>setEd(null)} style={{fontSize:10}}>✕</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-          <div style={{gridColumn:"span 2"}}><F l="Item Name"><input className="in" value={ef.internal_name} onChange={e=>setEf(p=>({...p,internal_name:e.target.value}))} style={{fontSize:11}}/></F></div>
-          <div style={{gridColumn:"span 2"}}><F l="Material"><input className="in" value={ef.media} onChange={e=>setEf(p=>({...p,media:e.target.value}))} style={{fontSize:11}}/></F></div>
-          <F l="Width"><input className="in mn" value={ef.width} onChange={e=>setEf(p=>({...p,width:e.target.value}))} style={{fontSize:11}}/></F>
-          <F l="Height"><input className="in mn" value={ef.height} onChange={e=>setEf(p=>({...p,height:e.target.value}))} style={{fontSize:11}}/></F>
-          <F l="Size Unit"><select className="in" value={ef.size_unit||'MM'} onChange={e=>setEf(p=>({...p,size_unit:e.target.value}))}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
-          <F l="Qty"><input className="in mn" type="number" value={ef.qty} onChange={e=>setEf(p=>({...p,qty:+e.target.value}))} style={{fontSize:11}}/></F>
-          <F l="Rate Mode"><select className="in" value={ef.rate_mode||'UNIT'} onChange={e=>setEf(p=>({...p,rate_mode:e.target.value}))}>{RATES.map(u=><option key={u}>{u}</option>)}</select></F>
-          <F l={"SqFt: "+(cSq(ef.width,ef.height,ef.qty,ef.size_unit||'MM')||'—')}><span className="mn" style={{fontSize:14,color:"#64748b"}}>{cSq(ef.width,ef.height,ef.qty,ef.size_unit||'MM')||'—'}</span></F>
-          {canSeeRates&&<F l="Rate ₹"><input className="in mn" type="number" value={ef.rate} onChange={e=>setEf(p=>({...p,rate:+e.target.value}))} style={{fontSize:11}}/></F>}
-          {canSeeRates&&<F l="GST %"><select className="in" value={ef.gstPct!=null?ef.gstPct:18} onChange={e=>setEf(p=>({...p,gstPct:+e.target.value}))}>{[0,5,12,18,28].map(g=><option key={g} value={g}>{g}%</option>)}</select></F>}
-        </div>
-        <div style={{display:"flex",gap:6,marginTop:12}}>
-          <button className="b bg" style={{flex:1,justifyContent:"center",padding:8}} onClick={()=>{const w=Math.round((+ef.width||0)*100)/100,h=Math.round((+ef.height||0)*100)/100,q=+ef.qty||1,r=+ef.rate||0,rm=ef.rate_mode||'UNIT',su=ef.size_unit||'MM',gp=ef.gstPct!=null?ef.gstPct:18;const sq=cSq(w,h,q,su);const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;const gst=Math.round(total*(gp/100)*100)/100;saveEdit(ed,{width:String(w||ef.width),height:String(h||ef.height),rate_mode:rm,size_unit:su,sqft:sq,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100});}}>💾 Save Item</button>
-          <button className="b" style={{padding:8}} onClick={()=>setEd(null)}>Cancel</button>
-        </div>
-      </div>
-    </div>}
     {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
         <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
