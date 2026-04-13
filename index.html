@@ -134,6 +134,7 @@ document.addEventListener('click',function(e){
     try{const {error}=await window._sbRef.from('line_items').update(updates).eq('id',itemId);
       if(error){if(window._showToast)window._showToast("⚠️ SAVE FAILED: "+error.message,false);saveBtn.textContent='💾 Save Item';saveBtn.disabled=false;return;}
       Object.assign(it,updates);d.close();d.remove();
+      if(window._forceItemRefresh)window._forceItemRefresh(itemId,updates);
       if(window._showToast)window._showToast("✅ Item saved!",true);
     }catch(e){if(window._showToast)window._showToast("⚠️ Error: "+e.message,false);saveBtn.textContent='💾 Save Item';saveBtn.disabled=false;}
   };
@@ -195,6 +196,7 @@ function MainApp({user,onLogout,masterData}){
 
   const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
   window._showToast=show;
+  window._forceItemRefresh=(itemId,updates)=>{setItems(p=>p.map(i=>i.id===itemId?{...i,...updates}:i));};
 
   // Helper: fetch ALL rows from a table (paginate past 1000 limit)
   const fetchAll = async (table, order=null, filter=null) => {
@@ -2607,7 +2609,6 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     setActivities(p=>p.map(a=>a.id===id?{...a,[field]:value}:a));
   };
 
-  const F=({l,children})=><div><label style={{fontSize:8,color:'#64748b',fontWeight:600}}>{l}</label>{children}</div>;
   const ins={className:"in",style:{fontSize:10,padding:'4px 6px'}};
 
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
