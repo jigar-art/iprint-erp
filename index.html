@@ -621,7 +621,7 @@ function MainApp({user,onLogout,masterData}){
 }
 
 // ─── SMALL COMPONENTS ───────────────────────────────────────
-function SC({l,v,s,c="#e3a008",d=0}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}</p><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
+function SC({l,v,s,c="#e3a008",d=0,delta}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}</p><div style={{display:"flex",alignItems:"baseline",gap:4}}><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{delta!=null&&delta!==0&&<span style={{fontSize:9,fontWeight:700,color:delta>0?'#4ade80':'#f47067'}}>{delta>0?'▲ +'+delta:'▼ '+delta}</span>}</div>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
 function FB({f,firms}){const fm=firms?.find(x=>x.code===f);return fm?<span className="bd" style={{background:fm.color+"20",color:fm.color}}>{fm.short_name}</span>:null;}
 function Ck({on,onClick}){return <div className={`ck ${on?"on":""}`} onClick={onClick}>{on?"✓":""}</div>;}
 function StatusTip({j,children}){
@@ -674,6 +674,38 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
   });
   const bk=bStats(bankJobs);const nb=bStats(nonBankJobs);
   const [indTab,setIndTab]=useState('all');
+  const [cmpDays,setCmpDays]=useState(0); // 0=off, 7=week, 30=month
+
+  // Calculate deltas: how many jobs were created in the comparison period
+  const deltas=useMemo(()=>{
+    if(!cmpDays) return {};
+    const cutoff=new Date();cutoff.setDate(cutoff.getDate()-cmpDays);
+    const cutStr=cutoff.toISOString();
+    const recent=jobs.filter(j=>{const ca=j.created_at||'';return ca>=cutStr;});
+    const recentCount=recent.length;
+    // Count jobs that entered each status within the period (from status_dates)
+    const statusDeltas={};
+    const statusKeys={estimate:['quotation_sent','po_pending','po_received','recce_pending','active'],design:['designing'],printing:['printing'],fab:['fabrication'],install:['installation'],delivered:['delivered'],billPend:['billing_pending','given_for_billing','cash_pending','proforma_invoice','ic_pending'],billed:['billing_done','cash_received']};
+    // Parse status_dates timestamps like "06 Apr 2026 04:26 pm by RUCHITA"
+    const parseSD=(str)=>{if(!str)return null;const m=str.match(/(\d{1,2})\s+(\w+)\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);if(!m)return null;const months={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};let hr=+m[4];if(m[6].toLowerCase()==='pm'&&hr!==12)hr+=12;if(m[6].toLowerCase()==='am'&&hr===12)hr=0;return new Date(+m[3],months[m[2]]||0,+m[1],hr,+m[5]);};
+    Object.entries(statusKeys).forEach(([key,sdKeys])=>{
+      let count=0;
+      jobs.forEach(j=>{
+        const sd=j.status_dates||{};
+        for(const sk of sdKeys){
+          const ts=sd[sk];if(!ts)continue;
+          const dt=parseSD(ts);
+          if(dt&&dt>=cutoff)count++;
+        }
+      });
+      statusDeltas[key]=count;
+    });
+    // For total jobs: new jobs created
+    statusDeltas.jobs=recentCount;
+    // For PO pending: count jobs that became PO pending (no PO) in the period
+    statusDeltas.poPend=recent.filter(j=>!j.po_number&&!['Billing Done','Cancelled','No Bill','Cash Received','Draft'].includes(j.status)).length;
+    return statusDeltas;
+  },[cmpDays,jobs]);
   
   const results=useMemo(()=>{
     if(!dq||dq.length<2) return [];
@@ -697,8 +729,14 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       </tbody></table></div>}
       {dq.length>=2&&results.length===0&&<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>}
     </div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+      <div style={{display:"flex",gap:3}}>
+        {[{d:0,l:'No Compare'},{d:7,l:'7 Days'},{d:30,l:'30 Days'}].map(p=><button key={p.d} className={`b bs ${cmpDays===p.d?'bp':''}`} onClick={()=>setCmpDays(p.d)} style={{fontSize:9,padding:"3px 8px"}}>{p.d?'📊 '+p.l:'—'}</button>)}
+      </div>
+      {cmpDays>0&&<span style={{fontSize:9,color:"#64748b"}}>Showing changes in last {cmpDays} days</span>}
+    </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60}/><SC l="Printing" v={s.printing} c="#ef4444" d={90}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120}/><SC l="Installation" v={s.install} c="#059669" d={150}/><SC l="Dispatch" v={s.delivered} c="#10b981" d={180}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210}/><SC l="Billed" v={s.billed} c="#4ade80" d={240}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30} delta={deltas.estimate}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60} delta={deltas.design}/><SC l="Printing" v={s.printing} c="#ef4444" d={90} delta={deltas.printing}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120} delta={deltas.fab}/><SC l="Installation" v={s.install} c="#059669" d={150} delta={deltas.install}/><SC l="Dispatch" v={s.delivered} c="#10b981" d={180} delta={deltas.delivered}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210} delta={deltas.billPend}/><SC l="Billed" v={s.billed} c="#4ade80" d={240} delta={deltas.billed}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270} delta={deltas.poPend}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
