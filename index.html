@@ -1739,8 +1739,8 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     for(let i=0;i<Math.min(15,data.length);i++){
       const row=data[i];if(!row)continue;
       const txt=row.map(c=>String(c||'').toLowerCase()).join(' ');
-      if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(description|particular|specification|item|job desc)/.test(txt)) return i;
-      if(/(description|particular|item|job desc)/.test(txt)&&/(qty|quantity|unit|uom|nos|sqft|sft)/.test(txt)) return i;
+      if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(description|particular|specification|item|job desc|signage|product)/.test(txt)) return i;
+      if(/(description|particular|item|job desc|signage\s*name|product\s*name)/.test(txt)&&/(qty|quantity|unit|uom|nos|sqft|sft|size)/.test(txt)) return i;
       if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(qty|quantity|unit|uom|rate|amount)/.test(txt)) return i;
       // CMS/Banking BOQ: has site code + address + job description
       if(/(sr\.?\s*no|sl\.?\s*no)/.test(txt)&&/(site\s*code|atm\s*id)/.test(txt)&&/(address|location)/.test(txt)) return i;
@@ -1762,11 +1762,11 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     if(height<0&&h2.length>0){height=find2([/^height$/,/height/]);}
     return {
       sr:find([/^sl|^sr|^s\.?\s*no|^#/]),
-      desc:find([/description|particular|^item$|job desc/]),
+      desc:find([/description|particular|^item$|job desc|signage\s*name|product\s*name|^name$/]),
       spec:find([/^specification|^material|media\s*make/]),
       wallNo:find([/wall.*no|location|zone/]),
       floor:find([/^floor$/]),
-      size:find([/size.*in|size.*\(|^uom$|^umo$|flex\s*size/]),
+      size:find([/^size$|size.*in|size.*\(|^uom$|^umo$|flex\s*size/]),
       width,height,
       uom:find([/uom|umo|^unit$|^units$/]),
       qty:find([/^qty|quantit|^nos$/]),
@@ -1774,7 +1774,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       installRate:find([/install.*rate/]),
       totalAmt:find([/total.*amount|total.*amt|^amount$/]),
       remarks:find([/remark/]),
-      refImage:find([/ref.*image|^image/]),
+      refImage:find([/ref.*image|^image|reference/]),
       length:find([/^length$/]),
       breadth:find([/^breadth$/]),
       // CMS/Banking specific columns
