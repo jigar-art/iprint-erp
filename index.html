@@ -621,6 +621,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales"]},
     {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
+    {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
   ];
   const nav=allNav.filter(n=>{
     if(!n.roles.includes(user.role))return false;
@@ -674,6 +675,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="backup"&&<BackupPage/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={filteredJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
+          {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
         </div>
       </main>
 
@@ -1740,6 +1742,8 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(description|particular|specification|item|job desc)/.test(txt)) return i;
       if(/(description|particular|item|job desc)/.test(txt)&&/(qty|quantity|unit|uom|nos|sqft|sft)/.test(txt)) return i;
       if(/(sl\.?\s*no|sr\.?\s*no)/.test(txt)&&/(qty|quantity|unit|uom|rate|amount)/.test(txt)) return i;
+      // CMS/Banking BOQ: has site code + address + job description
+      if(/(sr\.?\s*no|sl\.?\s*no)/.test(txt)&&/(site\s*code|atm\s*id)/.test(txt)&&/(address|location)/.test(txt)) return i;
     }
     return 0;
   };
@@ -1759,10 +1763,10 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     return {
       sr:find([/^sl|^sr|^s\.?\s*no|^#/]),
       desc:find([/description|particular|^item$|job desc/]),
-      spec:find([/^specification|^material/]),
+      spec:find([/^specification|^material|media\s*make/]),
       wallNo:find([/wall.*no|location|zone/]),
       floor:find([/^floor$/]),
-      size:find([/size.*in|size.*\(|^uom$|^umo$/]),
+      size:find([/size.*in|size.*\(|^uom$|^umo$|flex\s*size/]),
       width,height,
       uom:find([/uom|umo|^unit$|^units$/]),
       qty:find([/^qty|quantit|^nos$/]),
@@ -1773,6 +1777,14 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       refImage:find([/ref.*image|^image/]),
       length:find([/^length$/]),
       breadth:find([/^breadth$/]),
+      // CMS/Banking specific columns
+      siteCode:find([/site\s*code|atm\s*id|branch\s*code/]),
+      address:find([/^address$|new\s*address|site\s*address/]),
+      pincode:find([/pin\s*code|pincode|^pin$/]),
+      city:find([/^city$/]),
+      district:find([/^district$/]),
+      state:find([/^state$/]),
+      fieldOfficer:find([/field\s*officer|f\.?\s*o|contact/]),
     };
   };
 
@@ -1802,9 +1814,10 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       const spec=cols.spec>-1?String(row[cols.spec]||''):'';
       const wallNo=cols.wallNo>-1?String(row[cols.wallNo]||''):'';
       const floor=cols.floor>-1?String(row[cols.floor]||''):'';
+      const siteCode=cols.siteCode>-1?String(row[cols.siteCode]||''):'';
       if(floor&&floor!=='nan')lastFloor=floor.replace(/\\n/g,' ');
-      if(!desc&&!wallNo&&!spec)continue;
-      if(/^nan$/i.test(desc)&&!wallNo&&!spec)continue;
+      if(!desc&&!wallNo&&!spec&&!siteCode)continue;
+      if(/^nan$/i.test(desc)&&!wallNo&&!spec&&!siteCode)continue;
 
       let w='',h='';
       if(cols.width>-1&&cols.height>-1){
@@ -1812,8 +1825,14 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       } else if(cols.length>-1&&(cols.height>-1||cols.breadth>-1)){
         w=String(row[cols.length]||'');h=String(row[cols.breadth>-1?cols.breadth:cols.height]||'');
       } else if(cols.size>-1){
-        const parsed=parseSize(String(row[cols.size]||''));
-        w=parsed.w;h=parsed.h;
+        const sizeVal=row[cols.size];
+        // If size column has a number, treat it as width and next column as height (CMS Flex Size format)
+        if(sizeVal&&!isNaN(+sizeVal)&&row[cols.size+1]&&!isNaN(+row[cols.size+1])){
+          w=String(sizeVal);h=String(row[cols.size+1]);
+        } else {
+          const parsed=parseSize(String(sizeVal||''));
+          w=parsed.w;h=parsed.h;
+        }
       }
       // Also try parsing size from description or spec (e.g. "18″ × 24″")
       if(!w&&!h&&desc){const descSize=parseSize(desc);w=descSize.w;h=descSize.h;}
@@ -1822,27 +1841,43 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       if(!w&&!h&&cols.uom>-1){const uomSize=parseSize(String(row[cols.uom]||''));w=uomSize.w;h=uomSize.h;}
       
       const qty=cols.qty>-1?(+row[cols.qty]||0):0;
-      if(qty<=0)continue;
+      // For CMS BOQs with site codes, default qty to 1 if no explicit qty column
+      if(qty<=0&&!siteCode)continue;
+      const finalQty=qty>0?qty:1;
       const uom=cols.uom>-1?String(row[cols.uom]||'Nos'):'Nos';
       const remarks=cols.remarks>-1?String(row[cols.remarks]||''):'';
       const sRate=cols.supplyRate>-1?(+row[cols.supplyRate]||0):0;
       const iRate=cols.installRate>-1?(+row[cols.installRate]||0):0;
 
-      // Build label: [Floor] [WallNo]: Description
+      // Build label: [SiteCode] [Floor] [WallNo]: Description
       let label=desc.slice(0,100);
-      if(wallNo&&!/^nan$/i.test(wallNo)) label=wallNo.replace(/\\n/g,' ').trim()+': '+label;
-      if(lastFloor) label=lastFloor+' — '+label;
+      if(siteCode&&!/^nan$/i.test(siteCode)) label=siteCode.replace(/\\n/g,' ').trim()+(desc?' — '+label:'');
+      else{
+        if(wallNo&&!/^nan$/i.test(wallNo)) label=wallNo.replace(/\\n/g,' ').trim()+': '+label;
+        if(lastFloor) label=lastFloor+' — '+label;
+      }
       
-      // Material: combine spec + remarks
+      // Material: combine spec + remarks + CMS address
       let mat=(spec&&!/^nan$/i.test(spec)?spec.replace(/\\n/g,' ').slice(0,80):'');
       if(remarks&&!/^nan$/i.test(remarks)){
         mat=mat?(mat+' | '+remarks.replace(/\\n/g,' ').slice(0,60)):remarks.replace(/\\n/g,' ').slice(0,80);
       }
+      // For CMS BOQs, build full site address as material/remarks
+      let siteAddr='';
+      if(cols.address>-1){
+        const parts=[row[cols.address],row[cols.city],row[cols.district],row[cols.state],row[cols.pincode]].filter(v=>v&&String(v).trim()&&!/^nan$/i.test(String(v)));
+        siteAddr=parts.map(v=>String(v).trim()).join(', ');
+        if(siteAddr&&!mat) mat=siteAddr;
+        else if(siteAddr) mat=mat+' | '+siteAddr;
+      }
+      // Field officer
+      const fo=cols.fieldOfficer>-1?String(row[cols.fieldOfficer]||'').trim():'';
+      if(fo&&!/^nan$/i.test(fo)) mat=mat?(mat+' | FO: '+fo):('FO: '+fo);
 
       items.push({
         sr:items.length+1,sheet:sheetName,desc:label.replace(/\\n/g,' '),fullDesc:desc+(spec?'\n\nSpec: '+spec:''),wallNo,floor:lastFloor,
         w:String(w).replace(/[^0-9.]/g,''),h:String(h).replace(/[^0-9.]/g,''),
-        qty,uom:uom.trim().replace(/^nan$/i,'Nos'),
+        qty:finalQty,uom:uom.trim().replace(/^nan$/i,'Nos'),
         remarks:mat,supplyRate:sRate?String(sRate):'',installRate:iRate?String(iRate):'',
       });
     }
@@ -2775,6 +2810,80 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
 }
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// JOB NOTES PAGE — For Batul/Sales to add notes without seeing job details
+// ═══════════════════════════════════════════════════════════
+function JobNotesPage({jobs,user,show}){
+  const [sq,setSq]=useState('');
+  const [selJob,setSelJob]=useState(null);
+  const [notes,setNotes]=useState([]);
+  const [newNote,setNewNote]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const results=useMemo(()=>{
+    if(sq.length<2)return [];
+    const q=sq.toLowerCase();
+    return jobs.filter(j=>j.id?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)).slice(0,15);
+  },[sq,jobs]);
+
+  const openJob=async(j)=>{
+    setSelJob(j);setLoading(true);
+    const {data}=await sb.from('client_notes').select('*').eq('job_id',j.id).order('created_at',{ascending:false});
+    setNotes(data||[]);setLoading(false);
+  };
+
+  const addNote=async()=>{
+    if(!newNote.trim()||!selJob)return;
+    const rec={id:'N'+Date.now(),job_id:selJob.id,dept:user?.name||'Unknown',text:newNote.trim(),created_at:new Date().toISOString()};
+    const {error}=await sb.from('client_notes').insert(rec);
+    if(error){show("⚠️ Failed to save note",false);return;}
+    setNotes(p=>[rec,...p]);setNewNote('');show("✅ Note added!");
+  };
+
+  const fmtDate=(d)=>{if(!d)return '';const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});};
+
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div className="c" style={{padding:12}}>
+      <input className="in" value={sq} onChange={e=>{setSq(e.target.value);setSelJob(null);}} placeholder="🔍 Search by Job#, Client, or Project..." style={{fontSize:12,padding:"8px 12px",width:"100%",boxSizing:"border-box"}}/>
+      {sq.length>=2&&!selJob&&<div style={{marginTop:6}}>
+        {results.length===0&&<p style={{fontSize:10,color:"#64748b",padding:8}}>No jobs found</p>}
+        {results.map(j=><div key={j.id} style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>openJob(j)}>
+          <div><span className="mn" style={{color:"#e3a008",fontWeight:700,fontSize:11}}>{j.id}</span><span style={{fontSize:10,color:"#c9d1d9",marginLeft:8}}>{j.client_name?.slice(0,25)}</span></div>
+          <div><span style={{fontSize:9,color:"#64748b"}}>{j.project?.slice(0,20)}</span><span className="bd" style={{marginLeft:6,fontSize:8,background:j.status==='Printing'?'#ef444420':j.status==='Fabrication'?'#dc262620':'#64748b20',color:j.status==='Printing'?'#ef4444':j.status==='Fabrication'?'#dc2626':'#64748b'}}>{j.status}</span></div>
+        </div>)}
+      </div>}
+    </div>
+
+    {selJob&&<div className="c" style={{padding:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,paddingBottom:8,borderBottom:"1px solid #1a2030"}}>
+        <div>
+          <span className="mn" style={{color:"#e3a008",fontWeight:700,fontSize:14}}>{selJob.id}</span>
+          <span style={{fontSize:11,color:"#c9d1d9",marginLeft:8}}>{selJob.client_name}</span>
+          <span style={{fontSize:10,color:"#64748b",marginLeft:8}}>{selJob.project}</span>
+        </div>
+        <span className="bd" style={{fontSize:9}}>{selJob.status}</span>
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <input className="in" value={newNote} onChange={e=>setNewNote(e.target.value)} placeholder="Type your note here..." style={{flex:1,fontSize:11,padding:"8px 10px"}} onKeyDown={e=>{if(e.key==='Enter')addNote();}}/>
+        <button className="b bp" onClick={addNote} style={{padding:"8px 16px",fontSize:11}}>📝 Add Note</button>
+      </div>
+
+      {loading?<p style={{textAlign:"center",color:"#64748b",padding:16}}>Loading notes...</p>
+      :notes.length===0?<p style={{textAlign:"center",color:"#64748b",padding:16,fontSize:11}}>No notes yet for this job. Add the first one!</p>
+      :<div style={{display:"flex",flexDirection:"column",gap:4}}>
+        {notes.map(n=><div key={n.id} style={{padding:"8px 10px",background:n.dept==='SYSTEM'?"#060810":"#0a1520",borderRadius:8,border:n.dept==='SYSTEM'?"1px solid #1a2030":"1px solid #3b82f633"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+            <span style={{fontSize:9,fontWeight:700,color:n.dept==='SYSTEM'?"#64748b":"#3b82f6"}}>{n.dept==='SYSTEM'?'🤖 System':('👤 '+n.dept)}</span>
+            <span style={{fontSize:8,color:"#64748b"}}>{fmtDate(n.created_at)}</span>
+          </div>
+          <p style={{fontSize:10.5,color:"#c9d1d9",margin:0,lineHeight:1.4,whiteSpace:"pre-wrap"}}>{n.text}</p>
+        </div>)}
+      </div>}
+    </div>}
+  </div>;
+}
+
 // CLIENT PORTAL — Dept login + status view + notes
 // ═══════════════════════════════════════════════════════════
 function ClientPortal({code}){
