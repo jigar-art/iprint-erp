@@ -58,6 +58,7 @@ const {useState,useCallback,useMemo,useEffect} = React;
 const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+window._sbRef=sb;
 
 // ─── FILE UPLOAD HELPER ─────────────────────────────────
 const uploadFile = async (file, folder='general') => {
@@ -88,6 +89,55 @@ const fmtK=n=>n>=1e5?"₹"+(n/1e5).toFixed(1)+"L":n>=1e3?"₹"+(n/1e3).toFixed(0
 const cSq=(w,h,q,u)=>{if(!w||!h)return 0;const W=+w,H=+h,Q=+q||1;const U=(u||'MM').toUpperCase();return U==="MM"?Math.round(W*H*Q/92903.04*100)/100:U==="CM"?Math.round(W*H*Q/929.0304*100)/100:(U==="INCH"||U==="IN")?Math.round(W*H*Q/144*100)/100:(U==="FOOT"||U==="FT"||U==="FEET")?Math.round(W*H*Q*100)/100:0;};
 const td=()=>new Date().toISOString().slice(0,10);
 let _uidSeq=0;const uid=()=>""+Date.now()+String(++_uidSeq).padStart(4,'0')+Math.random().toString(36).slice(2,5);
+
+// ─── GLOBAL EDIT ITEM HANDLER (outside React to avoid re-render freeze) ───
+window._itemCache={};
+window._showToast=null;
+document.addEventListener('click',function(e){
+  const btn=e.target.closest('[data-edit-item]');
+  if(!btn)return;
+  e.stopPropagation();e.preventDefault();e.stopImmediatePropagation();
+  const itemId=btn.getAttribute('data-edit-item');
+  const it=window._itemCache[itemId];
+  if(!it)return;
+  const d=document.createElement('dialog');d.style.cssText='background:#0c1017;border:1px solid #e3a008;border-radius:12px;padding:16px;width:420px;max-width:92vw;color:#c9d1d9;z-index:999;';
+  const esc=(s)=>(s||'').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  d.innerHTML='<p style="font-size:12px;font-weight:700;color:#e3a008;margin:0 0 10px">✏️ Edit: '+esc(it.internal_name)+'</p>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'+
+    '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">ITEM NAME</label><input id="_eName" class="in" value="'+esc(it.internal_name)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
+    '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">MATERIAL</label><input id="_eMedia" class="in" value="'+esc(it.media)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">WIDTH</label><input id="_eW" class="in mn" value="'+(it.width||'')+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">HEIGHT</label><input id="_eH" class="in mn" value="'+(it.height||'')+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">SIZE UNIT</label><select id="_eSU" class="in" style="width:100%;box-sizing:border-box">'+['MM','INCH','FOOT'].map(u=>'<option'+(u===(it.size_unit||'MM')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">QTY</label><input id="_eQ" class="in mn" type="number" value="'+(it.qty||1)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE MODE</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box">'+['SQFT','UNIT','RFT','NOS','SET','LOT'].map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="'+(it.rate||0)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">'+[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')+'</select></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>';
+  document.body.appendChild(d);d.showModal();
+  d.querySelector('#_eCancel').onclick=()=>{d.close();d.remove();};
+  d.addEventListener('close',()=>{try{d.remove();}catch(e){}});
+  d.querySelector('#_eSave').onclick=async()=>{
+    const w=Math.round((+d.querySelector('#_eW').value||0)*100)/100;
+    const h=Math.round((+d.querySelector('#_eH').value||0)*100)/100;
+    const q=+d.querySelector('#_eQ').value||1;const r=+d.querySelector('#_eR').value||0;
+    const rm=d.querySelector('#_eRM').value||'UNIT';const su=d.querySelector('#_eSU').value||'MM';
+    const gp=+d.querySelector('#_eGST').value||18;
+    const sq=cSq(w,h,q,su);
+    const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;
+    const gst=Math.round(total*(gp/100)*100)/100;
+    const updates={internal_name:d.querySelector('#_eName').value,media:d.querySelector('#_eMedia').value,
+      width:String(w||d.querySelector('#_eW').value),height:String(h||d.querySelector('#_eH').value),
+      qty:q,rate:r,rate_mode:rm,size_unit:su,sqft:sq,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100};
+    const saveBtn=d.querySelector('#_eSave');saveBtn.textContent='⏳ Saving...';saveBtn.disabled=true;
+    try{const {error}=await window._sbRef.from('line_items').update(updates).eq('id',itemId);
+      if(error){if(window._showToast)window._showToast("⚠️ SAVE FAILED: "+error.message,false);saveBtn.textContent='💾 Save Item';saveBtn.disabled=false;return;}
+      Object.assign(it,updates);d.close();d.remove();
+      if(window._showToast)window._showToast("✅ Item saved!",true);
+    }catch(e){if(window._showToast)window._showToast("⚠️ Error: "+e.message,false);saveBtn.textContent='💾 Save Item';saveBtn.disabled=false;}
+  };
+},true); // capture phase!
 
 // ═══════════════════════════════════════════════════════════
 // LOGIN SCREEN
@@ -143,6 +193,7 @@ function MainApp({user,onLogout,masterData}){
   const [modal,setModal]=useState(null);
 
   const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
+  window._showToast=show;
 
   // Helper: fetch ALL rows from a table (paginate past 1000 limit)
   const fetchAll = async (table, order=null, filter=null) => {
@@ -808,8 +859,6 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
-  const [ed,setEd]=useState(null); // editing item id
-  const [ef,setEf]=useState({}); // edit form
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const [addingToBatch,setAddingToBatch]=useState(null); // batch id being added to
   const [pdfMode,setPdfMode]=useState(null); // 'estimate'|'production'|null
@@ -851,43 +900,6 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   };
   const fm=firms.find(f=>f.code===(jf.firm||j.firm))||{};
   const ab=async()=>{const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);};
-  const startEdit=(it)=>{
-    const d=document.createElement('dialog');d.style.cssText='background:#0c1017;border:1px solid #e3a008;border-radius:12px;padding:16px;width:400px;max-width:90vw;color:#c9d1d9;';
-    d.innerHTML=`<p style="font-size:12px;font-weight:700;color:#e3a008;margin:0 0 10px">✏️ Edit: ${(it.internal_name||'').replace(/</g,'&lt;')}</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-      <div style="grid-column:span 2"><label style="font-size:8px;color:#64748b">Item Name</label><input id="_eName" class="in" value="${(it.internal_name||'').replace(/"/g,'&quot;')}" style="width:100%;font-size:11px"/></div>
-      <div style="grid-column:span 2"><label style="font-size:8px;color:#64748b">Material</label><input id="_eMedia" class="in" value="${(it.media||'').replace(/"/g,'&quot;')}" style="width:100%;font-size:11px"/></div>
-      <div><label style="font-size:8px;color:#64748b">Width</label><input id="_eW" class="in mn" value="${it.width||''}" style="width:100%;font-size:11px"/></div>
-      <div><label style="font-size:8px;color:#64748b">Height</label><input id="_eH" class="in mn" value="${it.height||''}" style="width:100%;font-size:11px"/></div>
-      <div><label style="font-size:8px;color:#64748b">Size Unit</label><select id="_eSU" class="in" style="width:100%">${SIZES.map(u=>'<option'+(u===(it.size_unit||'MM')?' selected':'')+'>'+u+'</option>').join('')}</select></div>
-      <div><label style="font-size:8px;color:#64748b">Qty</label><input id="_eQ" class="in mn" type="number" value="${it.qty||1}" style="width:100%;font-size:11px"/></div>
-      <div><label style="font-size:8px;color:#64748b">Rate Mode</label><select id="_eRM" class="in" style="width:100%">${RATES.map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')}</select></div>
-      <div><label style="font-size:8px;color:#64748b">Rate ₹</label><input id="_eR" class="in mn" type="number" value="${it.rate||0}" style="width:100%;font-size:11px"/></div>
-      <div><label style="font-size:8px;color:#64748b">GST %</label><select id="_eGST" class="in" style="width:100%">${[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')}</select></div>
-    </div>
-    <div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>`;
-    document.body.appendChild(d);d.showModal();
-    d.querySelector('#_eCancel').onclick=()=>{d.close();d.remove();};
-    d.querySelector('#_eSave').onclick=async()=>{
-      const w=Math.round((+d.querySelector('#_eW').value||0)*100)/100;
-      const h=Math.round((+d.querySelector('#_eH').value||0)*100)/100;
-      const q=+d.querySelector('#_eQ').value||1;
-      const r=+d.querySelector('#_eR').value||0;
-      const rm=d.querySelector('#_eRM').value||'UNIT';
-      const su=d.querySelector('#_eSU').value||'MM';
-      const gp=+d.querySelector('#_eGST').value||18;
-      const sq=cSq(w,h,q,su);
-      const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;
-      const gst=Math.round(total*(gp/100)*100)/100;
-      const updates={internal_name:d.querySelector('#_eName').value,media:d.querySelector('#_eMedia').value,width:String(w||d.querySelector('#_eW').value),height:String(h||d.querySelector('#_eH').value),qty:q,rate:r,rate_mode:rm,size_unit:su,sqft:sq,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100};
-      try{const {error}=await sb.from('line_items').update(updates).eq('id',it.id);
-        if(error){show("⚠️ SAVE FAILED: "+error.message,false);return;}
-        Object.assign(it,updates);d.close();d.remove();show("✅ Item saved!");
-      }catch(e){show("⚠️ Error: "+e.message,false);}
-    };
-    d.addEventListener('close',()=>d.remove());
-  };
-  const saveEdit=async(itId,extraFields={})=>{try{const mergedUpdates={...ef,...extraFields};const {error}=await sb.from('line_items').update(mergedUpdates).eq('id',itId);if(error){show("⚠️ SAVE FAILED: "+error.message+". Try again.",false);return;}const bts=(j.batches||[]);for(const b of bts){const it=(b.items||[]).find(i=>i.id===itId);if(it){Object.assign(it,mergedUpdates);break;}}setEd(null);show("✅ Item saved!");}catch(e){show("⚠️ Error: "+(e.message||e),false);}};
   const saveNewItem=async(batchId)=>{
     if(!ni.internal_name){show("Enter item name",false);return;}
     const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=+ni.gstPct||18;
@@ -986,10 +998,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       </div>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
         <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
-        {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);
+        {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;
           return <tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
-            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} ref={el=>{if(el)el.onclick=e=>{e.stopPropagation();startEdit(it);}}}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" ref={el=>{if(el)el.onclick=e=>{e.stopPropagation();startEdit(it);}}} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
