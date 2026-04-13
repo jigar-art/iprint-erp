@@ -805,7 +805,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         text:'🏢 Billing address changed by '+(user?.name||'Unknown')+':\n\nOLD: '+oldBillAddr+'\nNEW: '+newBillAddr,
         created_at:new Date().toISOString()});}catch(e){}
     }
-    const ok=await updateJobFields(j.id,jf);
+    // Build clean fields object — exclude firm if empty (FK constraint)
+    const cleanFields = {...jf};
+    if(!cleanFields.firm) delete cleanFields.firm;
+    const ok=await updateJobFields(j.id,cleanFields);
     if(ok!==false)setJfDirty(false);
   };
   const fm=firms.find(f=>f.code===(jf.firm||j.firm))||{};
