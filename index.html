@@ -134,6 +134,7 @@ function MainApp({user,onLogout,masterData}){
   const [osLogs,setOsLogs]=useState([]);
   const [dLogs,setDLogs]=useState([]);
   const [expenses,setExpenses]=useState([]);
+  const [salesActs,setSalesActs]=useState([]);
   const [pg,setPg]=useState("dash");
   const [toast,setToast]=useState(null);
   const [search,setSearch]=useState("");
@@ -177,13 +178,14 @@ function MainApp({user,onLogout,masterData}){
       console.log('Phase 1: Loaded',j.length,'jobs');
       setLoading(false);
       
-      // Phase 2: Load batches + line items in background
-      const [b,li] = await Promise.all([
+      // Phase 2: Load batches + line items + sales in background
+      const [b,li,sa] = await Promise.all([
         fetchAll('batches','id'),
         fetchAll('line_items','id'),
+        fetchAll('sales_activities','id'),
       ]);
-      setBatches(b); setItems(li);
-      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items');
+      setBatches(b); setItems(li); setSalesActs(sa);
+      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',sa.length,'sales');
     }
     load();
   },[]);
@@ -558,6 +560,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales"]},
+    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"]},
   ];
   const nav=allNav.filter(n=>{
     if(!n.roles.includes(user.role))return false;
@@ -607,6 +610,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
+          {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
         </div>
       </main>
 
@@ -2378,6 +2382,256 @@ function BackupPage(){
         <p>• Your data is stored on <strong style={{color:"#4ade80"}}>AWS cloud servers</strong> in Mumbai region</p>
       </div>
     </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SALES CRM — Visits, Leads, Pipeline, Reports
+// ═══════════════════════════════════════════════════════════
+function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,show,sm}){
+  const [tab,setTab]=useState('visits');
+  const [showAdd,setShowAdd]=useState(false);
+  const [sq,setSq]=useState('');
+  const [dateFrom,setDateFrom]=useState('');
+  const [dateTo,setDateTo]=useState('');
+  const [repFilter,setRepFilter]=useState('All');
+  const INDUSTRIES=['Architecture Firm','Interior Design Firm','Interior and Architecture Design Firm','Contractor','PMC','Tech Company','Finance Company','Design Agency','Developers/Building contractors','Other'];
+  const PRODUCTS=['Vinyl','Glass Film','Signage','BENIF','Canvas','Frames','Wallpaper','3D Graphics','Acoustic','Suncontrol Film','PPF Film','Environmental Branding','Other'];
+  const FEEDBACKS=['Yes','No','They will contact Us','Called Again Later','Followup Required','Referred to other team'];
+  const RESPONSES=['Positive - Enquiry Started','Asked for Sample','Asked to Visit Again','Followup needed','Pricing too High','Have other vendor','Negative - Not using our products','Reference shared'];
+  const STATUSES=['Open','Quoted','Follow-up','Sample Sent','Won','Lost','On Hold'];
+  const PROJ_STATUSES=['Design Pending','Mockup Pending','Artwork approved','Cost approval Pending','Sampling done','Installation Pending','On hold','Completed'];
+  const salesReps=[...new Set(activities.map(a=>a.rep_name).filter(Boolean))];
+  if(!salesReps.includes('BATUL A'))salesReps.unshift('BATUL A');
+
+  const [nf,setNf]=useState({date:td(),client_type:'New Client',firm_name:'',industry:INDUSTRIES[0],mobile:'',landline:'',email:'',address:'',contact_person:'',designation:'',feedback:FEEDBACKS[0],product_pitched:PRODUCTS[0],response:RESPONSES[0],action_taken:'',pipeline_project:'',pipeline_date:'',pipeline_product:'',pipeline_qty:'',ref_name1:'',ref_company1:'',ref_name2:'',ref_company2:'',remarks:'',revisit_date:'',rep_name:user?.name?.includes('BATUL')?'BATUL A':user?.name||''});
+
+  const filtered=useMemo(()=>{
+    let f=activities;
+    if(sq){const q=sq.toLowerCase();f=f.filter(a=>a.firm_name?.toLowerCase().includes(q)||a.contact_person?.toLowerCase().includes(q)||a.client_name?.toLowerCase().includes(q)||a.project?.toLowerCase().includes(q)||a.pipeline_project?.toLowerCase().includes(q)||a.product_pitched?.toLowerCase().includes(q));}
+    if(repFilter!=='All')f=f.filter(a=>a.rep_name===repFilter);
+    if(dateFrom)f=f.filter(a=>a.date>=dateFrom);
+    if(dateTo)f=f.filter(a=>a.date<=dateTo);
+    return f.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  },[activities,sq,repFilter,dateFrom,dateTo]);
+
+  const visits=filtered.filter(a=>a.activity_type==='visit');
+  const pipeline=filtered.filter(a=>a.activity_type==='project');
+
+  // Stats
+  const stats=useMemo(()=>{
+    const thisMonth=td().slice(0,7);
+    const today=td();
+    const monthActs=activities.filter(a=>a.date?.startsWith(thisMonth));
+    const todayActs=activities.filter(a=>a.date===today);
+    const newClients=activities.filter(a=>a.client_type==='New Client');
+    const pipelineActs=activities.filter(a=>a.activity_type==='project');
+    const wonActs=pipelineActs.filter(a=>a.status==='Won'||a.status==='Completed');
+    return {
+      totalVisits:activities.filter(a=>a.activity_type==='visit').length,
+      monthVisits:monthActs.filter(a=>a.activity_type==='visit').length,
+      todayVisits:todayActs.filter(a=>a.activity_type==='visit').length,
+      newClients:newClients.length,
+      repeatClients:activities.filter(a=>a.client_type==='Old Client').length,
+      totalPipeline:pipelineActs.length,
+      activePipeline:pipelineActs.filter(a=>!['Won','Lost','Completed'].includes(a.status)).length,
+      won:wonActs.length,
+      products:{},
+    };
+  },[activities]);
+
+  // Product breakdown
+  const productStats=useMemo(()=>{
+    const p={};activities.forEach(a=>{const pr=a.product_pitched||a.pipeline_product;if(pr)pr.split(',').forEach(x=>{const k=x.trim();if(k&&k!=='No Data Shared by Batul')p[k]=(p[k]||0)+1;});});
+    return Object.entries(p).sort((a,b)=>b[1]-a[1]);
+  },[activities]);
+
+  const addVisit=async()=>{
+    if(!nf.firm_name.trim()){alert('Enter firm name');return;}
+    const id='SA'+Date.now()+Math.random().toString(36).slice(2,5);
+    const rec={id,date:nf.date,activity_type:'visit',rep_name:nf.rep_name,client_type:nf.client_type,firm_name:nf.firm_name,client_name:nf.firm_name,industry:nf.industry,mobile:nf.mobile,landline:nf.landline,email:nf.email,address:nf.address,contact_person:nf.contact_person,designation:nf.designation,description:nf.feedback,product_pitched:nf.product_pitched,outcome:nf.response,follow_up_notes:nf.action_taken,pipeline_project:nf.pipeline_project,pipeline_date:nf.pipeline_date,pipeline_product:nf.pipeline_product,pipeline_qty:nf.pipeline_qty,ref_name1:nf.ref_name1,ref_company1:nf.ref_company1,ref_name2:nf.ref_name2,ref_company2:nf.ref_company2,remarks:nf.remarks,follow_up_date:nf.revisit_date,status:'Open',created_at:new Date().toISOString()};
+    const {error}=await sb.from('sales_activities').insert(rec);
+    if(!error){setActivities(p=>[rec,...p]);setShowAdd(false);show('Visit logged!');
+      setNf(p=>({...p,firm_name:'',mobile:'',landline:'',email:'',address:'',contact_person:'',designation:'',feedback:FEEDBACKS[0],product_pitched:PRODUCTS[0],response:RESPONSES[0],action_taken:'',pipeline_project:'',pipeline_date:'',pipeline_product:'',pipeline_qty:'',ref_name1:'',ref_company1:'',ref_name2:'',ref_company2:'',remarks:'',revisit_date:''}));
+    } else show('Error: '+error.message,false);
+  };
+
+  const deleteAct=async(id)=>{
+    const role=user?.role||'';
+    if(!['admin','sales'].includes(role)){show('Only admin/sales can delete',false);return;}
+    if(!confirm('Delete this activity?'))return;
+    await sb.from('sales_activities').delete().eq('id',id);
+    setActivities(p=>p.filter(a=>a.id!==id));show('Deleted');
+  };
+
+  const updateAct=async(id,field,value)=>{
+    await sb.from('sales_activities').update({[field]:value}).eq('id',id);
+    setActivities(p=>p.map(a=>a.id===id?{...a,[field]:value}:a));
+  };
+
+  const F=({l,children})=><div><label style={{fontSize:8,color:'#64748b',fontWeight:600}}>{l}</label>{children}</div>;
+  const ins={className:"in",style:{fontSize:10,padding:'4px 6px'}};
+
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    {/* Tabs + Actions */}
+    <div style={{display:"flex",justifyContent:"space-between",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:3}}>
+        {[{id:'dashboard',l:'📊 Dashboard'},{id:'visits',l:'🚶 Site Visits'},{id:'pipeline',l:'📋 Pipeline'},{id:'reports',l:'📈 Reports'}].map(t=><button key={t.id} className={`b ${tab===t.id?'bp':''}`} onClick={()=>setTab(t.id)} style={{fontSize:10}}>{t.l}</button>)}
+      </div>
+      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+        <select className="in" value={repFilter} onChange={e=>setRepFilter(e.target.value)} style={{fontSize:10,padding:'4px',width:130}}><option value="All">All Reps</option>{salesReps.map(r=><option key={r}>{r}</option>)}</select>
+        <input className="in" type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} style={{fontSize:9,padding:'3px',width:110}} title="From date"/>
+        <input className="in" type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} style={{fontSize:9,padding:'3px',width:110}} title="To date"/>
+        <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search..." value={sq} onChange={e=>setSq(e.target.value)} style={{width:160,fontSize:10}}/></div>
+        <button className="b bp" onClick={()=>setShowAdd(true)} style={{fontSize:10}}>➕ Log Visit</button>
+      </div>
+    </div>
+
+    {/* DASHBOARD TAB */}
+    {tab==='dashboard'&&<div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:7,marginBottom:12}}>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>TOTAL VISITS</p><p style={{fontSize:22,fontWeight:800,color:"#3b82f6"}}>{stats.totalVisits}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>THIS MONTH</p><p style={{fontSize:22,fontWeight:800,color:"#8b5cf6"}}>{stats.monthVisits}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>TODAY</p><p style={{fontSize:22,fontWeight:800,color:"#e3a008"}}>{stats.todayVisits}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>NEW CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{stats.newClients}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>REPEAT CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#06b6d4"}}>{stats.repeatClients}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>PIPELINE</p><p style={{fontSize:22,fontWeight:800,color:"#f59e0b"}}>{stats.activePipeline}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WON</p><p style={{fontSize:22,fontWeight:800,color:"#4ade80"}}>{stats.won}</p></div>
+      </div>
+      <div className="c" style={{padding:10}}>
+        <p style={{fontSize:11,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Products Pitched (Frequency)</p>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{productStats.map(([p,c])=><span key={p} className="bd" style={{background:"#3b82f620",color:"#3b82f6",fontSize:10,padding:"3px 8px"}}>{p} <b>{c}</b></span>)}</div>
+      </div>
+    </div>}
+
+    {/* VISITS TAB */}
+    {tab==='visits'&&<div className="c" style={{padding:0}}>
+      <div style={{padding:"6px 8px",borderBottom:"2px solid #3b82f6",background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>🚶 Site Visits — {visits.length} records{sq?` matching "${sq}"`:''}</span></div>
+      <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>New/Old</th><th>Firm</th><th>Industry</th><th>Contact</th><th>Phone</th><th>Feedback</th><th>Product</th><th>Response</th><th>Action</th><th>Pipeline</th><th>Re-visit</th><th>Rep</th><th></th></tr></thead><tbody>
+        {visits.map(a=><tr key={a.id}>
+          <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
+          <td><span className="bd" style={{background:a.client_type==='New Client'?'#10b98120':'#06b6d420',color:a.client_type==='New Client'?'#10b981':'#06b6d4',fontSize:8}}>{a.client_type==='New Client'?'NEW':'OLD'}</span></td>
+          <td style={{fontSize:10,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.firm_name}>{a.firm_name}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.industry?.slice(0,15)}</td>
+          <td style={{fontSize:9}} title={a.designation}>{a.contact_person?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.mobile?.slice(0,12)}</td>
+          <td style={{fontSize:8}}>{a.description?.slice(0,18)}</td>
+          <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,20)}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.follow_up_notes?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:"#f59e0b"}}>{a.pipeline_project?.slice(0,15)}</td>
+          <td style={{fontSize:8}}>{a.follow_up_date||'—'}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
+          <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)}>✕</button></td>
+        </tr>)}
+        {visits.length===0&&<tr><td colSpan={14} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits found</td></tr>}
+      </tbody></table></div>
+    </div>}
+
+    {/* PIPELINE TAB */}
+    {tab==='pipeline'&&<div className="c" style={{padding:0}}>
+      <div style={{padding:"6px 8px",borderBottom:"2px solid #f59e0b",background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:"#f59e0b"}}>📋 Active Pipeline — {pipeline.length} projects</span></div>
+      <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Job#</th><th>Project</th><th>Client</th><th>Contact</th><th>Location</th><th>Product</th><th>Status</th><th>Phase</th><th>Updates</th><th>Start</th><th></th></tr></thead><tbody>
+        {pipeline.map(a=><tr key={a.id}>
+          <td style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{a.job_id||'—'}</td>
+          <td style={{fontSize:10,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.project}>{a.project||a.pipeline_project}</td>
+          <td style={{fontSize:10}}>{a.client_name?.slice(0,18)}</td>
+          <td style={{fontSize:9}}>{a.contact_person?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.location?.slice(0,15)}</td>
+          <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,18)}</td>
+          <td><select className="in" value={a.status||'Open'} onChange={e=>updateAct(a.id,'status',e.target.value)} style={{fontSize:8,padding:"2px",width:90}}>{PROJ_STATUSES.map(s=><option key={s}>{s}</option>)}</select></td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.outcome?.slice(0,20)}</td>
+          <td style={{fontSize:8,color:"#64748b",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.remarks}>{a.remarks?.slice(0,25)}</td>
+          <td style={{fontSize:8}}>{a.date}</td>
+          <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)}>✕</button></td>
+        </tr>)}
+        {pipeline.length===0&&<tr><td colSpan={11} style={{textAlign:"center",color:"#64748b",padding:20}}>No pipeline projects</td></tr>}
+      </tbody></table></div>
+    </div>}
+
+    {/* REPORTS TAB */}
+    {tab==='reports'&&<div style={{display:"grid",gap:8}}>
+      <div className="c" style={{padding:10}}>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 Visit Frequency by Month</p>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(()=>{
+          const months={};activities.filter(a=>a.activity_type==='visit').forEach(a=>{const m=a.date?.slice(0,7);if(m)months[m]=(months[m]||0)+1;});
+          return Object.entries(months).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,c])=><div key={m} className="c a" style={{padding:"6px 10px",minWidth:80,textAlign:"center"}}><p style={{fontSize:8,color:"#64748b"}}>{m}</p><p style={{fontSize:16,fontWeight:800,color:"#3b82f6"}}>{c}</p></div>);
+        })()}</div>
+      </div>
+      <div className="c" style={{padding:10}}>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏢 New vs Repeat Clients</p>
+        <div style={{display:"flex",gap:8}}>
+          <div className="c a" style={{padding:10,flex:1,textAlign:"center",borderColor:"#10b98144"}}><p style={{fontSize:8,color:"#64748b"}}>NEW CLIENTS</p><p style={{fontSize:28,fontWeight:800,color:"#10b981"}}>{activities.filter(a=>a.client_type==='New Client').length}</p></div>
+          <div className="c a" style={{padding:10,flex:1,textAlign:"center",borderColor:"#06b6d444"}}><p style={{fontSize:8,color:"#64748b"}}>REPEAT CLIENTS</p><p style={{fontSize:28,fontWeight:800,color:"#06b6d4"}}>{activities.filter(a=>a.client_type==='Old Client').length}</p></div>
+        </div>
+      </div>
+      <div className="c" style={{padding:10}}>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Top Products Pitched</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:4}}>{productStats.slice(0,12).map(([p,c])=><div key={p} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}>{p}</span><span style={{fontWeight:800,color:"#8b5cf6",fontSize:12}}>{c}</span></div>)}</div>
+      </div>
+      <div className="c" style={{padding:10}}>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📋 Response Breakdown</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:4}}>{(()=>{
+          const r={};activities.forEach(a=>{const o=a.outcome;if(o&&!o.includes('No Data'))r[o]=(r[o]||0)+1;});
+          return Object.entries(r).sort((a,b)=>b[1]-a[1]).map(([k,v])=><div key={k} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,color:k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'}}>{k.slice(0,30)}</span><span style={{fontWeight:800,fontSize:11}}>{v}</span></div>);
+        })()}</div>
+      </div>
+      <button className="b" onClick={()=>{
+        const data=filtered.map((a,i)=>({'#':i+1,'Date':a.date,'Type':a.activity_type,'Rep':a.rep_name,'Client Type':a.client_type,'Firm':a.firm_name||a.client_name,'Industry':a.industry,'Contact':a.contact_person,'Phone':a.mobile,'Email':a.email,'Address':a.address,'Feedback':a.description,'Product':a.product_pitched,'Response':a.outcome,'Action':a.follow_up_notes,'Pipeline':a.pipeline_project,'Status':a.status}));
+        const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sales Data');
+        XLSX.writeFile(wb,'Sales_CRM_Export_'+td()+'.xlsx');show('Excel exported!');
+      }} style={{fontSize:11}}>📥 Export to Excel</button>
+    </div>}
+
+    {/* ADD VISIT MODAL */}
+    {showAdd&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:16,overflowY:"auto"}} onClick={()=>setShowAdd(false)}>
+      <div style={{background:"#0c1017",border:"1px solid #3b82f644",borderRadius:14,width:"100%",maxWidth:900,padding:20,margin:"10px 0"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <h3 style={{fontSize:14,fontWeight:800,color:"#3b82f6"}}>🚶 Log New Site Visit</h3>
+          <button className="b bs" onClick={()=>setShowAdd(false)}>✕</button>
+        </div>
+        <div className="fg f3" style={{gap:6,marginBottom:8}}>
+          <F l="Date *"><input {...ins} type="date" value={nf.date} onChange={e=>setNf(p=>({...p,date:e.target.value}))}/></F>
+          <F l="Client Type"><select {...ins} value={nf.client_type} onChange={e=>setNf(p=>({...p,client_type:e.target.value}))}><option>New Client</option><option>Old Client</option></select></F>
+          <F l="Firm Name *"><input {...ins} value={nf.firm_name} onChange={e=>setNf(p=>({...p,firm_name:e.target.value}))} placeholder="Company name"/></F>
+          <F l="Industry"><select {...ins} value={nf.industry} onChange={e=>setNf(p=>({...p,industry:e.target.value}))}>{INDUSTRIES.map(i=><option key={i}>{i}</option>)}</select></F>
+          <F l="Contact Person"><input {...ins} value={nf.contact_person} onChange={e=>setNf(p=>({...p,contact_person:e.target.value}))}/></F>
+          <F l="Designation"><input {...ins} value={nf.designation} onChange={e=>setNf(p=>({...p,designation:e.target.value}))}/></F>
+          <F l="Mobile"><input {...ins} value={nf.mobile} onChange={e=>setNf(p=>({...p,mobile:e.target.value}))}/></F>
+          <F l="Landline"><input {...ins} value={nf.landline} onChange={e=>setNf(p=>({...p,landline:e.target.value}))}/></F>
+          <F l="Email"><input {...ins} value={nf.email} onChange={e=>setNf(p=>({...p,email:e.target.value}))}/></F>
+          <div style={{gridColumn:"span 3"}}><F l="Address"><input {...ins} value={nf.address} onChange={e=>setNf(p=>({...p,address:e.target.value}))} style={{...ins.style,width:"100%"}}/></F></div>
+          <F l="Meeting Feedback"><select {...ins} value={nf.feedback} onChange={e=>setNf(p=>({...p,feedback:e.target.value}))}>{FEEDBACKS.map(f=><option key={f}>{f}</option>)}</select></F>
+          <F l="Product Pitched"><select {...ins} value={nf.product_pitched} onChange={e=>setNf(p=>({...p,product_pitched:e.target.value}))}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></F>
+          <F l="Response"><select {...ins} value={nf.response} onChange={e=>setNf(p=>({...p,response:e.target.value}))}>{RESPONSES.map(r=><option key={r}>{r}</option>)}</select></F>
+          <div style={{gridColumn:"span 3"}}><F l="Action Taken"><input {...ins} value={nf.action_taken} onChange={e=>setNf(p=>({...p,action_taken:e.target.value}))} style={{...ins.style,width:"100%"}} placeholder="Follow-up email, sample sent, etc."/></F></div>
+        </div>
+        <div style={{borderTop:"1px solid #1a2030",paddingTop:8,marginBottom:8}}>
+          <p style={{fontSize:10,fontWeight:700,color:"#f59e0b",marginBottom:6}}>📋 Pipeline Project (if any)</p>
+          <div className="fg f3" style={{gap:6}}>
+            <F l="Project Name"><input {...ins} value={nf.pipeline_project} onChange={e=>setNf(p=>({...p,pipeline_project:e.target.value}))}/></F>
+            <F l="Start Date"><input {...ins} value={nf.pipeline_date} onChange={e=>setNf(p=>({...p,pipeline_date:e.target.value}))} placeholder="e.g. MARCH"/></F>
+            <F l="Product Interested"><input {...ins} value={nf.pipeline_product} onChange={e=>setNf(p=>({...p,pipeline_product:e.target.value}))}/></F>
+            <F l="Qty (SqFt)"><input {...ins} value={nf.pipeline_qty} onChange={e=>setNf(p=>({...p,pipeline_qty:e.target.value}))}/></F>
+            <F l="Re-visit Date"><input {...ins} type="date" value={nf.revisit_date} onChange={e=>setNf(p=>({...p,revisit_date:e.target.value}))}/></F>
+          </div>
+        </div>
+        <div style={{borderTop:"1px solid #1a2030",paddingTop:8,marginBottom:8}}>
+          <p style={{fontSize:10,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>👤 References</p>
+          <div className="fg f4" style={{gap:6}}>
+            <F l="Ref Name 1"><input {...ins} value={nf.ref_name1} onChange={e=>setNf(p=>({...p,ref_name1:e.target.value}))}/></F>
+            <F l="Ref Company 1"><input {...ins} value={nf.ref_company1} onChange={e=>setNf(p=>({...p,ref_company1:e.target.value}))}/></F>
+            <F l="Ref Name 2"><input {...ins} value={nf.ref_name2} onChange={e=>setNf(p=>({...p,ref_name2:e.target.value}))}/></F>
+            <F l="Ref Company 2"><input {...ins} value={nf.ref_company2} onChange={e=>setNf(p=>({...p,ref_company2:e.target.value}))}/></F>
+          </div>
+        </div>
+        <F l="Remarks"><input {...ins} value={nf.remarks} onChange={e=>setNf(p=>({...p,remarks:e.target.value}))} style={{...ins.style,width:"100%"}} placeholder="Any additional notes"/></F>
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button className="b bp" onClick={addVisit} style={{flex:1,justifyContent:"center",padding:10,fontSize:12}}>💾 Save Visit</button>
+          <button className="b bs" onClick={()=>setShowAdd(false)}>Cancel</button>
+        </div>
+      </div>
+    </div>}
   </div>;
 }
 
