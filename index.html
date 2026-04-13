@@ -853,7 +853,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const ab=async()=>{const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);};
   const startEdit=(it)=>{setEd(it.id);setEf({internal_name:it.internal_name||'',client_name:it.client_name||'',media:it.media||'',qty:it.qty||1,rate:it.rate||0,width:it.width||'',height:it.height||'',rate_mode:it.rate_mode||'UNIT',size_unit:it.size_unit||'MM',gstPct:it.gstPct!=null?it.gstPct:18});};
   const [localItems,setLocalItems]=useState(()=>(j.batches||[]).flatMap(b=>(b.items||[])));
-  useEffect(()=>{setLocalItems((j.batches||[]).flatMap(b=>(b.items||[])));},[j]);
+  const jItemsKey=(j.batches||[]).map(b=>b.id).join(',');
+  useEffect(()=>{setLocalItems((j.batches||[]).flatMap(b=>(b.items||[])));},[jItemsKey]);
   const getItems=(batchId)=>localItems.filter(i=>i.batch_id===batchId);
   const saveEdit=async(itId,extraFields={})=>{try{const mergedUpdates={...ef,...extraFields};const {error}=await sb.from('line_items').update(mergedUpdates).eq('id',itId);if(error){show("⚠️ SAVE FAILED: "+error.message+". Try again.",false);return;}setLocalItems(p=>p.map(i=>i.id===itId?{...i,...mergedUpdates}:i));setEd(null);show("✅ Item saved!");}catch(e){show("⚠️ Error: "+(e.message||e),false);}};
   const saveNewItem=async(batchId)=>{
