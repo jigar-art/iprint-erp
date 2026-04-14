@@ -1144,6 +1144,26 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(clientEmail)}&su=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`,'_blank');
       }} style={{gap:4}}>📧 Email Estimate</button>}
       <button className="b" onClick={()=>{setPdfMode('production');const sel={};(j.batches||[]).forEach(b=>{if((b.items||[]).length>0)sel[b.id]=true;});setPdfBatches(sel);}} style={{gap:4}}>📋 Production Sheet</button>
+      {canSeeRates&&<button className="b" onClick={()=>{
+        const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
+        const wsData=[
+          ['Job#',j.id,'Client',j.client_name,'Project',j.project||''],
+          ['Firm',fm.name||'','Contact',j.contact_person||'','Phone',j.contact_no||''],
+          ['Delivery',j.delivery_address||'','PO#',j.po_number||'','Date',j.created_at?.slice(0,10)||''],
+          [],
+          ['Sr','Item Name','Material/Spec','Width','Height','Unit','Qty','Rate Mode','SqFt','Rate','Total','GST%','GST','Amount']
+        ];
+        allItems.forEach((it,i)=>{
+          wsData.push([i+1,it.internal_name||it.client_name||'',it.media||'',it.width||'',it.height||'',it.size_unit||'',it.qty||1,it.rate_mode||'UNIT',it.sqft||'',+it.rate||0,+it.total||0,it.gstPct!=null?it.gstPct:18,+it.gst||0,+it.amount||0]);
+        });
+        const totals=allItems.reduce((s,it)=>({total:s.total+(+it.total||0),gst:s.gst+(+it.gst||0),amount:s.amount+(+it.amount||0)}),{total:0,gst:0,amount:0});
+        wsData.push([]);
+        wsData.push(['','','','','','','','','','TOTAL',Math.round(totals.total*100)/100,'',Math.round(totals.gst*100)/100,Math.round(totals.amount*100)/100]);
+        const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(wsData);
+        ws['!cols']=[{wch:4},{wch:30},{wch:35},{wch:8},{wch:8},{wch:6},{wch:6},{wch:10},{wch:8},{wch:10},{wch:12},{wch:6},{wch:10},{wch:12}];
+        XLSX.utils.book_append_sheet(wb,ws,'Job '+j.id);
+        XLSX.writeFile(wb,'Job_'+j.id+'_'+j.client_name?.replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)+'.xlsx');
+      }} style={{gap:4}}>📊 Export Excel</button>}
     </div>
 
     {pdfMode&&<div style={{background:"#060810",border:"1px solid #e3a00844",borderRadius:8,padding:12,marginTop:6}}>
