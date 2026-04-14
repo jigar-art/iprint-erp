@@ -110,9 +110,9 @@ document.addEventListener('click',function(e){
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">HEIGHT</label><input id="_eH" class="in mn" value="'+(it.height||'')+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">SIZE UNIT</label><select id="_eSU" class="in" style="width:100%;box-sizing:border-box">'+['MM','INCH','FOOT'].map(u=>'<option'+(u===(it.size_unit||'MM')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">QTY</label><input id="_eQ" class="in mn" type="number" value="'+(it.qty||1)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
-    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE MODE</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box">'+['SQFT','UNIT','RFT','NOS','SET','LOT'].map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
-    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="'+(it.rate||0)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
-    '<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">'+[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')+'</select></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE MODE</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"'+(window._canSeeRates===false?' disabled':'')+(window._canSeeRates===false?' title="Not authorized"':'')+'>'+['SQFT','UNIT','RFT','NOS','SET','LOT'].map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
+    (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="'+(it.rate||0)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>':'<input id="_eR" type="hidden" value="'+(it.rate||0)+'"/>')+
+    (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">'+[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')+'</select></div>':'<input id="_eGST" type="hidden" value="'+(it.gstPct!=null?it.gstPct:18)+'"/>')+
     '</div>'+
     '<div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>';
   document.body.appendChild(d);d.showModal();
@@ -676,7 +676,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
-          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={filteredJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
+          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
         </div>
@@ -885,7 +885,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const role=user?.role||'admin';
   const prodRoles=['production','printing','fabrication','designer','dispatch'];
   const isProd=prodRoles.includes(role);
-  const canSeeRates=!isProd;
+  const canSeeRates=!isProd&&!['PRIYANKA'].includes((user?.name||'').toUpperCase());
+  window._canSeeRates=canSeeRates;
   const [jf,setJf]=useState({client_name:j.client_name||'',contact_person:j.contact_person||'',contact_no:j.contact_no||'',po_number:j.po_number||'',delivery_address:j.delivery_address||'',billing_address:j.billing_address||'',client_gst:j.client_gst||'',billing_name:j.billing_name||'',payment_terms:j.payment_terms||'',project:j.project||'',client_email:j.client_email||'',remark:j.remark||'',firm:j.firm||''});
   const [jfDirty,setJfDirty]=useState(false);
   const setJF=(k,v)=>{setJf(p=>({...p,[k]:v}));setJfDirty(true);};
