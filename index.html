@@ -1719,6 +1719,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const [colHeaders,setColHeaders]=useState([]);
   const [colMap,setColMap]=useState({});
   const [headerRow,setHeaderRow]=useState(0);
+  const [importMode,setImportMode]=useState('one_job'); // 'one_job' or 'multi_job'
 
   // Smart size parser — handles all formats: "Width- 16in Height- 24in", "8\"x12\"", "3ftx4ft", "1177.5MM x350.3MM", "18″ × 24″"
   const parseSize=(sizeStr)=>{
@@ -1954,14 +1955,34 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const submitJob=async()=>{
     if(!f.cn){alert("Select client");return;}
     if(its.length===0){alert("No items");return;}
-    if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
-    setSubmitting(true);
-    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
-    const batchId="B"+uid();
-    const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
-    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
-    await createJob(jobData,batchData,lineItems);
-    setSubmitting(false);
+    if(importMode==='multi_job'){
+      // Each item = separate job
+      if(!confirm(`Create ${its.length} SEPARATE JOBS?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nJobs to create: ${its.length}\n\nEach row becomes its own job sheet.\nClick OK to proceed.`))return;
+      setSubmitting(true);
+      const curFYVal=curFY;
+      const fyJobs=jobs.filter(j=>j.id?.includes('-'+curFYVal));
+      let lastNum=Math.max(0,...fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;}));
+      for(const it of its){
+        lastNum++;
+        const newJid=String(lastNum).padStart(4,'0')+'-'+curFYVal;
+        const jobData={id:newJid,firm:fm,client_id:f.cl,client_name:f.cn,project:it.int||f.pr,delivery_address:it.siteAddr||f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
+        const batchId="B"+uid();
+        const batchData={id:batchId,job_id:newJid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
+        const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
+        await createJob(jobData,batchData,lineItems);
+      }
+      setSubmitting(false);
+    } else {
+      // All items = one job
+      if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
+      setSubmitting(true);
+      const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
+      const batchId="B"+uid();
+      const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
+      const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+      await createJob(jobData,batchData,lineItems);
+      setSubmitting(false);
+    }
   };
 
   const GST_OPTS=[0,5,12,18,28];
@@ -2026,6 +2047,11 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
             if(auto.siteCode>=0)m[auto.siteCode]='site_code';
             if(auto.address>=0)m[auto.address]='address';
             if(auto.refImage>=0)m[auto.refImage]='ref_image';
+            if(auto.pincode>=0)m[auto.pincode]='pincode';
+            if(auto.city>=0)m[auto.city]='city';
+            if(auto.district>=0)m[auto.district]='district';
+            if(auto.state>=0)m[auto.state]='state';
+            if(auto.fieldOfficer>=0)m[auto.fieldOfficer]='field_officer';
             setColMap(m);
             setStep(2.5);
           }} disabled={selSheets.length===0}>Map Columns →</button>
@@ -2053,6 +2079,12 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
               <option value="remarks">📝 Remarks</option>
               <option value="site_code">🏢 Site Code</option>
               <option value="address">📍 Address</option>
+              <option value="pincode">📮 Pin Code</option>
+              <option value="city">🏙 City</option>
+              <option value="district">🗺 District</option>
+              <option value="state">🏛 State</option>
+              <option value="field_officer">👷 Field Officer</option>
+              <option value="job_type">🏷 Job Type/Description</option>
               <option value="ref_image">🖼 Ref Image</option>
             </select>
           </td>)}</tr>
@@ -2061,6 +2093,19 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         <div style={{display:"flex",gap:3,flexWrap:"wrap",marginTop:6}}>
           {Object.entries(colMap).map(([idx,role])=><span key={idx} className="bd" style={{background:"#23863620",color:"#4ade80",fontSize:8}}>{colHeaders.find(h=>h.idx===+idx)?.label?.slice(0,15)} → {role}</span>)}
           {Object.keys(colMap).length===0&&<span style={{fontSize:9,color:"#f47067"}}>⚠️ No columns mapped — assign at least Item Name</span>}
+        </div>
+        <div style={{background:"#0a0f1a",border:"1px solid #1a2030",borderRadius:8,padding:10,marginTop:8}}>
+          <p style={{fontSize:9,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>📋 IMPORT MODE — How should rows be treated?</p>
+          <div style={{display:"flex",gap:6}}>
+            <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",fontSize:10,color:importMode==='one_job'?"#4ade80":"#64748b",padding:"6px 10px",border:"1px solid "+(importMode==='one_job'?"#4ade80":"#1a2030"),borderRadius:6,background:importMode==='one_job'?"#23863610":"transparent"}} onClick={()=>setImportMode('one_job')}>
+              <span style={{width:14,height:14,borderRadius:7,border:"2px solid "+(importMode==='one_job'?"#4ade80":"#64748b"),display:"flex",alignItems:"center",justifyContent:"center"}}>{importMode==='one_job'&&<span style={{width:8,height:8,borderRadius:4,background:"#4ade80"}}/>}</span>
+              📦 All rows → ONE job (combined sheet)
+            </label>
+            <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",fontSize:10,color:importMode==='multi_job'?"#e3a008":"#64748b",padding:"6px 10px",border:"1px solid "+(importMode==='multi_job'?"#e3a008":"#1a2030"),borderRadius:6,background:importMode==='multi_job'?"#e3a00810":"transparent"}} onClick={()=>setImportMode('multi_job')}>
+              <span style={{width:14,height:14,borderRadius:7,border:"2px solid "+(importMode==='multi_job'?"#e3a008":"#64748b"),display:"flex",alignItems:"center",justifyContent:"center"}}>{importMode==='multi_job'&&<span style={{width:8,height:8,borderRadius:4,background:"#e3a008"}}/>}</span>
+              📑 Each row → SEPARATE job (individual sheets)
+            </label>
+          </div>
         </div>
         <div style={{display:"flex",gap:4,marginTop:8}}>
           <button className="b" onClick={()=>setStep(2)}>← Back</button>
@@ -2088,11 +2133,17 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
                 if(qty<=0&&!siteCode)continue;
                 if(qty<=0)qty=1;
                 const rate=+(get('rate'))||0;
-                const mat=get('material');const remarks=get('remarks');const addr=get('address');
-                let label=siteCode?(siteCode+(itemName?' — '+itemName:'')):itemName;
-                let material=[mat,remarks,addr].filter(v=>v&&!/^nan$/i.test(v)).join(' | ');
-                items.push({sr:items.length+1,sheet:s.name,desc:label.slice(0,120),fullDesc:label+(material?'\n'+material:''),
-                  w,h,qty,uom:'Nos',remarks:material,supplyRate:rate?String(rate):'',installRate:'',wallNo:'',floor:''});
+                const mat=get('material');const remarks=get('remarks');
+                // Build full address from address + city + district + state + pincode
+                const addrParts=[get('address'),get('city'),get('district'),get('state'),get('pincode')].filter(v=>v&&!/^nan$/i.test(v));
+                const fullAddr=addrParts.join(', ');
+                const fo=get('field_officer');
+                const jobType=get('job_type');
+                let label=siteCode?(siteCode+(itemName?' — '+itemName:(jobType?' — '+jobType:''))):itemName;
+                let material=[mat,jobType&&!siteCode?'':jobType,remarks,fo?'FO: '+fo:''].filter(v=>v&&!/^nan$/i.test(v)).join(' | ');
+                items.push({sr:items.length+1,sheet:s.name,desc:label.slice(0,120),fullDesc:label+(material?'\n'+material:'')+(fullAddr?'\n📍 '+fullAddr:''),
+                  w,h,qty,uom:'Nos',remarks:material,supplyRate:rate?String(rate):'',installRate:'',wallNo:'',floor:'',
+                  siteAddr:fullAddr,jobType:jobType||''});
               }
               all=all.concat(items);
             }
@@ -2108,7 +2159,8 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
               return {id:uid(),sr:it.sr,int:it.desc,cli:it.desc,m:it.remarks||'',w:it.w,h:it.h,
                 qty:it.qty,rm,rate:combinedRate||'',sqft,
                 tot:combinedRate?tot:0,gst:combinedRate?gst:0,amt:combinedRate?Math.round((tot+gst)*100)/100:0,
-                gstPct:18,mach:'In-house',imgUrl:'',supplyRate:it.supplyRate,installRate:it.installRate,fullDesc:it.fullDesc};
+                gstPct:18,mach:'In-house',imgUrl:'',supplyRate:it.supplyRate,installRate:it.installRate,fullDesc:it.fullDesc,
+                siteAddr:it.siteAddr||'',jobType:it.jobType||''};
             }));
             setStep(3);
           }} disabled={!colMap||!Object.values(colMap).includes('item_name')&&!Object.values(colMap).includes('site_code')}>Parse {selSheets.length} sheet(s) →</button>
@@ -2166,7 +2218,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}>
         <button className="b" onClick={()=>{setStep(1);setIts([]);setSheets([]);setFileName("");}}>← Start Over</button>
         <button className="b" onClick={()=>sp("jobs")}>Cancel</button>
-        <button className="b bp" onClick={submitJob} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button>
+        <button className="b bp" onClick={submitJob} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":(importMode==='multi_job'?`Create ${its.length} Jobs`:"Create "+jid)}</button>
       </div>
     </>}
   </div>;
