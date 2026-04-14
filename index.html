@@ -186,7 +186,10 @@ function MainApp({user,onLogout,masterData}){
   const [dLogs,setDLogs]=useState([]);
   const [expenses,setExpenses]=useState([]);
   const [salesActs,setSalesActs]=useState([]);
-  const [pg,setPg]=useState("dash");
+  const [pg,setPgRaw]=useState(()=>{
+    try{return localStorage.getItem('erp_pg')||'dash';}catch(e){return 'dash';}
+  });
+  const setPg=(p)=>{setPgRaw(p);try{localStorage.setItem('erp_pg',p);}catch(e){}};
   const [toast,setToast]=useState(null);
   const [search,setSearch]=useState("");
   const [col,setCol]=useState(false);
@@ -2347,9 +2350,20 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
 // ROOT APP — Loads master data, then shows Login or MainApp
 // ═══════════════════════════════════════════════════════════
 function RootApp(){
-  const [user,setUser]=useState(null);
+  const [user,setUser]=useState(()=>{
+    try{const s=localStorage.getItem('erp_user');return s?JSON.parse(s):null;}catch(e){return null;}
+  });
   const [masterData,setMasterData]=useState(null);
   const [loading,setLoading]=useState(true);
+
+  const handleLogin=(member)=>{
+    setUser(member);
+    try{localStorage.setItem('erp_user',JSON.stringify(member));localStorage.setItem('erp_login_time',Date.now().toString());}catch(e){}
+  };
+  const handleLogout=()=>{
+    setUser(null);
+    try{localStorage.removeItem('erp_user');localStorage.removeItem('erp_pg');localStorage.removeItem('erp_login_time');}catch(e){}
+  };
 
   useEffect(()=>{
     async function loadMaster(){
@@ -2369,6 +2383,16 @@ function RootApp(){
         products:p.data||[], materials:m.data||[], machines:mac.data||[],
         agencies:ag.data||[], delBoys:db.data||[], team:tm.data||[],
       });
+      // Validate stored session — if user no longer in team, auto-logout
+      try{
+        const stored=localStorage.getItem('erp_user');
+        if(stored){
+          const u=JSON.parse(stored);
+          const teamList=tm.data||[];
+          const valid=teamList.find(t=>t.name===u.name&&t.pin===u.pin);
+          if(!valid){localStorage.removeItem('erp_user');localStorage.removeItem('erp_pg');setUser(null);}
+        }
+      }catch(e){}
       setLoading(false);
     }
     loadMaster();
@@ -2381,8 +2405,8 @@ function RootApp(){
   const cCode=urlP.get('client');
   if(cCode) return <ClientPortal code={cCode}/>;
 
-  if(!user) return <Login onLogin={setUser} team={masterData.team}/>;
-  return <MainApp user={user} onLogout={()=>setUser(null)} masterData={masterData}/>;
+  if(!user) return <Login onLogin={handleLogin} team={masterData.team}/>;
+  return <MainApp user={user} onLogout={handleLogout} masterData={masterData}/>;
 }
 
 // ═══════════════════════════════════════════════════════════
