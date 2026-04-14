@@ -1373,7 +1373,24 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
         (()=>{const withImg=its.filter(it=>it.imgUrl);return withImg.length>0?'<div class="refs"><h3 style="font-size:12px;margin-bottom:8px;border-bottom:1px solid #999;padding-bottom:4px">Artwork / Design References</h3><div style="display:flex;flex-wrap:wrap;gap:10px">'+withImg.map((it,i)=>'<div style="text-align:center"><img src="'+it.imgUrl+'"/><p style="font-size:9px;color:#333;font-weight:600;margin-top:2px">'+(it.int||'Item '+(i+1))+'</p><p style="font-size:8px;color:#666">'+(it.w&&it.h?it.w+'×'+it.h+' | ':'')+'Qty:'+it.qty+'</p></div>').join('')+'</div></div>':'';})() +
         `<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:30px;font-size:10px;color:#666"><div style="border-top:1px solid #999;padding-top:4px">Prepared By</div><div style="border-top:1px solid #999;padding-top:4px">Production Head</div><div style="border-top:1px solid #999;padding-top:4px">Approved By</div></div></body></html>`;
       const w=window.open('','_blank');w.document.write(psHtml);w.document.close();w.print();
-    }} style={{gap:6}}>📋 Production Sheet</button><button className="b" onClick={()=>sub(true)} style={{padding:"7px 14px",borderColor:"#64748b"}} disabled={submitting}>{submitting?"⏳...":"💾 Save Draft"}</button><button className="b bp" onClick={()=>sub(false)} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button></div>
+    }} style={{gap:6}}>📋 Production Sheet</button><button className="b" onClick={()=>{
+      const wsData=[
+        ['Job#',jid,'Client',f.cn||'','Project',f.pr||''],
+        ['Firm',(firms.find(x=>x.code===fm)||{}).name||'','Contact',f.cp||'','Phone',f.cph||''],
+        ['Delivery',f.da||'','PO#',f.po||'','Date',f.rd||''],
+        [],
+        ['Sr','Item Name','Material/Spec','Width','Height','Unit','Qty','Rate Mode','SqFt','Rate','Total','GST%','GST','Amount']
+      ];
+      its.forEach((it,i)=>{
+        wsData.push([i+1,it.int||it.cli||'',it.m||'',it.w||'',it.h||'',su,it.qty||1,it.rm||'UNIT',it.sqft||'',+it.rate||0,it.tot||0,it.gstPct!=null?it.gstPct:18,it.gst||0,it.amt||0]);
+      });
+      wsData.push([]);
+      wsData.push(['','','','','','','','','','TOTAL',Math.round(tot.s*100)/100,'',Math.round(tot.g*100)/100,Math.round(tot.t*100)/100]);
+      const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet(wsData);
+      ws['!cols']=[{wch:4},{wch:30},{wch:35},{wch:8},{wch:8},{wch:6},{wch:6},{wch:10},{wch:8},{wch:10},{wch:12},{wch:6},{wch:10},{wch:12}];
+      XLSX.utils.book_append_sheet(wb,ws,'Estimate '+jid);
+      XLSX.writeFile(wb,'Estimate_'+jid+'_'+(f.cn||'Client').replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)+'.xlsx');
+    }} style={{gap:6}}>📊 Export Excel</button><button className="b" onClick={()=>sub(true)} style={{padding:"7px 14px",borderColor:"#64748b"}} disabled={submitting}>{submitting?"⏳...":"💾 Save Draft"}</button><button className="b bp" onClick={()=>sub(false)} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button></div>
   </div>;
 }
 
