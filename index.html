@@ -2400,7 +2400,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
   const [page,setPage]=useState(0);
   const [showAddSite,setShowAddSite]=useState(false);
   const [customProject,setCustomProject]=useState(false);
-  const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});
+  const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_unique_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});
   const pageSize=50;
 
   // Load banking sites from Supabase
@@ -2433,7 +2433,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
     if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
     if(search){const q=search.toLowerCase();f=f.filter(s=>
-      s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||
+      s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||s.site_unique_id?.toLowerCase().includes(q)||
       s.city?.toLowerCase().includes(q)||s.state?.toLowerCase().includes(q)||
       s.vendor_name?.toLowerCase().includes(q)||s.job_no?.toLowerCase().includes(q)||
       s.billing_status?.toLowerCase().includes(q)||s.district?.toLowerCase().includes(q)
@@ -2477,7 +2477,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
   // Export to Excel
   const exportExcel=()=>{
     const data=filtered.map((s,i)=>({
-      'Sr':i+1,'Job#':s.job_no||'','PO#':s.po_number||'','ATM ID':s.atm_id||'',
+      'Sr':i+1,'Job#':s.job_no||'','PO#':s.po_number||'','ATM ID':s.atm_id||'','Site UID':s.site_unique_id||'',
       'Address':s.site_address||'','City':s.city||'','District':s.district||'',
       'State':s.state||'','Pincode':s.pincode||'','Vendor':s.vendor_name||'',
       'Installation':s.installation_status||'','Photos':s.photo_status||'',
@@ -2497,7 +2497,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     const id='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
     const rec={...newSite,id};
     const {error}=await sb.from('banking_sites').insert(rec);
-    if(!error){setSites(p=>[rec,...p]);setShowAddSite(false);setCustomProject(false);setNewSite({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});show('Site added!');}
+    if(!error){setSites(p=>[rec,...p]);setShowAddSite(false);setCustomProject(false);setNewSite({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_unique_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});show('Site added!');}
     else show('Error: '+error.message,false);
   };
 
@@ -2575,6 +2575,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
         <div><label style={{fontSize:8,color:'#64748b'}}>Job #</label><input className="in" value={newSite.job_no} onChange={e=>setNewSite(s=>({...s,job_no:e.target.value}))} placeholder="e.g. 0921" style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>PO #</label><input className="in" value={newSite.po_number} onChange={e=>setNewSite(s=>({...s,po_number:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>ATM ID</label><input className="in" value={newSite.atm_id} onChange={e=>setNewSite(s=>({...s,atm_id:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Site Unique ID</label><input className="in" value={newSite.site_unique_id} onChange={e=>setNewSite(s=>({...s,site_unique_id:e.target.value}))} style={{fontSize:10}}/></div>
         <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Site Address</label><input className="in" value={newSite.site_address} onChange={e=>setNewSite(s=>({...s,site_address:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>City</label><input className="in" value={newSite.city} onChange={e=>setNewSite(s=>({...s,city:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>District</label><input className="in" value={newSite.district} onChange={e=>setNewSite(s=>({...s,district:e.target.value}))} style={{fontSize:10}}/></div>
@@ -2595,7 +2596,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     {/* Sites Table */}
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
-        <th style={{width:30}}>#</th><th>Job#</th><th>ATM ID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
+        <th style={{width:30}}>#</th><th>Job#</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
         <th>Vendor</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th>
       </tr></thead><tbody>
       {paged.map((s,i)=>{
@@ -2604,6 +2605,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
           <td className="mn" style={{fontSize:9}}>{page*pageSize+i+1}</td>
           <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=jobs.find(j=>j.id?.includes(s.job_no));if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
           <td style={{fontSize:9,color:'#8b5cf6',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.atm_id}>{s.atm_id||'—'}</td>
+          <td style={{fontSize:9,color:'#06b6d4',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_unique_id}>{s.site_unique_id||'—'}</td>
           <td style={{fontSize:9,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_address}>{s.site_address?.slice(0,50)||'—'}</td>
           <td style={{fontSize:9}}>{s.city||s.district||'—'}</td>
           <td style={{fontSize:9,color:'#64748b'}}>{s.state?.slice(0,12)||'—'}</td>
