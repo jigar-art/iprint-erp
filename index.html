@@ -220,29 +220,41 @@ function MainApp({user,onLogout,masterData}){
   useEffect(()=>{
     async function load(){
       setLoading(true);
-      // Phase 1: Load jobs + small tables (fast)
-      const [j,g,pl,fl,ol,dl,ex] = await Promise.all([
-        fetchAll('jobs','id'),
+      // Determine current FY suffix
+      const now=new Date();const m=now.getMonth(),y=now.getFullYear();
+      const curFYSuffix=m>=3?`${String(y).slice(2)}${String(y+1).slice(2)}`:`${String(y-1).slice(2)}${String(y).slice(2)}`;
+      
+      // Phase 1: Load current FY jobs + essential small tables (fast)
+      const [j,g,ex] = await Promise.all([
+        fetchAll('jobs','id',q=>q.like('id','%-'+curFYSuffix)),
         fetchAll('grn','id'),
+        fetchAll('expenses','id'),
+      ]);
+      setJobs(j); setGrnData(g); setExpenses(ex);
+      console.log('Phase 1: Loaded',j.length,'current FY jobs');
+      setLoading(false);
+      
+      // Phase 2: Load batches + line items for current FY jobs
+      const curJobIds=j.map(x=>x.id);
+      const [b,li] = await Promise.all([
+        fetchAll('batches','id'),
+        fetchAll('line_items','id'),
+      ]);
+      setBatches(b); setItems(li);
+      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items');
+
+      // Phase 3: Load older FY jobs + logs + sales in background
+      const [oldJ,pl,fl,ol,dl,sa] = await Promise.all([
+        fetchAll('jobs','id',q=>q.not('id','like','%-'+curFYSuffix)),
         fetchAll('print_logs','id'),
         fetchAll('fab_logs','id'),
         fetchAll('outsource_logs','id'),
         fetchAll('dispatch_logs','id'),
-        fetchAll('expenses','id'),
-      ]);
-      setJobs(j); setGrnData(g); setPLogs(pl); setFLogs(fl);
-      setOsLogs(ol); setDLogs(dl); setExpenses(ex);
-      console.log('Phase 1: Loaded',j.length,'jobs');
-      setLoading(false);
-      
-      // Phase 2: Load batches + line items + sales in background
-      const [b,li,sa] = await Promise.all([
-        fetchAll('batches','id'),
-        fetchAll('line_items','id'),
         fetchAll('sales_activities','id'),
       ]);
-      setBatches(b); setItems(li); setSalesActs(sa);
-      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',sa.length,'sales');
+      setJobs(prev=>[...prev,...oldJ]); setPLogs(pl); setFLogs(fl);
+      setOsLogs(ol); setDLogs(dl); setSalesActs(sa);
+      console.log('Phase 3: Loaded',oldJ.length,'older jobs + logs');
     }
     load();
   },[]);
@@ -574,14 +586,26 @@ function MainApp({user,onLogout,masterData}){
     return s;
   },[grnData,pLogs,fLogs,osLogs]);
 
-  // Assemble jobs with batches and items
-  const fullJobs = useMemo(()=>jobs.map(j=>({
-    ...j,
-    batches: batches.filter(b=>b.job_id===j.id).map(b=>({
-      ...b,
-      items: items.filter(i=>i.batch_id===b.id).sort((a,b)=>(a.id||'').localeCompare(b.id||''))
-    }))
-  })),[jobs,batches,items]);
+  // Assemble jobs with batches and items — using Maps for O(1) lookup instead of O(n) filter
+  const fullJobs = useMemo(()=>{
+    // Build index: batch_id → items[]
+    const itemsByBatch = new Map();
+    for(const it of items){
+      const key=it.batch_id;
+      if(!itemsByBatch.has(key)) itemsByBatch.set(key,[]);
+      itemsByBatch.get(key).push(it);
+    }
+    // Sort items within each batch
+    for(const [,arr] of itemsByBatch) arr.sort((a,b)=>(a.id||'').localeCompare(b.id||''));
+    // Build index: job_id → batches[]
+    const batchesByJob = new Map();
+    for(const b of batches){
+      const key=b.job_id;
+      if(!batchesByJob.has(key)) batchesByJob.set(key,[]);
+      batchesByJob.get(key).push({...b, items: itemsByBatch.get(b.id)||[]});
+    }
+    return jobs.map(j=>({...j, batches: batchesByJob.get(j.id)||[]}));
+  },[jobs,batches,items]);
 
   // FY filter: filter jobs by financial year suffix in job ID
   const filteredJobs = useMemo(()=>{
