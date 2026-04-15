@@ -1008,18 +1008,24 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       })}
     </div>
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
-      <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
-        <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
-          <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
-          {b.po_number&&<span className="mn" style={{fontSize:8,color:"#06b6d4"}}>PO:{b.po_number}</span>}
-          <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
-          <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
+      <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
+          <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+            <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
+            {b.po_number&&<span className="mn" style={{fontSize:8,color:"#06b6d4"}}>PO:{b.po_number}</span>}
+            <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
+            <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:3}}>
+            {b.bill_no?<span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
+            :canSeeRates&&<div style={{display:"flex",gap:2,alignItems:"center"}}><input className="in mn" placeholder="Invoice#" style={{width:90,fontSize:9,padding:"2px 4px"}} onKeyDown={e=>{if(e.key==='Enter'&&e.target.value){saveBill(b.id,e.target.value);e.target.value='';}}} /><button className="b bg bs" style={{fontSize:8,padding:"2px 6px"}} onClick={e=>{const inp=e.target.previousSibling;if(inp?.value){saveBill(b.id,inp.value);inp.value='';}}}>Save Inv</button></div>}
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:3,flexWrap:"wrap"}}>
-          <input className="in mn" value={b.atm_id||''} placeholder="ATM ID" onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,atm_id:v}:x));}} onBlur={e=>updateBatchField(b.id,'atm_id',e.target.value)} style={{width:100,fontSize:8,padding:"2px 4px",background:"#0c1017",border:"1px solid #1a2030",color:"#8b5cf6"}}/>
-          <input className="in mn" value={b.site_unique_id||''} placeholder="Site UID" onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,site_unique_id:v}:x));}} onBlur={e=>updateBatchField(b.id,'site_unique_id',e.target.value)} style={{width:90,fontSize:8,padding:"2px 4px",background:"#0c1017",border:"1px solid #1a2030",color:"#06b6d4"}}/>
-          {b.bill_no?<span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
-          :canSeeRates&&<div style={{display:"flex",gap:2,alignItems:"center"}}><input className="in mn" placeholder="Invoice#" style={{width:90,fontSize:9,padding:"2px 4px"}} onKeyDown={e=>{if(e.key==='Enter'&&e.target.value){saveBill(b.id,e.target.value);e.target.value='';}}} /><button className="b bg bs" style={{fontSize:8,padding:"2px 6px"}} onClick={e=>{const inp=e.target.previousSibling;if(inp?.value){saveBill(b.id,inp.value);inp.value='';}}}>Save Inv</button></div>}
+        <div style={{display:"flex",gap:4,marginTop:4,alignItems:"center"}}>
+          <span style={{fontSize:8,color:"#64748b"}}>ATM ID:</span>
+          <input className="in mn" value={b.atm_id||''} placeholder="Enter ATM ID..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,atm_id:v}:x));}} onBlur={e=>updateBatchField(b.id,'atm_id',e.target.value)} style={{width:140,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030",color:"#8b5cf6"}}/>
+          <span style={{fontSize:8,color:"#64748b",marginLeft:6}}>Site UID:</span>
+          <input className="in mn" value={b.site_unique_id||''} placeholder="Enter Site UID..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,site_unique_id:v}:x));}} onBlur={e=>updateBatchField(b.id,'site_unique_id',e.target.value)} style={{width:130,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030",color:"#06b6d4"}}/>
         </div>
       </div>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
@@ -1045,7 +1051,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         <div style={{display:"flex",gap:4,marginTop:6}}><button className="b bg" onClick={()=>saveNewItem(b.id)}>✓ Save Item</button><button className="b" onClick={()=>setAddingToBatch(null)}>Cancel</button></div>
       </div>:<div style={{padding:"4px 8px",borderTop:"1px solid #0c1017"}}><button className="b bp bs" onClick={()=>setAddingToBatch(b.id)}>➕ Add Item</button></div>}
     </div>)}
-    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4}}><input className="in" placeholder="Batch note..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1}}/><button className="b bp" onClick={ab}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
+    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
         <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
           const file=e.target.files[0];if(!file)return;
