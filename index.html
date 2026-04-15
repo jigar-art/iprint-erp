@@ -1038,6 +1038,19 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
             <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
             {b.po_number&&<span className="mn" style={{fontSize:8,color:"#06b6d4"}}>PO:{b.po_number}</span>}
             <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
+            <button style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Copy/Duplicate this batch" onClick={async()=>{
+              if(!confirm('📋 Copy Batch '+(bi+1)+'?\n\nThis will duplicate all items with same descriptions, materials, sizes.\nYou can then edit sizes/details on the copy.'))return;
+              const newBid="B"+uid();
+              const bd={id:newBid,job_id:j.id,date:td(),note:(b.note||'')+(b.note?' (Copy)':' Copy'),bill_no:'',status:'New',atm_id:'',site_unique_id:'',po_number:b.po_number||'',billing_address:b.billing_address||'',delivery_address:b.delivery_address||'',photo_urls:[],dc_urls:[]};
+              await addBatchToJob(bd);
+              const srcItems=(b.items||[]);
+              for(const it of srcItems){
+                const newIt={id:'LI'+uid(),batch_id:newBid,job_id:j.id,sr:it.sr,product_id:'',internal_name:it.internal_name,client_name:it.client_name,media:it.media,width:it.width,height:it.height,size_unit:it.size_unit,qty:it.qty,rate_mode:it.rate_mode,rate:it.rate||0,sqft:it.sqft||0,total:it.total||0,gst:it.gst||0,gstPct:it.gstPct||18,amount:it.amount||0,area:it.area||'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.img_url||''};
+                await sb.from('line_items').insert(newIt);
+                setItems(p=>[...p,newIt]);
+              }
+              show('✅ Batch copied with '+srcItems.length+' items!');
+            }}>📋</button>
             <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:3}}>
@@ -1083,7 +1096,27 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           <F l="GST%"><select className="in" value={ni.gstPct} onChange={e=>setNi(p=>({...p,gstPct:+e.target.value}))}>{[0,5,12,18,28].map(g=><option key={g} value={g}>{g}%</option>)}</select></F>
         </div>
         <div style={{display:"flex",gap:4,marginTop:6}}><button className="b bg" onClick={()=>saveNewItem(b.id)}>✓ Save Item</button><button className="b" onClick={()=>setAddingToBatch(null)}>Cancel</button></div>
-      </div>:<div style={{padding:"4px 8px",borderTop:"1px solid #0c1017"}}><button className="b bp bs" onClick={()=>setAddingToBatch(b.id)}>➕ Add Item</button></div>}
+      </div>:<div style={{padding:"4px 8px",borderTop:"1px solid #0c1017",display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+        <button className="b bp bs" onClick={()=>setAddingToBatch(b.id)}>➕ Add Item</button>
+        <div style={{display:"flex",gap:6,marginLeft:"auto",alignItems:"center",flexWrap:"wrap"}}>
+          {(()=>{const photos=Array.isArray(b.photo_urls)?b.photo_urls:[];return <>
+            <span style={{fontSize:8,color:"#64748b"}}>📸 Photos ({photos.length})</span>
+            {photos.map((u,pi)=><span key={pi} style={{display:"inline-flex",alignItems:"center",gap:2,background:"#3b82f610",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}>
+              <a href={u} target="_blank" rel="noopener noreferrer" style={{color:"#3b82f6",fontSize:8,textDecoration:"none"}}>📸{pi+1}</a>
+              <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={async()=>{if(!confirm('Remove photo?'))return;const nw=photos.filter((_,i)=>i!==pi);await sb.from('batches').update({photo_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,photo_urls:nw}:x));show('Photo removed');}}>✕</button>
+            </span>)}
+            <label style={{cursor:"pointer",fontSize:8,color:"#3b82f6",border:"1px dashed #3b82f633",padding:"2px 6px",borderRadius:4}}>+Photo<input type="file" accept=".jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-photos');if(urls.length){const nw=[...photos,...urls];await sb.from('batches').update({photo_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,photo_urls:nw}:x));show('📸 '+urls.length+' photo(s) uploaded!');}}}/></label>
+          </>;})()}
+          {(()=>{const dcs=Array.isArray(b.dc_urls)?b.dc_urls:[];return <>
+            <span style={{fontSize:8,color:"#64748b",marginLeft:6}}>📄 DC ({dcs.length})</span>
+            {dcs.map((u,di)=><span key={di} style={{display:"inline-flex",alignItems:"center",gap:2,background:"#06b6d410",border:"1px solid #06b6d433",padding:"2px 6px",borderRadius:4}}>
+              <a href={u} target="_blank" rel="noopener noreferrer" style={{color:"#06b6d4",fontSize:8,textDecoration:"none"}}>📄{di+1}</a>
+              <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={async()=>{if(!confirm('Remove DC?'))return;const nw=dcs.filter((_,i)=>i!==di);await sb.from('batches').update({dc_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:nw}:x));show('DC removed');}}>✕</button>
+            </span>)}
+            <label style={{cursor:"pointer",fontSize:8,color:"#06b6d4",border:"1px dashed #06b6d433",padding:"2px 6px",borderRadius:4}}>+DC<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-dc');if(urls.length){const nw=[...dcs,...urls];await sb.from('batches').update({dc_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:nw}:x));show('📄 '+urls.length+' DC(s) uploaded!');}}}/></label>
+          </>;})()}
+        </div>
+      </div>}
     </div>)}
     {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,billing_address:billVal,delivery_address:delVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
