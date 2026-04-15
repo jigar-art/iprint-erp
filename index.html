@@ -907,6 +907,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
   const [addingToBatch,setAddingToBatch]=useState(null); // batch id being added to
+  const [copyBatch,setCopyBatch]=useState(null); // {batchId, bi, items:[{...item, selected:bool}]}
   const [pdfMode,setPdfMode]=useState(null); // 'estimate'|'production'|null
   const [pdfBatches,setPdfBatches]=useState({}); // {batchId: true/false}
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'UNIT',gstPct:18});
@@ -1038,18 +1039,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
             <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
             {b.po_number&&<span className="mn" style={{fontSize:8,color:"#06b6d4"}}>PO:{b.po_number}</span>}
             <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
-            <button style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Copy/Duplicate this batch" onClick={async()=>{
-              if(!confirm('📋 Copy Batch '+(bi+1)+'?\n\nThis will duplicate all items with same descriptions, materials, sizes.\nYou can then edit sizes/details on the copy.'))return;
-              const newBid="B"+uid();
-              const bd={id:newBid,job_id:j.id,date:td(),note:(b.note||'')+(b.note?' (Copy)':' Copy'),bill_no:'',status:'New',atm_id:'',site_unique_id:'',po_number:b.po_number||'',billing_address:b.billing_address||'',delivery_address:b.delivery_address||'',photo_urls:[],dc_urls:[]};
-              await addBatchToJob(bd);
-              const srcItems=(b.items||[]);
-              for(const it of srcItems){
-                const newIt={id:'LI'+uid(),batch_id:newBid,job_id:j.id,sr:it.sr,product_id:'',internal_name:it.internal_name,client_name:it.client_name,media:it.media,width:it.width,height:it.height,size_unit:it.size_unit,qty:it.qty,rate_mode:it.rate_mode,rate:it.rate||0,sqft:it.sqft||0,total:it.total||0,gst:it.gst||0,gstPct:it.gstPct||18,amount:it.amount||0,area:it.area||'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.img_url||''};
-                await sb.from('line_items').insert(newIt);
-                setItems(p=>[...p,newIt]);
-              }
-              show('✅ Batch copied with '+srcItems.length+' items!');
+            <button style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Copy/Duplicate this batch" onClick={()=>{
+              setCopyBatch({batchId:b.id,bi:bi+1,items:(b.items||[]).map(it=>({...it,selected:true}))});
             }}>📋</button>
             <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
           </div>
@@ -1118,6 +1109,48 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         </div>
       </div>}
     </div>)}
+    {copyBatch&&<div className="c a" style={{padding:12,border:"2px solid #3b82f6"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <p style={{fontSize:11,fontWeight:700,color:"#3b82f6"}}>📋 Copy from Batch {copyBatch.bi} — Select items to include</p>
+        <div style={{display:"flex",gap:4}}>
+          <button className="b bs" style={{fontSize:8}} onClick={()=>setCopyBatch(p=>({...p,items:p.items.map(it=>({...it,selected:true}))}))}>Select All</button>
+          <button className="b bs" style={{fontSize:8}} onClick={()=>setCopyBatch(p=>({...p,items:p.items.map(it=>({...it,selected:false}))}))}>Deselect All</button>
+          <button className="b bs" style={{fontSize:8,color:"#f47067"}} onClick={()=>setCopyBatch(null)}>✕</button>
+        </div>
+      </div>
+      <div style={{maxHeight:200,overflowY:"auto",marginBottom:8}}>
+        {copyBatch.items.map((it,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 6px",borderBottom:"1px solid #1a2030",cursor:"pointer",background:it.selected?"#3b82f608":"transparent"}} onClick={()=>setCopyBatch(p=>({...p,items:p.items.map((x,xi)=>xi===i?{...x,selected:!x.selected}:x)}))}>
+          <div className={`ck ${it.selected?"on":""}`} style={{flexShrink:0}}>{it.selected?"✓":""}</div>
+          <span style={{fontSize:10,fontWeight:600,minWidth:120}}>{it.internal_name}</span>
+          <span style={{fontSize:9,color:"#8b949e"}}>{it.media?.slice(0,30)}</span>
+          <span className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</span>
+          <span className="mn" style={{fontSize:9}}>Qty:{it.qty}</span>
+          {canSeeRates&&<span className="mn" style={{fontSize:9,color:"#e3a008"}}>₹{(+it.rate||0).toFixed(0)}</span>}
+        </div>)}
+      </div>
+      <div style={{fontSize:9,color:"#64748b",marginBottom:6}}>{copyBatch.items.filter(it=>it.selected).length} of {copyBatch.items.length} items selected</div>
+      <div style={{display:"flex",gap:4}}>
+        <button className="b bp" disabled={copyBatch.items.filter(it=>it.selected).length===0} onClick={async()=>{
+          try{
+            const selItems=copyBatch.items.filter(it=>it.selected);
+            if(selItems.length===0){show('Select at least one item',false);return;}
+            const srcBatch=j.batches?.find(x=>x.id===copyBatch.batchId);
+            const newBid="B"+uid();
+            const bd={id:newBid,job_id:j.id,date:td(),note:(srcBatch?.note||'')+(srcBatch?.note?' (Copy)':' Copy'),bill_no:'',status:'New',atm_id:'',site_unique_id:'',po_number:srcBatch?.po_number||'',billing_address:srcBatch?.billing_address||'',delivery_address:srcBatch?.delivery_address||''};
+            const {error:bErr}=await sb.from('batches').insert(bd);
+            if(bErr){show('⚠️ Failed: '+bErr.message,false);return;}
+            setBatches(p=>[bd,...p]);
+            const newItems=selItems.map((it,i)=>({id:'LI'+uid(),batch_id:newBid,job_id:j.id,sr:i+1,product_id:'',internal_name:it.internal_name,client_name:it.client_name,media:it.media,width:it.width,height:it.height,size_unit:it.size_unit,qty:it.qty,rate_mode:it.rate_mode,rate:it.rate||0,sqft:it.sqft||0,total:it.total||0,gst:it.gst||0,gstPct:it.gstPct||18,amount:it.amount||0,area:it.area||'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.img_url||''}));
+            const {error:iErr}=await sb.from('line_items').insert(newItems);
+            if(iErr){show('⚠️ Batch created but items failed: '+iErr.message,false);return;}
+            setItems(p=>[...p,...newItems]);
+            setCopyBatch(null);
+            show('✅ New batch created with '+newItems.length+' items!');
+          }catch(e){show('⚠️ Error: '+e.message,false);}
+        }}>📋 Create Copy ({copyBatch.items.filter(it=>it.selected).length} items)</button>
+        <button className="b" onClick={()=>setCopyBatch(null)}>Cancel</button>
+      </div>
+    </div>}
     {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,billing_address:billVal,delivery_address:delVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
         <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
