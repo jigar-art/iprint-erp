@@ -622,7 +622,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
-    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales"]},
+    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"]},
     {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
     {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
   ];
@@ -2588,13 +2588,28 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     if(!error){setSites(p=>p.map(s=>s.id===id?{...s,[field]:value}:s));show('Updated!');}
     else show('Error: '+error.message,false);
   };
+  // Update site AND sync to linked job (for PO#)
+  const updateSiteWithJobSync=async(siteId,jobNo,field,value)=>{
+    const {error}=await sb.from('banking_sites').update({[field]:value}).eq('id',siteId);
+    if(error){show('Error: '+error.message,false);return;}
+    setSites(p=>p.map(s=>s.id===siteId?{...s,[field]:value}:s));
+    // Sync PO# to the linked job in jobs table
+    if(field==='po_number'&&jobNo){
+      const fy=['2526','2627'];
+      for(const f of fy){
+        const jid=jobNo.padStart(4,'0')+'-'+f;
+        await sb.from('jobs').update({po_number:value}).eq('id',jid);
+      }
+    }
+    show('Updated & synced!');
+  };
 
   // Export to Excel
   const exportExcel=()=>{
     const data=filtered.map((s,i)=>({
-      'Sr':i+1,'Job#':s.job_no||'','PO#':s.po_number||'','ATM ID':s.atm_id||'','Site UID':s.site_unique_id||'',
+      'Sr':i+1,'Job#':s.job_no||'','Vendor PO#':s.po_number||'','ATM ID':s.atm_id||'','Site UID':s.site_unique_id||'',
       'Address':s.site_address||'','City':s.city||'','District':s.district||'',
-      'State':s.state||'','Pincode':s.pincode||'','Vendor':s.vendor_name||'',
+      'State':s.state||'','Pincode':s.pincode||'','Vendor':s.vendor_name||'','Vendor Contact':s.vendor_contact||'',
       'Installation':s.installation_status||'','Photos':s.photo_status||'',
       'Billing Status':s.billing_status||'','Billing Category':s.billing_category||'',
       'Work Category':s.work_category||''
@@ -2712,7 +2727,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
         <th style={{width:30}}>#</th><th>Job#</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
-        <th>Vendor</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th>
+        <th>Vendor</th><th>V.Contact</th><th>Vendor PO#</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th>
       </tr></thead><tbody>
       {paged.map((s,i)=>{
         const billingColor=s.billing_category==='Invoiced'?'#4ade80':s.billing_category==='Given for Billing'?'#06b6d4':'#f59e0b';
@@ -2725,7 +2740,9 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
           <td style={{fontSize:9,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_address}>{s.site_address?.slice(0,50)||'—'}</td>
           <td style={{fontSize:9}}>{s.city||s.district||'—'}</td>
           <td style={{fontSize:9,color:'#64748b'}}>{s.state?.slice(0,12)||'—'}</td>
-          <td style={{fontSize:9,maxWidth:80,overflow:'hidden',textOverflow:'ellipsis'}} title={s.vendor_name}>{s.vendor_name?.slice(0,15)||'—'}</td>
+          <td style={{fontSize:9,maxWidth:80,overflow:'hidden',textOverflow:'ellipsis'}} title={s.vendor_name}><input className="in" value={s.vendor_name||''} onChange={e=>{const v=e.target.value;setSites(p=>p.map(x=>x.id===s.id?{...x,vendor_name:v}:x));}} onBlur={e=>updateSite(s.id,'vendor_name',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:70,background:'transparent',border:'1px solid transparent'}} placeholder="—"/></td>
+          <td><input className="in" value={s.vendor_contact||''} onChange={e=>{const v=e.target.value;setSites(p=>p.map(x=>x.id===s.id?{...x,vendor_contact:v}:x));}} onBlur={e=>updateSite(s.id,'vendor_contact',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:65,background:'transparent',border:'1px solid transparent'}} placeholder="—"/></td>
+          <td><input className="in mn" value={s.po_number||''} onChange={e=>{const v=e.target.value;setSites(p=>p.map(x=>x.id===s.id?{...x,po_number:v}:x));}} onBlur={e=>updateSiteWithJobSync(s.id,s.job_no,'po_number',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:75,background:'transparent',border:'1px solid transparent',color:'#e3a008'}} placeholder="—"/></td>
           <td><select className="in" value={s.installation_status||''} onChange={e=>updateSite(s.id,'installation_status',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:70,color:s.installation_status==='Completed'?'#4ade80':s.installation_status==='Duplicate'?'#64748b':'#f59e0b'}}>
             <option value="">—</option><option value="Completed">Completed</option><option value="Pending">Pending</option><option value="Duplicate">Duplicate</option><option value="In Progress">In Progress</option>
           </select></td>
