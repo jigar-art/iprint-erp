@@ -187,6 +187,7 @@ function MainApp({user,onLogout,masterData}){
   const [expenses,setExpenses]=useState([]);
   const [salesActs,setSalesActs]=useState([]);
   const [osItems,setOsItems]=useState([]);
+  const [reqs,setReqs]=useState([]);
   const [pg,setPgRaw]=useState(()=>{
     try{return localStorage.getItem('erp_pg')||'dash';}catch(e){return 'dash';}
   });
@@ -237,13 +238,14 @@ function MainApp({user,onLogout,masterData}){
       
       // Phase 2: Load batches + line items for current FY jobs
       const curJobIds=j.map(x=>x.id);
-      const [b,li,osi] = await Promise.all([
+      const [b,li,osi,rq] = await Promise.all([
         fetchAll('batches','id'),
         fetchAll('line_items','id'),
         fetchAll('outsource_items','id'),
+        fetchAll('requisitions','id'),
       ]);
-      setBatches(b); setItems(li); setOsItems(osi);
-      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',osi.length,'outsource');
+      setBatches(b); setItems(li); setOsItems(osi); setReqs(rq);
+      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',osi.length,'outsource',rq.length,'requisitions');
 
       // Phase 3: Load older FY jobs + logs + sales in background
       const [oldJ,pl,fl,ol,dl,sa] = await Promise.all([
@@ -673,7 +675,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?(osItems||[]).filter(o=>o.po_status==='Pending').length:0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -702,7 +704,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
-          {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items}/>}
+          {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
@@ -713,7 +715,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -904,7 +906,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
@@ -1063,6 +1065,85 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         </div>;
       })}
     </div>
+    {/* ── REQUISITIONS ── */}
+    {(()=>{
+      const jobReqs=(reqs||[]).filter(r=>r.job_id===j.id);
+      const [showReqForm,setShowReqForm]=React.useState(false);
+      const [rf,setRf]=React.useState({vendor:'',items:[{product:'',size:'',qty:1,rate:0,per:'Sheet'}],transport:0,notes:''});
+      const REQ_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter'];
+      const addReqLine=()=>setRf(p=>({...p,items:[...p.items,{product:'',size:'',qty:1,rate:0,per:'Sheet'}]}));
+      const updReqLine=(i,k,v)=>setRf(p=>({...p,items:p.items.map((x,xi)=>xi===i?{...x,[k]:v}:x)}));
+      const delReqLine=(i)=>setRf(p=>({...p,items:p.items.filter((_,xi)=>xi!==i)}));
+      const nextReqNo=()=>{const nums=(reqs||[]).map(r=>+r.req_no?.replace(/\D/g,'')||0);return String(Math.max(0,...nums)+1);};
+      const saveReq=async()=>{
+        if(!rf.vendor){show('Enter vendor name',false);return;}
+        if(!rf.items.some(x=>x.product)){show('Add at least one item',false);return;}
+        const itemsTotal=rf.items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0),0);
+        const total=itemsTotal+(+rf.transport||0);
+        const rec={id:'RQ'+Date.now(),req_no:nextReqNo(),job_id:j.id,line_item_id:'',
+          vendor_name:rf.vendor,date:td(),items:rf.items.filter(x=>x.product),
+          transport:+rf.transport||0,total,notes:rf.notes,
+          po_status:'Pending',po_number:'',created_by:user?.name||'',created_at:new Date().toISOString()};
+        const {error}=await sb.from('requisitions').insert(rec);
+        if(error){show('⚠️ Save failed: '+error.message,false);return;}
+        setReqs(p=>[...p,rec]);
+        show('✅ Requisition #'+rec.req_no+' created! PO pending for Shreya.');
+        setRf({vendor:'',items:[{product:'',size:'',qty:1,rate:0,per:'Sheet'}],transport:0,notes:''});
+        setShowReqForm(false);
+      };
+      const deleteReq=async(id)=>{if(!confirm('Delete this requisition?'))return;const {error}=await sb.from('requisitions').delete().eq('id',id);if(!error)setReqs(p=>p.filter(r=>r.id!==id));};
+      return <div style={{marginTop:6}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <p style={{fontSize:10,fontWeight:700,color:"#8b5cf6"}}>📋 REQUISITIONS ({jobReqs.length})</p>
+          <button className="b" onClick={()=>setShowReqForm(!showReqForm)} style={{fontSize:9,padding:"2px 8px",borderColor:"#8b5cf6",color:"#8b5cf6"}}>{showReqForm?'✕ Close':'+ New Requisition'}</button>
+        </div>
+        {jobReqs.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3,marginBottom:6}}>{jobReqs.map(r=>{
+          const rItems=Array.isArray(r.items)?r.items:[];
+          return <div key={r.id} style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:"6px 10px",fontSize:9}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontWeight:800,color:"#8b5cf6",fontSize:11}}>#{r.req_no}</span>
+                <span style={{color:"#c9d1d9"}}>{r.vendor_name}</span>
+                <span style={{color:"#64748b"}}>{r.date}</span>
+                <span style={{padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,background:r.po_status==='PO Generated'?"#4ade8022":"#8b5cf622",color:r.po_status==='PO Generated'?"#4ade80":"#8b5cf6"}}>{r.po_status}</span>
+                {r.po_number&&<span style={{fontSize:7,color:"#64748b"}}>PO: {r.po_number}</span>}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontWeight:700,color:"#e3a008"}}>₹{(+r.total||0).toFixed(0)}</span>
+                <span style={{fontSize:7,color:"#64748b"}}>by {r.created_by}</span>
+                <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteReq(r.id)}>✕</button>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{rItems.map((x,xi)=><span key={xi} style={{color:"#8b949e"}}>{x.product}{x.size?' ('+x.size+')':''} × {x.qty} @ ₹{x.rate}/{x.per}</span>)}
+            {(+r.transport>0)&&<span style={{color:"#64748b"}}>+ Transport ₹{r.transport}</span>}</div>
+          </div>})}</div>}
+        {showReqForm&&<div style={{background:"#0d1520",border:"1px solid #8b5cf644",borderRadius:8,padding:10}}>
+          <div className="fg f3" style={{gap:6,marginBottom:8}}>
+            <div><span style={{fontSize:7,color:"#64748b"}}>Vendor / Masers *</span><select className="in" value={rf.vendor} onChange={e=>setRf(p=>({...p,vendor:e.target.value}))} style={{fontSize:9,padding:"3px 4px"}}><option value="">Select vendor...</option>{(agencies||[]).map(a=><option key={a.id} value={a.name}>{a.name}</option>)}<option value="_other">+ Other</option></select>
+            {rf.vendor==='_other'&&<input className="in" placeholder="Vendor name" style={{fontSize:9,marginTop:2,padding:"3px 4px"}} onChange={e=>setRf(p=>({...p,vendor:e.target.value}))}/>}</div>
+            <div><span style={{fontSize:7,color:"#64748b"}}>Transport ₹</span><input className="in mn" type="number" value={rf.transport} onChange={e=>setRf(p=>({...p,transport:e.target.value}))} style={{fontSize:9,padding:"3px 4px"}}/></div>
+            <div><span style={{fontSize:7,color:"#64748b"}}>Notes</span><input className="in" value={rf.notes} onChange={e=>setRf(p=>({...p,notes:e.target.value}))} placeholder="Optional" style={{fontSize:9,padding:"3px 4px"}}/></div>
+          </div>
+          <p style={{fontSize:8,color:"#8b5cf6",fontWeight:700,marginBottom:4}}>ITEMS</p>
+          <table style={{marginBottom:6}}><thead><tr><th style={{fontSize:8}}>Product / Material</th><th style={{fontSize:8}}>Size</th><th style={{fontSize:8}}>Qty</th><th style={{fontSize:8}}>Rate</th><th style={{fontSize:8}}>Per</th><th style={{fontSize:8}}>Amount</th><th></th></tr></thead>
+          <tbody>{rf.items.map((x,xi)=><tr key={xi}>
+            <td><input className="in" value={x.product} onChange={e=>updReqLine(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+            <td><input className="in" value={x.size} onChange={e=>updReqLine(xi,'size',e.target.value)} placeholder="4×8" style={{fontSize:9,padding:"2px 4px",width:60}}/></td>
+            <td><input className="in mn" type="number" value={x.qty} onChange={e=>updReqLine(xi,'qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:40}}/></td>
+            <td><input className="in mn" type="number" value={x.rate} onChange={e=>updReqLine(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:60}}/></td>
+            <td><select className="in" value={x.per} onChange={e=>updReqLine(xi,'per',e.target.value)} style={{fontSize:8,padding:"2px",width:70}}>{REQ_PER.map(p=><option key={p}>{p}</option>)}</select></td>
+            <td className="mn" style={{fontSize:9,fontWeight:700,color:"#e3a008"}}>₹{((+x.qty||0)*(+x.rate||0)).toFixed(0)}</td>
+            <td>{rf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>delReqLine(xi)}>✕</button>}</td>
+          </tr>)}</tbody></table>
+          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+            <button className="b bs" onClick={addReqLine} style={{fontSize:8,color:"#8b5cf6",borderColor:"#8b5cf6"}}>+ Add Line</button>
+            <span style={{flex:1}}/>
+            <span style={{fontSize:9,color:"#64748b"}}>Total: <strong style={{color:"#e3a008"}}>₹{(rf.items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0),0)+(+rf.transport||0)).toFixed(0)}</strong></span>
+            <button className="b bp" onClick={saveReq} style={{fontSize:10,padding:"4px 14px",background:"#8b5cf6",borderColor:"#8b5cf6"}}>📋 Create Requisition</button>
+          </div>
+        </div>}
+      </div>;
+    })()}
     {(j.batches||[]).map((b,bi)=><div key={b.id} className="c" style={{padding:0,overflow:"hidden"}}>
       <div style={{padding:"5px 8px",borderBottom:"1px solid #1a2030",background:"#0a0f1a"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
@@ -1869,13 +1950,34 @@ function StockPage({stock,grn,pl,fl}){const rows=Object.entries(stock).filter(([
 }
 
 // REMINDERS
-function RemPage({jobs,osItems,setOsItems,items}){const rem=jobs.filter(j=>!j.po_number).map(j=>({...j,d:Math.max(0,Math.floor((new Date()-new Date(j.created_at))/864e5))})).sort((a,b)=>b.d-a.d);
+function RemPage({jobs,osItems,setOsItems,items,reqs,setReqs}){const rem=jobs.filter(j=>!j.po_number).map(j=>({...j,d:Math.max(0,Math.floor((new Date()-new Date(j.created_at))/864e5))})).sort((a,b)=>b.d-a.d);
   const pendingOs=(osItems||[]).filter(o=>o.po_status==='Pending');
+  const pendingReqs=(reqs||[]).filter(r=>r.po_status==='Pending');
   const updateOsPO=async(osId,poNum)=>{
     const {error}=await sb.from('outsource_items').update({po_status:poNum?'PO Generated':'Pending',po_number:poNum}).eq('id',osId);
     if(!error&&setOsItems)setOsItems(p=>p.map(o=>o.id===osId?{...o,po_status:poNum?'PO Generated':'Pending',po_number:poNum}:o));
   };
+  const updateReqPO=async(rId,poNum)=>{
+    const {error}=await sb.from('requisitions').update({po_status:poNum?'PO Generated':'Pending',po_number:poNum}).eq('id',rId);
+    if(!error&&setReqs)setReqs(p=>p.map(r=>r.id===rId?{...r,po_status:poNum?'PO Generated':'Pending',po_number:poNum}:r));
+  };
   return <div>
+  {pendingReqs.length>0&&<div className="c" style={{marginBottom:12,borderColor:"#8b5cf644"}}>
+    <h3 style={{fontSize:12,fontWeight:700,color:"#8b5cf6",marginBottom:8}}>📋 Requisition PO Pending ({pendingReqs.length})</h3>
+    <table><thead><tr><th>Req#</th><th>Job</th><th>Vendor</th><th>Items</th><th>Total</th><th>By</th><th>Date</th><th>PO#</th><th></th></tr></thead>
+    <tbody>{pendingReqs.map(r=>{const rItems=Array.isArray(r.items)?r.items:[];
+      return <tr key={r.id}>
+        <td style={{fontWeight:800,color:"#8b5cf6",fontSize:11}}>#{r.req_no}</td>
+        <td className="mn" style={{color:"#e3a008",fontWeight:700,fontSize:10}}>{r.job_id}</td>
+        <td style={{fontSize:9}}>{r.vendor_name}</td>
+        <td style={{fontSize:8,color:"#8b949e"}}>{rItems.map(x=>x.product).join(', ').slice(0,40)}</td>
+        <td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>₹{(+r.total||0).toFixed(0)}</td>
+        <td style={{fontSize:8,color:"#64748b"}}>{r.created_by}</td>
+        <td style={{fontSize:8,color:"#64748b"}}>{r.date}</td>
+        <td><input className="in mn" placeholder="Enter PO#" style={{width:80,fontSize:9,padding:"2px 4px"}} onKeyDown={e=>{if(e.key==='Enter'&&e.target.value){updateReqPO(r.id,e.target.value);e.target.value='';}}}/></td>
+        <td><button className="b bp" style={{fontSize:8,padding:"2px 6px",background:"#8b5cf6",borderColor:"#8b5cf6"}} onClick={e=>{const inp=e.target.parentElement.previousElementSibling?.querySelector('input');if(inp?.value){updateReqPO(r.id,inp.value);inp.value='';}}}>✓ PO</button></td>
+      </tr>})}</tbody></table>
+  </div>}
   {pendingOs.length>0&&<div className="c" style={{marginBottom:12,borderColor:"#f9731644"}}>
     <h3 style={{fontSize:12,fontWeight:700,color:"#f97316",marginBottom:8}}>🔧 Outsource PO Pending ({pendingOs.length})</h3>
     <table><thead><tr><th>Job</th><th>Item</th><th>Task</th><th>Vendor</th><th>Rate</th><th>Total</th><th>Added By</th><th>PO#</th><th></th></tr></thead>
