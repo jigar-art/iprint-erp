@@ -186,6 +186,7 @@ function MainApp({user,onLogout,masterData}){
   const [dLogs,setDLogs]=useState([]);
   const [expenses,setExpenses]=useState([]);
   const [salesActs,setSalesActs]=useState([]);
+  const [osItems,setOsItems]=useState([]);
   const [pg,setPgRaw]=useState(()=>{
     try{return localStorage.getItem('erp_pg')||'dash';}catch(e){return 'dash';}
   });
@@ -236,12 +237,13 @@ function MainApp({user,onLogout,masterData}){
       
       // Phase 2: Load batches + line items for current FY jobs
       const curJobIds=j.map(x=>x.id);
-      const [b,li] = await Promise.all([
+      const [b,li,osi] = await Promise.all([
         fetchAll('batches','id'),
         fetchAll('line_items','id'),
+        fetchAll('outsource_items','id'),
       ]);
-      setBatches(b); setItems(li);
-      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items');
+      setBatches(b); setItems(li); setOsItems(osi);
+      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',osi.length,'outsource');
 
       // Phase 3: Load older FY jobs + logs + sales in background
       const [oldJ,pl,fl,ol,dl,sa] = await Promise.all([
@@ -671,7 +673,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=><div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}</div>)}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?(osItems||[]).filter(o=>o.po_status==='Pending').length:0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -700,7 +702,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
-          {pg==="rem"&&<RemPage jobs={filteredJobs}/>}
+          {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
@@ -711,7 +713,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -902,7 +904,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
@@ -911,6 +913,35 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [pdfMode,setPdfMode]=useState(null); // 'estimate'|'production'|null
   const [pdfBatches,setPdfBatches]=useState({}); // {batchId: true/false}
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'UNIT',gstPct:18});
+  const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
+  const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
+  const OS_TASKS=['Installation Charges','Coating Works','Router Cutting','Laser Cutting','Printing Charges','Frames','Signages (Internal)','Signages (External)'];
+  const jobOsItems=(osItems||[]).filter(o=>o.job_id===j.id);
+  const saveOsItem=async(lineItem)=>{
+    if(!osForm.task_type){show('Select a task type',false);return;}
+    if(!osForm.vendor_name){show('Enter vendor name',false);return;}
+    const r=+osForm.rate||0;const rm=osForm.rate_mode;
+    const q=+lineItem.qty||1;const sf=+lineItem.sqft||0;
+    const total=rm==='SQFT'?Math.round(sf*r*100)/100:rm==='SQINCH'?Math.round(sf*144*r*100)/100:Math.round(q*r*100)/100;
+    const rec={id:'OS'+Date.now(),line_item_id:lineItem.id,job_id:j.id,task_type:osForm.task_type,
+      vendor_name:osForm.vendor_name,vendor_id:'',rate:r,rate_mode:rm,qty:q,sqft:sf,total,
+      notes:osForm.notes,po_status:'Pending',po_number:'',created_by:user?.name||'',created_at:new Date().toISOString()};
+    const {error}=await sb.from('outsource_items').insert(rec);
+    if(error){show('⚠️ Save failed: '+error.message,false);return;}
+    setOsItems(p=>[...p,rec]);
+    show('✅ Outsource item added! PO pending for Shreya.');
+    setOsForm({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
+    setOsOpen(null);
+  };
+  const deleteOsItem=async(osId)=>{
+    if(!confirm('Delete this outsource entry?'))return;
+    const {error}=await sb.from('outsource_items').delete().eq('id',osId);
+    if(!error)setOsItems(p=>p.filter(o=>o.id!==osId));
+  };
+  const updateOsPO=async(osId,poNum)=>{
+    const {error}=await sb.from('outsource_items').update({po_status:poNum?'PO Generated':'Pending',po_number:poNum}).eq('id',osId);
+    if(!error)setOsItems(p=>p.map(o=>o.id===osId?{...o,po_status:poNum?'PO Generated':'Pending',po_number:poNum}:o));
+  };
   // Role-based access control
   const role=user?.role||'admin';
   const prodRoles=['production','printing','fabrication','designer','dispatch'];
@@ -1066,12 +1097,38 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           <input className="in" value={b.delivery_address||''} placeholder="Delivery address for this batch..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,delivery_address:v}:x));}} onBlur={e=>updateBatchField(b.id,'delivery_address',e.target.value)} style={{flex:1,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030"}}/>
         </div>
       </div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
         <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
-        {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;
-          return <tr key={it.id} className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
+        {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;const itOs=jobOsItems.filter(o=>o.line_item_id===it.id);
+          return <React.Fragment key={it.id}><tr className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
-            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>{DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>})}</tbody></table></div>
+            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>
+            <td style={{textAlign:"center",padding:"2px 1px"}}><button style={{background:itOs.length>0?"#f9731622":"none",border:itOs.length>0?"1px solid #f97316":"1px solid #333",borderRadius:4,color:itOs.length>0?"#f97316":"#64748b",cursor:"pointer",fontSize:8,padding:"1px 3px",minWidth:22,fontWeight:itOs.length>0?700:400}} onClick={()=>setOsOpen(osOpen===it.id?null:it.id)}>{itOs.length>0?itOs.length:'+'}</button></td>
+            {DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>
+          {osOpen===it.id&&<tr><td colSpan={100} style={{padding:0,border:"none"}}><div style={{background:"#0d1520",border:"1px solid #f9731633",borderRadius:6,padding:10,margin:"2px 0 6px"}}>
+            <p style={{fontSize:10,fontWeight:700,color:"#f97316",marginBottom:6}}>🔧 Outsource — {it.internal_name}</p>
+            {itOs.length>0&&<div style={{marginBottom:8}}>{itOs.map(o=><div key={o.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",borderRadius:4,background:"#060810",marginBottom:3,fontSize:9}}>
+              <span style={{fontWeight:700,color:"#f97316"}}>{o.task_type}</span>
+              <span style={{color:"#c9d1d9"}}>→ {o.vendor_name}</span>
+              <span className="mn" style={{color:"#64748b"}}>₹{(+o.rate||0).toFixed(2)}/{o.rate_mode}</span>
+              <span className="mn" style={{fontWeight:700,color:"#e3a008"}}>= ₹{(+o.total||0).toFixed(2)}</span>
+              <span style={{padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,background:o.po_status==='PO Generated'?"#4ade8022":"#f9731622",color:o.po_status==='PO Generated'?"#4ade80":"#f97316"}}>{o.po_status}</span>
+              {o.po_status==='Pending'&&<input className="in" placeholder="PO#" style={{width:60,fontSize:8,padding:"1px 4px"}} onBlur={e=>{if(e.target.value)updateOsPO(o.id,e.target.value);}}/>}
+              {o.po_number&&<span style={{fontSize:7,color:"#64748b"}}>PO: {o.po_number}</span>}
+              <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,marginLeft:"auto"}} onClick={()=>deleteOsItem(o.id)}>✕</button>
+            </div>)}</div>}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div><span style={{fontSize:7,color:"#64748b"}}>Task Type *</span><select className="in" value={osForm.task_type} onChange={e=>setOsForm(p=>({...p,task_type:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:150}}><option value="">Select task...</option>{OS_TASKS.map(t=><option key={t}>{t}</option>)}</select></div>
+              <div><span style={{fontSize:7,color:"#64748b"}}>Vendor *</span><select className="in" value={osForm.vendor_name} onChange={e=>setOsForm(p=>({...p,vendor_name:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:140}}><option value="">Select vendor...</option>{(agencies||[]).map(a=><option key={a.id} value={a.name}>{a.name}</option>)}<option value="_other">+ Other</option></select>
+              {osForm.vendor_name==='_other'&&<input className="in" placeholder="Vendor name" style={{fontSize:9,marginTop:2,padding:"3px 4px"}} onChange={e=>setOsForm(p=>({...p,vendor_name:e.target.value}))}/>}</div>
+              <div><span style={{fontSize:7,color:"#64748b"}}>Rate</span><input className="in mn" type="number" value={osForm.rate} onChange={e=>setOsForm(p=>({...p,rate:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:70}}/></div>
+              <div><span style={{fontSize:7,color:"#64748b"}}>Per</span><select className="in" value={osForm.rate_mode} onChange={e=>setOsForm(p=>({...p,rate_mode:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:80}}><option value="UNIT">Per Unit</option><option value="SQFT">Per SqFt</option><option value="SQINCH">Per SqInch</option></select></div>
+              <div><span style={{fontSize:7,color:"#64748b"}}>Notes</span><input className="in" value={osForm.notes} onChange={e=>setOsForm(p=>({...p,notes:e.target.value}))} placeholder="Optional" style={{fontSize:9,padding:"3px 4px",width:100}}/></div>
+              <button className="b bp" onClick={()=>saveOsItem(it)} style={{fontSize:9,padding:"3px 10px"}}>+ Add Outsource</button>
+              <button className="b bs" onClick={()=>setOsOpen(null)} style={{fontSize:9,padding:"3px 6px"}}>Close</button>
+            </div>
+          </div></td></tr>}
+          </React.Fragment>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
@@ -1812,11 +1869,33 @@ function StockPage({stock,grn,pl,fl}){const rows=Object.entries(stock).filter(([
 }
 
 // REMINDERS
-function RemPage({jobs}){const rem=jobs.filter(j=>!j.po_number).map(j=>({...j,d:Math.max(0,Math.floor((new Date()-new Date(j.created_at))/864e5))})).sort((a,b)=>b.d-a.d);
-  return <div className="c" style={{padding:0}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Days</th><th></th></tr></thead><tbody>
+function RemPage({jobs,osItems,setOsItems,items}){const rem=jobs.filter(j=>!j.po_number).map(j=>({...j,d:Math.max(0,Math.floor((new Date()-new Date(j.created_at))/864e5))})).sort((a,b)=>b.d-a.d);
+  const pendingOs=(osItems||[]).filter(o=>o.po_status==='Pending');
+  const updateOsPO=async(osId,poNum)=>{
+    const {error}=await sb.from('outsource_items').update({po_status:poNum?'PO Generated':'Pending',po_number:poNum}).eq('id',osId);
+    if(!error&&setOsItems)setOsItems(p=>p.map(o=>o.id===osId?{...o,po_status:poNum?'PO Generated':'Pending',po_number:poNum}:o));
+  };
+  return <div>
+  {pendingOs.length>0&&<div className="c" style={{marginBottom:12,borderColor:"#f9731644"}}>
+    <h3 style={{fontSize:12,fontWeight:700,color:"#f97316",marginBottom:8}}>🔧 Outsource PO Pending ({pendingOs.length})</h3>
+    <table><thead><tr><th>Job</th><th>Item</th><th>Task</th><th>Vendor</th><th>Rate</th><th>Total</th><th>Added By</th><th>PO#</th><th></th></tr></thead>
+    <tbody>{pendingOs.map(o=>{const li=(items||[]).find(i=>i.id===o.line_item_id);const jb=jobs.find(j=>j.id===o.job_id);
+      return <tr key={o.id}>
+        <td className="mn" style={{color:"#e3a008",fontWeight:700,fontSize:10}}>{o.job_id}</td>
+        <td style={{fontSize:9}}>{li?.internal_name||'—'}</td>
+        <td style={{fontWeight:600,color:"#f97316",fontSize:9}}>{o.task_type}</td>
+        <td style={{fontSize:9}}>{o.vendor_name}</td>
+        <td className="mn" style={{fontSize:9}}>₹{(+o.rate||0).toFixed(2)}/{o.rate_mode}</td>
+        <td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>₹{(+o.total||0).toFixed(2)}</td>
+        <td style={{fontSize:8,color:"#64748b"}}>{o.created_by}</td>
+        <td><input className="in mn" placeholder="Enter PO#" style={{width:80,fontSize:9,padding:"2px 4px"}} onKeyDown={e=>{if(e.key==='Enter'&&e.target.value){updateOsPO(o.id,e.target.value);e.target.value='';}}}/></td>
+        <td><button className="b bp" style={{fontSize:8,padding:"2px 6px"}} onClick={e=>{const inp=e.target.parentElement.previousElementSibling?.querySelector('input');if(inp?.value){updateOsPO(o.id,inp.value);inp.value='';}}}>✓ PO</button></td>
+      </tr>})}</tbody></table>
+  </div>}
+  <div className="c" style={{padding:0}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Days</th><th></th></tr></thead><tbody>
     {rem.map(j=><tr key={j.id}><td className="mn" style={{color:"#e3a008",fontWeight:700}}>{j.id}</td><td>{j.client_name?.slice(0,22)}</td><td style={{color:"#64748b"}}>{j.project}</td><td><span style={{color:j.d>30?"#ef4444":"#f59e0b",fontWeight:700}}>{j.d}d</span></td><td><button className="b br bs" onClick={()=>window.open(`mailto:?subject=PO Reminder-${j.id}&body=Dear ${j.contact_person},%0AReminder for PO:%0AJob:${j.id}%0AProject:${j.project}%0APending:${j.d} days%0ARegards,iPrint`)}>📧</button></td></tr>)}
     {rem.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#4ade80",padding:16}}>All POs received!</td></tr>}
-  </tbody></table></div>;
+  </tbody></table></div></div>;
 }
 
 // CLIENTS
