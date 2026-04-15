@@ -1244,6 +1244,10 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const [poFile,setPoFile]=useState(null);
   const [designFiles,setDesignFiles]=useState([]);
   const [submitting,setSubmitting]=useState(false);
+  const [syncBankingNJ,setSyncBankingNJ]=useState(false);
+  const [bankProjectNJ,setBankProjectNJ]=useState('');
+  const NJ_BANK_PROJECTS=['NCR SBI BRANDING','NCR SBI GSB','NCR PNB GSB','NCR BOB GSB','CMS SBI GSB+LOLLIPOP','CMS SBI BRANDING','CMS BOB GSB+BRANDING','Diebold HDFC GSB'];
+  const NJ_BANK_MAP={'NCR SBI BRANDING':['NCR','SBI'],'NCR SBI GSB':['NCR','SBI'],'NCR PNB GSB':['NCR','PNB'],'NCR BOB GSB':['NCR','BOB'],'CMS SBI GSB+LOLLIPOP':['CMS','SBI'],'CMS SBI BRANDING':['CMS','SBI'],'CMS BOB GSB+BRANDING':['CMS','BOB'],'Diebold HDFC GSB':['Diebold','HDFC']};
   const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
   const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
 
@@ -1290,6 +1294,12 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
     const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
     await createJob(jobData,batchData,lineItems);
+    // Sync to Banking CRM if enabled
+    if(syncBankingNJ&&bankProjectNJ){
+      const bm=NJ_BANK_MAP[bankProjectNJ]||['',''];
+      const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
+      await sb.from('banking_sites').insert({id:siteId,project:bankProjectNJ,client:bm[0],bank:bm[1],job_no:jid.split('-')[0],po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
+    }
     setSubmitting(false);
   };
 
@@ -1391,6 +1401,16 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       XLSX.utils.book_append_sheet(wb,ws,'Estimate '+jid);
       XLSX.writeFile(wb,'Estimate_'+jid+'_'+(f.cn||'Client').replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)+'.xlsx');
     }} style={{gap:6}}>📊 Export Excel</button><button className="b" onClick={()=>sub(true)} style={{padding:"7px 14px",borderColor:"#64748b"}} disabled={submitting}>{submitting?"⏳...":"💾 Save Draft"}</button><button className="b bp" onClick={()=>sub(false)} style={{padding:"7px 18px"}} disabled={submitting}>{submitting?"⏳ Creating...":"Create "+jid}</button></div>
+    <div style={{background:"#0a0f1a",border:"1px solid #1a2030",borderRadius:8,padding:8,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}} onClick={()=>setSyncBankingNJ(p=>!p)}>
+        <div className={`ck ${syncBankingNJ?"on":""}`} style={{flexShrink:0}}>{syncBankingNJ?"✓":""}</div>
+        <span style={{fontSize:10,fontWeight:700,color:syncBankingNJ?"#06b6d4":"#64748b"}}>🏦 Sync to Banking CRM</span>
+      </div>
+      {syncBankingNJ&&<select className="in" value={bankProjectNJ} onChange={e=>setBankProjectNJ(e.target.value)} style={{fontSize:9,padding:"3px 6px",width:200}}>
+        <option value="">Select Banking Project...</option>
+        {NJ_BANK_PROJECTS.map(p=><option key={p} value={p}>{p}</option>)}
+      </select>}
+    </div>
   </div>;
 }
 
@@ -1761,6 +1781,10 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const [colMap,setColMap]=useState({});
   const [headerRow,setHeaderRow]=useState(0);
   const [importMode,setImportMode]=useState('one_job'); // 'one_job' or 'multi_job'
+  const [syncBanking,setSyncBanking]=useState(false);
+  const [bankProject,setBankProject]=useState('');
+  const BANK_PROJECTS=['NCR SBI BRANDING','NCR SBI GSB','NCR PNB GSB','NCR BOB GSB','CMS SBI GSB+LOLLIPOP','CMS SBI BRANDING','CMS BOB GSB+BRANDING','Diebold HDFC GSB'];
+  const BANK_MAP={'NCR SBI BRANDING':['NCR','SBI'],'NCR SBI GSB':['NCR','SBI'],'NCR PNB GSB':['NCR','PNB'],'NCR BOB GSB':['NCR','BOB'],'CMS SBI GSB+LOLLIPOP':['CMS','SBI'],'CMS SBI BRANDING':['CMS','SBI'],'CMS BOB GSB+BRANDING':['CMS','BOB'],'Diebold HDFC GSB':['Diebold','HDFC']};
 
   // Smart size parser — handles all formats: "Width- 16in Height- 24in", "8\"x12\"", "3ftx4ft", "1177.5MM x350.3MM", "18″ × 24″"
   const parseSize=(sizeStr)=>{
@@ -2011,6 +2035,13 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         const batchData={id:batchId,job_id:newJid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
         const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
         await createJob(jobData,batchData,lineItems);
+        // Sync to Banking CRM if enabled
+        if(syncBanking&&bankProject){
+          const bm=BANK_MAP[bankProject]||['',''];
+          const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5)+i;
+          const siteCode=it.int?.split(' — ')[0]||it.int?.split('—')[0]||'';
+          await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:String(lastNum).padStart(4,'0'),po_number:f.po||'',atm_id:siteCode.trim(),site_unique_id:'',site_address:it.siteAddr||it.m||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
+        }
       }
       setSubmitting(false);
     } else {
@@ -2022,6 +2053,12 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
       const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
       await createJob(jobData,batchData,lineItems);
+      // Sync to Banking CRM if enabled (one-job mode)
+      if(syncBanking&&bankProject){
+        const bm=BANK_MAP[bankProject]||['',''];
+        const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
+        await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:jid.split('-')[0],po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
+      }
       setSubmitting(false);
     }
   };
@@ -2147,6 +2184,20 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
               📑 Each row → SEPARATE job (individual sheets)
             </label>
           </div>
+        </div>
+        <div style={{background:"#0a0f1a",border:"1px solid #1a2030",borderRadius:8,padding:10,marginTop:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}} onClick={()=>setSyncBanking(p=>!p)}>
+            <div className={`ck ${syncBanking?"on":""}`} style={{flexShrink:0}}>{syncBanking?"✓":""}</div>
+            <span style={{fontSize:10,fontWeight:700,color:syncBanking?"#06b6d4":"#64748b"}}>🏦 Sync to Banking CRM</span>
+            <span style={{fontSize:8,color:"#64748b"}}>— Creates entries in Banking CRM dashboard for each job</span>
+          </div>
+          {syncBanking&&<div style={{marginTop:6}}>
+            <select className="in" value={bankProject} onChange={e=>setBankProject(e.target.value)} style={{fontSize:10,padding:"4px 8px",width:"100%"}}>
+              <option value="">Select Banking Project...</option>
+              {BANK_PROJECTS.map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
+            {!bankProject&&<span style={{fontSize:8,color:"#f47067",marginTop:2,display:"block"}}>⚠️ Select a banking project to enable sync</span>}
+          </div>}
         </div>
         <div style={{display:"flex",gap:4,marginTop:8}}>
           <button className="b" onClick={()=>setStep(2)}>← Back</button>
