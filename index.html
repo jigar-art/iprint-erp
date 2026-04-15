@@ -1168,6 +1168,28 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         XLSX.utils.book_append_sheet(wb,ws,'Job '+j.id);
         XLSX.writeFile(wb,'Job_'+j.id+'_'+j.client_name?.replace(/[^a-zA-Z0-9]/g,'_').slice(0,20)+'.xlsx');
       }} style={{gap:4}}>📊 Export Excel</button>}
+      <button className="b" onClick={async()=>{
+        const JD_BANK_PROJECTS=['NCR SBI BRANDING','NCR SBI GSB','NCR PNB GSB','NCR BOB GSB','CMS SBI GSB+LOLLIPOP','CMS SBI BRANDING','CMS BOB GSB+BRANDING','Diebold HDFC GSB'];
+        const JD_BANK_MAP={'NCR SBI BRANDING':['NCR','SBI'],'NCR SBI GSB':['NCR','SBI'],'NCR PNB GSB':['NCR','PNB'],'NCR BOB GSB':['NCR','BOB'],'CMS SBI GSB+LOLLIPOP':['CMS','SBI'],'CMS SBI BRANDING':['CMS','SBI'],'CMS BOB GSB+BRANDING':['CMS','BOB'],'Diebold HDFC GSB':['Diebold','HDFC']};
+        const proj=prompt('Select Banking Project:\n\n'+JD_BANK_PROJECTS.map((p,i)=>(i+1)+'. '+p).join('\n')+'\n\nEnter number (1-'+JD_BANK_PROJECTS.length+'):');
+        if(!proj)return;
+        const idx=parseInt(proj)-1;
+        if(idx<0||idx>=JD_BANK_PROJECTS.length){alert('Invalid selection');return;}
+        const bankProj=JD_BANK_PROJECTS[idx];
+        const bm=JD_BANK_MAP[bankProj]||['',''];
+        const jobNum=j.id?.split('-')[0]||'';
+        // Check if already synced
+        const {data:existing}=await sb.from('banking_sites').select('id').eq('job_no',jobNum).limit(1);
+        if(existing&&existing.length>0){
+          if(!confirm('Job '+j.id+' already exists in Banking CRM. Create another entry?'))return;
+        }
+        const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
+        const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));
+        const siteCode=allItems[0]?.internal_name?.split(' — ')[0]||allItems[0]?.internal_name?.split('—')[0]||'';
+        const {error}=await sb.from('banking_sites').insert({id:siteId,project:bankProj,client:bm[0],bank:bm[1],job_no:jobNum,po_number:j.po_number||'',atm_id:siteCode.trim(),site_unique_id:'',site_address:j.delivery_address||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:j.created_at||new Date().toISOString()});
+        if(error)show('⚠️ Sync failed: '+error.message,false);
+        else show('✅ Synced to Banking CRM — '+bankProj);
+      }} style={{gap:4}}>🏦 Sync to Banking</button>
     </div>
 
     {pdfMode&&<div style={{background:"#060810",border:"1px solid #e3a00844",borderRadius:8,padding:12,marginTop:6}}>
