@@ -1717,11 +1717,38 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   // Local products list — starts from prop, grows as user types new materials
   const [prodList,setProdList]=useState(products);
   useEffect(()=>{setProdList(products);},[products]);
+  // Recent jobs for the selected client — used for "Copy from last job" helper
+  const [recentClientJobs,setRecentClientJobs]=useState([]);
+  const [showRecentPicker,setShowRecentPicker]=useState(false);
   const [its,sIts]=useState([{id:uid(),sr:1,int:"",cli:"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
   // Typeahead state per row: {[rowIdx]: boolean}
   const [matOpen,setMatOpen]=useState({});
 
-  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||p.cemail,cgst:c.gst||'',bname:c.billing_name||c.name}));};
+  const selC=cid=>{
+    const c=clients.find(x=>x.id===cid);
+    if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||p.cemail,cgst:c.gst||'',bname:c.billing_name||c.name}));
+    // Reset recent jobs cache + fetch top 5 most recent for this client
+    setRecentClientJobs([]);setShowRecentPicker(false);
+    if(cid){
+      sb.from('jobs').select('id,contact_person,contact_no,delivery_address,billing_address,client_gst,billing_name,payment_terms,project,created_at').eq('client_id',cid).order('created_at',{ascending:false}).limit(5).then(({data})=>{
+        if(data&&data.length>0)setRecentClientJobs(data);
+      });
+    }
+  };
+  // Copy client/billing details from a previous job (leaves Project + Delivery Address for user to fill)
+  const copyFromJob=(job)=>{
+    if(!job)return;
+    sF(p=>({
+      ...p,
+      cp:job.contact_person||p.cp,
+      cph:job.contact_no||p.cph,
+      ba:job.billing_address||p.ba,
+      cgst:job.client_gst||p.cgst,
+      bname:job.billing_name||p.bname,
+      pt:job.payment_terms||p.pt,
+    }));
+    setShowRecentPicker(false);
+  };
   const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email,cgst:nc.gst||'',bname:nc.billing_name||nc.name.trim()}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
   // Pick existing product from list — fills internal AND client(DC) name
   const pickProd=(i,prod)=>{sIts(p=>{const n=[...p];n[i]={...n[i],int:prod.internal_name,cli:prod.client_name||prod.internal_name};return n;});setMatOpen(m=>({...m,[i]:false}));};
@@ -1819,6 +1846,18 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
         <F l="Made By"><select className="in" value={f.mb} onChange={e=>sF(p=>({...p,mb:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
         <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
         <F l="Client *"><div style={{display:"flex",gap:2}}><select className="in" value={f.cl} onChange={e=>selC(e.target.value)} style={{flex:1}}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewCli(true)}>+</button></div></F>
+        {f.cl&&recentClientJobs.length>0&&<div style={{gridColumn:"span 3",display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:"#06b6d410",border:"1px solid #06b6d433",borderRadius:6}}>
+          <span style={{fontSize:9,color:"#06b6d4",fontWeight:600,whiteSpace:"nowrap"}}>💡 Returning client —</span>
+          <button className="b bs" onClick={()=>copyFromJob(recentClientJobs[0])} title={`Copy contact, billing, GST & payment terms from ${recentClientJobs[0].id}`} style={{fontSize:10,color:"#06b6d4",borderColor:"#06b6d455",padding:"2px 8px",whiteSpace:"nowrap"}}>📋 Copy from last job ({recentClientJobs[0].id})</button>
+          {recentClientJobs.length>1&&<button className="b bs" onClick={()=>setShowRecentPicker(v=>!v)} style={{fontSize:10,color:"#64748b",padding:"2px 6px"}}>▾ Other recent ({recentClientJobs.length-1})</button>}
+          <span style={{fontSize:8,color:"#64748b",marginLeft:"auto"}}>Delivery address stays blank — you edit that per job</span>
+        </div>}
+        {showRecentPicker&&<div style={{gridColumn:"span 3",padding:"6px 8px",background:"#0a0f1a",border:"1px solid #1a2030",borderRadius:6,display:"flex",flexDirection:"column",gap:3}}>
+          {recentClientJobs.slice(1).map(j=><button key={j.id} className="b bs" onClick={()=>copyFromJob(j)} style={{fontSize:10,textAlign:"left",justifyContent:"flex-start",padding:"4px 8px",display:"flex",flexDirection:"column",alignItems:"flex-start",gap:1}}>
+            <span style={{color:"#e3a008",fontWeight:700}}>{j.id} <span style={{color:"#64748b",fontWeight:400,marginLeft:4}}>· {j.project?.slice(0,40)||'—'}</span></span>
+            <span style={{fontSize:8,color:"#64748b"}}>{j.contact_person} · {j.contact_no} · {new Date(j.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'})}</span>
+          </button>)}
+        </div>}
         <F l="Project / Site Name *"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))} placeholder="Required"/></F>
         <F l="Contact Person *"><input className="in" value={f.cp} onChange={e=>sF(p=>({...p,cp:e.target.value}))} placeholder="Required"/></F>
         <F l="Contact Number *"><input className="in" value={f.cph} onChange={e=>sF(p=>({...p,cph:e.target.value}))} placeholder="Required"/></F>
