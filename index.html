@@ -1545,7 +1545,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;const itOs=jobOsItems.filter(o=>o.line_item_id===it.id);
           return <React.Fragment key={it.id}><tr className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
-            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b"}}>{it.sqft||'—'}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>
+            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b",lineHeight:1.3}}>{it.sqft>0?<><span>{it.sqft}</span><span style={{display:"block",fontSize:7,color:"#475569"}}>{Math.round(it.sqft/10.7639*100)/100}m²</span></>:"—"}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>
             <td style={{textAlign:"center",padding:"2px 1px"}}><button style={{background:itOs.length>0?"#f9731622":"none",border:itOs.length>0?"1px solid #f97316":"1px solid #333",borderRadius:4,color:itOs.length>0?"#f97316":"#64748b",cursor:"pointer",fontSize:8,padding:"1px 3px",minWidth:22,fontWeight:itOs.length>0?700:400}} onClick={()=>setOsOpen(osOpen===it.id?null:it.id)}>{itOs.length>0?itOs.length:'+'}</button></td>
             {DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>
           {osOpen===it.id&&<tr><td colSpan={100} style={{padding:0,border:"none"}}><div style={{background:"#0d1520",border:"1px solid #f9731633",borderRadius:6,padding:10,margin:"2px 0 6px"}}>
@@ -2013,7 +2013,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     </div>
     <div className="c a" style={{padding:0,animationDelay:"50ms"}}>
       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>📷</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>📷</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt / SqMtr</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
         <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
           <td><select className="in" value={it.pi} onChange={e=>{const v=+e.target.value;if(v===-1){sIts(p=>{const n=[...p];n[i]={...n[i],pi:-1,int:"",cli:""};return n;});}else{selP(i,v);}}} style={{fontSize:9,padding:"2px",minWidth:90}}><option value={-1}>— New Material —</option>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select>{(it.pi===-1||it.pi==="-1")&&<input className="in" value={it.int} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],int:e.target.value};return n;})} placeholder="Type name..." autoFocus style={{fontSize:9,padding:"2px 3px",marginTop:2}}/>}</td>
           <td style={{padding:"2px",minWidth:40}}>{it.imgUrl?<a href={it.imgUrl} target="_blank"><img src={it.imgUrl} style={{width:30,height:30,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:30,height:30,borderRadius:3,border:"1px dashed #3b82f6",color:"#3b82f6",fontSize:11}}>+<input type="file" accept=".jpg,.png,.jpeg,.pdf" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url)sIts(p=>{const n=[...p];n[i]={...n[i],imgUrl:url};return n;});}}}/></label>}</td>
@@ -2023,7 +2023,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
           <td><input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
           <td><input className="in mn" type="number" min={1} value={it.qty} onChange={e=>uI(i,"qty",e.target.value)} style={{fontSize:10,padding:"3px",width:32}}/></td>
           <td><select className="in" value={it.rm} onChange={e=>uI(i,"rm",e.target.value)} style={{fontSize:10,padding:"3px",width:48}}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
-          <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.sqft||"—"}</td>
+          <td className="mn" style={{fontSize:10,color:"#64748b",lineHeight:1.3}}>{it.sqft>0?<><span>{it.sqft}</span><span style={{display:"block",fontSize:7,color:"#475569"}}>{Math.round(it.sqft/10.7639*100)/100} m²</span></>:"—"}</td>
           <td><input className="in mn" value={it.rate} onChange={e=>uI(i,"rate",e.target.value)} style={{fontSize:10,padding:"3px",width:44}}/></td>
           <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
           <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:9,padding:"2px",width:42}}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
@@ -2031,7 +2031,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
           <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px 3px",width:90}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
           <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td></tr>)}
-        <tr style={{background:"#0a0f1a"}}><td colSpan={6} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4"}}>{tot.tsq||"—"}</td><td></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
+        <tr style={{background:"#0a0f1a"}}><td colSpan={6} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4",lineHeight:1.3}}>{tot.tsq>0?<><span>{tot.tsq} ft²</span><span style={{display:"block",fontSize:7,color:"#475569"}}>{Math.round(tot.tsq/10.7639*100)/100} m²</span></>:"—"}</td><td></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
       </tbody></table></div>
     </div>
     <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b" onClick={()=>{
@@ -2513,35 +2513,49 @@ const WA_NUMBERS = {
   'Shreya':          '917304008506',
 };
 const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
-const AISENSY_API_KEY = ''; // Paste AiSensy API key here when ready
 
-// Send via AiSensy Business API OR fallback to wa.me pre-fill
+// ── Meta Cloud API credentials ──────────────────────────────
+const META_WA_TOKEN = 'EAA99yop8cZCkBRBRngo3b2ZAqAiNMhlW3E6cZCal01I8DIZCEdoZBZBFKCd1iCxm3WUmmfvMZBwqNTXHIvJys4bZCNCDUGuuXd8aHpnbpYpZAmtyPomRViY0nQJbbXHAIWO8AplIhI3pKlXNaWDbBzzZCldYuzWBsa2Hx14RtF2E0zvX7vdyxGgud1euSDxAZDZD';
+const META_PHONE_NUMBER_ID = '1124028427456007';
+// ────────────────────────────────────────────────────────────
+
+// Send via Meta Cloud API OR fallback to wa.me pre-fill
 async function sendWhatsApp(toNumber, message, campaign='iprint_notification') {
-  if (AISENSY_API_KEY) {
+  if (META_WA_TOKEN && META_PHONE_NUMBER_ID) {
     try {
-      await fetch('https://backend.aisensy.com/campaign/t1/api/v2', {
+      const url = 'https://graph.facebook.com/v19.0/' + META_PHONE_NUMBER_ID + '/messages';
+      const res = await fetch(url, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + META_WA_TOKEN
+        },
         body: JSON.stringify({
-          apiKey: AISENSY_API_KEY,
-          campaignName: campaign,
-          destination: toNumber,
-          userName: 'iPrint India',
-          templateParams: [message],
-          source: 'iprint-erp',
-          media: {},
-          buttons: [],
-          carouselCards: [],
-          location: {}
+          messaging_product: 'whatsapp',
+          to: toNumber,
+          type: 'text',
+          text: { body: message }
         })
       });
-      return true;
-    } catch(e) { console.error('AiSensy error:', e); }
+      const data = await res.json();
+      if (data.messages && data.messages[0] && data.messages[0].id) {
+        console.log('WA sent OK:', data.messages[0].id);
+        return true;
+      } else {
+        console.warn('WA API issue:', JSON.stringify(data));
+        window.open('https://wa.me/' + toNumber + '?text=' + encodeURIComponent(message), '_blank');
+        return false;
+      }
+    } catch(e) {
+      console.error('Meta WA API error:', e);
+      window.open('https://wa.me/' + toNumber + '?text=' + encodeURIComponent(message), '_blank');
+      return false;
+    }
   }
-  // Fallback: wa.me pre-fill
   window.open('https://wa.me/' + toNumber + '?text=' + encodeURIComponent(message), '_blank');
   return false;
 }
+
 
 function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const [filter, setFilter] = React.useState('Pending Approval');
@@ -2646,9 +2660,9 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
       </div>
 
       {/* AiSensy API Key notice */}
-      {!AISENSY_API_KEY && (
+      {META_WA_TOKEN && (
         <div style={{background:'#e3a00810', border:'1px solid #e3a00833', borderRadius:6, padding:'6px 10px', marginBottom:10, fontSize:9, color:'#e3a008'}}>
-          ⚡ <strong>WhatsApp in pre-fill mode</strong> — Paste your AiSensy API key in the code (AISENSY_API_KEY) to enable fully automatic sending. Until then, clicking Send opens WhatsApp Web pre-filled.
+          ✅ <strong>WhatsApp API active</strong> — Meta Cloud API connected. Messages send automatically on approve/reject. Test token valid ~24hrs — add permanent token before it expires.
         </div>
       )}
 
@@ -2764,7 +2778,7 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
               {/* WhatsApp buttons — shown after action OR for already approved/rejected */}
               {showWA && (
                 <div style={{marginTop:8, padding:'8px 10px', background:'#0d2818', border:'1px solid #25d36633', borderRadius:6}}>
-                  <p style={{fontSize:8, color:'#25d366', fontWeight:700, marginBottom:6}}>📱 WhatsApp Notifications {AISENSY_API_KEY ? '(Auto-send via AiSensy)' : '(Click to open pre-filled)'}</p>
+                  <p style={{fontSize:8, color:'#25d366', fontWeight:700, marginBottom:6}}>📱 WhatsApp Notifications {META_WA_TOKEN ? '(Auto-send via Meta API ✅)' : '(Click to open pre-filled)'}</p>
                   <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
                     {/* Notify Requestor */}
                     {requestorPhone && (
