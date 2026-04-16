@@ -80,7 +80,7 @@ const uploadMultiple = async (files, folder='general') => {
 const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
 const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
 const SIZES=["MM","INCH","FOOT"];
-const RATES=["SQFT","UNIT","RFT","NOS","SET","LOT"];
+const RATES=["SQFT","SQMTR","UNIT","RFT","NOS","SET","LOT"];
 const MUNITS=["roll","nos","sheet","pcs","sqft","mtr","kg","box","set","lot"];
 const FAB_P=["Laser Cutting","Router Cutting","CNC Cutting","Bending","Welding","PU Coating","Painting","Polishing","Assembly","Carpentry","3D Cutting"];
 
@@ -110,7 +110,7 @@ document.addEventListener('click',function(e){
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">HEIGHT</label><input id="_eH" class="in mn" value="'+(it.height||'')+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">SIZE UNIT</label><select id="_eSU" class="in" style="width:100%;box-sizing:border-box">'+['MM','INCH','FOOT'].map(u=>'<option'+(u===(it.size_unit||'MM')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">QTY</label><input id="_eQ" class="in mn" type="number" value="'+(it.qty||1)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
-    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE MODE</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"'+(window._canSeeRates===false?' disabled':'')+(window._canSeeRates===false?' title="Not authorized"':'')+'>'+['SQFT','UNIT','RFT','NOS','SET','LOT'].map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE MODE</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"'+(window._canSeeRates===false?' disabled':'')+(window._canSeeRates===false?' title="Not authorized"':'')+'>'+['SQFT','SQMTR','UNIT','RFT','NOS','SET','LOT'].map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
     (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="'+(it.rate||0)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>':'<input id="_eR" type="hidden" value="'+(it.rate||0)+'"/>')+
     (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">'+[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')+'</select></div>':'<input id="_eGST" type="hidden" value="'+(it.gstPct!=null?it.gstPct:18)+'"/>')+
     '</div>'+
@@ -125,7 +125,7 @@ document.addEventListener('click',function(e){
     const rm=d.querySelector('#_eRM').value||'UNIT';const su=d.querySelector('#_eSU').value||'MM';
     const gp=+d.querySelector('#_eGST').value||18;
     const sq=cSq(w,h,q,su);
-    const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:Math.round(q*r*100)/100;
+    const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:(rm==='SQMTR'&&sq>0)?Math.round((sq/10.7639)*r*100)/100:Math.round(q*r*100)/100;
     const gst=Math.round(total*(gp/100)*100)/100;
     const updates={internal_name:d.querySelector('#_eName').value,media:d.querySelector('#_eMedia').value,
       width:String(w||d.querySelector('#_eW').value),height:String(h||d.querySelector('#_eH').value),
@@ -1126,7 +1126,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     if(!ni.internal_name){show("Enter item name",false);return;}
     const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=+ni.gstPct||18;
     const sqft=cSq(w,h,q,ni.size_unit);
-    const total=ni.rate_mode==='SQFT'?Math.round(sqft*r*100)/100:Math.round(q*r*100)/100;
+    const total=ni.rate_mode==='SQFT'?Math.round(sqft*r*100)/100:ni.rate_mode==='SQMTR'?Math.round((sqft/10.7639)*r*100)/100:Math.round(q*r*100)/100;
     const gst=Math.round(total*(gp/100)*100)/100;
     const itemData={id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:1,product_id:"",
       internal_name:ni.internal_name,client_name:ni.client_name||ni.internal_name,media:ni.media,
@@ -1931,7 +1931,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email,cgst:nc.gst||'',bname:nc.billing_name||nc.name.trim()}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
   const GST_OPTS=[0,5,12,18,28];
-  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=(it.rm==="SQFT"&&it.sqft>0)?Math.round(it.sqft*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
+  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=(it.rm==="SQFT"&&it.sqft>0)?Math.round(it.sqft*r*100)/100:(it.rm==="SQMTR"&&it.sqft>0)?Math.round((it.sqft/10.7639)*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
   const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
   const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
   const tot=useMemo(()=>{const s=Math.round(its.reduce((a,x)=>a+x.tot,0)*100)/100,g=Math.round(its.reduce((a,x)=>a+x.gst,0)*100)/100,tq=its.reduce((a,x)=>a+(+x.qty||0),0),tsq=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;return {s,g,t:Math.round((s+g)*100)/100,tq,tsq};},[its]);
