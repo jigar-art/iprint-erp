@@ -79,6 +79,65 @@ const uploadMultiple = async (files, folder='general') => {
 // ─── CONSTANTS ──────────────────────────────────────────────
 const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
 const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
+// UNIT_MODES: single source of truth for billing unit
+// Each mode: {label, needsWH, dimUnit, areaFn, totalFn, displayFn}
+// needsWH = true → show W & H inputs; false → hide them (just use qty)
+// dimUnit = hint shown in W/H header
+// areaFn(w,h,qty) → computed area/measure
+// totalFn(area, qty, rate) → line total
+// displayFn(area) → what to show in the Area column
+const UNIT_MODES = [
+  { value:'SqFt (INCH)',  label:'SqFt (INCH)',  needsWH:true,  dimUnit:'inch',
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/144*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' ft²':'—' },
+  { value:'SqFt (FOOT)',  label:'SqFt (FOOT)',  needsWH:true,  dimUnit:'ft',
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' ft²':'—' },
+  { value:'SqFt (MM)',    label:'SqFt (MM)',    needsWH:true,  dimUnit:'mm',
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/92903.04*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' ft²':'—' },
+  { value:'SqMtr (INCH)', label:'SqMtr (INCH)', needsWH:true,  dimUnit:'inch',
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/1550.0031*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' m²':'—' },
+  { value:'SqMtr (FOOT)', label:'SqMtr (FOOT)', needsWH:true,  dimUnit:'ft',
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/10.7639*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' m²':'—' },
+  { value:'SqMtr (MM)',   label:'SqMtr (MM)',   needsWH:true,  dimUnit:'mm',
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/1000000*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' m²':'—' },
+  { value:'RFT (INCH)',   label:'RFT (INCH)',   needsWH:false, dimUnit:'',
+    areaFn:(w,h,q)=>0,
+    totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
+    displayFn:(a)=>'—' },
+  { value:'UNIT',  label:'Unit',  needsWH:false, dimUnit:'',
+    areaFn:(w,h,q)=>0,
+    totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
+    displayFn:(a)=>'—' },
+  { value:'NOS',   label:'NOS',   needsWH:false, dimUnit:'',
+    areaFn:(w,h,q)=>0,
+    totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
+    displayFn:(a)=>'—' },
+  { value:'SET',   label:'Set',   needsWH:false, dimUnit:'',
+    areaFn:(w,h,q)=>0,
+    totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
+    displayFn:(a)=>'—' },
+  { value:'LOT',   label:'Lot',   needsWH:false, dimUnit:'',
+    areaFn:(w,h,q)=>0,
+    totalFn:(a,q,r)=>Math.round((+r||0)*100)/100,
+    displayFn:(a)=>'—' },
+  { value:'KG',    label:'Kg',    needsWH:false, dimUnit:'',
+    areaFn:(w,h,q)=>0,
+    totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
+    displayFn:(a)=>'—' },
+];
+const getUnitMode = (rm) => UNIT_MODES.find(u=>u.value===rm) || UNIT_MODES[0];
+// Keep legacy RATES for backward compat in other places
 const SIZES=["MM","INCH","FOOT"];
 const RATES=["SQFT","SQMTR","UNIT","RFT","NOS","SET","LOT"];
 const MUNITS=["roll","nos","sheet","pcs","sqft","mtr","kg","box","set","lot"];
@@ -110,7 +169,7 @@ document.addEventListener('click',function(e){
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">HEIGHT</label><input id="_eH" class="in mn" value="'+(it.height||'')+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">SIZE UNIT</label><select id="_eSU" class="in" style="width:100%;box-sizing:border-box">'+['MM','INCH','FOOT'].map(u=>'<option'+(u===(it.size_unit||'MM')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">QTY</label><input id="_eQ" class="in mn" type="number" value="'+(it.qty||1)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>'+
-    '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE MODE</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"'+(window._canSeeRates===false?' disabled':'')+(window._canSeeRates===false?' title="Not authorized"':'')+'>'+['SQFT','SQMTR','UNIT','RFT','NOS','SET','LOT'].map(u=>'<option'+(u===(it.rate_mode||'UNIT')?' selected':'')+'>'+u+'</option>').join('')+'</select></div>'+
+    '<div><label style="font-size:8px;color:#64748b;font-weight:600">UNIT (Billing)</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"'+(window._canSeeRates===false?' disabled':'')+(window._canSeeRates===false?' title="Not authorized"':'')+'>'+UNIT_MODES.map(u=>'<option value="'+u.value+'"'+(u.value===(it.rate_mode||'SqFt (INCH)')?' selected':'')+'>'+u.label+'</option>').join('')+'</select></div>'+
     (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="'+(it.rate||0)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>':'<input id="_eR" type="hidden" value="'+(it.rate||0)+'"/>')+
     (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">'+[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')+'</select></div>':'<input id="_eGST" type="hidden" value="'+(it.gstPct!=null?it.gstPct:18)+'"/>')+
     '</div>'+
@@ -124,8 +183,9 @@ document.addEventListener('click',function(e){
     const q=+d.querySelector('#_eQ').value||1;const r=+d.querySelector('#_eR').value||0;
     const rm=d.querySelector('#_eRM').value||'UNIT';const su=d.querySelector('#_eSU').value||'MM';
     const gp=+d.querySelector('#_eGST').value||18;
-    const sq=cSq(w,h,q,su);
-    const total=(rm==='SQFT'&&sq>0)?Math.round(sq*r*100)/100:(rm==='SQMTR'&&sq>0)?Math.round((sq/10.7639)*r*100)/100:Math.round(q*r*100)/100;
+    const um2=getUnitMode(rm);
+    const sq=um2.areaFn(w,h,q);
+    const total=um2.totalFn(sq,q,r);
     const gst=Math.round(total*(gp/100)*100)/100;
     const updates={internal_name:d.querySelector('#_eName').value,media:d.querySelector('#_eMedia').value,
       width:String(w||d.querySelector('#_eW').value),height:String(h||d.querySelector('#_eH').value),
@@ -948,7 +1008,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [copyBatch,setCopyBatch]=useState(null); // {batchId, bi, items:[{...item, selected:bool}]}
   const [pdfMode,setPdfMode]=useState(null); // 'estimate'|'production'|null
   const [pdfBatches,setPdfBatches]=useState({}); // {batchId: true/false}
-  const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'UNIT',gstPct:18});
+  const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
   const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
   const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
   const OS_TASKS=['Installation Charges','Coating Works','Router Cutting','Laser Cutting','Printing Charges','Frames','Signages (Internal)','Signages (External)'];
@@ -1129,8 +1189,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const saveNewItem=async(batchId)=>{
     if(!ni.internal_name){show("Enter item name",false);return;}
     const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=+ni.gstPct||18;
-    const sqft=cSq(w,h,q,ni.size_unit);
-    const total=ni.rate_mode==='SQFT'?Math.round(sqft*r*100)/100:ni.rate_mode==='SQMTR'?Math.round((sqft/10.7639)*r*100)/100:Math.round(q*r*100)/100;
+    const um3=getUnitMode(ni.rate_mode);
+    const sqft=um3.areaFn(w,h,q);
+    const total=um3.totalFn(sqft,q,r);
     const gst=Math.round(total*(gp/100)*100)/100;
     const itemData={id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:1,product_id:"",
       internal_name:ni.internal_name,client_name:ni.client_name||ni.internal_name,media:ni.media,
@@ -1139,7 +1200,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
       dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false};
     await addLineItem(itemData);
-    setNi({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'UNIT',gstPct:18});
+    setNi({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
     setAddingToBatch(null);
   };
   
@@ -1544,12 +1605,12 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           <input className="in" value={b.delivery_address||''} placeholder="Delivery address for this batch..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,delivery_address:v}:x));}} onBlur={e=>updateBatchField(b.id,'delivery_address',e.target.value)} style={{flex:1,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030"}}/>
         </div>
       </div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>By</th><th>SqFt/m²</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>Unit</th><th>Area/Qty</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
         <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;const itOs=jobOsItems.filter(o=>o.line_item_id===it.id);
           return <React.Fragment key={it.id}><tr className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
-            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b",lineHeight:1.3}}>{it.sqft>0?<><span style={{color:it.rate_mode==="SQMTR"?"#f59e0b":"inherit"}}>{it.rate_mode==="SQMTR"?Math.round(it.sqft/10.7639*100)/100:it.sqft}</span><span style={{display:"block",fontSize:7,color:"#475569"}}>{it.rate_mode==="SQMTR"?it.sqft+" ft²":Math.round(it.sqft/10.7639*100)/100+" m²"}</span></>:"—"}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>
+            <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b",lineHeight:1.3}}>{(()=>{const um=getUnitMode(it.rate_mode);const d=um.displayFn(it.sqft);return d!=="—"?<span style={{color:"#06b6d4",fontWeight:600}}>{d}</span>:<span style={{color:"#475569"}}>—</span>;})()}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>
             <td style={{textAlign:"center",padding:"2px 1px"}}><button style={{background:itOs.length>0?"#f9731622":"none",border:itOs.length>0?"1px solid #f97316":"1px solid #333",borderRadius:4,color:itOs.length>0?"#f97316":"#64748b",cursor:"pointer",fontSize:8,padding:"1px 3px",minWidth:22,fontWeight:itOs.length>0?700:400}} onClick={()=>setOsOpen(osOpen===it.id?null:it.id)}>{itOs.length>0?itOs.length:'+'}</button></td>
             {DEPTS.map(d=><td key={d} style={{textAlign:"center",padding:"2px 1px"}}><Ck on={it['dept_'+d.toLowerCase()]} onClick={()=>togDept(it.id,d,!it['dept_'+d.toLowerCase()])}/></td>)}</tr>
           {osOpen===it.id&&<tr><td colSpan={100} style={{padding:0,border:"none"}}><div style={{background:"#0d1520",border:"1px solid #f9731633",borderRadius:6,padding:10,margin:"2px 0 6px"}}>
@@ -1586,7 +1647,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           <F l="Width"><input className="in mn" value={ni.width} onChange={e=>setNi(p=>({...p,width:e.target.value}))} placeholder="W"/></F>
           <F l="Height"><input className="in mn" value={ni.height} onChange={e=>setNi(p=>({...p,height:e.target.value}))} placeholder="H"/></F>
           <F l="Qty"><input className="in mn" type="number" min={1} value={ni.qty} onChange={e=>setNi(p=>({...p,qty:+e.target.value}))}/></F>
-          <F l="Rate Mode"><select className="in" value={ni.rate_mode} onChange={e=>setNi(p=>({...p,rate_mode:e.target.value}))}>{RATES.map(u=><option key={u}>{u}</option>)}</select></F>
+          <F l="Unit"><select className="in" value={ni.rate_mode} onChange={e=>setNi(p=>({...p,rate_mode:e.target.value}))} style={{minWidth:120}}>{UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}</select></F>
           <F l="Rate ₹"><input className="in mn" type="number" value={ni.rate} onChange={e=>setNi(p=>({...p,rate:+e.target.value}))}/></F>
           <F l="GST%"><select className="in" value={ni.gstPct} onChange={e=>setNi(p=>({...p,gstPct:+e.target.value}))}>{[0,5,12,18,28].map(g=><option key={g} value={g}>{g}%</option>)}</select></F>
         </div>
@@ -1732,7 +1793,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
                 
                 lineItems.push({id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:lineItems.length+1,product_id:"",
                   internal_name:(desc||srVal).slice(0,150),client_name:(desc||srVal).slice(0,150),media,
-                  width:w,height:h,size_unit:'FOOT',qty,rate_mode:calcSqft?'SQFT':'UNIT',rate,
+                  width:w,height:h,size_unit:'FOOT',qty,rate_mode:calcSqft?'SqFt (INCH)':'UNIT',rate,
                   sqft:Math.round(calcSqft*100)/100,
                   total:total||Math.round(calcSqft*rate*100)/100,gst,
                   amount:total&&gst?Math.round((total+gst)*100)/100:Math.round((total||calcSqft*rate)*1.18*100)/100||0,
@@ -1929,14 +1990,14 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const NJ_BANK_PROJECTS=['NCR SBI BRANDING','NCR SBI GSB','NCR PNB GSB','NCR BOB GSB','CMS SBI GSB+LOLLIPOP','CMS SBI BRANDING','CMS BOB GSB+BRANDING','Diebold HDFC GSB'];
   const NJ_BANK_MAP={'NCR SBI BRANDING':['NCR','SBI'],'NCR SBI GSB':['NCR','SBI'],'NCR PNB GSB':['NCR','PNB'],'NCR BOB GSB':['NCR','BOB'],'CMS SBI GSB+LOLLIPOP':['CMS','SBI'],'CMS SBI BRANDING':['CMS','SBI'],'CMS BOB GSB+BRANDING':['CMS','BOB'],'Diebold HDFC GSB':['Diebold','HDFC']};
   const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
-  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
+  const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SqFt (INCH)",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
 
   const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||p.cemail,cgst:c.gst||'',bname:c.billing_name||c.name}));};
   const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email,cgst:nc.gst||'',bname:nc.billing_name||nc.name.trim()}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
   const GST_OPTS=[0,5,12,18,28];
-  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);it.sqft=cSq(w,h,q,su);it.tot=(it.rm==="SQFT"&&it.sqft>0)?Math.round(it.sqft*r*100)/100:(it.rm==="SQMTR"&&it.sqft>0)?Math.round((it.sqft/10.7639)*r*100)/100:Math.round(q*r*100)/100;it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
-  const aI=()=>sIts(p=>[...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SQFT",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
+  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);const um=getUnitMode(it.rm);it.sqft=um.areaFn(w,h,q);it.tot=um.totalFn(it.sqft,q,r);it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
+  const aI=()=>sIts(p=>{const lastRm=p[p.length-1]?.rm||"SqFt (INCH)";return [...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:lastRm,rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}];});
   const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
   const tot=useMemo(()=>{const s=Math.round(its.reduce((a,x)=>a+x.tot,0)*100)/100,g=Math.round(its.reduce((a,x)=>a+x.gst,0)*100)/100,tq=its.reduce((a,x)=>a+(+x.qty||0),0),tsq=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;return {s,g,t:Math.round((s+g)*100)/100,tq,tsq};},[its]);
   
@@ -1972,7 +2033,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,billing_address:f.ba,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
-    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
     await createJob(jobData,batchData,lineItems);
     // Sync to Banking CRM if enabled
     if(syncBankingNJ&&bankProjectNJ){
@@ -2000,7 +2061,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
         <div style={{gridColumn:"span 3"}}><F l="Billing / PO Address 🏢"><input className="in" value={f.ba} onChange={e=>sF(p=>({...p,ba:e.target.value}))} placeholder="Billing address (if different from delivery)"/></F></div>
         <F l="Client GST Number *"><input className="in mn" value={f.cgst} onChange={e=>sF(p=>({...p,cgst:e.target.value}))} placeholder="27XXXXX... (Required)"/></F>
         <F l="Billing Entity *"><input className="in" value={f.bname} onChange={e=>sF(p=>({...p,bname:e.target.value}))} placeholder="Billing name (Required)"/></F>
-        <F l="Size Unit"><select className="in" value={su} onChange={e=>sSu(e.target.value)}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
+        
         <F l="📎 Upload PO"><input type="file" accept=".pdf,.jpg,.png,.jpeg" className="in" style={{padding:3}} onChange={e=>setPoFile(e.target.files[0]||null)}/>{poFile&&<span style={{fontSize:8,color:"#4ade80"}}>✓ {poFile.name.slice(0,20)}</span>}</F>
         <F l="🎨 Design Reference"><input type="file" accept=".jpg,.png,.jpeg,.pdf" multiple className="in" style={{padding:3}} onChange={e=>setDesignFiles([...e.target.files])}/>{designFiles.length>0&&<span style={{fontSize:8,color:"#4ade80"}}>✓ {designFiles.length} file(s)</span>}</F>
         <F l="Payment Terms"><input className="in" value={f.pt} onChange={e=>sF(p=>({...p,pt:e.target.value}))}/></F>
@@ -2017,17 +2078,17 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     </div>
     <div className="c a" style={{padding:0,animationDelay:"50ms"}}>
       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>📷</th><th>Client(DC)</th><th>Material</th><th>W</th><th>H</th><th>Qty</th><th>By</th><th>SqFt / SqMtr</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>📷</th><th>Client(DC)</th><th>Material</th><th>Unit</th><th style={{minWidth:50,fontSize:8,color:"#94a3b8"}}>W</th><th style={{minWidth:50,fontSize:8,color:"#94a3b8"}}>H</th><th>Qty</th><th>Area/Qty</th><th>Rate ₹</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
         <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
           <td><select className="in" value={it.pi} onChange={e=>{const v=+e.target.value;if(v===-1){sIts(p=>{const n=[...p];n[i]={...n[i],pi:-1,int:"",cli:""};return n;});}else{selP(i,v);}}} style={{fontSize:9,padding:"2px",minWidth:90}}><option value={-1}>— New Material —</option>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select>{(it.pi===-1||it.pi==="-1")&&<input className="in" value={it.int} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],int:e.target.value};return n;})} placeholder="Type name..." autoFocus style={{fontSize:9,padding:"2px 3px",marginTop:2}}/>}</td>
           <td style={{padding:"2px",minWidth:40}}>{it.imgUrl?<a href={it.imgUrl} target="_blank"><img src={it.imgUrl} style={{width:30,height:30,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:30,height:30,borderRadius:3,border:"1px dashed #3b82f6",color:"#3b82f6",fontSize:11}}>+<input type="file" accept=".jpg,.png,.jpeg,.pdf" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url)sIts(p=>{const n=[...p];n[i]={...n[i],imgUrl:url};return n;});}}}/></label>}</td>
           <td><input className="in" value={it.cli} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],cli:e.target.value};return n;})} style={{fontSize:10,padding:"3px",color:"#06b6d4"}}/></td>
           <td><input className="in" value={it.m} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],m:e.target.value};return n;})} placeholder="Material/spec..." style={{fontSize:10,padding:"3px"}}/></td>
-          <td><input className="in mn" value={it.w} onChange={e=>uI(i,"w",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
-          <td><input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{fontSize:10,padding:"3px",width:40}}/></td>
+          <td><select className="in" value={it.rm} onChange={e=>uI(i,"rm",e.target.value)} style={{fontSize:9,padding:"2px 3px",minWidth:100}}>{UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}</select></td>
+          <td>{getUnitMode(it.rm).needsWH?<input className="in mn" value={it.w} onChange={e=>uI(i,"w",e.target.value)} style={{fontSize:10,padding:"3px",width:50}} placeholder={getUnitMode(it.rm).dimUnit}/>:<span style={{color:"#475569",fontSize:9}}>—</span>}</td>
+          <td>{getUnitMode(it.rm).needsWH?<input className="in mn" value={it.h} onChange={e=>uI(i,"h",e.target.value)} style={{fontSize:10,padding:"3px",width:50}} placeholder={getUnitMode(it.rm).dimUnit}/>:<span style={{color:"#475569",fontSize:9}}>—</span>}</td>
           <td><input className="in mn" type="number" min={1} value={it.qty} onChange={e=>uI(i,"qty",e.target.value)} style={{fontSize:10,padding:"3px",width:32}}/></td>
-          <td><select className="in" value={it.rm} onChange={e=>uI(i,"rm",e.target.value)} style={{fontSize:10,padding:"3px",width:48}}>{RATES.map(u=><option key={u}>{u}</option>)}</select></td>
-          <td className="mn" style={{fontSize:10,color:"#64748b",lineHeight:1.3}}>{it.sqft>0?<><span>{it.sqft}</span><span style={{display:"block",fontSize:7,color:"#475569"}}>{Math.round(it.sqft/10.7639*100)/100} m²</span></>:"—"}</td>
+          <td className="mn" style={{fontSize:10,color:"#06b6d4",fontWeight:600}}>{getUnitMode(it.rm).displayFn(it.sqft)}</td>
           <td><input className="in mn" value={it.rate} onChange={e=>uI(i,"rate",e.target.value)} style={{fontSize:10,padding:"3px",width:44}}/></td>
           <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
           <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:9,padding:"2px",width:42}}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
@@ -2035,7 +2096,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
           <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px 3px",width:90}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
           <td>{its.length>1&&<button className="b bs" onClick={()=>rI(i)} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td></tr>)}
-        <tr style={{background:"#0a0f1a"}}><td colSpan={6} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4",lineHeight:1.3}}>{tot.tsq>0?<><span>{tot.tsq} ft²</span><span style={{display:"block",fontSize:7,color:"#475569"}}>{Math.round(tot.tsq/10.7639*100)/100} m²</span></>:"—"}</td><td></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
+        <tr style={{background:"#0a0f1a"}}><td colSpan={6} style={{textAlign:"right",fontWeight:700,fontSize:10}}>TOTAL</td><td className="mn" style={{fontWeight:700}}>{tot.tq}</td><td></td><td className="mn" style={{fontWeight:600,color:"#06b6d4"}}>{tot.tsq>0?tot.tsq:'—'}</td><td></td><td className="mn" style={{fontWeight:700}}>{fmt(tot.s)}</td><td></td><td className="mn" style={{color:"#64748b"}}>{fmt(tot.g)}</td><td className="mn" style={{fontWeight:800,color:"#e3a008"}}>{fmt(tot.t)}</td><td colSpan={2}></td></tr>
       </tbody></table></div>
     </div>
     <div style={{display:"flex",gap:4,justifyContent:"flex-end",flexWrap:"wrap"}}><button className="b" onClick={()=>sp("jobs")}>Cancel</button><button className="b" onClick={()=>{
@@ -3929,7 +3990,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         const jobData={id:newJid,firm:fm,client_id:f.cl,client_name:f.cn,project:it.int||f.pr,delivery_address:it.siteAddr||f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
         const batchId="B"+uid();
         const batchData={id:batchId,job_id:newJid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
-        const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
+        const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
         await createJob(jobData,batchData,lineItems);
         // Sync to Banking CRM if enabled
         if(syncBanking&&bankProject){
@@ -3947,7 +4008,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
       const batchId="B"+uid();
       const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
-      const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:su,qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+      const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
       await createJob(jobData,batchData,lineItems);
       // Sync to Banking CRM if enabled (one-job mode)
       if(syncBanking&&bankProject){
