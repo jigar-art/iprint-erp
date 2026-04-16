@@ -6004,7 +6004,176 @@ function ClientPortal({code}){
   </div>;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<RootApp/>);
+function HealthCheckPage(){
+  const [checks,setChecks] = useState({
+    react:    {status:'ok',     label:'React mounted',         detail:`v${React.version}`},
+    supabase: {status:'pending',label:'Supabase connection',   detail:'Checking...'},
+    counts:   {status:'pending',label:'Core table row counts', detail:'Checking...'},
+    recent:   {status:'pending',label:'Most recent job write', detail:'Checking...'},
+    file:     {status:'pending',label:'File fingerprint',      detail:'Checking...'}
+  });
+
+  const upd = (k,patch) => setChecks(c => ({...c, [k]: {...c[k], ...patch}}));
+
+  useEffect(() => {
+    // ── Check 2: Supabase connection (roundtrip ms) ───────────────
+    (async () => {
+      const t0 = performance.now();
+      try {
+        const {error,count} = await sb.from('firms').select('*',{count:'exact',head:true});
+        const ms = Math.round(performance.now() - t0);
+        if (error) throw error;
+        upd('supabase', {status:'ok', detail:`Connected in ${ms} ms · firms table reachable (${count} rows)`});
+      } catch (e) {
+        upd('supabase', {status:'fail', detail:`Failed: ${e.message || String(e)}`});
+      }
+    })();
+
+    // ── Check 3: Core table row counts (jobs, batches, line_items, clients) ──
+    (async () => {
+      const tables = ['jobs','batches','line_items','clients'];
+      try {
+        const results = await Promise.all(tables.map(t =>
+          sb.from(t).select('*',{count:'exact',head:true})
+            .then(r => ({t, error:r.error, count:r.count}))
+        ));
+        const failed = results.filter(r => r.error);
+        if (failed.length) {
+          upd('counts', {status:'fail', detail:`Failed: ${failed.map(f => `${f.t} (${f.error.message})`).join(', ')}`});
+        } else {
+          upd('counts', {status:'ok', detail: results.map(r => `${r.t}: ${(r.count||0).toLocaleString()}`).join(' · ')});
+        }
+      } catch (e) {
+        upd('counts', {status:'fail', detail:`Failed: ${e.message || String(e)}`});
+      }
+    })();
+
+    // ── Check 4: Most recent job write (jobs.id is the identifier; job_no does NOT exist) ──
+    (async () => {
+      try {
+        const {data,error} = await sb.from('jobs')
+          .select('id,client_name,created_at')
+          .order('created_at',{ascending:false})
+          .limit(1);
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          upd('recent', {status:'warn', detail:'No jobs found in table'});
+          return;
+        }
+        const j = data[0];
+        const ageMs = Date.now() - new Date(j.created_at).getTime();
+        const min = Math.floor(ageMs / 60000);
+        const hr  = Math.floor(ageMs / 3600000);
+        const day = Math.floor(ageMs / 86400000);
+        let ago;
+        if (min < 1)        ago = 'just now';
+        else if (min < 60)  ago = `${min}m ago`;
+        else if (hr < 48)   ago = `${hr}h ago`;
+        else                ago = `${day}d ago`;
+        // Warn if the most recent write is suspiciously old (>7 days).
+        const status = day > 7 ? 'warn' : 'ok';
+        const cn = j.client_name ? ` · ${j.client_name.slice(0,30)}` : '';
+        upd('recent', {status, detail:`Job ${j.id}${cn} · ${ago}`});
+      } catch (e) {
+        upd('recent', {status:'fail', detail:`Failed: ${e.message || String(e)}`});
+      }
+    })();
+
+    // ── Check 5: File fingerprint (line count + KB of currently served '/' ) ──
+    (async () => {
+      const t0 = performance.now();
+      try {
+        const r = await fetch('/', {cache:'no-store'});
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const txt = await r.text();
+        const ms = Math.round(performance.now() - t0);
+        const lines = txt.split(`\n`).length;
+        const kb = (txt.length / 1024).toFixed(1);
+        upd('file', {status:'ok', detail:`${lines.toLocaleString()} lines · ${kb} KB · fetched in ${ms} ms`});
+      } catch (e) {
+        upd('file', {status:'fail', detail:`Failed: ${e.message || String(e)}`});
+      }
+    })();
+  }, []);
+
+  // ── Derived overall status ─────────────────────────────────────
+  const order  = ['react','supabase','counts','recent','file'];
+  const all    = order.map(k => checks[k]);
+  const pending = all.some(c => c.status === 'pending');
+  const failed  = all.some(c => c.status === 'fail');
+  const warned  = all.some(c => c.status === 'warn');
+  const overall      = pending ? 'CHECKING...' : (failed ? 'DEGRADED' : (warned ? 'DEGRADED' : 'HEALTHY'));
+  const overallColor = pending ? '#64748b' : (failed ? '#ef4444' : (warned ? '#e3a008' : '#10b981'));
+  const overallBg    = pending ? '#0c1017' : (failed ? '#1f0f12' : (warned ? '#1f1a0a' : '#0a1f15'));
+
+  // ── Status indicator helpers ───────────────────────────────────
+  const icon = s => {
+    if (s === 'ok')   return <span style={{color:'#10b981',fontWeight:700}}>✓</span>;
+    if (s === 'fail') return <span style={{color:'#ef4444',fontWeight:700}}>✗</span>;
+    if (s === 'warn') return <span style={{color:'#e3a008',fontWeight:700}}>!</span>;
+    return <span style={{color:'#64748b',display:'inline-block',animation:'hcSpin 1s linear infinite'}}>⟳</span>;
+  };
+  const rowAccent = s => s === 'fail' ? '#ef4444' : (s === 'warn' ? '#e3a008' : (s === 'ok' ? '#10b981' : '#1a2030'));
+
+  return <div style={{minHeight:'100vh',background:'#060810',color:'#e2e8f0',fontFamily:`'DM Sans',system-ui,sans-serif`,padding:'24px 16px',overflowY:'auto'}}>
+    <style>{`@keyframes hcSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
+    <div style={{maxWidth:720,margin:'0 auto'}}>
+
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
+        <div style={{width:40,height:40,borderRadius:8,background:'linear-gradient(135deg,#e3a008,#ca8a04)',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:14,color:'#060810'}}>iP</div>
+        <div>
+          <h1 style={{margin:0,fontSize:20,fontWeight:700,letterSpacing:'-.01em'}}>iPrint ERP — Health Check</h1>
+          <div style={{fontSize:11,color:'#64748b',marginTop:2}}>{new Date().toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'})}</div>
+        </div>
+      </div>
+
+      {/* Overall status badge */}
+      <div style={{background:overallBg,border:`1px solid ${overallColor}`,borderRadius:10,padding:'16px 20px',margin:'18px 0',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div>
+          <div style={{fontSize:11,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'.08em',fontWeight:600}}>Overall status</div>
+          <div style={{fontSize:24,fontWeight:800,color:overallColor,marginTop:4,letterSpacing:'-.01em'}}>{overall}</div>
+        </div>
+        <div style={{fontSize:34,opacity:.85}}>{icon(pending ? 'pending' : (failed ? 'fail' : (warned ? 'warn' : 'ok')))}</div>
+      </div>
+
+      {/* Per-check rows */}
+      <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:24}}>
+        {order.map(k => {
+          const c = checks[k];
+          const accent = rowAccent(c.status);
+          return <div key={k} style={{background:'#0c1017',border:`1px solid ${accent}40`,borderLeft:`3px solid ${accent}`,borderRadius:8,padding:'12px 14px',display:'flex',alignItems:'flex-start',gap:12}}>
+            <div style={{fontSize:18,lineHeight:'18px',width:18,textAlign:'center',flexShrink:0,marginTop:1}}>{icon(c.status)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0'}}>{c.label}</div>
+              <div style={{fontSize:11,color:'#94a3b8',marginTop:3,fontFamily:(k==='counts'||k==='recent'||k==='file')?`'JetBrains Mono',monospace`:'inherit',wordBreak:'break-word'}}>{c.detail}</div>
+            </div>
+          </div>;
+        })}
+      </div>
+
+      {/* How-to-use footer */}
+      <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:8,padding:'14px 16px',marginBottom:16}}>
+        <div style={{fontSize:11,color:'#e3a008',textTransform:'uppercase',letterSpacing:'.06em',fontWeight:700,marginBottom:8}}>How to use this page</div>
+        <div style={{fontSize:12,color:'#94a3b8',lineHeight:1.55}}>
+          Bookmark <code style={{background:'#060810',padding:'1px 5px',borderRadius:3,fontSize:11,color:'#e2e8f0'}}>{location.origin}/?health=1</code> and check it before starting work each day. If it shows <span style={{color:'#10b981',fontWeight:600}}>HEALTHY</span> you're good to go. If it shows <span style={{color:'#ef4444',fontWeight:600}}>DEGRADED</span> or any row is ✗, alert Jigar before doing data entry — there may be a database, deploy, or connectivity problem. The file fingerprint (line count + KB) tells you which deploy is currently live; cross-check against the latest GitHub commit if a stale deploy is suspected.
+        </div>
+      </div>
+
+      {/* Bottom controls */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:11,color:'#64748b'}}>
+        <a href="/" style={{color:'#e3a008',textDecoration:'none',fontWeight:600}}>← Back to ERP</a>
+        <button onClick={() => location.reload()} className="b" style={{fontSize:11}}>↻ Re-run checks</button>
+      </div>
+
+    </div>
+  </div>;
+}
+
+// Health check route — chosen OUTSIDE RootApp so the URL check is not
+// inside any component (would violate React hooks rules).
+const __isHealth = new URLSearchParams(window.location.search).get('health') === '1';
+ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? <HealthCheckPage/> : <RootApp/>);
 </script>
 </body>
 </html>
