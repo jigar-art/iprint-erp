@@ -688,6 +688,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
     {id:"appr",l:"Approvals",e:"🔔",roles:["admin"],users:["JIGAR"]},
     {id:"po",l:"PO Generator",e:"📄",roles:["admin","accounts"],users:["JIGAR","SHREYA"]},
+    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","accounts","dispatch"],users:["JIGAR","SHREYA","MURLI","ACCOUNTS"]},
   ];
   const nav=allNav.filter(n=>{
     if(!n.roles.includes(user.role))return false;
@@ -705,7 +706,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -744,6 +745,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
           {pg==="appr"&&<ApprovalsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
           {pg==="po"&&<POPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
+          {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
         </div>
       </main>
 
@@ -2618,6 +2620,315 @@ function numToWords(n) {
   let words = convert(parseInt(intPart)).trim();
   if (decPart && parseInt(decPart) > 0) words += ' and ' + convert(parseInt(decPart)).trim() + ' Paise';
   return words + ' Only';
+}
+
+
+// ══════════════════════════════════════════════════════════
+// PHASE D — GRN / RECEIVE MATERIAL PAGE
+// ══════════════════════════════════════════════════════════
+function GRNReceivePage({prs, setPrs, jobs, user, show}) {
+  const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
+  const STATUS_FILTERS = ['PO Sent','PO Generated','Approved','All'];
+
+  const [filter, setFilter] = React.useState('PO Sent');
+  const [receiving, setReceiving] = React.useState(null);
+  const [gf, setGf] = React.useState({
+    received_by: user?.name || 'Murli Shetty',
+    received_at: new Date().toISOString().slice(0,10),
+    invoice_no: '',
+    received_notes: '',
+    partial_delivery: false,
+    items_received: []
+  });
+  const [saving, setSaving] = React.useState(false);
+
+  const filtered = React.useMemo(() => {
+    const list = filter === 'All'
+      ? prs.filter(p => ['Approved','PO Generated','PO Sent'].includes(p.status))
+      : prs.filter(p => p.status === filter);
+    return [...list].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
+  },[prs, filter]);
+
+  const openReceive = (pr) => {
+    const items = Array.isArray(pr.items) ? pr.items : [];
+    setGf({
+      received_by: user?.name?.includes('MURLI') || user?.name?.includes('Murli') ? 'Murli Shetty'
+        : user?.name?.includes('SHREYA') || user?.name?.includes('Shreya') ? 'Shreya'
+        : 'Murli Shetty',
+      received_at: new Date().toISOString().slice(0,10),
+      invoice_no: '',
+      received_notes: '',
+      partial_delivery: false,
+      items_received: items.map((x,i) => ({
+        index: i,
+        product: x.product,
+        ordered_qty: +x.qty || 0,
+        per: x.per || 'nos',
+        received_qty: +x.qty || 0,
+        ok: true
+      }))
+    });
+    setReceiving(pr);
+  };
+
+  const saveGRN = async () => {
+    if (!gf.received_by) { show('Select receiver', false); return; }
+    setSaving(true);
+    const grn_id = 'GRN' + Date.now();
+    const updates = {
+      status: gf.partial_delivery ? 'PO Sent' : 'Completed',
+      received_by: gf.received_by,
+      received_at: new Date(gf.received_at).toISOString(),
+      grn_id,
+      received_notes: [
+        gf.invoice_no ? 'Invoice: ' + gf.invoice_no : '',
+        gf.received_notes || '',
+        gf.partial_delivery ? 'PARTIAL DELIVERY' : '',
+        gf.items_received.some(x => +x.received_qty !== +x.ordered_qty)
+          ? 'Qty variances: ' + gf.items_received.filter(x => +x.received_qty !== +x.ordered_qty)
+              .map(x => x.product + ' (ordered ' + x.ordered_qty + ', received ' + x.received_qty + ')').join('; ')
+          : ''
+      ].filter(Boolean).join(' | ') || null,
+      invoice_no: gf.invoice_no || null,
+      partial_delivery: gf.partial_delivery
+    };
+    const {error} = await sb.from('purchase_requests').update(updates).eq('id', receiving.id);
+    if (error) { show('Save failed: ' + error.message, false); setSaving(false); return; }
+
+    const updated = {...receiving, ...updates};
+    setPrs(p => p.map(x => x.id === receiving.id ? updated : x));
+
+    // WhatsApp notify Jigar + group
+    const itemsSummary = gf.items_received.map(x => x.product + ' x' + x.received_qty + ' ' + x.per).join(', ');
+    const waMsg = (gf.partial_delivery
+      ? 'PARTIAL DELIVERY recorded'
+      : 'Material RECEIVED and GRN recorded') +
+      ' — ' + receiving.pr_no +
+      '\nVendor: ' + receiving.vendor_name +
+      '\nItems: ' + itemsSummary +
+      '\nGRN: ' + grn_id +
+      (gf.invoice_no ? '\nInvoice: ' + gf.invoice_no : '') +
+      (gf.received_notes ? '\nNotes: ' + gf.received_notes : '') +
+      '\nReceived by: ' + gf.received_by +
+      '\nStatus: ' + (gf.partial_delivery ? 'Partial — balance pending' : 'COMPLETED');
+    sendWhatsApp(WA_NUMBERS['Jigar'], waMsg, 'iprint_grn_received');
+
+    setSaving(false);
+    setReceiving(null);
+    show('✅ GRN ' + grn_id + ' recorded! Status → ' + (gf.partial_delivery ? 'PO Sent (partial)' : 'Completed'));
+  };
+
+  const stCol = {
+    'Approved':     {bg:'#4ade8020',c:'#4ade80'},
+    'PO Generated': {bg:'#06b6d420',c:'#06b6d4'},
+    'PO Sent':      {bg:'#3b82f620',c:'#3b82f6'},
+    'Completed':    {bg:'#8b5cf620',c:'#8b5cf6'},
+  };
+  const firmColor = code => ({JPP:'#e3a008',JXT:'#3b82f6',VHD:'#8b5cf6'})[code]||'#64748b';
+
+  const pendingCount = prs.filter(p => ['PO Sent','PO Generated'].includes(p.status)).length;
+
+  return (
+    <div style={{padding:12, overflowY:'auto', height:'100%'}}>
+      {/* Header */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8}}>
+        <div>
+          <h2 style={{fontSize:14, fontWeight:800, color:'#8b5cf6', margin:0}}>📦 Receive Material — GRN</h2>
+          <p style={{fontSize:10, color:'#64748b', margin:'2px 0 0'}}>
+            {pendingCount > 0
+              ? <span style={{color:'#3b82f6', fontWeight:700}}>{pendingCount} PO(s) pending material receipt</span>
+              : <span style={{color:'#4ade80'}}>✓ All POs received</span>}
+          </p>
+        </div>
+        <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
+          {STATUS_FILTERS.map(f => (
+            <button key={f} className={`b bs ${filter===f?'bp':''}`} onClick={() => setFilter(f)}
+              style={{fontSize:9, padding:'3px 8px',
+                ...(filter===f && f==='PO Sent' ? {background:'#3b82f620',borderColor:'#3b82f6',color:'#3b82f6'} : {})}}>
+              {f}{f==='PO Sent' ? ` (${prs.filter(p=>p.status==='PO Sent').length})` : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* GRN Entry Panel */}
+      {receiving && (
+        <div style={{background:'#0a0f1a', border:'1px solid #8b5cf644', borderRadius:8, padding:12, marginBottom:12}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, flexWrap:'wrap', gap:6}}>
+            <div>
+              <span style={{fontWeight:800, color:'#8b5cf6', fontSize:12}}>Recording GRN — {receiving.pr_no}</span>
+              {receiving.po_no && <span style={{marginLeft:8, fontSize:10, color:'#06b6d4'}}>{receiving.po_no}</span>}
+              <span style={{marginLeft:8, fontSize:9, color:'#64748b'}}>{receiving.vendor_name}</span>
+            </div>
+            <button className="b bs" onClick={() => setReceiving(null)} style={{fontSize:9}}>✕ Cancel</button>
+          </div>
+
+          {/* Receiver + Date + Invoice */}
+          <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:10}}>
+            <div>
+              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Received By *</span>
+              <select className="in" value={gf.received_by} onChange={e=>setGf(p=>({...p,received_by:e.target.value}))}
+                style={{fontSize:9, padding:'3px 4px', width:'100%'}}>
+                {GRN_RECEIVERS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Date of Receipt *</span>
+              <input className="in" type="date" value={gf.received_at}
+                onChange={e=>setGf(p=>({...p,received_at:e.target.value}))}
+                style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+            </div>
+            <div>
+              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Vendor Invoice No.</span>
+              <input className="in" value={gf.invoice_no}
+                onChange={e=>setGf(p=>({...p,invoice_no:e.target.value}))}
+                placeholder="e.g. INV-2024-456"
+                style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+            </div>
+          </div>
+
+          {/* Items received — qty check */}
+          <p style={{fontSize:8, color:'#8b5cf6', fontWeight:700, marginBottom:6}}>ITEMS RECEIVED</p>
+          <div style={{background:'#060810', borderRadius:6, padding:'6px 8px', marginBottom:8}}>
+            <table style={{width:'100%'}}>
+              <thead><tr>
+                <th style={{fontSize:7, color:'#64748b', textAlign:'left', paddingBottom:4}}>Item</th>
+                <th style={{fontSize:7, color:'#64748b', textAlign:'right', width:70}}>Ordered</th>
+                <th style={{fontSize:7, color:'#64748b', textAlign:'right', width:90}}>Received Qty</th>
+                <th style={{fontSize:7, color:'#64748b', textAlign:'center', width:50}}>OK?</th>
+              </tr></thead>
+              <tbody>
+                {gf.items_received.map((x, i) => {
+                  const variance = +x.received_qty !== +x.ordered_qty;
+                  return (
+                    <tr key={i}>
+                      <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8, paddingTop:4}}>{x.product}</td>
+                      <td style={{fontSize:9, color:'#64748b', textAlign:'right', paddingTop:4}}>{x.ordered_qty} {x.per}</td>
+                      <td style={{textAlign:'right', paddingTop:2}}>
+                        <input className="in mn" type="number" min="0" value={x.received_qty}
+                          onChange={e => setGf(p => ({...p, items_received: p.items_received.map((it,xi) => xi===i ? {...it, received_qty: e.target.value} : it)}))}
+                          style={{fontSize:9, padding:'2px 4px', width:70, textAlign:'right',
+                            borderColor: variance ? '#f59e0b' : '#1a2030',
+                            color: variance ? '#f59e0b' : 'inherit'}}/>
+                        <span style={{fontSize:8, color:'#64748b', marginLeft:3}}>{x.per}</span>
+                      </td>
+                      <td style={{textAlign:'center', paddingTop:4}}>
+                        {variance
+                          ? <span style={{fontSize:9, color:'#f59e0b', fontWeight:700}}>⚠️</span>
+                          : <span style={{fontSize:9, color:'#4ade80'}}>✓</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {gf.items_received.some(x => +x.received_qty !== +x.ordered_qty) && (
+              <div style={{marginTop:6, fontSize:8, color:'#f59e0b'}}>
+                ⚠️ Quantity variance detected — will be noted in GRN
+              </div>
+            )}
+          </div>
+
+          {/* Notes + Partial */}
+          <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:8, marginBottom:10, alignItems:'center'}}>
+            <div>
+              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Notes / Remarks</span>
+              <input className="in" value={gf.received_notes}
+                onChange={e=>setGf(p=>({...p,received_notes:e.target.value}))}
+                placeholder="Any observations, quality issues, damage notes..."
+                style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+            </div>
+            <div style={{textAlign:'center', padding:'0 8px'}}>
+              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:4}}>Partial Delivery?</span>
+              <input type="checkbox" checked={gf.partial_delivery}
+                onChange={e=>setGf(p=>({...p,partial_delivery:e.target.checked}))}
+                style={{width:16, height:16, cursor:'pointer'}}/>
+              {gf.partial_delivery && <div style={{fontSize:7, color:'#f59e0b', marginTop:2}}>Balance pending</div>}
+            </div>
+          </div>
+
+          {/* Status indicator */}
+          <div style={{background: gf.partial_delivery ? '#f59e0b15' : '#4ade8015',
+            border: '1px solid ' + (gf.partial_delivery ? '#f59e0b44' : '#4ade8044'),
+            borderRadius:6, padding:'6px 10px', marginBottom:10, fontSize:9}}>
+            {gf.partial_delivery
+              ? <span style={{color:'#f59e0b'}}>⚠️ <strong>Partial delivery</strong> — status will stay at "PO Sent". Record again when balance arrives.</span>
+              : <span style={{color:'#4ade80'}}>✅ <strong>Full delivery</strong> — PR status will be marked <strong>Completed</strong>.</span>}
+          </div>
+
+          {/* Save button */}
+          <div style={{display:'flex', justifyContent:'flex-end', gap:6}}>
+            <button className="b bs" onClick={() => setReceiving(null)} style={{fontSize:9, padding:'4px 12px'}}>Cancel</button>
+            <button className="b bp" onClick={saveGRN} disabled={saving}
+              style={{fontSize:11, padding:'6px 20px', background:'#8b5cf6', borderColor:'#8b5cf6', fontWeight:700}}>
+              {saving ? '⏳ Saving...' : '📦 Confirm Receipt & Save GRN'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PR List */}
+      {filtered.length === 0 && (
+        <div style={{textAlign:'center', padding:40, color:'#64748b', fontSize:11}}>
+          {filter === 'PO Sent' ? '✅ No POs pending receipt' : `No ${filter} PRs`}
+        </div>
+      )}
+
+      <div style={{display:'flex', flexDirection:'column', gap:6}}>
+        {filtered.map(pr => {
+          const sc = stCol[pr.status] || {bg:'#64748b20',c:'#64748b'};
+          const rItems = Array.isArray(pr.items) ? pr.items : [];
+          const isCompleted = pr.status === 'Completed';
+          return (
+            <div key={pr.id} style={{background:'#0a0f1a',
+              border:`1px solid ${pr.status==='PO Sent'?'#3b82f633':'#1a2030'}`,
+              borderRadius:8, padding:'10px 12px',
+              opacity: isCompleted ? 0.7 : 1}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:6}}>
+                <div style={{display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                  <span style={{fontWeight:800, color:'#f59e0b', fontSize:11}}>{pr.pr_no}</span>
+                  {pr.po_no && <span style={{fontWeight:700, color:'#06b6d4', fontSize:10}}>{pr.po_no}</span>}
+                  <span style={{padding:'1px 6px', borderRadius:3, fontSize:7, fontWeight:700, background:sc.bg, color:sc.c}}>{pr.status}</span>
+                  <span style={{padding:'1px 6px', borderRadius:3, fontSize:8, fontWeight:700,
+                    background:firmColor(pr.firm_code)+'20', color:firmColor(pr.firm_code)}}>{pr.firm_code}</span>
+                  <span style={{fontSize:9, color:'#c9d1d9'}}>{pr.vendor_name}</span>
+                  {pr.urgency==='Urgent' && <span style={{padding:'1px 5px', borderRadius:3, fontSize:7, fontWeight:700, background:'#f4706720', color:'#f47067'}}>🔴 URGENT</span>}
+                </div>
+                <div style={{display:'flex', alignItems:'center', gap:8}}>
+                  <span style={{fontWeight:800, color:'#e3a008', fontSize:12}}>₹{(+pr.total||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</span>
+                  {!isCompleted && (
+                    <button className="b bp" onClick={() => openReceive(pr)}
+                      style={{fontSize:10, padding:'5px 14px', background:'#8b5cf6', borderColor:'#8b5cf6', fontWeight:700}}>
+                      📦 Receive
+                    </button>
+                  )}
+                  {isCompleted && pr.grn_id && (
+                    <span style={{fontSize:8, color:'#4ade80', fontWeight:700}}>✅ {pr.grn_id}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Items summary */}
+              <div style={{marginTop:6, display:'flex', gap:8, flexWrap:'wrap', fontSize:9, color:'#8b949e'}}>
+                {rItems.map((x,xi) => <span key={xi}>{x.product}{x.size?' ('+x.size+')':''} × {x.qty} {x.per}</span>)}
+                {pr.expected_delivery && <span style={{color:'#06b6d4'}}>· Expected {pr.expected_delivery}</span>}
+                {pr.payment_terms && <span style={{color:'#64748b'}}>· {pr.payment_terms}</span>}
+              </div>
+
+              {/* GRN details if completed */}
+              {isCompleted && (
+                <div style={{marginTop:6, padding:'4px 8px', background:'#4ade8010', border:'1px solid #4ade8033', borderRadius:4, fontSize:8}}>
+                  <span style={{color:'#4ade80'}}>📦 Received by {pr.received_by}</span>
+                  {pr.received_at && <span style={{color:'#64748b', marginLeft:8}}>{new Date(pr.received_at).toLocaleDateString('en-IN')}</span>}
+                  {pr.received_notes && <span style={{color:'#8b949e', marginLeft:8}}>· {pr.received_notes}</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function POPage({prs, setPrs, jobs, user, show, firms}) {
