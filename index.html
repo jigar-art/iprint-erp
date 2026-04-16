@@ -692,6 +692,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
+    {id:"prodmgr",l:"Materials Library",e:"🎨",roles:["admin"],users:["JIGAR"]},
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"]},
     {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
     {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
@@ -733,7 +734,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="jobs"&&<JobsPage jobs={filteredJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
-          {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
+          {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
@@ -746,6 +747,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
+          {pg==="prodmgr"&&<ProdMgrPage products={products}/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
@@ -1730,9 +1732,14 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     const it=its[i];if(!it)return;
     const name=(it.int||'').trim();
     if(!name)return;
-    // Check if already exists (case-insensitive) — if so, skip save
-    const exists=prodList.some(p=>(p.internal_name||'').toLowerCase()===name.toLowerCase());
-    if(exists)return;
+    // Check if already exists (case-insensitive) — if so, snap to canonical casing + don't save
+    const match=prodList.find(p=>(p.internal_name||'').toLowerCase()===name.toLowerCase());
+    if(match){
+      if(match.internal_name!==it.int){
+        sIts(p=>{const n=[...p];if(n[i])n[i]={...n[i],int:match.internal_name,cli:n[i].cli||match.client_name||match.internal_name};return n;});
+      }
+      return;
+    }
     const row=await addNewProduct(name,it.cli||name);
     if(row){
       products.push(row);
@@ -2470,7 +2477,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
 // ═══════════════════════════════════════════════════════════
 // BOQ IMPORT — Smart Excel/CSV parser for client BOQs
 // ═══════════════════════════════════════════════════════════
-function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,user}){
+function BOQImportPage({firms,clients,products,team,machines,createJob,addNewProduct,sp,jobs,user}){
   const [step,setStep]=useState(1);
   const [sheets,setSheets]=useState([]);
   const [selSheets,setSelSheets]=useState([]);
@@ -2722,6 +2729,27 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const jid=`${nextNum}-${curFY}`;
   const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||''}));};
 
+  // Auto-save BOQ-imported materials to products library (case-insensitive dedup)
+  const syncItemsToLibrary=async()=>{
+    const existing=new Set(products.map(p=>(p.internal_name||'').toLowerCase()));
+    const seen=new Set();
+    const toAdd=[];
+    for(const it of its){
+      const nm=(it.int||'').trim();
+      if(!nm)continue;
+      const key=nm.toLowerCase();
+      if(existing.has(key)||seen.has(key))continue;
+      seen.add(key);
+      toAdd.push({name:nm,cli:(it.cli||nm).trim()});
+    }
+    if(!toAdd.length)return 0;
+    // Fire-and-forget in parallel (no need to block UI)
+    const results=await Promise.all(toAdd.map(x=>addNewProduct(x.name,x.cli).catch(()=>null)));
+    const saved=results.filter(Boolean);
+    saved.forEach(r=>products.push(r));
+    return saved.length;
+  };
+
   const submitJob=async()=>{
     if(!f.cn){alert("Select client");return;}
     if(its.length===0){alert("No items");return;}
@@ -2748,6 +2776,8 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
           await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:String(lastNum).padStart(4,'0'),po_number:f.po||'',atm_id:siteCode.trim(),site_unique_id:'',site_address:it.siteAddr||it.m||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
         }
       }
+      // Auto-save new materials to products library (non-blocking)
+      syncItemsToLibrary().catch(e=>console.warn('lib sync failed',e));
       setSubmitting(false);
     } else {
       // All items = one job
@@ -2764,6 +2794,8 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
         await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:jid.split('-')[0],po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
       }
+      // Auto-save new materials to products library (non-blocking)
+      syncItemsToLibrary().catch(e=>console.warn('lib sync failed',e));
       setSubmitting(false);
     }
   };
@@ -3550,6 +3582,218 @@ function BackupPage(){
         <p>• Your data is stored on <strong style={{color:"#4ade80"}}>AWS cloud servers</strong> in Mumbai region</p>
       </div>
     </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRODUCTS / MATERIALS LIBRARY MANAGER
+// Admin-only page to clean up typos, merge duplicates, delete unused
+// ═══════════════════════════════════════════════════════════
+function ProdMgrPage({products}){
+  const [rows,setRows]=useState([]);         // all products + usage count
+  const [orphans,setOrphans]=useState([]);   // names used in line_items but not in products
+  const [loading,setLoading]=useState(true);
+  const [q,setQ]=useState('');
+  const [sort,setSort]=useState('usage'); // 'name' | 'usage' | 'new'
+  const [editId,setEditId]=useState(null);
+  const [editName,setEditName]=useState('');
+  const [editCli,setEditCli]=useState('');
+  const [busyId,setBusyId]=useState(null);
+  const [mergeFrom,setMergeFrom]=useState(null); // {id,name} source for merge
+  const [mergeTo,setMergeTo]=useState('');
+  const [msg,setMsg]=useState('');
+
+  const flash=(t,ok=true)=>{setMsg((ok?'✅ ':'⚠️ ')+t);setTimeout(()=>setMsg(''),3500);};
+
+  const load=async()=>{
+    setLoading(true);
+    // 1) get all products fresh
+    const pr=await sb.from('products').select('*').order('internal_name');
+    const prods=pr.data||[];
+    // 2) get all line_item internal_names (paginate because there are 12k+)
+    let all=[];
+    for(let from=0;from<20000;from+=1000){
+      const r=await sb.from('line_items').select('internal_name').range(from,from+999);
+      if(r.error||!r.data||r.data.length===0)break;
+      all=all.concat(r.data);
+      if(r.data.length<1000)break;
+    }
+    // 3) count by normalized name
+    const counts={};
+    all.forEach(li=>{const n=(li.internal_name||'').trim();if(!n)return;const k=n.toLowerCase();counts[k]=(counts[k]||0)+1;});
+    // 4) build enriched rows
+    const enriched=prods.map(p=>({
+      ...p,
+      usage: counts[(p.internal_name||'').toLowerCase()]||0,
+    }));
+    setRows(enriched);
+    // 5) find orphans — used in line_items but not present in products
+    const prodKeys=new Set(prods.map(p=>(p.internal_name||'').toLowerCase()));
+    // preserve original casing by taking first-seen
+    const origCase={};
+    all.forEach(li=>{const n=(li.internal_name||'').trim();if(!n)return;const k=n.toLowerCase();if(!origCase[k])origCase[k]=n;});
+    const orph=Object.entries(counts)
+      .filter(([k])=>!prodKeys.has(k))
+      .map(([k,c])=>({name:origCase[k]||k,usage:c}))
+      .sort((a,b)=>b.usage-a.usage);
+    setOrphans(orph);
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const filtered=useMemo(()=>{
+    let r=[...rows];
+    if(q){const qq=q.toLowerCase();r=r.filter(x=>(x.internal_name||'').toLowerCase().includes(qq)||(x.client_name||'').toLowerCase().includes(qq));}
+    if(sort==='name')r.sort((a,b)=>(a.internal_name||'').localeCompare(b.internal_name||''));
+    else if(sort==='usage')r.sort((a,b)=>b.usage-a.usage||(a.internal_name||'').localeCompare(b.internal_name||''));
+    else if(sort==='new')r.sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+    return r;
+  },[rows,q,sort]);
+
+  const startEdit=(p)=>{setEditId(p.id);setEditName(p.internal_name||'');setEditCli(p.client_name||'');};
+  const cancelEdit=()=>{setEditId(null);setEditName('');setEditCli('');};
+  const saveEdit=async(p)=>{
+    const nn=editName.trim();if(!nn){flash('Name cannot be empty',false);return;}
+    if(nn===p.internal_name&&editCli.trim()===(p.client_name||'')){cancelEdit();return;}
+    // Check if renaming to an existing product — suggest merge
+    const clash=rows.find(x=>x.id!==p.id&&(x.internal_name||'').toLowerCase()===nn.toLowerCase());
+    if(clash){flash(`"${nn}" already exists. Use Merge instead.`,false);return;}
+    setBusyId(p.id);
+    const oldName=p.internal_name;
+    // Update products row
+    const u=await sb.from('products').update({internal_name:nn,client_name:editCli.trim()||nn}).eq('id',p.id);
+    if(u.error){flash('Update failed: '+u.error.message,false);setBusyId(null);return;}
+    // Update all line_items that referenced the old name (case-insensitive match)
+    const updated=await sb.from('line_items').update({internal_name:nn}).ilike('internal_name',oldName);
+    if(updated.error)console.warn('line_items rename warning:',updated.error.message);
+    flash(`Renamed "${oldName}" → "${nn}"`);
+    setBusyId(null);cancelEdit();load();
+  };
+  const doDelete=async(p)=>{
+    const warn=p.usage>0
+      ? `⚠️ DELETE "${p.internal_name}"?\n\nThis product is used in ${p.usage} line item(s). Deleting will remove it from the library — the line_items will keep the name text but the product reference will be gone.\n\nAre you sure?`
+      : `Delete "${p.internal_name}"?\n\nThis product is unused.`;
+    if(!confirm(warn))return;
+    setBusyId(p.id);
+    const r=await sb.from('products').delete().eq('id',p.id);
+    if(r.error){flash('Delete failed: '+r.error.message,false);setBusyId(null);return;}
+    flash(`Deleted "${p.internal_name}"`);
+    setBusyId(null);load();
+  };
+  const openMerge=(p)=>{setMergeFrom(p);setMergeTo('');};
+  const doMerge=async()=>{
+    if(!mergeFrom||!mergeTo){flash('Pick a target product',false);return;}
+    const target=rows.find(x=>x.id===mergeTo);
+    if(!target){flash('Target not found',false);return;}
+    if(!confirm(`Merge "${mergeFrom.internal_name}" INTO "${target.internal_name}"?\n\n• All line_items referencing "${mergeFrom.internal_name}" will be renamed to "${target.internal_name}"\n• The "${mergeFrom.internal_name}" product row will be DELETED\n\nThis cannot be undone. Continue?`))return;
+    setBusyId(mergeFrom.id);
+    // Rename all line_items (case-insensitive)
+    const up=await sb.from('line_items').update({internal_name:target.internal_name}).ilike('internal_name',mergeFrom.internal_name);
+    if(up.error){flash('Merge failed: '+up.error.message,false);setBusyId(null);return;}
+    // Delete source product
+    const del=await sb.from('products').delete().eq('id',mergeFrom.id);
+    if(del.error)console.warn('Could not delete source:',del.error.message);
+    flash(`Merged "${mergeFrom.internal_name}" into "${target.internal_name}"`);
+    setBusyId(null);setMergeFrom(null);setMergeTo('');load();
+  };
+  const adoptOrphan=async(o)=>{
+    if(!confirm(`Add "${o.name}" to the products library?\n\nThis will make it appear in dropdowns on New Job / BOQ.`))return;
+    const id='P'+uid();
+    const r=await sb.from('products').insert({id,internal_name:o.name,client_name:o.name,code:'',active:true});
+    if(r.error){flash('Insert failed: '+r.error.message,false);return;}
+    flash(`Added "${o.name}" to library`);
+    load();
+  };
+
+  const totalUsage=rows.reduce((a,b)=>a+b.usage,0);
+  const unused=rows.filter(r=>r.usage===0).length;
+
+  if(loading) return <div style={{padding:30,textAlign:'center'}}><div className="loader" style={{margin:'0 auto 10px'}}/><p style={{color:'#64748b',fontSize:11}}>Loading materials library (scanning ~12K line items)...</p></div>;
+
+  return <div style={{display:'flex',flexDirection:'column',gap:8,maxWidth:1100}}>
+    <div className="c a" style={{padding:12}}>
+      <h3 style={{fontSize:14,fontWeight:700,marginBottom:4}}>🎨 Materials Library Manager</h3>
+      <p style={{fontSize:10,color:'#64748b',marginBottom:8}}>Edit, merge, or delete products/materials. Changes also rename references in all existing line items.</p>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6,marginBottom:8}}>
+        <SC l="TOTAL PRODUCTS" v={rows.length} c="#3b82f6"/>
+        <SC l="TOTAL USES" v={totalUsage.toLocaleString()} c="#4ade80"/>
+        <SC l="UNUSED" v={unused} c="#64748b" s="candidates to delete"/>
+        <SC l="ORPHANS" v={orphans.length} c="#e3a008" s="used but not in library"/>
+      </div>
+      {msg&&<div style={{padding:'6px 10px',background:msg.startsWith('✅')?'#4ade8020':'#f4706720',border:'1px solid '+(msg.startsWith('✅')?'#4ade8055':'#f4706755'),borderRadius:6,fontSize:11,marginBottom:6}}>{msg}</div>}
+      <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+        <input className="in" placeholder="🔎 Search products..." value={q} onChange={e=>setQ(e.target.value)} style={{flex:1,minWidth:180,fontSize:11}}/>
+        <select className="in" value={sort} onChange={e=>setSort(e.target.value)} style={{fontSize:11,width:150}}>
+          <option value="usage">Sort: Most used</option>
+          <option value="name">Sort: Name A-Z</option>
+          <option value="new">Sort: Newest</option>
+        </select>
+        <button className="b bs" onClick={load} style={{fontSize:10}}>🔄 Reload</button>
+      </div>
+    </div>
+
+    {mergeFrom&&<div className="c" style={{padding:12,borderColor:'#e3a00855',background:'#e3a00808'}}>
+      <p style={{fontSize:11,fontWeight:700,color:'#e3a008',marginBottom:6}}>🔀 Merge "{mergeFrom.internal_name}" into…</p>
+      <p style={{fontSize:9,color:'#64748b',marginBottom:6}}>All {mergeFrom.usage} line items using "{mergeFrom.internal_name}" will be renamed. This product row will then be deleted.</p>
+      <div style={{display:'flex',gap:4,alignItems:'center'}}>
+        <select className="in" value={mergeTo} onChange={e=>setMergeTo(e.target.value)} style={{flex:1,fontSize:11}}>
+          <option value="">Select target product...</option>
+          {rows.filter(x=>x.id!==mergeFrom.id).sort((a,b)=>(a.internal_name||'').localeCompare(b.internal_name||'')).map(x=><option key={x.id} value={x.id}>{x.internal_name} ({x.usage} uses)</option>)}
+        </select>
+        <button className="b bp" onClick={doMerge} disabled={!mergeTo||busyId} style={{fontSize:11}}>Merge</button>
+        <button className="b" onClick={()=>{setMergeFrom(null);setMergeTo('');}} style={{fontSize:11}}>Cancel</button>
+      </div>
+    </div>}
+
+    <div className="c" style={{padding:0}}>
+      <div style={{padding:'6px 10px',borderBottom:'1px solid #1a2030',display:'flex',justifyContent:'space-between'}}>
+        <span style={{fontSize:10,fontWeight:700,color:'#c9d1d9'}}>PRODUCTS ({filtered.length})</span>
+      </div>
+      <div style={{overflowX:'auto',maxHeight:'55vh'}}><table>
+        <thead><tr><th>Internal Name</th><th>Client Name (DC)</th><th style={{textAlign:'right'}}>Uses</th><th style={{minWidth:220}}>Actions</th></tr></thead>
+        <tbody>
+        {filtered.map(p=>editId===p.id?(
+          <tr key={p.id} style={{background:'#e3a00810'}}>
+            <td><input className="in" value={editName} onChange={e=>setEditName(e.target.value)} autoFocus style={{fontSize:11}}/></td>
+            <td><input className="in" value={editCli} onChange={e=>setEditCli(e.target.value)} placeholder="Same as internal" style={{fontSize:11,color:'#06b6d4'}}/></td>
+            <td className="mn" style={{textAlign:'right',fontSize:10}}>{p.usage}</td>
+            <td>
+              <button className="b bg bs" onClick={()=>saveEdit(p)} disabled={busyId===p.id} style={{fontSize:10,marginRight:3}}>💾 Save</button>
+              <button className="b bs" onClick={cancelEdit} style={{fontSize:10}}>Cancel</button>
+            </td>
+          </tr>
+        ):(
+          <tr key={p.id}>
+            <td style={{fontSize:11,fontWeight:600}}>{p.internal_name}</td>
+            <td style={{fontSize:11,color:'#06b6d4'}}>{p.client_name||'—'}</td>
+            <td className="mn" style={{textAlign:'right',fontSize:10,color:p.usage===0?'#64748b':'#4ade80',fontWeight:600}}>{p.usage}</td>
+            <td style={{whiteSpace:'nowrap'}}>
+              <button className="b bs" onClick={()=>startEdit(p)} title="Rename" style={{fontSize:10,marginRight:3}}>✏️ Edit</button>
+              <button className="b bs" onClick={()=>openMerge(p)} title="Merge into another" style={{fontSize:10,marginRight:3,color:'#e3a008'}}>🔀 Merge</button>
+              <button className="b bs" onClick={()=>doDelete(p)} disabled={busyId===p.id} title="Delete" style={{fontSize:10,color:'#f47067'}}>🗑️</button>
+            </td>
+          </tr>
+        ))}
+        {filtered.length===0&&<tr><td colSpan={4} style={{textAlign:'center',color:'#64748b',padding:16,fontSize:11}}>No products match "{q}"</td></tr>}
+        </tbody></table></div>
+    </div>
+
+    {orphans.length>0&&<div className="c" style={{padding:0,borderColor:'#e3a00833'}}>
+      <div style={{padding:'6px 10px',borderBottom:'1px solid #1a2030',background:'#e3a00810'}}>
+        <span style={{fontSize:10,fontWeight:700,color:'#e3a008'}}>⚠️ ORPHANS — Used in line items but not in products library ({orphans.length})</span>
+        <p style={{fontSize:9,color:'#64748b',marginTop:2}}>These names appear on jobs/BOQs but aren't in the library, so they don't appear in dropdowns. Add to library to fix, or merge individual rows manually via SQL if typos.</p>
+      </div>
+      <div style={{overflowX:'auto',maxHeight:'30vh'}}><table>
+        <thead><tr><th>Name</th><th style={{textAlign:'right'}}>Uses</th><th>Action</th></tr></thead>
+        <tbody>
+        {orphans.slice(0,100).map((o,i)=><tr key={i}>
+          <td style={{fontSize:11}}>{o.name}</td>
+          <td className="mn" style={{textAlign:'right',fontSize:10}}>{o.usage}</td>
+          <td><button className="b bs bp" onClick={()=>adoptOrphan(o)} style={{fontSize:10}}>➕ Add to library</button></td>
+        </tr>)}
+        </tbody></table></div>
+      {orphans.length>100&&<p style={{padding:'6px 10px',fontSize:9,color:'#64748b'}}>Showing top 100 of {orphans.length} orphans (sorted by usage).</p>}
+    </div>}
   </div>;
 }
 
