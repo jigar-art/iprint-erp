@@ -1293,6 +1293,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
+      const [quoteFile,setQuoteFile]=React.useState(null);
+      const [quoteParsing,setQuoteParsing]=React.useState(false);
+      const [quoteReview,setQuoteReview]=React.useState(null); // parsed items for review
+      const [showQuoteUpload,setShowQuoteUpload]=React.useState(false);
 
       // Load vendors on first form open
       const loadVendors=async()=>{
@@ -1333,6 +1337,105 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         const v=(vendors||[]).find(x=>x.id===vid);
         if(!v)return setPrf(p=>({...p,vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra'}));
         setPrf(p=>({...p,vendor_id:v.id,vendor_name:v.name,vendor_gstin:v.gstin||'',vendor_phone:v.phone||'',vendor_state:v.state||'Maharashtra'}));
+      };
+
+      // ── VENDOR QUOTE PARSER ─────────────────────────────────────────────────
+      const parseExcelQuote=async(file)=>{
+        setQuoteParsing(true);
+        try {
+          const ab=await file.arrayBuffer();
+          const wb=XLSX.read(ab,{type:'arraybuffer'});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+          // Extract vendor info
+          let vendorName='',invoiceNo='',invoiceDate='',workDesc='',items=[];
+          for(let i=0;i<rows.length;i++){
+            const row=rows[i];
+            const flat=row.map(c=>String(c||'').trim()).join('|');
+            if(i===0 && row[0]) vendorName=String(row[0]).trim();
+            if(flat.includes('Invoice No')) invoiceNo=flat.replace(/.*Invoice No[:\-\s]*/i,'').split('|')[0].trim();
+            if(flat.includes('Invoice Date')) invoiceDate=flat.replace(/.*Invoice Date[:\-\s]*/i,'').split('|')[0].trim();
+            if(flat.toLowerCase().includes('details of work')) workDesc=String(row[3]||row[2]||'').trim();
+            // Detect item rows: first cell is number, second cell has description, fifth/sixth has amount
+            const sr=String(row[0]||'').trim();
+            const desc=String(row[1]||row[2]||'').trim();
+            const amt=parseFloat(String(row[5]||row[9]||row[14]||'').replace(/,/g,''))||0;
+            if(/^\d+$/.test(sr) && desc && desc.toLowerCase()!=='s. no.' && desc.toLowerCase()!=='sl no' && amt>0){
+              items.push({
+                sr:+sr,
+                product:desc,
+                size:'',
+                qty:1,
+                rate:amt,
+                per:'Job',
+                gst_pct:18,
+                hsn:'',
+                accepted:true,
+                note:'',
+                originalRate:amt
+              });
+            }
+          }
+          setQuoteReview({vendorName,invoiceNo,invoiceDate,workDesc,items,fileName:file.name,fileType:'excel'});
+        } catch(e){
+          show('Could not parse Excel: '+e.message, false);
+        }
+        setQuoteParsing(false);
+      };
+
+      const applyQuoteToForm=()=>{
+        if(!quoteReview) return;
+        const acceptedItems=quoteReview.items.filter(x=>x.accepted);
+        if(acceptedItems.length===0){show('Select at least 1 item',false);return;}
+        const rejectedItems=quoteReview.items.filter(x=>!x.accepted && x.note);
+        // Pre-fill form with accepted items
+        setPrf(p=>({
+          ...p,
+          notes:p.notes||(quoteReview.workDesc||''),
+          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:''}))
+        }));
+        // If there are rejected items with notes — send WhatsApp to vendor + user + group
+        if(rejectedItems.length>0 && prf.vendor_phone){
+          const phone=(prf.vendor_phone||'').replace(/\D/g,'').replace(/^0/,'91').replace(/^(?!91)/,'91');
+          const vendorMsg='Dear *'+prf.vendor_name+'*,
+
+Thank you for your quotation'+(quoteReview.invoiceNo?' ('+quoteReview.invoiceNo+')':'')+'. We have reviewed and have the following revision requests:
+
+'
+            +rejectedItems.map((x,i)=>'*Item '+(i+1)+':* '+x.product+'
+_Note:_ '+x.note).join('
+
+')
+            +'
+
+Please send a revised quotation at the earliest.
+
+Regards,
+iPrint India';
+          sendWhatsApp(phone, vendorMsg, 'vendor_quote_revision');
+          // Copy to requestor
+          const reqPhone=WA_NUMBERS[prf.requestor]||WA_NUMBERS['Jigar'];
+          const userMsg='📋 *Quote Revision Sent to '+prf.vendor_name+'*
+
+File: '+quoteReview.fileName+'
+Rejected items with notes:
+
+'
+            +rejectedItems.map(x=>'• '+x.product+': '+x.note).join('
+')
+            +'
+
+Accepted '+acceptedItems.length+' of '+quoteReview.items.length+' items — pre-filled in PR form.';
+          setTimeout(()=>sendWhatsApp(reqPhone, userMsg, 'vendor_quote_revision_user'),1500);
+          // Group notification
+          setTimeout(()=>sendWhatsApp(WA_GROUP, userMsg, 'vendor_quote_revision_group'),3000);
+          show('✅ '+acceptedItems.length+' items added to PR. Revision notes sent to vendor + team on WhatsApp!');
+        } else {
+          show('✅ '+acceptedItems.length+' items loaded into PR from quote');
+        }
+        setQuoteReview(null);
+        setShowQuoteUpload(false);
+        setQuoteFile(null);
       };
 
       const savePR=async()=>{
@@ -1440,6 +1543,133 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         {/* New PR Form */}
         {showPRForm&&<div style={{background:"#0a0f1a",border:"1px solid #f59e0b44",borderRadius:8,padding:10}}>
           <p style={{fontSize:9,fontWeight:700,color:"#f59e0b",marginBottom:8}}>NEW PURCHASE REQUEST</p>
+
+          {/* ── VENDOR QUOTE UPLOAD SECTION ────────────────────────────── */}
+          <div style={{marginBottom:8,padding:'6px 10px',background:'#060810',border:'1px solid #1a2030',borderRadius:6}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:6}}>
+              <span style={{fontSize:9,color:'#64748b',fontWeight:600}}>📎 Have a vendor quote? Import it to pre-fill line items</span>
+              <button className="b bs" onClick={()=>setShowQuoteUpload(v=>!v)} style={{fontSize:8,padding:'2px 8px',color:'#06b6d4',borderColor:'#06b6d4'}}>
+                {showQuoteUpload?'✕ Cancel':'📂 Upload Quote (Excel/PDF)'}
+              </button>
+            </div>
+            {showQuoteUpload&&<div style={{marginTop:8}}>
+              <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <label style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',background:'#0c1017',border:'1px dashed #06b6d4',borderRadius:6,cursor:'pointer',fontSize:9,color:'#06b6d4'}}>
+                  📂 {quoteFile?quoteFile.name:'Choose Excel or PDF file'}
+                  <input type="file" accept=".xlsx,.xls,.pdf" style={{display:'none'}} onChange={e=>{const f=e.target.files[0];if(f)setQuoteFile(f);}}/>
+                </label>
+                {quoteFile&&<button className="b bp" onClick={()=>{
+                  if(quoteFile.name.match(/\.pdf$/i)){
+                    setQuoteReview({vendorName:'',invoiceNo:'',invoiceDate:'',workDesc:'',items:[],fileName:quoteFile.name,fileType:'pdf',pdfOnly:true});
+                  } else {
+                    parseExcelQuote(quoteFile);
+                  }
+                }} disabled={quoteParsing} style={{fontSize:9,padding:'4px 12px',background:'#06b6d4',borderColor:'#06b6d4',color:'#000',fontWeight:700}}>
+                  {quoteParsing?'⏳ Parsing...':'🔍 Parse & Review'}
+                </button>}
+                {quoteFile&&<span style={{fontSize:8,color:'#64748b'}}>{(quoteFile.size/1024).toFixed(0)} KB</span>}
+              </div>
+            </div>}
+          </div>
+
+          {/* ── QUOTE REVIEW MODAL ──────────────────────────────────────── */}
+          {quoteReview&&<div style={{marginBottom:10,background:'#060810',border:'1px solid #06b6d4',borderRadius:8,padding:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div>
+                <span style={{fontWeight:800,color:'#06b6d4',fontSize:12}}>📋 Quote Review</span>
+                <span style={{marginLeft:8,fontSize:10,color:'#64748b'}}>{quoteReview.fileName}</span>
+                {quoteReview.invoiceNo&&<span style={{marginLeft:6,fontSize:9,color:'#8b949e'}}>Inv: {quoteReview.invoiceNo}</span>}
+              </div>
+              <button className="b bs" onClick={()=>{setQuoteReview(null);setQuoteFile(null);}} style={{fontSize:9}}>✕</button>
+            </div>
+
+            {quoteReview.pdfOnly?<div>
+              <div style={{padding:'8px 10px',background:'rgba(6,182,212,0.08)',border:'1px solid rgba(6,182,212,0.2)',borderRadius:6,fontSize:10,color:'#7dd3fc',marginBottom:8}}>
+                📎 PDF attached as reference. Items cannot be auto-parsed — please fill line items manually below.
+              </div>
+              <button className="b bp" onClick={()=>{setQuoteReview(null);setShowQuoteUpload(false);show('PDF attached — fill items manually');}}
+                style={{fontSize:10,padding:'5px 14px',background:'#06b6d4',borderColor:'#06b6d4',color:'#000',fontWeight:700}}>
+                ✅ OK, I'll fill manually
+              </button>
+            </div>:<div>
+              {quoteReview.vendorName&&<div style={{fontSize:10,color:'#c9d1d9',marginBottom:6}}>
+                <strong style={{color:'#4ade80'}}>Vendor:</strong> {quoteReview.vendorName}
+                {quoteReview.workDesc&&<span style={{marginLeft:8,color:'#64748b',fontSize:9}}>{quoteReview.workDesc}</span>}
+              </div>}
+              <div style={{fontSize:8,color:'#f59e0b',fontWeight:700,marginBottom:4}}>
+                REVIEW LINE ITEMS — ✅ Accept or ❌ Reject with note
+                <span style={{marginLeft:8,color:'#64748b',fontWeight:400}}>
+                  {quoteReview.items.filter(x=>x.accepted).length} of {quoteReview.items.length} accepted
+                </span>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:4,maxHeight:280,overflowY:'auto',marginBottom:8}}>
+                {quoteReview.items.map((item,xi)=><div key={xi}
+                  style={{background:item.accepted?'rgba(74,222,128,0.05)':'rgba(244,112,103,0.05)',
+                    border:'1px solid '+(item.accepted?'rgba(74,222,128,0.25)':'rgba(244,112,103,0.25)'),
+                    borderRadius:6,padding:'6px 10px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                    {/* Accept/Reject toggle */}
+                    <button onClick={()=>setQuoteReview(p=>({...p,items:p.items.map((it,i)=>i===xi?{...it,accepted:!it.accepted,note:it.accepted?it.note:''}:it)}))}
+                      style={{padding:'2px 8px',borderRadius:4,border:'none',cursor:'pointer',fontSize:9,fontWeight:700,
+                        background:item.accepted?'#4ade80':'#f47067',color:item.accepted?'#000':'#fff',flexShrink:0}}>
+                      {item.accepted?'✅ Accept':'❌ Reject'}
+                    </button>
+                    {/* Item name */}
+                    <span style={{flex:1,fontSize:10,color:item.accepted?'#c9d1d9':'#64748b',textDecoration:item.accepted?'none':'line-through',minWidth:120}}>
+                      <strong>{item.sr}.</strong> {item.product}
+                    </span>
+                    {/* Rate - editable */}
+                    <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+                      <span style={{fontSize:8,color:'#64748b'}}>₹</span>
+                      <input className="in mn" type="number" value={item.rate}
+                        onChange={e=>setQuoteReview(p=>({...p,items:p.items.map((it,i)=>i===xi?{...it,rate:+e.target.value}:it)}))}
+                        style={{fontSize:9,padding:'1px 4px',width:64,color:'#e3a008',background:'#0c1017'}}/>
+                      <span style={{fontSize:8,color:'#64748b'}}>/{item.per||'Job'}</span>
+                    </div>
+                    {/* GST */}
+                    <select className="in" value={item.gst_pct}
+                      onChange={e=>setQuoteReview(p=>({...p,items:p.items.map((it,i)=>i===xi?{...it,gst_pct:+e.target.value}:it)}))}
+                      style={{fontSize:8,padding:'1px 3px',width:48}}>
+                      {[0,5,12,18,28].map(g=><option key={g} value={g}>{g}%</option>)}
+                    </select>
+                    <span style={{fontSize:9,fontWeight:700,color:'#e3a008',minWidth:60,textAlign:'right'}}>
+                      ₹{((item.qty||1)*(item.rate||0)).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  {/* Rejection note input */}
+                  {!item.accepted&&<div style={{marginTop:5}}>
+                    <input className="in" value={item.note||''}
+                      onChange={e=>setQuoteReview(p=>({...p,items:p.items.map((it,i)=>i===xi?{...it,note:e.target.value}:it)}))}
+                      placeholder="Reason for rejection / revision request (e.g. Rate too high — target ₹1200)"
+                      autoFocus
+                      style={{fontSize:9,padding:'3px 6px',width:'100%',borderColor:'#f47067',color:'#fca5a5'}}/>
+                    <span style={{fontSize:8,color:'#f47067',marginTop:2,display:'block'}}>📱 This note will be sent to vendor via WhatsApp</span>
+                  </div>}
+                </div>)}
+              </div>
+              {/* Total + Apply button */}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}}>
+                <div style={{fontSize:10,color:'#64748b'}}>
+                  Accepted total: <strong style={{color:'#e3a008'}}>
+                    ₹{quoteReview.items.filter(x=>x.accepted).reduce((s,x)=>(s+(x.qty||1)*(x.rate||0)),0).toLocaleString('en-IN')}
+                  </strong>
+                  {quoteReview.items.some(x=>!x.accepted)&&<span style={{marginLeft:8,color:'#f47067'}}>
+                    · {quoteReview.items.filter(x=>!x.accepted).length} rejected
+                    {quoteReview.items.filter(x=>!x.accepted&&x.note).length>0&&
+                      <span style={{color:'#25d366'}}> · 📱 {quoteReview.items.filter(x=>!x.accepted&&x.note).length} notes to send</span>}
+                  </span>}
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <button className="b bs" onClick={()=>{setQuoteReview(null);setQuoteFile(null);}} style={{fontSize:9}}>Cancel</button>
+                  <button className="b bp" onClick={applyQuoteToForm}
+                    disabled={quoteReview.items.filter(x=>x.accepted).length===0}
+                    style={{fontSize:10,padding:'5px 14px',background:'#4ade80',borderColor:'#4ade80',color:'#000',fontWeight:700}}>
+                    ✅ Apply to PR{prf.vendor_phone&&quoteReview.items.some(x=>!x.accepted&&x.note)?' + Send WhatsApp':''}
+                  </button>
+                </div>
+              </div>
+            </div>}
+          </div>}
 
           {/* Row 1: Firm / Requestor / Type / Urgency */}
           <div className="fg" style={{gap:6,marginBottom:6,gridTemplateColumns:"repeat(4,1fr)"}}>
