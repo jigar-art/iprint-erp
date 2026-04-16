@@ -986,6 +986,14 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   // ─── DELIVERY CHALLAN GENERATOR ──
   const [dcMode,setDcMode]=useState(null); // batchId when DC modal is open
   const [dcForm,setDcForm]=useState({to_name:'',to_address:'',delivery_note:'',po_no:'',po_date:'',dc_date:td(),prepared_by:user?.name||'',delivered_by:''});
+  // Track all DCs already created for this job (for visual indicator on batch header)
+  const [jobDCs,setJobDCs]=useState([]);
+  useEffect(()=>{
+    if(!j?.id)return;
+    sb.from('delivery_challans').select('id,dc_no,batch_id,dc_date,to_name').eq('job_id',j.id).order('created_at',{ascending:true}).then(({data})=>{
+      if(data)setJobDCs(data);
+    });
+  },[j?.id]);
   const openDCForm=(batch)=>{
     // Pre-fill from job + batch data
     setDcForm({
@@ -1028,6 +1036,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const {error}=await sb.from('delivery_challans').insert(rec);
     if(error){show('⚠️ Failed to save DC: '+error.message,false);return;}
     show('✅ DC '+dcNo+' saved!');
+    // Reflect the new DC locally so the batch header indicator updates immediately
+    setJobDCs(p=>[...p,{id:rec.id,dc_no:dcNo,batch_id:batch.id,dc_date:dcForm.dc_date,to_name:dcForm.to_name}]);
     // Now open print preview with 3 copies
     const copyHTML=(copyLabel)=>`<div class="dc-copy"><div class="dc-box">
       <div class="dc-head"><div class="dc-hdr-l">${firm.logo_url?'<img src="'+firm.logo_url+'" class="dc-logo"/>':''}<div class="dc-firm">${firm.name||''}</div></div>
@@ -1305,7 +1315,13 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
               setCopyBatch({batchId:b.id,bi:bi+1,items:(b.items||[]).map(it=>({...it,selected:true}))});
             }}>📋</button>
             <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
-            <button style={{background:"#10b98122",border:"1px solid #10b981",borderRadius:4,color:"#10b981",cursor:"pointer",fontSize:8,padding:"1px 6px",fontWeight:700}} title="Generate Delivery Challan" onClick={()=>openDCForm(b)}>🚚 DC</button>
+            {(()=>{const existingDCs=jobDCs.filter(d=>d.batch_id===b.id);
+              if(existingDCs.length===0) return <button style={{background:"#10b98122",border:"1px solid #10b981",borderRadius:4,color:"#10b981",cursor:"pointer",fontSize:8,padding:"1px 6px",fontWeight:700}} title="Generate Delivery Challan" onClick={()=>openDCForm(b)}>🚚 DC</button>;
+              return <>
+                {existingDCs.map(d=><span key={d.id} className="mn" title={`DC ${d.dc_no}\nTo: ${d.to_name||''}\nDate: ${d.dc_date||''}`} style={{background:"#10b98122",border:"1px solid #10b98188",borderRadius:4,color:"#10b981",fontSize:8,padding:"1px 6px",fontWeight:700,whiteSpace:"nowrap"}}>🚚 {d.dc_no}</span>)}
+                <button style={{background:"none",border:"1px dashed #10b98155",borderRadius:4,color:"#10b981",cursor:"pointer",fontSize:8,padding:"1px 5px"}} title="Generate another Delivery Challan for this batch" onClick={()=>openDCForm(b)}>➕ DC</button>
+              </>;
+            })()}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:3}}>
             {b.bill_no?<span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
