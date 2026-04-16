@@ -1407,7 +1407,7 @@ _Note:_ ${x.note}`).join('\n\n')}
 Please send a revised quotation at the earliest.
 
 Regards,
-iPrint India`;
+${FIRM_DATA[prf.firm_code]?.name||'iPrint India'}`;
           sendWhatsApp(phone, vendorMsg, 'vendor_quote_revision');
           // Copy to requestor
           const reqPhone=WA_NUMBERS[prf.requestor]||WA_NUMBERS['Jigar'];
@@ -1421,8 +1421,12 @@ ${rejectedItems.map(x=>`• ${x.product}: ${x.note}`).join('\n')}
 Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-filled in PR form.`;
           setTimeout(()=>sendWhatsApp(reqPhone, userMsg, 'vendor_quote_revision_user'),1500);
           // Group notification
-          setTimeout(()=>sendWhatsApp(WA_GROUP, userMsg, 'vendor_quote_revision_group'),3000);
-          show('✅ '+acceptedItems.length+' items added to PR. Revision notes sent to vendor + team on WhatsApp!');
+          setTimeout(()=>{
+            navigator.clipboard?.writeText(userMsg).catch(()=>{});
+            window.open(WA_GROUP, '_blank');
+            show('📋 Group message copied — paste in iPrint group!');
+          },3000);
+          show('✅ '+acceptedItems.length+' items added to PR. WA sent to vendor + requestor.');
         } else {
           show('✅ '+acceptedItems.length+' items loaded into PR from quote');
         }
@@ -1465,7 +1469,24 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         setSaving(false);
         if(error){show('⚠️ Save failed: '+error.message,false);return;}
         setPrs(p=>[...p,rec]);
-        show('✅ '+pr_no+' submitted for Jigar\'s approval!');
+        // ── Notify Jigar on PR submission ──
+        const jigarMsg=`🛒 *New PR Pending Approval*
+
+*${pr_no}* | ${rec.firm_code}
+*Vendor:* ${rec.vendor_name}
+*Items:* ${rec.items.map(x=>x.product+' ×'+x.qty).join(', ')}
+*Total:* ₹${rec.total.toLocaleString('en-IN')}
+*Urgency:* ${rec.urgency}
+*Requested by:* ${rec.created_by}
+
+Open Approvals in ERP to approve/reject.
+iprint-erp.vercel.app`;
+        sendWhatsApp(WA_NUMBERS['Jigar'], jigarMsg, 'iprint_pr_submitted');
+        // ── Also notify accounts group ──
+        const groupMsg=`🛒 *New PR — ${pr_no}*
+Vendor: ${rec.vendor_name} | ₹${rec.total.toLocaleString('en-IN')} | By: ${rec.created_by}`;
+        navigator.clipboard?.writeText(groupMsg).catch(()=>{});
+        show('✅ '+pr_no+' submitted! Jigar notified on WhatsApp.');
         setPrf(blankForm);
         setShowPRForm(false);
       };
@@ -2843,7 +2864,8 @@ const WA_NUMBERS = {
   'Printing Dept':   '919326282238', // Harish handles Printing Dept
   'Shreya':          '917304008506',
 };
-const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
+const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn'; // iPrint Operations group
+const WA_ACCOUNTS_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn'; // iPrint group (same as WA_GROUP)
 
 // ── Meta Cloud API credentials ──────────────────────────────
 const META_WA_TOKEN = 'EAA99yop8cZCkBRBRngo3b2ZAqAiNMhlW3E6cZCal01I8DIZCEdoZBZBFKCd1iCxm3WUmmfvMZBwqNTXHIvJys4bZCNCDUGuuXd8aHpnbpYpZAmtyPomRViY0nQJbbXHAIWO8AplIhI3pKlXNaWDbBzzZCldYuzWBsa2Hx14RtF2E0zvX7vdyxGgud1euSDxAZDZD';
@@ -3483,7 +3505,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 
   const sendVendorWA = (preview) => {
     const {pr, poNo} = preview;
-    const msg = `Dear *${pr.vendor_name}*,\n\nPlease find below our Purchase Order details:\n\n*PO No:* ${poNo}\n*Date:* ${new Date().toLocaleDateString('en-IN')}\n*Items:* ${(pr.items||[]).map(x=>x.product+' x'+x.qty).join(', ')}\n*Total:* ₹${(+pr.total||0).toLocaleString('en-IN')}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n\nKindly confirm receipt and expected delivery date.\n\nRegards,\n*${FIRM_DATA[pr.firm_code]?.short||'iPrint'}*`;
+    const msg = `Dear *${pr.vendor_name}*,\n\nPlease find below our Purchase Order details:\n\n*PO No:* ${poNo}\n*Date:* ${new Date().toLocaleDateString('en-IN')}\n*Items:* ${(pr.items||[]).map(x=>x.product+' x'+x.qty).join(', ')}\n*Total:* ₹${(+pr.total||0).toLocaleString('en-IN')}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n\nKindly confirm receipt and expected delivery date.\n\nRegards,\n*${FIRM_DATA[pr.firm_code]?.name||'iPrint India'}*`;
     const phone = (pr.vendor_phone||'').replace(/\D/g,'').replace(/^0/,'91').replace(/^(?!91)/,'91');
     if (phone.length >= 10) sendWhatsApp(phone, msg, 'iprint_po_send');
     else { navigator.clipboard?.writeText(msg); show('📋 Message copied — no vendor phone on file'); }
@@ -3619,7 +3641,8 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
 
   const buildVendorMsg = (pr) => {
     const items = (pr.items||[]).map(x => `• ${x.product}${x.size?' ('+x.size+')':''} — Qty: ${x.qty} ${x.per} @ ₹${x.rate}`).join('\n');
-    return `Dear *${pr.vendor_name}*,\n\nThis is iPrint India. We are raising a Purchase Order for the following:\n\n${items}\n\n*PR Ref:* ${pr.pr_no}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n${pr.expected_delivery?'*Expected Delivery:* '+pr.expected_delivery+'\n':''}\nOur team will send you the formal PO document shortly. Please confirm availability.\n\nThank you 🙏\n*iPrint India*`;
+    const firmName = FIRM_DATA[pr.firm_code]?.name || 'iPrint India';
+    return `Dear *${pr.vendor_name}*,\n\nThis is ${firmName}. We are raising a Purchase Order for the following:\n\n${items}\n\n*PR Ref:* ${pr.pr_no}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n${pr.expected_delivery?'*Expected Delivery:* '+pr.expected_delivery+'\n':''}\nOur team will send you the formal PO document shortly. Please confirm availability.\n\nThank you 🙏\n*${firmName}*`;
   };
 
   const buildGroupMsg = (pr, action) => {
@@ -3644,7 +3667,19 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
     setPrs(p => p.map(x => x.id === pr.id ? updated : x));
     setProcessing(null);
     setWaButtons(p => ({...p, [pr.id]: true}));
-    show('✅ ' + pr.pr_no + ' approved! Send WhatsApp notifications below.');
+    // ── AUTO-FIRE all 3 WA messages on approve ──
+    // 1. Requestor
+    const requestorPhone = WA_NUMBERS[pr.created_by];
+    if (requestorPhone) sendWhatsApp(requestorPhone, buildApproveMsg(pr), 'iprint_pr_approved');
+    // 2. Vendor (if phone on file)
+    if (pr.vendor_phone) {
+      const vPhone = (pr.vendor_phone||'').replace(/\D/g,'').replace(/^0/,'91').replace(/^(?!91)/,'91');
+      if (vPhone.length >= 10) setTimeout(() => sendWhatsApp(vPhone, buildVendorMsg(pr), 'iprint_vendor_notify'), 1500);
+    }
+    // 3. Shreya
+    const shreyaMsg = `📄 *PO Required — ${pr.pr_no}*\n\nPlease generate a PO for:\n*Vendor:* ${pr.vendor_name}\n*Amount:* ₹${(+pr.total||0).toLocaleString('en-IN')}\n*Firm:* ${pr.firm_code}\n*Payment Terms:* ${pr.payment_terms||'TBD — please fill'}\n*Urgency:* ${pr.urgency}\n\nApproved by Jigar ✅`;
+    setTimeout(() => sendWhatsApp(WA_NUMBERS['Shreya'], shreyaMsg, 'iprint_po_request'), 3000);
+    show('✅ ' + pr.pr_no + ' approved! WA sent to ' + (pr.created_by||'requestor') + ', vendor & Shreya automatically.');
   };
 
   const rejectPR = async (pr) => {
@@ -3659,7 +3694,10 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
     setRejecting(null);
     setRejReason('');
     setWaButtons(p => ({...p, [pr.id]: true}));
-    show('PR rejected. Send WhatsApp notification to requestor.');
+    // ── AUTO-FIRE WA to requestor on reject ──
+    const requestorPhone = WA_NUMBERS[pr.created_by];
+    if (requestorPhone) sendWhatsApp(requestorPhone, buildRejectMsg({...pr, rejection_reason: rejReason.trim()}), 'iprint_pr_rejected');
+    show('❌ ' + pr.pr_no + ' rejected. WA sent to ' + (pr.created_by||'requestor') + ' automatically.');
   };
 
   const job = (jobId) => (jobs||[]).find(j => j.id === jobId);
