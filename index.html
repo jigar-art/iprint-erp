@@ -1397,35 +1397,28 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         // If there are rejected items with notes — send WhatsApp to vendor + user + group
         if(rejectedItems.length>0 && prf.vendor_phone){
           const phone=(prf.vendor_phone||'').replace(/\D/g,'').replace(/^0/,'91').replace(/^(?!91)/,'91');
-          const vendorMsg='Dear *'+prf.vendor_name+'*,
+          const vendorMsg=`Dear *${prf.vendor_name}*,
 
-Thank you for your quotation'+(quoteReview.invoiceNo?' ('+quoteReview.invoiceNo+')':'')+'. We have reviewed and have the following revision requests:
+Thank you for your quotation${quoteReview.invoiceNo?' ('+quoteReview.invoiceNo+')':''}. We have reviewed and have the following revision requests:
 
-'
-            +rejectedItems.map((x,i)=>'*Item '+(i+1)+':* '+x.product+'
-_Note:_ '+x.note).join('
-
-')
-            +'
+${rejectedItems.map((x,i)=>`*Item ${i+1}:* ${x.product}
+_Note:_ ${x.note}`).join('\n\n')}
 
 Please send a revised quotation at the earliest.
 
 Regards,
-iPrint India';
+iPrint India`;
           sendWhatsApp(phone, vendorMsg, 'vendor_quote_revision');
           // Copy to requestor
           const reqPhone=WA_NUMBERS[prf.requestor]||WA_NUMBERS['Jigar'];
-          const userMsg='📋 *Quote Revision Sent to '+prf.vendor_name+'*
+          const userMsg=`📋 *Quote Revision Sent to ${prf.vendor_name}*
 
-File: '+quoteReview.fileName+'
+File: ${quoteReview.fileName}
 Rejected items with notes:
 
-'
-            +rejectedItems.map(x=>'• '+x.product+': '+x.note).join('
-')
-            +'
+${rejectedItems.map(x=>`• ${x.product}: ${x.note}`).join('\n')}
 
-Accepted '+acceptedItems.length+' of '+quoteReview.items.length+' items — pre-filled in PR form.';
+Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-filled in PR form.`;
           setTimeout(()=>sendWhatsApp(reqPhone, userMsg, 'vendor_quote_revision_user'),1500);
           // Group notification
           setTimeout(()=>sendWhatsApp(WA_GROUP, userMsg, 'vendor_quote_revision_group'),3000);
