@@ -1297,6 +1297,14 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const [quoteParsing,setQuoteParsing]=React.useState(false);
       const [quoteReview,setQuoteReview]=React.useState(null); // parsed items for review
       const [showQuoteUpload,setShowQuoteUpload]=React.useState(false);
+      const [vSearch,setVSearch]=React.useState('');
+      const [vOpen,setVOpen]=React.useState(false);
+      const vRef=React.useRef(null);
+      React.useEffect(()=>{
+        const handler=(e)=>{if(vRef.current&&!vRef.current.contains(e.target))setVOpen(false);};
+        document.addEventListener('mousedown',handler);
+        return ()=>document.removeEventListener('mousedown',handler);
+      },[]);
 
       // Load vendors on first form open
       const loadVendors=async()=>{
@@ -1694,49 +1702,33 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           </div>
 
           {/* Row 2: Vendor search + Add Vendor */}
-          {(()=>{
-            const [vSearch,setVSearch]=React.useState('');
-            const [vOpen,setVOpen]=React.useState(false);
-            const vRef=React.useRef(null);
-            React.useEffect(()=>{
-              const handler=(e)=>{if(vRef.current&&!vRef.current.contains(e.target))setVOpen(false);};
-              document.addEventListener('mousedown',handler);
-              return ()=>document.removeEventListener('mousedown',handler);
-            },[]);
-            const vMatches=React.useMemo(()=>{
-              if(!vSearch.trim())return filteredVendors.slice(0,80);
-              const q=vSearch.toLowerCase();
-              return filteredVendors.filter(v=>
-                v.name.toLowerCase().includes(q)||
-                (v.gstin&&v.gstin.toLowerCase().includes(q))||
-                (v.address&&v.address.toLowerCase().includes(q))
-              ).slice(0,50);
-            },[filteredVendors,vSearch]);
-            const pickVendor=(v)=>{selectVendor(v.id);setVSearch(v.name);setVOpen(false);};
-            const clearVendor=()=>{selectVendor('');setVSearch('');setVOpen(false);};
-            return (
-            <div style={{marginBottom:6}} ref={vRef}>
-              <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
-                <span style={{fontSize:7,color:"#64748b"}}>Vendor *</span>
-                {prf.vendor_id&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={clearVendor}>✕ Clear</button>}
-                <button style={{background:"none",border:"none",color:"#f59e0b",cursor:"pointer",fontSize:8,padding:0,marginLeft:"auto"}} onClick={()=>setShowAddVendor(!showAddVendor)}>+ Add New Vendor</button>
-              </div>
-              <div style={{position:"relative"}}>
-                <input className="in" value={vSearch}
-                  onChange={e=>{setVSearch(e.target.value);setVOpen(true);if(!e.target.value)clearVendor();}}
-                  onFocus={()=>{setVOpen(true);if(vendors===null)loadVendors();}}
-                  placeholder="Type to search vendor by name or GSTIN..."
-                  style={{fontSize:9,padding:"3px 8px",width:"100%",
-                    borderColor:prf.vendor_id?"#4ade8066":"inherit",
-                    background:prf.vendor_id?"#4ade8008":"inherit"}}
-                />
-                {prf.vendor_id&&<span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:"#4ade80"}}>✓</span>}
-                {vOpen&&vMatches.length>0&&(
+          <div style={{marginBottom:6}} ref={vRef}>
+            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
+              <span style={{fontSize:7,color:"#64748b"}}>Vendor *</span>
+              {prf.vendor_id&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={()=>{selectVendor('');setVSearch('');setVOpen(false);}}>✕ Clear</button>}
+              <button style={{background:"none",border:"none",color:"#f59e0b",cursor:"pointer",fontSize:8,padding:0,marginLeft:"auto"}} onClick={()=>setShowAddVendor(!showAddVendor)}>+ Add New Vendor</button>
+            </div>
+            <div style={{position:"relative"}}>
+              <input className="in" value={vSearch}
+                onChange={e=>{setVSearch(e.target.value);setVOpen(true);if(!e.target.value){selectVendor('');setVSearch('');}}}
+                onFocus={()=>{setVOpen(true);if(vendors===null)loadVendors();}}
+                placeholder="Type to search vendor by name or GSTIN..."
+                style={{fontSize:9,padding:"3px 8px",width:"100%",
+                  borderColor:prf.vendor_id?"#4ade8066":"inherit",
+                  background:prf.vendor_id?"#4ade8008":"inherit"}}
+              />
+              {prf.vendor_id&&<span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:"#4ade80"}}>✓</span>}
+              {vOpen&&(()=>{
+                const q=vSearch.toLowerCase();
+                const vMatches=vSearch.trim()
+                  ?filteredVendors.filter(v=>v.name.toLowerCase().includes(q)||(v.gstin&&v.gstin.toLowerCase().includes(q))).slice(0,50)
+                  :filteredVendors.slice(0,80);
+                return vMatches.length>0?(
                   <div style={{position:"absolute",zIndex:50,top:"100%",left:0,right:0,background:"#0c1017",
                     border:"1px solid #f59e0b44",borderRadius:"0 0 6px 6px",
                     maxHeight:220,overflowY:"auto",boxShadow:"0 8px 24px rgba(0,0,0,.6)"}}>
                     {vMatches.map(v=>(
-                      <div key={v.id} onClick={()=>pickVendor(v)}
+                      <div key={v.id} onClick={()=>{selectVendor(v.id);setVSearch(v.name);setVOpen(false);}}
                         style={{padding:"5px 8px",cursor:"pointer",borderBottom:"1px solid #1a2030",
                           background:prf.vendor_id===v.id?"#f59e0b15":"transparent"}}
                         onMouseEnter={e=>e.currentTarget.style.background="#f59e0b12"}
@@ -1751,15 +1743,13 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                         {v.gstin&&<div style={{fontSize:7,color:"#64748b",marginTop:1}}>{v.gstin}</div>}
                       </div>
                     ))}
-                    {vMatches.length===0&&<div style={{padding:"8px",fontSize:9,color:"#64748b",textAlign:"center"}}>No vendors found</div>}
                   </div>
-                )}
-              </div>
-              {prf.vendor_gstin&&<div style={{marginTop:2,fontSize:7,color:"#64748b"}}>GSTIN: {prf.vendor_gstin} · State: {prf.vendor_state}</div>}
-              {prf.vendor_id&&prf.vendor_name&&<div style={{marginTop:1,fontSize:8,color:"#4ade80"}}>✓ {prf.vendor_name} selected</div>}
+                ):null;
+              })()}
             </div>
-            );
-          })()}
+            {prf.vendor_gstin&&<div style={{marginTop:2,fontSize:7,color:"#64748b"}}>GSTIN: {prf.vendor_gstin} · State: {prf.vendor_state}</div>}
+            {prf.vendor_id&&prf.vendor_name&&<div style={{marginTop:1,fontSize:8,color:"#4ade80"}}>✓ {prf.vendor_name} selected</div>}
+          </div>
 
           {/* Inline Add Vendor Modal */}
           {showAddVendor&&<div style={{background:"#060810",border:"1px solid #f59e0b33",borderRadius:6,padding:8,marginBottom:8}}>
