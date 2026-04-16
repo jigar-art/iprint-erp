@@ -944,6 +944,117 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const {error}=await sb.from('outsource_items').update({po_status:poNum?'PO Generated':'Pending',po_number:poNum}).eq('id',osId);
     if(!error)setOsItems(p=>p.map(o=>o.id===osId?{...o,po_status:poNum?'PO Generated':'Pending',po_number:poNum}:o));
   };
+  // ─── DELIVERY CHALLAN GENERATOR ──
+  const [dcMode,setDcMode]=useState(null); // batchId when DC modal is open
+  const [dcForm,setDcForm]=useState({to_name:'',to_address:'',delivery_note:'',po_no:'',po_date:'',dc_date:td(),prepared_by:user?.name||'',delivered_by:''});
+  const openDCForm=(batch)=>{
+    // Pre-fill from job + batch data
+    setDcForm({
+      to_name: j.billing_name || j.client_name || '',
+      to_address: batch.delivery_address || j.delivery_address || '',
+      delivery_note: batch.note || '',
+      po_no: batch.po_number || j.po_number || '',
+      po_date: '',
+      dc_date: td(),
+      prepared_by: user?.name || '',
+      delivered_by: ''
+    });
+    setDcMode(batch.id);
+  };
+  const generateDCNumber=async(firmCode)=>{
+    // Get current FY (e.g., 25-26, 26-27)
+    const now=new Date(); const m=now.getMonth(), y=now.getFullYear();
+    const fyStart=m>=3?y:y-1;
+    const fy=String(fyStart).slice(2)+'-'+String(fyStart+1).slice(2);
+    // Find highest DC# for this firm+FY
+    const {data}=await sb.from('delivery_challans').select('dc_no').eq('firm_code',firmCode).eq('fy',fy);
+    const nums=(data||[]).map(x=>{const m=x.dc_no?.match(/DC(\d+)$/);return m?+m[1]:0;});
+    const next=String((Math.max(0,...nums,0))+1).padStart(3,'0');
+    return {dcNo:`${firmCode}/${fy}/DC${next}`, fy};
+  };
+  const saveAndPrintDC=async(batch)=>{
+    if(!dcForm.to_name){show('Enter To (Customer) name',false);return;}
+    const firmCode=j.firm||'JXT';
+    const firm=firms.find(f=>f.code===firmCode)||{};
+    const {dcNo,fy}=await generateDCNumber(firmCode);
+    const dcItems=(batch.items||[]).map((it,i)=>({
+      sr:i+1, width:it.width||'', height:it.height||'', size_unit:it.size_unit||'',
+      qty:it.qty||0, sqft:it.sqft||0, description:it.internal_name||it.client_name||'—', media:it.media||''
+    }));
+    const rec={id:'DC'+Date.now(),dc_no:dcNo,firm_code:firmCode,fy,job_id:j.id,batch_id:batch.id,
+      dc_date:dcForm.dc_date,to_name:dcForm.to_name,to_address:dcForm.to_address,
+      delivery_note:dcForm.delivery_note,po_no:dcForm.po_no,po_date:dcForm.po_date,
+      items:dcItems,prepared_by:dcForm.prepared_by,delivered_by:dcForm.delivered_by,
+      dc_file_url:'',created_by:user?.name||'',created_at:new Date().toISOString()};
+    const {error}=await sb.from('delivery_challans').insert(rec);
+    if(error){show('⚠️ Failed to save DC: '+error.message,false);return;}
+    show('✅ DC '+dcNo+' saved!');
+    // Now open print preview with 3 copies
+    const copyHTML=(copyLabel)=>`<div class="dc-copy"><div class="dc-box">
+      <div class="dc-head"><div class="dc-hdr-l">${firm.logo_url?'<img src="'+firm.logo_url+'" class="dc-logo"/>':''}<div class="dc-firm">${firm.name||''}</div></div>
+      <div class="dc-hdr-r"><div class="dc-addr"><strong>${firm.name||''}</strong><br>${(firm.address||'').replace(/,/g,',<br>')}</div><div class="dc-gst">GSTIN / UIN : ${firm.gst||''}</div></div></div>
+      <div class="dc-meta">
+        <div class="dc-to"><div class="dc-label">To,</div><div class="dc-to-box">${(dcForm.to_name||'').replace(/\n/g,'<br>')}<br>${(dcForm.to_address||'').replace(/\n/g,'<br>')}</div></div>
+        <div class="dc-job"><div class="row"><b>Job # :</b> <span>${j.id}</span></div><div class="row"><b>Delivery Note :</b> <span>${dcForm.delivery_note||''}</span></div><div class="row"><b>Date :</b> <span>${dcForm.dc_date}</span></div><div class="row"><b>PO. No :</b> <span>${dcForm.po_no||''}</span></div><div class="row"><b>Date :</b> <span>${dcForm.po_date||''}</span></div></div>
+      </div>
+      <div class="dc-copy-label">${copyLabel}</div>
+      <div class="dc-subhead">Please receive the undermentioned material as per your order</div>
+      <table class="dc-tbl"><thead><tr><th style="width:6%">Sr.No</th><th style="width:10%">Width<br><small>(mm/inch/feet)</small></th><th style="width:10%">Height<br><small>(mm/inch/feet)</small></th><th style="width:8%">Quantity<br><small>(nos)</small></th><th style="width:8%">Sq.Ft.</th><th>Description</th></tr></thead>
+      <tbody>${dcItems.map(x=>`<tr><td>${x.sr}</td><td>${x.width?x.width+(x.size_unit?' '+x.size_unit:''):''}</td><td>${x.height||''}</td><td>${x.qty}</td><td>${x.sqft||'—'}</td><td class="desc">${x.description}</td></tr>`).join('')}
+      ${Array(Math.max(0,10-dcItems.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+      </tbody></table>
+      <div class="dc-foot">
+        <div class="dc-foot-l">
+          <div class="fl-row"><b>Prepared By:</b> ${dcForm.prepared_by||''}</div>
+          <div class="fl-row"><b>Delivered By:</b> ${dcForm.delivered_by||''}</div>
+        </div>
+        <div class="dc-foot-r">
+          <div class="fr-row">Received the above mentioned Goods in good order and condition.</div>
+          <div class="fr-row"><b>Receiver's Name:</b> ________________</div>
+          <div class="fr-row"><b>Receiver's Signature with Seal:</b> ________________</div>
+        </div>
+      </div>
+      <div class="dc-cheque">Cheque should be drawn under <strong>${firm.name||''}</strong></div>
+      <div class="dc-num"><strong>DC No: ${dcNo}</strong></div>
+      </div></div>`;
+    const html=`<html><head><title>Delivery Challan ${dcNo}</title><style>
+      @page{size:A4;margin:0}
+      *{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif}
+      body{color:#222;font-size:11px}
+      .dc-copy{page-break-after:always;padding:10mm;height:297mm;width:210mm;position:relative}
+      .dc-copy:last-child{page-break-after:auto}
+      .dc-box{border:2px solid #222;padding:8px;height:100%;display:flex;flex-direction:column}
+      .dc-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #222;padding-bottom:6px;margin-bottom:4px}
+      .dc-hdr-l{display:flex;align-items:center;gap:10px}
+      .dc-logo{max-width:60px;max-height:60px}
+      .dc-firm{font-size:24px;font-weight:900;letter-spacing:1px}
+      .dc-hdr-r{text-align:right;font-size:10px;line-height:1.4}
+      .dc-addr{max-width:300px}
+      .dc-gst{margin-top:4px;font-weight:700}
+      .dc-meta{display:flex;gap:10px;padding:4px 0;border-bottom:1px solid #222}
+      .dc-to{flex:1;padding-right:8px;border-right:1px solid #222}
+      .dc-label{color:#555;font-size:11px;margin-bottom:2px}
+      .dc-to-box{min-height:80px;font-size:11px;line-height:1.5;white-space:pre-line}
+      .dc-job{flex:1;padding-left:8px;font-size:11px}
+      .dc-job .row{padding:3px 0;border-bottom:1px solid #ccc}
+      .dc-job .row b{display:inline-block;min-width:95px}
+      .dc-copy-label{position:absolute;top:60px;right:20mm;font-size:12px;font-weight:700;color:#c00;border:1px solid #c00;padding:3px 8px;transform:rotate(0deg);background:#fff}
+      .dc-subhead{font-size:10.5px;text-align:center;padding:3px;border-bottom:1px solid #222;font-style:italic}
+      .dc-tbl{width:100%;border-collapse:collapse;flex:1}
+      .dc-tbl th,.dc-tbl td{border:1px solid #222;padding:3px 5px;font-size:10px;text-align:center;vertical-align:middle}
+      .dc-tbl th{background:#f0f0f0;font-weight:700}
+      .dc-tbl td.desc{text-align:left;font-size:10.5px}
+      .dc-tbl tbody tr{height:20px}
+      .dc-foot{display:flex;border-top:1px solid #222}
+      .dc-foot-l,.dc-foot-r{flex:1;padding:4px 8px;font-size:10px}
+      .dc-foot-l{border-right:1px solid #222}
+      .fl-row,.fr-row{padding:3px 0;border-bottom:1px dashed #999}
+      .dc-cheque{background:#e0e0e0;padding:4px;text-align:center;font-size:10.5px;border-top:1px solid #222}
+      .dc-num{text-align:right;font-size:10px;padding:2px 6px;color:#555}
+    </style></head><body>${copyHTML('ORIGINAL - CUSTOMER COPY')}${copyHTML('DUPLICATE - OFFICE COPY')}${copyHTML('TRIPLICATE - ACCOUNTS COPY')}</body></html>`;
+    const w=window.open('','_blank');w.document.write(html);w.document.close();setTimeout(()=>w.print(),500);
+    setDcMode(null);
+  };
   // Role-based access control
   const role=user?.role||'admin';
   const prodRoles=['production','printing','fabrication','designer','dispatch'];
@@ -1155,6 +1266,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
               setCopyBatch({batchId:b.id,bi:bi+1,items:(b.items||[]).map(it=>({...it,selected:true}))});
             }}>📋</button>
             <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Delete batch" onClick={()=>deleteBatch(b.id)}>🗑️</button>
+            <button style={{background:"#10b98122",border:"1px solid #10b981",borderRadius:4,color:"#10b981",cursor:"pointer",fontSize:8,padding:"1px 6px",fontWeight:700}} title="Generate Delivery Challan" onClick={()=>openDCForm(b)}>🚚 DC</button>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:3}}>
             {b.bill_no?<span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
@@ -1503,6 +1615,46 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         }} style={{fontSize:11}}>🖨️ Export {pdfMode==='estimate'?'Estimate':'Production Sheet'}</button>
       </div>
     </div>}
+
+    {/* DELIVERY CHALLAN FORM MODAL */}
+    {dcMode&&(()=>{const batch=(j.batches||[]).find(b=>b.id===dcMode);if(!batch)return null;const firm=firms.find(f=>f.code===(j.firm||'JXT'))||{};
+      return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:20,overflowY:"auto"}} onClick={()=>setDcMode(null)}>
+        <div style={{background:"#0c1017",border:"1px solid #10b981",borderRadius:10,width:"100%",maxWidth:700,padding:16,maxHeight:"calc(100vh - 40px)",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <h3 style={{fontSize:13,fontWeight:700,color:"#10b981"}}>🚚 Generate Delivery Challan — Batch: {batch.note||batch.id}</h3>
+            <button className="b bs" onClick={()=>setDcMode(null)}>✕</button>
+          </div>
+          <div style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:10,marginBottom:10,fontSize:10}}>
+            <p style={{color:"#64748b",fontSize:9,marginBottom:4}}>ISSUING FIRM:</p>
+            <p style={{fontWeight:800,color:"#e3a008",fontSize:13}}>{firm.name}</p>
+            <p style={{color:"#8b949e",fontSize:9}}>{firm.address}</p>
+            <p style={{color:"#64748b",fontSize:9,marginTop:2}}>GSTIN: {firm.gst}</p>
+          </div>
+          <div className="fg f2" style={{gap:6}}>
+            <div style={{gridColumn:"span 2"}}><label style={{fontSize:8,color:"#64748b"}}>To (Customer Name / Billing Name) *</label><input className="in" value={dcForm.to_name} onChange={e=>setDcForm(p=>({...p,to_name:e.target.value}))} style={{fontSize:10}}/></div>
+            <div style={{gridColumn:"span 2"}}><label style={{fontSize:8,color:"#64748b"}}>Delivery Address</label><textarea className="in" value={dcForm.to_address} onChange={e=>setDcForm(p=>({...p,to_address:e.target.value}))} style={{fontSize:10,minHeight:55,resize:"vertical",fontFamily:"inherit",lineHeight:1.4,width:"100%"}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>Job #</label><input className="in mn" value={j.id} readOnly style={{fontSize:10,color:"#e3a008"}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>Delivery Note</label><input className="in" value={dcForm.delivery_note} onChange={e=>setDcForm(p=>({...p,delivery_note:e.target.value}))} style={{fontSize:10}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>Date</label><input className="in" type="date" value={dcForm.dc_date} onChange={e=>setDcForm(p=>({...p,dc_date:e.target.value}))} style={{fontSize:10}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>PO. No</label><input className="in mn" value={dcForm.po_no} onChange={e=>setDcForm(p=>({...p,po_no:e.target.value}))} style={{fontSize:10}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>PO Date</label><input className="in" type="date" value={dcForm.po_date} onChange={e=>setDcForm(p=>({...p,po_date:e.target.value}))} style={{fontSize:10}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>Prepared By</label><input className="in" value={dcForm.prepared_by} onChange={e=>setDcForm(p=>({...p,prepared_by:e.target.value}))} style={{fontSize:10}}/></div>
+            <div><label style={{fontSize:8,color:"#64748b"}}>Delivered By</label><input className="in" value={dcForm.delivered_by} onChange={e=>setDcForm(p=>({...p,delivered_by:e.target.value}))} placeholder="Delivery person name" style={{fontSize:10}}/></div>
+          </div>
+          <div style={{marginTop:10,padding:8,background:"#060810",border:"1px solid #1a2030",borderRadius:6}}>
+            <p style={{fontSize:9,color:"#10b981",fontWeight:700,marginBottom:4}}>ITEMS TO BE INCLUDED ({(batch.items||[]).length})</p>
+            <div style={{fontSize:9,color:"#8b949e",maxHeight:120,overflowY:"auto"}}>
+              {(batch.items||[]).map((it,i)=><div key={it.id} style={{padding:"2px 0",borderBottom:"1px solid #1a2030"}}>{i+1}. {it.internal_name||it.client_name} {it.width&&it.height?'— '+it.width+'×'+it.height+(it.size_unit||''):''} × {it.qty}</div>)}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end"}}>
+            <button className="b" onClick={()=>setDcMode(null)}>Cancel</button>
+            <button className="b bp" onClick={()=>saveAndPrintDC(batch)} style={{background:"#10b981",borderColor:"#10b981",fontSize:11,padding:"6px 16px"}}>🖨️ Save & Print DC (3 Copies)</button>
+          </div>
+        </div>
+      </div>;
+    })()}
+
   </div>;
 }
 
