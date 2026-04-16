@@ -1041,6 +1041,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   // ─── DELIVERY CHALLAN GENERATOR ──
   const [dcMode,setDcMode]=useState(null); // batchId when DC modal is open
   const [dcForm,setDcForm]=useState({to_name:'',to_address:'',delivery_note:'',po_no:'',po_date:'',dc_date:td(),prepared_by:user?.name||'',delivered_by:''});
+  const [dcSelectedItems,setDcSelectedItems]=useState(null); // null = all selected; Set of item ids when customised
   const openDCForm=(batch)=>{
     // Pre-fill from job + batch data
     setDcForm({
@@ -1053,6 +1054,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       prepared_by: user?.name || '',
       delivered_by: ''
     });
+    setDcSelectedItems(null); // reset to all items selected
     setDcMode(batch.id);
   };
   const generateDCNumber=async(firmCode)=>{
@@ -1071,7 +1073,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const firmCode=j.firm||'JXT';
     const firm=firms.find(f=>f.code===firmCode)||{};
     const {dcNo,fy}=await generateDCNumber(firmCode);
-    const dcItems=(batch.items||[]).map((it,i)=>({
+    const allBatchItems=(batch.items||[]);
+    const selectedSet=dcSelectedItems; // null=all, Set=specific
+    const filteredItems=selectedSet===null ? allBatchItems : allBatchItems.filter(it=>selectedSet.has(it.id));
+    const dcItems=filteredItems.map((it,i)=>({
       sr:i+1, width:it.width||'', height:it.height||'', size_unit:it.size_unit||'',
       qty:it.qty||0, sqft:it.sqft||0, description:it.internal_name||it.client_name||'—', media:it.media||''
     }));
@@ -1957,14 +1962,52 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
             <div><label style={{fontSize:8,color:"#64748b"}}>Delivered By</label><input className="in" value={dcForm.delivered_by} onChange={e=>setDcForm(p=>({...p,delivered_by:e.target.value}))} placeholder="Delivery person name" style={{fontSize:10}}/></div>
           </div>
           <div style={{marginTop:10,padding:8,background:"#060810",border:"1px solid #1a2030",borderRadius:6}}>
-            <p style={{fontSize:9,color:"#10b981",fontWeight:700,marginBottom:4}}>ITEMS TO BE INCLUDED ({(batch.items||[]).length})</p>
-            <div style={{fontSize:9,color:"#8b949e",maxHeight:120,overflowY:"auto"}}>
-              {(batch.items||[]).map((it,i)=><div key={it.id} style={{padding:"2px 0",borderBottom:"1px solid #1a2030"}}>{i+1}. {it.internal_name||it.client_name} {it.width&&it.height?'— '+it.width+'×'+it.height+(it.size_unit||''):''} × {it.qty}</div>)}
-            </div>
+            {(()=>{
+              const allItems=batch.items||[];
+              const selSet=dcSelectedItems===null?new Set(allItems.map(x=>x.id)):dcSelectedItems;
+              const selCount=dcSelectedItems===null?allItems.length:dcSelectedItems.size;
+              const toggleItem=(id)=>{
+                const current=dcSelectedItems===null?new Set(allItems.map(x=>x.id)):new Set(dcSelectedItems);
+                if(current.has(id)) current.delete(id); else current.add(id);
+                setDcSelectedItems(current.size===allItems.length?null:new Set(current));
+              };
+              const toggleAll=()=>setDcSelectedItems(dcSelectedItems===null?new Set():null);
+              return <>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                  <p style={{fontSize:9,color:'#10b981',fontWeight:700}}>
+                    ITEMS TO BE INCLUDED
+                    <span style={{marginLeft:6,color:selCount<allItems.length?'#f59e0b':'#10b981'}}>
+                      ({selCount} of {allItems.length} selected{selCount<allItems.length?' — PARTIAL DC':''})
+                    </span>
+                  </p>
+                  <button onClick={toggleAll} style={{fontSize:8,padding:'2px 8px',background:'transparent',border:'1px solid #1a2030',borderRadius:4,color:'#64748b',cursor:'pointer'}}>
+                    {dcSelectedItems===null?'Deselect All':'Select All'}
+                  </button>
+                </div>
+                <div style={{fontSize:9,color:'#8b949e',maxHeight:160,overflowY:'auto'}}>
+                  {allItems.map((it,i)=>{
+                    const checked=selSet.has(it.id);
+                    return <div key={it.id}
+                      onClick={()=>toggleItem(it.id)}
+                      style={{display:'flex',alignItems:'center',gap:8,padding:'5px 6px',borderBottom:'1px solid #1a2030',cursor:'pointer',background:checked?'rgba(16,185,129,0.05)':'transparent',borderRadius:3,transition:'background 0.1s'}}>
+                      <div style={{width:14,height:14,borderRadius:3,border:'1.5px solid '+(checked?'#10b981':'#475569'),background:checked?'#10b981':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                        {checked&&<span style={{color:'#000',fontSize:9,fontWeight:900,lineHeight:1}}>✓</span>}
+                      </div>
+                      <span style={{flex:1,color:checked?'#e2e8f0':'#64748b',textDecoration:checked?'none':'line-through'}}>
+                        {i+1}. {it.internal_name||it.client_name}
+                        {it.width&&it.height?' — '+it.width+'×'+it.height+(it.size_unit?''+it.size_unit:''):''}
+                        <span style={{color:'#64748b',marginLeft:4}}>× {it.qty}</span>
+                      </span>
+                    </div>;
+                  })}
+                </div>
+                {selCount===0&&<div style={{fontSize:9,color:'#f47067',marginTop:6,padding:'4px 6px',background:'rgba(244,112,103,0.08)',borderRadius:4}}>⚠️ No items selected — select at least 1 item to generate DC</div>}
+              </>;
+            })()}
           </div>
           <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end"}}>
             <button className="b" onClick={()=>setDcMode(null)}>Cancel</button>
-            <button className="b bp" onClick={()=>saveAndPrintDC(batch)} style={{background:"#10b981",borderColor:"#10b981",fontSize:11,padding:"6px 16px"}}>🖨️ Save & Print DC (3 Copies)</button>
+            {(()=>{const cnt=dcSelectedItems===null?(batch.items||[]).length:(dcSelectedItems?.size||0);return <button className="b bp" onClick={()=>{if(cnt===0){show('Select at least 1 item',false);return;}saveAndPrintDC(batch);}} style={{background:cnt===0?'#374151':'#10b981',borderColor:cnt===0?'#374151':'#10b981',fontSize:11,padding:'6px 16px',opacity:cnt===0?0.6:1}}>🖨️ Save & Print DC ({cnt} item{cnt!==1?'s':''}, 3 Copies)</button>;})()}
           </div>
         </div>
       </div>;
