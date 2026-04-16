@@ -686,6 +686,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"]},
     {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
     {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
+    {id:"appr",l:"Approvals",e:"🔔",roles:["admin"],users:["JIGAR"]},
   ];
   const nav=allNav.filter(n=>{
     if(!n.roles.includes(user.role))return false;
@@ -703,7 +704,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -740,6 +741,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
+          {pg==="appr"&&<ApprovalsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
         </div>
       </main>
 
@@ -2497,6 +2499,319 @@ function StockPage({stock,grn,pl,fl}){const rows=Object.entries(stock).filter(([
 }
 
 // REMINDERS
+
+// ══════════════════════════════════════════════════════════
+// APPROVALS PAGE — Phase B
+// ══════════════════════════════════════════════════════════
+const WA_NUMBERS = {
+  'Amol':            '918433727608',
+  'Murli Shetty':    '918691069121',
+  'Harish':          '919326282238',
+  'Priyanka':        '917400214057',
+  'Jigar':           '919076270111',
+  'Printing Dept':   '919326282238', // Harish handles Printing Dept
+  'Shreya':          '917304008506',
+};
+const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
+const AISENSY_API_KEY = ''; // Paste AiSensy API key here when ready
+
+// Send via AiSensy Business API OR fallback to wa.me pre-fill
+async function sendWhatsApp(toNumber, message, campaign='iprint_notification') {
+  if (AISENSY_API_KEY) {
+    try {
+      await fetch('https://backend.aisensy.com/campaign/t1/api/v2', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          apiKey: AISENSY_API_KEY,
+          campaignName: campaign,
+          destination: toNumber,
+          userName: 'iPrint India',
+          templateParams: [message],
+          source: 'iprint-erp',
+          media: {},
+          buttons: [],
+          carouselCards: [],
+          location: {}
+        })
+      });
+      return true;
+    } catch(e) { console.error('AiSensy error:', e); }
+  }
+  // Fallback: wa.me pre-fill
+  window.open('https://wa.me/' + toNumber + '?text=' + encodeURIComponent(message), '_blank');
+  return false;
+}
+
+function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
+  const [filter, setFilter] = React.useState('Pending Approval');
+  const [rejecting, setRejecting] = React.useState(null); // pr id being rejected
+  const [rejReason, setRejReason] = React.useState('');
+  const [processing, setProcessing] = React.useState(null); // pr id being processed
+  const [waButtons, setWaButtons] = React.useState({}); // {prId: true} = show WA buttons
+
+  const STATUS_FILTERS = ['Pending Approval','Approved','Rejected','All'];
+  const stCol = {
+    'Pending Approval': {bg:'#e3a00820',c:'#e3a008'},
+    'Approved':         {bg:'#4ade8020',c:'#4ade80'},
+    'Rejected':         {bg:'#f4706720',c:'#f47067'},
+    'PO Generated':     {bg:'#06b6d420',c:'#06b6d4'},
+    'PO Sent':          {bg:'#3b82f620',c:'#3b82f6'},
+    'Completed':        {bg:'#8b5cf620',c:'#8b5cf6'},
+    'Cancelled':        {bg:'#64748b20',c:'#64748b'},
+  };
+
+  const filtered = React.useMemo(() => {
+    const list = filter === 'All' ? prs : prs.filter(p => p.status === filter);
+    return [...list].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
+  }, [prs, filter]);
+
+  const pendingCount = (prs||[]).filter(p => p.status === 'Pending Approval').length;
+
+  const buildApproveMsg = (pr) => {
+    const items = (pr.items||[]).map(x => `${x.product}${x.size?' ('+x.size+')':''} x${x.qty}`).join(', ');
+    return `✅ *PR Approved — ${pr.pr_no}*\n\nYour Purchase Request has been approved by Jigar.\n\n*Vendor:* ${pr.vendor_name}\n*Items:* ${items}\n*Total:* ₹${(+pr.total||0).toFixed(0)}\n*Urgency:* ${pr.urgency}\n\nShreya will generate the PO shortly. 📄`;
+  };
+
+  const buildVendorMsg = (pr) => {
+    const items = (pr.items||[]).map(x => `• ${x.product}${x.size?' ('+x.size+')':''} — Qty: ${x.qty} ${x.per} @ ₹${x.rate}`).join('\n');
+    return `Dear *${pr.vendor_name}*,\n\nThis is iPrint India. We are raising a Purchase Order for the following:\n\n${items}\n\n*PR Ref:* ${pr.pr_no}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n${pr.expected_delivery?'*Expected Delivery:* '+pr.expected_delivery+'\n':''}\nOur team will send you the formal PO document shortly. Please confirm availability.\n\nThank you 🙏\n*iPrint India*`;
+  };
+
+  const buildGroupMsg = (pr, action) => {
+    if (action === 'approved') {
+      const items = (pr.items||[]).map(x => `${x.product} x${x.qty}`).join(', ');
+      return `🛒 *PR Approved*\n\n*${pr.pr_no}* | ${pr.firm_code}\n*Vendor:* ${pr.vendor_name}\n*Items:* ${items}\n*Amount:* ₹${(+pr.total||0).toFixed(0)}\n*Requested by:* ${pr.created_by}\n*Urgency:* ${pr.urgency}\n\nApproved by Jigar ✅`;
+    } else {
+      return `❌ *PR Rejected*\n\n*${pr.pr_no}* | ${pr.firm_code}\n*Vendor:* ${pr.vendor_name}\n*Requested by:* ${pr.created_by}\n*Reason:* ${pr.rejection_reason||'See ERP for details'}`;
+    }
+  };
+
+  const buildRejectMsg = (pr) => {
+    return `❌ *PR Rejected — ${pr.pr_no}*\n\nYour Purchase Request has been rejected by Jigar.\n\n*Vendor:* ${pr.vendor_name}\n*Reason:* ${pr.rejection_reason||'Please check with Jigar for details'}\n\nPlease revise and resubmit from the ERP. You can edit the PR and resubmit for approval.`;
+  };
+
+  const approvePR = async (pr) => {
+    setProcessing(pr.id);
+    const updates = {status:'Approved', approved_by:'Jigar', approved_at: new Date().toISOString()};
+    const {error} = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
+    if (error) { show('⚠️ Update failed: ' + error.message, false); setProcessing(null); return; }
+    const updated = {...pr, ...updates};
+    setPrs(p => p.map(x => x.id === pr.id ? updated : x));
+    setProcessing(null);
+    setWaButtons(p => ({...p, [pr.id]: true}));
+    show('✅ ' + pr.pr_no + ' approved! Send WhatsApp notifications below.');
+  };
+
+  const rejectPR = async (pr) => {
+    if (!rejReason.trim()) { show('Enter rejection reason', false); return; }
+    setProcessing(pr.id);
+    const updates = {status:'Rejected', rejected_by:'Jigar', rejected_at: new Date().toISOString(), rejection_reason: rejReason.trim()};
+    const {error} = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
+    if (error) { show('⚠️ Update failed: ' + error.message, false); setProcessing(null); return; }
+    const updated = {...pr, ...updates};
+    setPrs(p => p.map(x => x.id === pr.id ? updated : x));
+    setProcessing(null);
+    setRejecting(null);
+    setRejReason('');
+    setWaButtons(p => ({...p, [pr.id]: true}));
+    show('PR rejected. Send WhatsApp notification to requestor.');
+  };
+
+  const job = (jobId) => (jobs||[]).find(j => j.id === jobId);
+  const firmColor = (code) => ({JPP:'#e3a008',JXT:'#3b82f6',VHD:'#8b5cf6'}[code]||'#64748b');
+
+  return (
+    <div style={{padding:12, overflowY:'auto', height:'100%'}}>
+      {/* Header */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8}}>
+        <div>
+          <h2 style={{fontSize:14, fontWeight:800, color:'#f59e0b', margin:0}}>🔔 Purchase Approvals</h2>
+          <p style={{fontSize:10, color:'#64748b', margin:'2px 0 0'}}>
+            {pendingCount > 0
+              ? <span style={{color:'#e3a008', fontWeight:700}}>{pendingCount} pending your approval</span>
+              : <span style={{color:'#4ade80'}}>✓ All clear — no pending approvals</span>}
+          </p>
+        </div>
+        <div style={{display:'flex', gap:4}}>
+          {STATUS_FILTERS.map(f => (
+            <button key={f} className={`b bs ${filter===f?'bp':''}`}
+              onClick={() => setFilter(f)}
+              style={{fontSize:9, padding:'3px 8px',
+                ...(filter===f && f==='Pending Approval' ? {background:'#e3a00820',borderColor:'#e3a008',color:'#e3a008'} : {})}}>
+              {f}{f==='Pending Approval' && pendingCount > 0 ? ` (${pendingCount})` : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* AiSensy API Key notice */}
+      {!AISENSY_API_KEY && (
+        <div style={{background:'#e3a00810', border:'1px solid #e3a00833', borderRadius:6, padding:'6px 10px', marginBottom:10, fontSize:9, color:'#e3a008'}}>
+          ⚡ <strong>WhatsApp in pre-fill mode</strong> — Paste your AiSensy API key in the code (AISENSY_API_KEY) to enable fully automatic sending. Until then, clicking Send opens WhatsApp Web pre-filled.
+        </div>
+      )}
+
+      {/* PR Cards */}
+      {filtered.length === 0 && (
+        <div style={{textAlign:'center', padding:40, color:'#64748b', fontSize:11}}>
+          {filter === 'Pending Approval' ? '🎉 No pending approvals!' : `No ${filter.toLowerCase()} PRs`}
+        </div>
+      )}
+
+      <div style={{display:'flex', flexDirection:'column', gap:8}}>
+        {filtered.map(pr => {
+          const sc = stCol[pr.status] || {bg:'#64748b20', c:'#64748b'};
+          const rItems = Array.isArray(pr.items) ? pr.items : [];
+          const jb = job(pr.job_id);
+          const isPending = pr.status === 'Pending Approval';
+          const isApproved = pr.status === 'Approved';
+          const isRejected = pr.status === 'Rejected';
+          const showWA = waButtons[pr.id] || isApproved || isRejected;
+          const requestorPhone = WA_NUMBERS[pr.created_by];
+
+          return (
+            <div key={pr.id} style={{background:'#0a0f1a', border:`1px solid ${isPending?'#e3a00844':'#1a2030'}`, borderRadius:8, padding:12,
+              boxShadow: isPending ? '0 0 12px #e3a00811' : 'none'}}>
+
+              {/* PR Header row */}
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8, flexWrap:'wrap', gap:6}}>
+                <div style={{display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                  <span style={{fontWeight:800, color:'#f59e0b', fontSize:12}}>{pr.pr_no}</span>
+                  <span style={{padding:'1px 6px', borderRadius:3, fontSize:7, fontWeight:700, background:sc.bg, color:sc.c}}>{pr.status}</span>
+                  {pr.urgency==='Urgent' && <span style={{padding:'1px 5px', borderRadius:3, fontSize:7, fontWeight:700, background:'#f4706720', color:'#f47067'}}>🔴 URGENT</span>}
+                  <span style={{padding:'1px 6px', borderRadius:3, fontSize:8, fontWeight:700, background:firmColor(pr.firm_code)+'20', color:firmColor(pr.firm_code)}}>{pr.firm_code}</span>
+                  <span style={{fontSize:9, color:'#64748b'}}>{pr.request_type}</span>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontWeight:800, color:'#e3a008', fontSize:13}}>₹{(+pr.total||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</div>
+                  <div style={{fontSize:8, color:'#64748b'}}>GST incl: ₹{(+pr.gst_total||0).toFixed(0)}</div>
+                </div>
+              </div>
+
+              {/* Meta row */}
+              <div style={{display:'flex', gap:12, flexWrap:'wrap', marginBottom:8, fontSize:9}}>
+                <span>🏢 <strong style={{color:'#c9d1d9'}}>{pr.vendor_name}</strong>{pr.vendor_gstin&&<span style={{color:'#64748b'}}> · {pr.vendor_gstin}</span>}</span>
+                <span>👤 <span style={{color:'#94a3b8'}}>by {pr.created_by}</span></span>
+                {jb && <span>📋 <span style={{color:'#64748b'}}>Job {pr.job_id} · {jb.client_name}</span></span>}
+                {pr.expected_delivery && <span>📅 <span style={{color:'#06b6d4'}}>By {pr.expected_delivery}</span></span>}
+                {pr.payment_terms && <span>💳 <span style={{color:'#64748b'}}>{pr.payment_terms}</span></span>}
+                <span style={{color:'#64748b', fontSize:8}}>{new Date(pr.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+              </div>
+
+              {/* Items */}
+              <div style={{background:'#060810', borderRadius:5, padding:'6px 8px', marginBottom:8}}>
+                <table style={{width:'100%'}}>
+                  <thead><tr>
+                    <th style={{fontSize:7, color:'#64748b', textAlign:'left', paddingBottom:3}}>Item</th>
+                    <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>Qty</th>
+                    <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>Rate</th>
+                    <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>GST</th>
+                    <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>Amount</th>
+                  </tr></thead>
+                  <tbody>{rItems.map((x,xi) => (
+                    <tr key={xi}>
+                      <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8}}>{x.product}{x.size ? <span style={{color:'#64748b'}}> ({x.size})</span> : ''}</td>
+                      <td style={{fontSize:9, color:'#94a3b8', textAlign:'right'}}>{x.qty} {x.per}</td>
+                      <td style={{fontSize:9, color:'#94a3b8', textAlign:'right'}}>₹{x.rate}</td>
+                      <td style={{fontSize:9, color:'#64748b', textAlign:'right'}}>{x.gst_pct}%</td>
+                      <td style={{fontSize:9, color:'#e3a008', fontWeight:700, textAlign:'right'}}>₹{((+x.qty||0)*(+x.rate||0)).toFixed(0)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                {(+pr.transport>0) && <div style={{textAlign:'right', fontSize:8, color:'#64748b', marginTop:3}}>+ Transport ₹{pr.transport}</div>}
+              </div>
+
+              {pr.notes && <div style={{fontSize:9, color:'#64748b', marginBottom:8, fontStyle:'italic'}}>📝 {pr.notes}</div>}
+              {pr.rejection_reason && <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, padding:'4px 8px', fontSize:9, color:'#f47067', marginBottom:8}}>❌ Rejected: {pr.rejection_reason}</div>}
+
+              {/* Action buttons — Pending Approval */}
+              {isPending && rejecting !== pr.id && (
+                <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
+                  <button className="b bp" onClick={() => approvePR(pr)} disabled={processing===pr.id}
+                    style={{fontSize:10, padding:'5px 16px', background:'#4ade80', borderColor:'#4ade80', color:'#000', fontWeight:700}}>
+                    {processing===pr.id ? '...' : '✅ Approve'}
+                  </button>
+                  <button className="b" onClick={() => {setRejecting(pr.id); setRejReason('');}}
+                    style={{fontSize:10, padding:'5px 14px', borderColor:'#f47067', color:'#f47067'}}>
+                    ❌ Reject
+                  </button>
+                  <span style={{flex:1}}/>
+                  <span style={{fontSize:8, color:'#64748b'}}>Requested by {pr.created_by} · ₹{(+pr.total||0).toFixed(0)}</span>
+                </div>
+              )}
+
+              {/* Rejection reason input */}
+              {isPending && rejecting === pr.id && (
+                <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:6, padding:8}}>
+                  <p style={{fontSize:9, color:'#f47067', fontWeight:700, marginBottom:6}}>❌ Rejection Reason</p>
+                  <input className="in" value={rejReason} onChange={e=>setRejReason(e.target.value)}
+                    placeholder="e.g. Rate too high — get 2 more quotes, Wrong vendor for this type of work..."
+                    style={{fontSize:9, padding:'4px 8px', width:'100%', marginBottom:6, borderColor:'#f4706766'}}
+                    onKeyDown={e => e.key==='Enter' && rejectPR(pr)}
+                    autoFocus/>
+                  <div style={{display:'flex', gap:4}}>
+                    <button className="b bp" onClick={() => rejectPR(pr)} disabled={processing===pr.id}
+                      style={{fontSize:10, padding:'4px 14px', background:'#f47067', borderColor:'#f47067', color:'#fff', fontWeight:700}}>
+                      {processing===pr.id ? '...' : '❌ Confirm Reject'}
+                    </button>
+                    <button className="b bs" onClick={() => {setRejecting(null); setRejReason('');}}
+                      style={{fontSize:9, padding:'4px 10px'}}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* WhatsApp buttons — shown after action OR for already approved/rejected */}
+              {showWA && (
+                <div style={{marginTop:8, padding:'8px 10px', background:'#0d2818', border:'1px solid #25d36633', borderRadius:6}}>
+                  <p style={{fontSize:8, color:'#25d366', fontWeight:700, marginBottom:6}}>📱 WhatsApp Notifications {AISENSY_API_KEY ? '(Auto-send via AiSensy)' : '(Click to open pre-filled)'}</p>
+                  <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
+                    {/* Notify Requestor */}
+                    {requestorPhone && (
+                      <button className="b" onClick={() => sendWhatsApp(requestorPhone,
+                        isApproved ? buildApproveMsg(pr) : buildRejectMsg({...pr}),
+                        isApproved ? 'iprint_pr_approved' : 'iprint_pr_rejected')}
+                        style={{fontSize:9, padding:'4px 10px', background:'#25d36620', borderColor:'#25d36644', color:'#25d366'}}>
+                        📱 Notify {pr.created_by}
+                      </button>
+                    )}
+                    {/* Notify Vendor — only on approval */}
+                    {isApproved && pr.vendor_phone && (
+                      <button className="b" onClick={() => sendWhatsApp(pr.vendor_phone.replace(/\D/g,'').replace(/^0/,'91').replace(/^(?!91)/,'91'),
+                        buildVendorMsg(pr), 'iprint_vendor_notify')}
+                        style={{fontSize:9, padding:'4px 10px', background:'#25d36620', borderColor:'#25d36644', color:'#25d366'}}>
+                        📱 Message Vendor
+                      </button>
+                    )}
+                    {/* iPrint Group */}
+                    <button className="b" onClick={() => {
+                        const msg = buildGroupMsg(pr, isApproved ? 'approved' : 'rejected');
+                        navigator.clipboard?.writeText(msg).catch(()=>{});
+                        window.open(WA_GROUP, '_blank');
+                        show('Message copied! Paste it in the group 📋');
+                      }}
+                      style={{fontSize:9, padding:'4px 10px', background:'#25d36620', borderColor:'#25d36644', color:'#25d366'}}>
+                      👥 Post to iPrint Group
+                    </button>
+                    {/* Notify Shreya for PO — only on approval */}
+                    {isApproved && (
+                      <button className="b" onClick={() => sendWhatsApp(WA_NUMBERS['Shreya'],
+                        `📄 *PO Required — ${pr.pr_no}*\n\nPlease generate a PO for:\n*Vendor:* ${pr.vendor_name}\n*Amount:* ₹${(+pr.total||0).toFixed(0)}\n*Firm:* ${pr.firm_code}\n*Payment Terms:* ${pr.payment_terms||'TBD'}\n\nApproved by Jigar ✅`, 'iprint_po_request')}
+                        style={{fontSize:9, padding:'4px 10px', background:'#3b82f620', borderColor:'#3b82f644', color:'#3b82f6'}}>
+                        📄 Request PO from Shreya
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RemPage({jobs,osItems,setOsItems,items,reqs,setReqs}){const rem=jobs.filter(j=>!j.po_number).map(j=>({...j,d:Math.max(0,Math.floor((new Date()-new Date(j.created_at))/864e5))})).sort((a,b)=>b.d-a.d);
   const pendingOs=(osItems||[]).filter(o=>o.po_status==='Pending');
   const pendingReqs=(reqs||[]).filter(r=>r.po_status==='Pending');
