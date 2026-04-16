@@ -188,6 +188,7 @@ function MainApp({user,onLogout,masterData}){
   const [salesActs,setSalesActs]=useState([]);
   const [osItems,setOsItems]=useState([]);
   const [reqs,setReqs]=useState([]);
+  const [prs,setPrs]=useState([]);
   const [pg,setPgRaw]=useState(()=>{
     try{return localStorage.getItem('erp_pg')||'dash';}catch(e){return 'dash';}
   });
@@ -238,13 +239,14 @@ function MainApp({user,onLogout,masterData}){
       
       // Phase 2: Load batches + line items for current FY jobs
       const curJobIds=j.map(x=>x.id);
-      const [b,li,osi,rq] = await Promise.all([
+      const [b,li,osi,rq,pr] = await Promise.all([
         fetchAll('batches','id'),
         fetchAll('line_items','id'),
         fetchAll('outsource_items','id'),
         fetchAll('requisitions','id'),
+        fetchAll('purchase_requests','created_at'),
       ]);
-      setBatches(b); setItems(li); setOsItems(osi); setReqs(rq);
+      setBatches(b); setItems(li); setOsItems(osi); setReqs(rq); setPrs(pr);
       console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',osi.length,'outsource',rq.length,'requisitions');
 
       // Phase 3: Load older FY jobs + logs + sales in background
@@ -741,7 +743,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs}/>:modal.x}</div></div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -932,7 +934,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs}){
   const ALL_ST=['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Designing','Printing','Fabrication','Installation','Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received','No Bill','Cancelled'];
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
@@ -1202,81 +1204,301 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         </div>;
       })}
     </div>
-    {/* ── REQUISITIONS ── */}
+    {/* ── PURCHASE REQUESTS 2.0 ── */}
     {(()=>{
-      const jobReqs=(reqs||[]).filter(r=>r.job_id===j.id);
-      const [showReqForm,setShowReqForm]=React.useState(false);
-      const [rf,setRf]=React.useState({vendor:'',items:[{product:'',size:'',qty:1,rate:0,per:'Sheet'}],transport:0,notes:''});
-      const REQ_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter'];
-      const addReqLine=()=>setRf(p=>({...p,items:[...p.items,{product:'',size:'',qty:1,rate:0,per:'Sheet'}]}));
-      const updReqLine=(i,k,v)=>setRf(p=>({...p,items:p.items.map((x,xi)=>xi===i?{...x,[k]:v}:x)}));
-      const delReqLine=(i)=>setRf(p=>({...p,items:p.items.filter((_,xi)=>xi!==i)}));
-      const nextReqNo=()=>{const nums=(reqs||[]).map(r=>+r.req_no?.replace(/\D/g,'')||0);return String(Math.max(0,...nums)+1);};
-      const saveReq=async()=>{
-        if(!rf.vendor){show('Enter vendor name',false);return;}
-        if(!rf.items.some(x=>x.product)){show('Add at least one item',false);return;}
-        const itemsTotal=rf.items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0),0);
-        const total=itemsTotal+(+rf.transport||0);
-        const rec={id:'RQ'+Date.now(),req_no:nextReqNo(),job_id:j.id,line_item_id:'',
-          vendor_name:rf.vendor,date:td(),items:rf.items.filter(x=>x.product),
-          transport:+rf.transport||0,total,notes:rf.notes,
-          po_status:'Pending',po_number:'',created_by:user?.name||'',created_at:new Date().toISOString()};
-        const {error}=await sb.from('requisitions').insert(rec);
-        if(error){show('⚠️ Save failed: '+error.message,false);return;}
-        setReqs(p=>[...p,rec]);
-        show('✅ Requisition #'+rec.req_no+' created! PO pending for Shreya.');
-        setRf({vendor:'',items:[{product:'',size:'',qty:1,rate:0,per:'Sheet'}],transport:0,notes:''});
-        setShowReqForm(false);
+      const jobPRs=(prs||[]).filter(r=>r.job_id===j.id).sort((a,b)=>b.created_at>a.created_at?1:-1);
+      const [showPRForm,setShowPRForm]=React.useState(false);
+      const [vendors,setVendors]=React.useState(null); // null=not loaded yet
+      const [showAddVendor,setShowAddVendor]=React.useState(false);
+      const PR_REQUESTORS=['Amol','Murli Shetty','Harish','Priyanka','Jigar','Printing Dept'];
+      const PR_PAYMENT_TERMS=['Advance 100%','Advance 50% + Balance on delivery','COD','15 days from invoice','30 days from invoice','45 days from invoice','60 days from invoice','Custom'];
+      const PR_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter','Set','Job'];
+      const PR_GST=[0,5,12,18,28];
+      const PR_URGENCY=['Normal','Urgent','Scheduled'];
+      const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
+      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:''};
+      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
+      const [prf,setPrf]=React.useState(blankForm);
+      const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
+      const [saving,setSaving]=React.useState(false);
+
+      // Load vendors on first form open
+      const loadVendors=async()=>{
+        if(vendors!==null)return;
+        const {data,error}=await sb.from('vendors').select('id,name,category,gstin,phone,state,contact_person,active').eq('active',true).order('name');
+        setVendors(error?[]:data||[]);
       };
-      const deleteReq=async(id)=>{if(!confirm('Delete this requisition?'))return;const {error}=await sb.from('requisitions').delete().eq('id',id);if(!error)setReqs(p=>p.filter(r=>r.id!==id));};
+
+      const filteredVendors=React.useMemo(()=>{
+        if(!vendors)return[];
+        if(prf.request_type==='Material')return vendors.filter(v=>v.category==='Material'||v.category==='Both');
+        if(prf.request_type==='Outsource')return vendors.filter(v=>v.category==='Outsource'||v.category==='Both');
+        return vendors;
+      },[vendors,prf.request_type]);
+
+      const updItem=(i,k,v)=>setPrf(p=>({...p,items:p.items.map((x,xi)=>xi===i?{...x,[k]:v}:x)}));
+      const addItem=()=>setPrf(p=>({...p,items:[...p.items,{...blankItem}]}));
+      const delItem=(i)=>setPrf(p=>({...p,items:p.items.filter((_,xi)=>xi!==i)}));
+
+      const calcTotals=(items,transport)=>{
+        const sub=items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0),0);
+        const gstTotal=items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0)*(+x.gst_pct||0)/100,0);
+        const total=sub+gstTotal+(+transport||0);
+        return {subtotal:+sub.toFixed(2),gst_total:+gstTotal.toFixed(2),total:+total.toFixed(2)};
+      };
+
+      const getFY=()=>{const n=new Date();const m=n.getMonth(),y=n.getFullYear();return m>=3?`${String(y).slice(2)}-${String(y+1).slice(2)}`:`${String(y-1).slice(2)}-${String(y).slice(2)}`;};
+
+      const genPRNo=async(firmCode)=>{
+        const fy=getFY();
+        const {data}=await sb.from('purchase_requests').select('pr_no').eq('firm_code',firmCode).eq('fy',fy);
+        const nums=(data||[]).map(r=>{const m=r.pr_no?.match(/\/(\d+)$/);return m?+m[1]:0;});
+        const next=String(Math.max(0,...nums)+1).padStart(3,'0');
+        return `${firmCode}/PR/${fy}/${next}`;
+      };
+
+      const selectVendor=(vid)=>{
+        const v=(vendors||[]).find(x=>x.id===vid);
+        if(!v)return setPrf(p=>({...p,vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra'}));
+        setPrf(p=>({...p,vendor_id:v.id,vendor_name:v.name,vendor_gstin:v.gstin||'',vendor_phone:v.phone||'',vendor_state:v.state||'Maharashtra'}));
+      };
+
+      const savePR=async()=>{
+        if(!prf.requestor){show('Select requestor',false);return;}
+        if(!prf.vendor_id&&!prf.vendor_name){show('Select or enter a vendor',false);return;}
+        if(!prf.items.some(x=>x.product)){show('Add at least one item',false);return;}
+        setSaving(true);
+        const pr_no=await genPRNo(prf.firm_code);
+        const fy=getFY();
+        const {subtotal,gst_total,total}=calcTotals(prf.items,prf.transport);
+        const rec={
+          id:'PR'+Date.now(),
+          pr_no,fy,
+          firm_code:prf.firm_code,
+          job_id:j.id,
+          request_type:prf.request_type,
+          vendor_id:prf.vendor_id||null,
+          vendor_name:prf.vendor_name,
+          vendor_gstin:prf.vendor_gstin||null,
+          vendor_phone:prf.vendor_phone||null,
+          vendor_state:prf.vendor_state||'Maharashtra',
+          urgency:prf.urgency,
+          expected_delivery:prf.expected_delivery||null,
+          payment_terms:prf.payment_terms||null,
+          transport:+prf.transport||0,
+          items:prf.items.filter(x=>x.product),
+          subtotal,gst_total,total,
+          notes:prf.notes||null,
+          status:'Pending Approval',
+          created_by:prf.requestor,
+          created_at:new Date().toISOString()
+        };
+        const {error}=await sb.from('purchase_requests').insert(rec);
+        setSaving(false);
+        if(error){show('⚠️ Save failed: '+error.message,false);return;}
+        setPrs(p=>[...p,rec]);
+        show('✅ '+pr_no+' submitted for Jigar\'s approval!');
+        setPrf(blankForm);
+        setShowPRForm(false);
+      };
+
+      const saveNewVendor=async()=>{
+        if(!avf.name.trim()){show('Vendor name required',false);return;}
+        const newV={id:'V-NEW-'+Date.now(),name:avf.name.trim(),category:avf.category,phone:avf.phone||null,gstin:avf.gstin||null,contact_person:avf.contact_person||null,state:avf.state||'Maharashtra',active:true,created_by:user?.name||'',created_at:new Date().toISOString()};
+        const {error}=await sb.from('vendors').insert(newV);
+        if(error){show('⚠️ Vendor save failed: '+error.message,false);return;}
+        setVendors(p=>[...(p||[]),newV].sort((a,b)=>a.name.localeCompare(b.name)));
+        selectVendor(newV.id);
+        setAvf({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
+        setShowAddVendor(false);
+        show('✅ Vendor added!');
+      };
+
+      const deletePR=async(id,pr_no)=>{if(!confirm('Delete '+pr_no+'? This cannot be undone.'))return;const {error}=await sb.from('purchase_requests').delete().eq('id',id);if(!error)setPrs(p=>p.filter(r=>r.id!==id));};
+
+      const stCol={
+        'Pending Approval':{bg:'#e3a00820',c:'#e3a008'},
+        'Approved':{bg:'#4ade8020',c:'#4ade80'},
+        'Rejected':{bg:'#f4706720',c:'#f47067'},
+        'PO Generated':{bg:'#06b6d420',c:'#06b6d4'},
+        'PO Sent':{bg:'#3b82f620',c:'#3b82f6'},
+        'Completed':{bg:'#8b5cf620',c:'#8b5cf6'},
+        'Cancelled':{bg:'#64748b20',c:'#64748b'},
+      };
+
+      const totals=React.useMemo(()=>calcTotals(prf.items,prf.transport),[prf.items,prf.transport]);
+
       return <div style={{marginTop:6}}>
+        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-          <p style={{fontSize:10,fontWeight:700,color:"#8b5cf6"}}>📋 REQUISITIONS ({jobReqs.length})</p>
-          <button className="b" onClick={()=>setShowReqForm(!showReqForm)} style={{fontSize:9,padding:"2px 8px",borderColor:"#8b5cf6",color:"#8b5cf6"}}>{showReqForm?'✕ Close':'+ New Requisition'}</button>
+          <p style={{fontSize:10,fontWeight:700,color:"#f59e0b"}}>🛒 PURCHASE REQUESTS ({jobPRs.length})</p>
+          <button className="b" onClick={()=>{setShowPRForm(!showPRForm);if(!showPRForm)loadVendors();}} style={{fontSize:9,padding:"2px 8px",borderColor:"#f59e0b",color:"#f59e0b"}}>{showPRForm?'✕ Close':'+ New PR'}</button>
         </div>
-        {jobReqs.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3,marginBottom:6}}>{jobReqs.map(r=>{
-          const rItems=Array.isArray(r.items)?r.items:[];
-          return <div key={r.id} style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:"6px 10px",fontSize:9}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <span style={{fontWeight:800,color:"#8b5cf6",fontSize:11}}>#{r.req_no}</span>
-                <span style={{color:"#c9d1d9"}}>{r.vendor_name}</span>
-                <span style={{color:"#64748b"}}>{r.date}</span>
-                <span style={{padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,background:r.po_status==='PO Generated'?"#4ade8022":"#8b5cf622",color:r.po_status==='PO Generated'?"#4ade80":"#8b5cf6"}}>{r.po_status}</span>
-                {r.po_number&&<span style={{fontSize:7,color:"#64748b"}}>PO: {r.po_number}</span>}
+
+        {/* Existing PRs list */}
+        {jobPRs.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3,marginBottom:6}}>
+          {jobPRs.map(r=>{
+            const sc=stCol[r.status]||{bg:'#64748b20',c:'#64748b'};
+            const rItems=Array.isArray(r.items)?r.items:[];
+            return <div key={r.id} style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:"6px 10px",fontSize:9}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3,flexWrap:"wrap",gap:3}}>
+                <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:800,color:"#f59e0b",fontSize:10}}>{r.pr_no}</span>
+                  <span style={{padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,background:sc.bg,color:sc.c}}>{r.status}</span>
+                  {r.urgency==='Urgent'&&<span style={{padding:"1px 5px",borderRadius:3,fontSize:7,fontWeight:700,background:"#f4706720",color:"#f47067"}}>🔴 URGENT</span>}
+                  <span style={{color:"#c9d1d9"}}>{r.vendor_name}</span>
+                  <span style={{color:"#64748b",fontSize:8}}>{r.request_type}</span>
+                  {r.payment_terms&&<span style={{color:"#64748b",fontSize:7}}>{r.payment_terms}</span>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{fontWeight:700,color:"#e3a008"}}>₹{(+r.total||0).toFixed(0)}</span>
+                  <span style={{fontSize:7,color:"#64748b"}}>by {r.created_by}</span>
+                  {r.status==='Pending Approval'&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deletePR(r.id,r.pr_no)}>✕</button>}
+                </div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:4}}>
-                <span style={{fontWeight:700,color:"#e3a008"}}>₹{(+r.total||0).toFixed(0)}</span>
-                <span style={{fontSize:7,color:"#64748b"}}>by {r.created_by}</span>
-                <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteReq(r.id)}>✕</button>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {rItems.map((x,xi)=><span key={xi} style={{color:"#8b949e"}}>{x.product}{x.size?' ('+x.size+')':''} × {x.qty} {x.per} @ ₹{x.rate} <span style={{color:"#64748b"}}>GST {x.gst_pct}%</span></span>)}
+                {(+r.transport>0)&&<span style={{color:"#64748b"}}>+ Transport ₹{r.transport}</span>}
               </div>
+              {r.rejection_reason&&<div style={{marginTop:3,padding:"3px 6px",background:"#f4706710",border:"1px solid #f4706733",borderRadius:4,fontSize:8,color:"#f47067"}}>❌ Rejected: {r.rejection_reason}</div>}
+            </div>;
+          })}
+        </div>}
+
+        {/* New PR Form */}
+        {showPRForm&&<div style={{background:"#0a0f1a",border:"1px solid #f59e0b44",borderRadius:8,padding:10}}>
+          <p style={{fontSize:9,fontWeight:700,color:"#f59e0b",marginBottom:8}}>NEW PURCHASE REQUEST</p>
+
+          {/* Row 1: Firm / Requestor / Type / Urgency */}
+          <div className="fg" style={{gap:6,marginBottom:6,gridTemplateColumns:"repeat(4,1fr)"}}>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Firm *</span>
+              <select className="in" value={prf.firm_code} onChange={e=>setPrf(p=>({...p,firm_code:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:"100%"}}>
+                {FIRMS.map(f=><option key={f.code} value={f.code}>{f.code} — {f.name}</option>)}
+              </select>
             </div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{rItems.map((x,xi)=><span key={xi} style={{color:"#8b949e"}}>{x.product}{x.size?' ('+x.size+')':''} × {x.qty} @ ₹{x.rate}/{x.per}</span>)}
-            {(+r.transport>0)&&<span style={{color:"#64748b"}}>+ Transport ₹{r.transport}</span>}</div>
-          </div>})}</div>}
-        {showReqForm&&<div style={{background:"#0d1520",border:"1px solid #8b5cf644",borderRadius:8,padding:10}}>
-          <div className="fg f3" style={{gap:6,marginBottom:8}}>
-            <div><span style={{fontSize:7,color:"#64748b"}}>Vendor / Masers *</span><select className="in" value={rf.vendor} onChange={e=>setRf(p=>({...p,vendor:e.target.value}))} style={{fontSize:9,padding:"3px 4px"}}><option value="">Select vendor...</option>{(agencies||[]).map(a=><option key={a.id} value={a.name}>{a.name}</option>)}<option value="_other">+ Other</option></select>
-            {rf.vendor==='_other'&&<input className="in" placeholder="Vendor name" style={{fontSize:9,marginTop:2,padding:"3px 4px"}} onChange={e=>setRf(p=>({...p,vendor:e.target.value}))}/>}</div>
-            <div><span style={{fontSize:7,color:"#64748b"}}>Transport ₹</span><input className="in mn" type="number" value={rf.transport} onChange={e=>setRf(p=>({...p,transport:e.target.value}))} style={{fontSize:9,padding:"3px 4px"}}/></div>
-            <div><span style={{fontSize:7,color:"#64748b"}}>Notes</span><input className="in" value={rf.notes} onChange={e=>setRf(p=>({...p,notes:e.target.value}))} placeholder="Optional" style={{fontSize:9,padding:"3px 4px"}}/></div>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Requested By *</span>
+              <select className="in" value={prf.requestor} onChange={e=>setPrf(p=>({...p,requestor:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:"100%"}}>
+                <option value="">Select...</option>
+                {PR_REQUESTORS.map(r=><option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Type</span>
+              <select className="in" value={prf.request_type} onChange={e=>setPrf(p=>({...p,request_type:e.target.value,vendor_id:'',vendor_name:''}))} style={{fontSize:9,padding:"3px 4px",width:"100%"}}>
+                <option>Material</option><option>Outsource</option><option>Mixed</option>
+              </select>
+            </div>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Urgency</span>
+              <select className="in" value={prf.urgency} onChange={e=>setPrf(p=>({...p,urgency:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:"100%",color:prf.urgency==='Urgent'?'#f47067':prf.urgency==='Scheduled'?'#06b6d4':'inherit'}}>
+                {PR_URGENCY.map(u=><option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
           </div>
-          <p style={{fontSize:8,color:"#8b5cf6",fontWeight:700,marginBottom:4}}>ITEMS</p>
-          <table style={{marginBottom:6}}><thead><tr><th style={{fontSize:8}}>Product / Material</th><th style={{fontSize:8}}>Size</th><th style={{fontSize:8}}>Qty</th><th style={{fontSize:8}}>Rate</th><th style={{fontSize:8}}>Per</th><th style={{fontSize:8}}>Amount</th><th></th></tr></thead>
-          <tbody>{rf.items.map((x,xi)=><tr key={xi}>
-            <td><input className="in" value={x.product} onChange={e=>updReqLine(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-            <td><input className="in" value={x.size} onChange={e=>updReqLine(xi,'size',e.target.value)} placeholder="4×8" style={{fontSize:9,padding:"2px 4px",width:60}}/></td>
-            <td><input className="in mn" type="number" value={x.qty} onChange={e=>updReqLine(xi,'qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:40}}/></td>
-            <td><input className="in mn" type="number" value={x.rate} onChange={e=>updReqLine(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:60}}/></td>
-            <td><select className="in" value={x.per} onChange={e=>updReqLine(xi,'per',e.target.value)} style={{fontSize:8,padding:"2px",width:70}}>{REQ_PER.map(p=><option key={p}>{p}</option>)}</select></td>
-            <td className="mn" style={{fontSize:9,fontWeight:700,color:"#e3a008"}}>₹{((+x.qty||0)*(+x.rate||0)).toFixed(0)}</td>
-            <td>{rf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>delReqLine(xi)}>✕</button>}</td>
-          </tr>)}</tbody></table>
-          <div style={{display:"flex",gap:4,alignItems:"center"}}>
-            <button className="b bs" onClick={addReqLine} style={{fontSize:8,color:"#8b5cf6",borderColor:"#8b5cf6"}}>+ Add Line</button>
+
+          {/* Row 2: Vendor selector + Add Vendor */}
+          <div style={{marginBottom:6}}>
+            <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:2}}>
+              <span style={{fontSize:7,color:"#64748b"}}>Vendor *</span>
+              <button style={{background:"none",border:"none",color:"#f59e0b",cursor:"pointer",fontSize:8,padding:0}} onClick={()=>{setShowAddVendor(!showAddVendor);}}>+ Add New Vendor</button>
+            </div>
+            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+              <select className="in" value={prf.vendor_id} onChange={e=>selectVendor(e.target.value)} style={{fontSize:9,padding:"3px 4px",flex:1}}>
+                <option value="">Select vendor...</option>
+                {filteredVendors.map(v=><option key={v.id} value={v.id}>{v.name}{v.category==='Both'?' (M+OS)':''}</option>)}
+              </select>
+              {prf.vendor_name&&<span style={{fontSize:8,color:"#4ade80",whiteSpace:"nowrap"}}>✓ {prf.vendor_name}</span>}
+            </div>
+            {prf.vendor_gstin&&<span style={{fontSize:7,color:"#64748b"}}>GSTIN: {prf.vendor_gstin}</span>}
+          </div>
+
+          {/* Inline Add Vendor Modal */}
+          {showAddVendor&&<div style={{background:"#060810",border:"1px solid #f59e0b33",borderRadius:6,padding:8,marginBottom:8}}>
+            <p style={{fontSize:8,fontWeight:700,color:"#f59e0b",marginBottom:6}}>+ NEW VENDOR</p>
+            <div className="fg" style={{gap:4,marginBottom:4,gridTemplateColumns:"repeat(3,1fr)"}}>
+              <div><span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:1}}>Name *</span><input className="in" value={avf.name} onChange={e=>setAvf(p=>({...p,name:e.target.value}))} placeholder="Vendor / Supplier name" style={{fontSize:9,padding:"3px 4px",width:"100%"}}/></div>
+              <div><span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:1}}>Category</span><select className="in" value={avf.category} onChange={e=>setAvf(p=>({...p,category:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:"100%"}}><option>Material</option><option>Outsource</option><option>Both</option></select></div>
+              <div><span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:1}}>Phone</span><input className="in" value={avf.phone} onChange={e=>setAvf(p=>({...p,phone:e.target.value}))} placeholder="9876543210" style={{fontSize:9,padding:"3px 4px",width:"100%"}}/></div>
+              <div><span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:1}}>GSTIN</span><input className="in" value={avf.gstin} onChange={e=>setAvf(p=>({...p,gstin:e.target.value}))} placeholder="27XXXXX..." style={{fontSize:9,padding:"3px 4px",width:"100%"}}/></div>
+              <div><span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:1}}>Contact Person</span><input className="in" value={avf.contact_person} onChange={e=>setAvf(p=>({...p,contact_person:e.target.value}))} placeholder="Name" style={{fontSize:9,padding:"3px 4px",width:"100%"}}/></div>
+              <div><span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:1}}>State</span><input className="in" value={avf.state} onChange={e=>setAvf(p=>({...p,state:e.target.value}))} placeholder="Maharashtra" style={{fontSize:9,padding:"3px 4px",width:"100%"}}/></div>
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              <button className="b bp" onClick={saveNewVendor} style={{fontSize:9,padding:"3px 10px",background:"#f59e0b",borderColor:"#f59e0b",color:"#000"}}>💾 Save Vendor</button>
+              <button className="b bs" onClick={()=>setShowAddVendor(false)} style={{fontSize:9,padding:"3px 8px"}}>Cancel</button>
+            </div>
+          </div>}
+
+          {/* Row 3: Payment Terms / Expected Delivery / Notes */}
+          <div className="fg f3" style={{gap:6,marginBottom:6}}>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Payment Terms <span style={{color:"#64748b",fontStyle:"italic"}}>(Shreya fills if blank)</span></span>
+              <select className="in" value={prf.payment_terms} onChange={e=>setPrf(p=>({...p,payment_terms:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:"100%"}}>
+                <option value="">— Leave for Shreya —</option>
+                {PR_PAYMENT_TERMS.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Expected Delivery</span>
+              <input className="in" type="date" value={prf.expected_delivery} onChange={e=>setPrf(p=>({...p,expected_delivery:e.target.value}))} style={{fontSize:9,padding:"3px 4px",width:"100%"}}/>
+            </div>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Notes / Remarks</span>
+              <input className="in" value={prf.notes} onChange={e=>setPrf(p=>({...p,notes:e.target.value}))} placeholder="Optional specs, instructions..." style={{fontSize:9,padding:"3px 4px",width:"100%"}}/>
+            </div>
+          </div>
+
+          {/* Items Table */}
+          <p style={{fontSize:8,color:"#f59e0b",fontWeight:700,marginBottom:4}}>LINE ITEMS</p>
+          <div style={{overflowX:"auto",marginBottom:6}}>
+            <table style={{minWidth:600}}>
+              <thead><tr>
+                <th style={{fontSize:8,minWidth:140}}>Product / Description</th>
+                <th style={{fontSize:8,width:65}}>Size/Spec</th>
+                <th style={{fontSize:8,width:45}}>Qty</th>
+                <th style={{fontSize:8,width:75}}>Rate ₹</th>
+                <th style={{fontSize:8,width:70}}>Per</th>
+                <th style={{fontSize:8,width:55}}>GST %</th>
+                <th style={{fontSize:8,width:70}}>Amount</th>
+                <th style={{width:18}}></th>
+              </tr></thead>
+              <tbody>{prf.items.map((x,xi)=>{
+                const lineAmt=(+x.qty||0)*(+x.rate||0);
+                const lineGst=lineAmt*(+x.gst_pct||0)/100;
+                return <tr key={xi}>
+                  <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  <td><input className="in" value={x.size} onChange={e=>updItem(xi,'size',e.target.value)} placeholder="4×8ft" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>updItem(xi,'qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  <td><input className="in mn" type="number" min="0" value={x.rate} onChange={e=>updItem(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  <td><select className="in" value={x.per} onChange={e=>updItem(xi,'per',e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>{PR_PER.map(p=><option key={p}>{p}</option>)}</select></td>
+                  <td><select className="in" value={x.gst_pct} onChange={e=>updItem(xi,'gst_pct',+e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",color:x.gst_pct===0?'#64748b':'inherit'}}>{PR_GST.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
+                  <td style={{fontSize:9,color:"#e3a008",fontWeight:700,textAlign:"right",paddingRight:4}}>
+                    <span style={{display:"block"}}>₹{lineAmt.toFixed(0)}</span>
+                    {x.gst_pct>0&&<span style={{fontSize:7,color:"#64748b"}}>+₹{lineGst.toFixed(0)} GST</span>}
+                  </td>
+                  <td>{prf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:10,padding:0}} onClick={()=>delItem(xi)}>✕</button>}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+
+          {/* Footer: Add Line + Transport + Totals + Submit */}
+          <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
+            <button className="b bs" onClick={addItem} style={{fontSize:8,color:"#f59e0b",borderColor:"#f59e0b",padding:"3px 8px"}}>+ Add Line</button>
+            <div style={{display:"flex",alignItems:"center",gap:4}}>
+              <span style={{fontSize:8,color:"#64748b"}}>Transport ₹</span>
+              <input className="in mn" type="number" min="0" value={prf.transport} onChange={e=>setPrf(p=>({...p,transport:e.target.value}))} style={{fontSize:9,padding:"2px 4px",width:70}}/>
+            </div>
             <span style={{flex:1}}/>
-            <span style={{fontSize:9,color:"#64748b"}}>Total: <strong style={{color:"#e3a008"}}>₹{(rf.items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0),0)+(+rf.transport||0)).toFixed(0)}</strong></span>
-            <button className="b bp" onClick={saveReq} style={{fontSize:10,padding:"4px 14px",background:"#8b5cf6",borderColor:"#8b5cf6"}}>📋 Create Requisition</button>
+            <div style={{textAlign:"right",fontSize:9}}>
+              <div style={{color:"#64748b"}}>Subtotal: <strong style={{color:"#c9d1d9"}}>₹{totals.subtotal.toFixed(0)}</strong></div>
+              <div style={{color:"#64748b"}}>GST: <strong style={{color:"#c9d1d9"}}>₹{totals.gst_total.toFixed(0)}</strong></div>
+              {(+prf.transport>0)&&<div style={{color:"#64748b"}}>Transport: <strong style={{color:"#c9d1d9"}}>₹{(+prf.transport).toFixed(0)}</strong></div>}
+              <div style={{fontSize:11,fontWeight:800,color:"#e3a008"}}>Total: ₹{totals.total.toFixed(0)}</div>
+            </div>
+            <button className="b bp" onClick={savePR} disabled={saving} style={{fontSize:10,padding:"5px 16px",background:"#f59e0b",borderColor:"#f59e0b",color:"#000",fontWeight:700,alignSelf:"flex-end"}}>{saving?'Saving...':'📋 Submit PR'}</button>
           </div>
         </div>}
       </div>;
