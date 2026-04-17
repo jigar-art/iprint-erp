@@ -1402,6 +1402,31 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
+      const [editingPrId,setEditingPrId]=React.useState(null);
+      const [editingPrNo,setEditingPrNo]=React.useState(null);
+      // Load an existing PR back into the form for "Edit & Resubmit" (revision flow)
+      const editPR=(r)=>{
+        setPrf({
+          firm_code:r.firm_code||'JPP',
+          requestor:r.created_by||user?.name||'',
+          request_type:r.request_type||'Material',
+          vendor_id:r.vendor_id||'',
+          vendor_name:r.vendor_name||'',
+          vendor_gstin:r.vendor_gstin||'',
+          vendor_phone:r.vendor_phone||'',
+          vendor_state:r.vendor_state||'Maharashtra',
+          urgency:r.urgency||'Normal',
+          expected_delivery:r.expected_delivery||'',
+          payment_terms:r.payment_terms||'',
+          transport:+r.transport||0,
+          notes:r.notes||'',
+          items:(Array.isArray(r.items)&&r.items.length?r.items.map(x=>({...blankItem,...x})):[{...blankItem}])
+        });
+        setEditingPrId(r.id);
+        setEditingPrNo(r.pr_no);
+        setShowPRForm(true);
+        loadVendors();
+      };
       const [quoteFile,setQuoteFile]=React.useState(null);
       const [quoteParsing,setQuoteParsing]=React.useState(false);
       const [quoteReview,setQuoteReview]=React.useState(null); // parsed items for review
@@ -1554,9 +1579,55 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         if(!prf.vendor_id&&!prf.vendor_name){show('Select or enter a vendor',false);return;}
         if(!prf.items.some(x=>x.product)){show('Add at least one item',false);return;}
         setSaving(true);
-        const pr_no=await genPRNo(prf.firm_code);
         const fy=getFY();
         const {subtotal,gst_total,total}=calcTotals(prf.items,prf.transport);
+        const nowIso=new Date().toISOString();
+        if(editingPrId){
+          // ── REVISION RESUBMIT path ──
+          const existing=(prs||[]).find(p=>p.id===editingPrId);
+          const prevHistory=Array.isArray(existing?.revision_history)?existing.revision_history:[];
+          const newHistoryEntry=existing?.revision_notes?[{at:nowIso,by:prf.requestor,notes:existing.revision_notes,resubmitted:true}]:[];
+          const updates={
+            firm_code:prf.firm_code,
+            request_type:prf.request_type,
+            vendor_id:prf.vendor_id||null,
+            vendor_name:prf.vendor_name,
+            vendor_gstin:prf.vendor_gstin||null,
+            vendor_phone:prf.vendor_phone||null,
+            vendor_state:prf.vendor_state||'Maharashtra',
+            urgency:prf.urgency,
+            expected_delivery:prf.expected_delivery||null,
+            payment_terms:prf.payment_terms||null,
+            transport:+prf.transport||0,
+            items:prf.items.filter(x=>x.product),
+            subtotal,gst_total,total,
+            notes:prf.notes||null,
+            status:'Pending Approval',
+            revision_count:(+(existing?.revision_count)||0)+1,
+            revision_notes:null,
+            revision_history:[...prevHistory,...newHistoryEntry],
+            last_status_change_at:nowIso
+          };
+          const {error}=await sb.from('purchase_requests').update(updates).eq('id',editingPrId);
+          setSaving(false);
+          if(error){show('⚠️ Resubmit failed: '+error.message,false);return;}
+          setPrs(p=>p.map(r=>r.id===editingPrId?{...r,...updates}:r));
+          const prNoUsed=editingPrNo||existing?.pr_no||editingPrId;
+          show('✅ '+prNoUsed+' resubmitted for approval (revision #'+updates.revision_count+')');
+          // Notify Jigar
+          const jigarPhone=WA_NUMBERS['Jigar'];
+          if(jigarPhone){
+            const msg='🔁 *PR Resubmitted — '+prNoUsed+'*\n\nRevision #'+updates.revision_count+' from '+prf.requestor+'.\nVendor: '+prf.vendor_name+'\nAmount: ₹'+(+total||0).toLocaleString('en-IN')+'\n\nPlease review in Approvals tab.';
+            sendWhatsApp(jigarPhone,msg,'iprint_pr_resubmitted');
+          }
+          setEditingPrId(null);
+          setEditingPrNo(null);
+          setPrf(blankForm);
+          setShowPRForm(false);
+          return;
+        }
+        // ── NEW PR path (original behaviour, unchanged) ──
+        const pr_no=await genPRNo(prf.firm_code);
         const rec={
           id:'PR'+Date.now(),
           pr_no,fy,
@@ -1577,9 +1648,9 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           notes:prf.notes||null,
           status:'Pending Approval',
           created_by:prf.requestor,
-          created_at:new Date().toISOString(),
+          created_at:nowIso,
           requestor_dept: (typeof STAFF_DEPTS!=='undefined' && STAFF_DEPTS[prf.requestor]) || null,
-          last_status_change_at: new Date().toISOString()
+          last_status_change_at: nowIso
         };
         const {error}=await sb.from('purchase_requests').insert(rec);
         setSaving(false);
@@ -1608,6 +1679,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         'Pending Approval':{bg:'#e3a00820',c:'#e3a008'},
         'Approved':{bg:'#4ade8020',c:'#4ade80'},
         'Rejected':{bg:'#f4706720',c:'#f47067'},
+        'Revision Requested':{bg:'#14b8a620',c:'#14b8a6'},
         'PO Generated':{bg:'#06b6d420',c:'#06b6d4'},
         'PO Sent':{bg:'#3b82f620',c:'#3b82f6'},
         'Completed':{bg:'#8b5cf620',c:'#8b5cf6'},
@@ -1620,7 +1692,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
           <p style={{fontSize:10,fontWeight:700,color:"#f59e0b"}}>🛒 PURCHASE REQUESTS ({jobPRs.length})</p>
-          <button className="b" onClick={()=>{setShowPRForm(!showPRForm);if(!showPRForm)loadVendors();}} style={{fontSize:9,padding:"2px 8px",borderColor:"#f59e0b",color:"#f59e0b"}}>{showPRForm?'✕ Close':'+ New PR'}</button>
+          <button className="b" onClick={()=>{const willClose=showPRForm;setShowPRForm(!showPRForm);if(willClose&&editingPrId){setEditingPrId(null);setEditingPrNo(null);setPrf(blankForm);}if(!showPRForm)loadVendors();}} style={{fontSize:9,padding:"2px 8px",borderColor:editingPrId?"#14b8a6":"#f59e0b",color:editingPrId?"#14b8a6":"#f59e0b"}}>{showPRForm?(editingPrId?'✕ Cancel Edit':'✕ Close'):'+ New PR'}</button>
         </div>
 
         {/* Existing PRs list */}
@@ -1654,13 +1726,17 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 {(+r.transport>0)&&<span style={{color:"#64748b"}}>+ Transport ₹{r.transport}</span>}
               </div>
               {r.rejection_reason&&<div style={{marginTop:3,padding:"3px 6px",background:"#f4706710",border:"1px solid #f4706733",borderRadius:4,fontSize:8,color:"#f47067"}}>❌ Rejected: {r.rejection_reason}</div>}
+              {r.status==='Revision Requested'&&r.revision_notes&&<div style={{marginTop:3,padding:"4px 7px",background:"#14b8a610",border:"1px solid #14b8a644",borderRadius:4,fontSize:8,color:"#14b8a6",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                <span>↩ <span style={{fontWeight:700}}>Revision requested by Jigar:</span> {r.revision_notes}{(+r.revision_count>0)&&<span style={{color:"#64748b",marginLeft:4}}>(rev #{r.revision_count})</span>}</span>
+                <button className="b" onClick={()=>editPR(r)} style={{fontSize:8,padding:"2px 8px",borderColor:"#14b8a6",color:"#14b8a6",background:"#14b8a615",fontWeight:700,whiteSpace:"nowrap"}}>✏️ Edit & Resubmit</button>
+              </div>}
             </div>;
           })}
         </div>}
 
         {/* New PR Form */}
-        {showPRForm&&<div style={{background:"#0a0f1a",border:"1px solid #f59e0b44",borderRadius:8,padding:10}}>
-          <p style={{fontSize:9,fontWeight:700,color:"#f59e0b",marginBottom:8}}>NEW PURCHASE REQUEST</p>
+        {showPRForm&&<div style={{background:"#0a0f1a",border:`1px solid ${editingPrId?"#14b8a644":"#f59e0b44"}`,borderRadius:8,padding:10}}>
+          <p style={{fontSize:9,fontWeight:700,color:editingPrId?"#14b8a6":"#f59e0b",marginBottom:8}}>{editingPrId?`↩ REVISING ${editingPrNo||''} — edit and resubmit for approval`:'NEW PURCHASE REQUEST'}</p>
 
           {/* ── VENDOR QUOTE UPLOAD SECTION ────────────────────────────── */}
           <div style={{marginBottom:8,padding:'6px 10px',background:'#060810',border:'1px solid #1a2030',borderRadius:6}}>
@@ -4522,14 +4598,17 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const [filter, setFilter] = React.useState('Pending Approval');
   const [rejecting, setRejecting] = React.useState(null); // pr id being rejected
   const [rejReason, setRejReason] = React.useState('');
+  const [sendingBack, setSendingBack] = React.useState(null); // pr id being sent back for revision
+  const [revNotes, setRevNotes] = React.useState('');
   const [processing, setProcessing] = React.useState(null); // pr id being processed
   const [waButtons, setWaButtons] = React.useState({}); // {prId: true} = show WA buttons
 
-  const STATUS_FILTERS = ['Pending Approval','Approved','Rejected','All'];
+  const STATUS_FILTERS = ['Pending Approval','Approved','Revision Requested','Rejected','All'];
   const stCol = {
     'Pending Approval': {bg:'#e3a00820',c:'#e3a008'},
     'Approved':         {bg:'#4ade8020',c:'#4ade80'},
     'Rejected':         {bg:'#f4706720',c:'#f47067'},
+    'Revision Requested': {bg:'#14b8a620',c:'#14b8a6'},
     'PO Generated':     {bg:'#06b6d420',c:'#06b6d4'},
     'PO Sent':          {bg:'#3b82f620',c:'#3b82f6'},
     'Completed':        {bg:'#8b5cf620',c:'#8b5cf6'},
@@ -4605,6 +4684,33 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
     if (reqPhone) {
       const msg = `❌ Your PR *${pr.pr_no}* has been *REJECTED* by Jigar.\n\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\n*Reason:* ${reasonText}\n\nPlease revise and resubmit if needed. Track status in *My PRs* tab.`;
       sendWhatsApp(reqPhone, msg, 'iprint_pr_rejected');
+    }
+  };
+
+  const sendBackPR = async (pr) => {
+    if (!revNotes.trim()) { show('Enter revision notes', false); return; }
+    setProcessing(pr.id);
+    const nowIso = new Date().toISOString();
+    const updates = {
+      status: 'Revision Requested',
+      revision_notes: revNotes.trim(),
+      last_status_change_at: nowIso
+    };
+    const {error} = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
+    if (error) { show('⚠️ Update failed: ' + error.message, false); setProcessing(null); return; }
+    const updated = {...pr, ...updates};
+    setPrs(p => p.map(x => x.id === pr.id ? updated : x));
+    setProcessing(null);
+    setSendingBack(null);
+    const notesText = revNotes.trim();
+    setRevNotes('');
+    setWaButtons(p => ({...p, [pr.id]: true}));
+    show('↩ ' + pr.pr_no + ' sent back for revision.');
+    // Auto-notify requestor with revision notes
+    const reqPhone = WA_NUMBERS[pr.created_by];
+    if (reqPhone) {
+      const msg = `↩ Your PR *${pr.pr_no}* needs *revision* per Jigar.\n\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\n*Changes needed:* ${notesText}\n\nOpen the job in iPrint ERP, find this PR in the list, and tap *Edit & Resubmit* to revise. Your previous entries are preserved.`;
+      sendWhatsApp(reqPhone, msg, 'iprint_pr_revision_requested');
     }
   };
 
@@ -4714,11 +4820,15 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
               {pr.rejection_reason && <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, padding:'4px 8px', fontSize:9, color:'#f47067', marginBottom:8}}>❌ Rejected: {pr.rejection_reason}</div>}
 
               {/* Action buttons — Pending Approval */}
-              {isPending && rejecting !== pr.id && (
+              {isPending && rejecting !== pr.id && sendingBack !== pr.id && (
                 <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
                   <button className="b bp" onClick={() => approvePR(pr)} disabled={processing===pr.id}
                     style={{fontSize:10, padding:'5px 16px', background:'#4ade80', borderColor:'#4ade80', color:'#000', fontWeight:700}}>
                     {processing===pr.id ? '...' : '✅ Approve'}
+                  </button>
+                  <button className="b" onClick={() => {setSendingBack(pr.id); setRevNotes('');}}
+                    style={{fontSize:10, padding:'5px 14px', borderColor:'#14b8a6', color:'#14b8a6'}}>
+                    ↩ Send Back
                   </button>
                   <button className="b" onClick={() => {setRejecting(pr.id); setRejReason('');}}
                     style={{fontSize:10, padding:'5px 14px', borderColor:'#f47067', color:'#f47067'}}>
@@ -4729,10 +4839,32 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
                 </div>
               )}
 
+              {/* Send-back-for-revision input */}
+              {isPending && sendingBack === pr.id && (
+                <div style={{background:'#14b8a610', border:'1px solid #14b8a644', borderRadius:6, padding:8}}>
+                  <p style={{fontSize:9, color:'#14b8a6', fontWeight:700, marginBottom:6}}>↩ Send Back for Revision — what needs to change?</p>
+                  <input className="in" value={revNotes} onChange={e=>setRevNotes(e.target.value)}
+                    placeholder="e.g. Increase qty to 50, Change to Maharashtra vendor for tax efficiency, Get a quote in meters..."
+                    style={{fontSize:9, padding:'4px 8px', width:'100%', marginBottom:6, borderColor:'#14b8a666'}}
+                    onKeyDown={e => e.key==='Enter' && sendBackPR(pr)}
+                    autoFocus/>
+                  <div style={{display:'flex', gap:4, alignItems:'center'}}>
+                    <button className="b bp" onClick={() => sendBackPR(pr)} disabled={processing===pr.id}
+                      style={{fontSize:10, padding:'4px 14px', background:'#14b8a6', borderColor:'#14b8a6', color:'#fff', fontWeight:700}}>
+                      {processing===pr.id ? '...' : '↩ Send Back'}
+                    </button>
+                    <button className="b bs" onClick={() => {setSendingBack(null); setRevNotes('');}}
+                      style={{fontSize:9, padding:'4px 10px'}}>Cancel</button>
+                    <span style={{flex:1}}/>
+                    <span style={{fontSize:8, color:'#64748b'}}>{pr.created_by} can edit and resubmit — their entries are preserved.</span>
+                  </div>
+                </div>
+              )}
+
               {/* Rejection reason input */}
               {isPending && rejecting === pr.id && (
                 <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:6, padding:8}}>
-                  <p style={{fontSize:9, color:'#f47067', fontWeight:700, marginBottom:6}}>❌ Rejection Reason</p>
+                  <p style={{fontSize:9, color:'#f47067', fontWeight:700, marginBottom:6}}>❌ Rejection Reason (permanent — use Send Back if a fix is possible)</p>
                   <input className="in" value={rejReason} onChange={e=>setRejReason(e.target.value)}
                     placeholder="e.g. Rate too high — get 2 more quotes, Wrong vendor for this type of work..."
                     style={{fontSize:9, padding:'4px 8px', width:'100%', marginBottom:6, borderColor:'#f4706766'}}
