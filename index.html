@@ -747,6 +747,7 @@ function MainApp({user,onLogout,masterData}){
     {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
     {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
     {id:"appr",l:"Approvals",e:"🔔",roles:["admin"],users:["JIGAR"]},
+    {id:"myprs",l:"My PRs",e:"📑",roles:["admin","sales","production","accounts","printing","fabrication","designer"]},
     {id:"po",l:"PO Generator",e:"📄",roles:["admin","accounts"],users:["JIGAR","SHREYA"]},
     {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","accounts","dispatch"],users:["JIGAR","SHREYA","MURLI","ACCOUNTS"]},
   ];
@@ -766,7 +767,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):n.id==='myprs'?(()=>{try{const uname=(user.name||'').toUpperCase();const lvKey='myprs_last_viewed_'+uname;const lv=localStorage.getItem(lvKey)||'1970-01-01T00:00:00Z';const myDept=(typeof STAFF_DEPTS!=='undefined')?Object.keys(STAFF_DEPTS).find(k=>k.toUpperCase()===uname||uname.includes(k.toUpperCase())):null;const myDeptTag=myDept?STAFF_DEPTS[myDept]:null;return (prs||[]).filter(p=>{const isMine=p.created_by&&p.created_by.toUpperCase()===uname;const isMyDept=myDeptTag&&p.requestor_dept===myDeptTag;if(!isMine&&!isMyDept)return false;const ts=p.last_status_change_at||p.created_at||'';return ts>lv&&p.status!=='Pending Approval';}).length;}catch(e){return 0;}})():0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -804,6 +805,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
           {pg==="appr"&&<ApprovalsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
+          {pg==="myprs"&&<MyPRsPage prs={prs} jobs={fullJobs} user={user} show={show} firms={firms} sm={setModal}/>}
           {pg==="po"&&<POPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
           {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
         </div>
@@ -1459,7 +1461,9 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           notes:prf.notes||null,
           status:'Pending Approval',
           created_by:prf.requestor,
-          created_at:new Date().toISOString()
+          created_at:new Date().toISOString(),
+          requestor_dept: (typeof STAFF_DEPTS!=='undefined' && STAFF_DEPTS[prf.requestor]) || null,
+          last_status_change_at: new Date().toISOString()
         };
         const {error}=await sb.from('purchase_requests').insert(rec);
         setSaving(false);
@@ -2843,6 +2847,17 @@ const WA_NUMBERS = {
   'Printing Dept':   '919326282238', // Harish handles Printing Dept
   'Shreya':          '917304008506',
 };
+// Maps PR_REQUESTORS values to a dept tag — used by My PRs page for "PRs from my dept" filter.
+// Keep keys aligned with PR_REQUESTORS list at line ~1285.
+const STAFF_DEPTS = {
+  'Amol':          'Production',
+  'Murli Shetty':  'Production',
+  'Harish':        'Printing',
+  'Printing Dept': 'Printing',
+  'Priyanka':      'Office',
+  'Jigar':         'Admin',
+  'Shreya':        'Accounts',
+};
 const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
 
 // ── WhatsApp sending via Interakt (through serverless proxy) ──
@@ -2994,6 +3009,7 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
     if (!gf.received_by) { show('Select receiver', false); return; }
     setSaving(true);
     const grn_id = 'GRN' + Date.now();
+    const nowIso = new Date().toISOString();
     const updates = {
       status: gf.partial_delivery ? 'PO Sent' : 'Completed',
       received_by: gf.received_by,
@@ -3009,7 +3025,8 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
           : ''
       ].filter(Boolean).join(' | ') || null,
       invoice_no: gf.invoice_no || null,
-      partial_delivery: gf.partial_delivery
+      partial_delivery: gf.partial_delivery,
+      last_status_change_at: nowIso
     };
     const {error} = await sb.from('purchase_requests').update(updates).eq('id', receiving.id);
     if (error) { show('Save failed: ' + error.message, false); setSaving(false); return; }
@@ -3031,6 +3048,15 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
       '\nReceived by: ' + gf.received_by +
       '\nStatus: ' + (gf.partial_delivery ? 'Partial — balance pending' : 'COMPLETED');
     sendWhatsApp(WA_NUMBERS['Jigar'], waMsg, 'iprint_grn_received');
+
+    // Auto-notify the original requestor
+    const reqPhone = WA_NUMBERS[receiving.created_by];
+    if (reqPhone && receiving.created_by !== 'Jigar') {
+      const reqMsg = (gf.partial_delivery
+        ? `📦 *PARTIAL DELIVERY* received for your PR *${receiving.pr_no}*.\n\nVendor: ${receiving.vendor_name}\nGRN: ${grn_id}\nReceived by: ${gf.received_by}\n\nBalance still pending. Track status in *My PRs* tab.`
+        : `✅ *Material RECEIVED* for your PR *${receiving.pr_no}* — status now COMPLETED.\n\nVendor: ${receiving.vendor_name}\nGRN: ${grn_id}\nReceived by: ${gf.received_by}\n\nView details in *My PRs* tab.`);
+      sendWhatsApp(reqPhone, reqMsg, 'iprint_grn_requestor');
+    }
 
     setSaving(false);
     setReceiving(null);
@@ -3476,13 +3502,21 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 
   const savePONo = async (preview) => {
     const {pr, poNo} = preview;
+    const nowIso = new Date().toISOString();
     const {error} = await sb.from('purchase_requests').update({
       po_no: poNo, status: 'PO Generated',
-      po_generated_by: user?.name||'', po_generated_at: new Date().toISOString()
+      po_generated_by: user?.name||'', po_generated_at: nowIso,
+      last_status_change_at: nowIso
     }).eq('id', pr.id);
     if (error) { show('⚠️ Save failed: ' + error.message, false); return; }
-    setPrs(p => p.map(x => x.id === pr.id ? {...x, po_no: poNo, status:'PO Generated', po_generated_by:user?.name, po_generated_at:new Date().toISOString()} : x));
+    setPrs(p => p.map(x => x.id === pr.id ? {...x, po_no: poNo, status:'PO Generated', po_generated_by:user?.name, po_generated_at:nowIso, last_status_change_at:nowIso} : x));
     show('✅ PO ' + poNo + ' saved!');
+    // Auto-notify requestor that their PR is now a PO
+    const reqPhone = WA_NUMBERS[pr.created_by];
+    if (reqPhone) {
+      const msg = `📄 PO Generated for your PR *${pr.pr_no}*.\n\n*PO No:* ${poNo}\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\nPO is being sent to vendor. Track status in *My PRs* tab.`;
+      sendWhatsApp(reqPhone, msg, 'iprint_po_generated');
+    }
   };
 
   const sendVendorWA = (preview) => {
@@ -3591,6 +3625,276 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   );
 }
 
+// ══════════════════════════════════════════════════════════
+// MY PRs PAGE — per-user PR/PO status view
+// ══════════════════════════════════════════════════════════
+function MyPRsPage({prs, jobs, user, show, firms, sm}) {
+  const uname = (user?.name||'').toUpperCase();
+  // Resolve current user to a PR_REQUESTORS-style key (proper case) and dept tag
+  const myStaffKey = React.useMemo(() => {
+    if (typeof STAFF_DEPTS === 'undefined') return null;
+    return Object.keys(STAFF_DEPTS).find(k => k.toUpperCase() === uname || uname.includes(k.toUpperCase())) || null;
+  }, [uname]);
+  const myDeptTag = myStaffKey ? STAFF_DEPTS[myStaffKey] : null;
+
+  const [scope, setScope] = React.useState('mine'); // 'mine' | 'dept' | 'all'
+  const [statusFilter, setStatusFilter] = React.useState('Active'); // 'Active' | 'All' | specific status
+
+  const lvKey = 'myprs_last_viewed_' + uname;
+  // Snapshot the unread cutoff once on mount so newly-arriving status changes during viewing
+  // still show the dot — they only clear on next visit.
+  const [unreadCutoff] = React.useState(() => {
+    try { return localStorage.getItem(lvKey) || '1970-01-01T00:00:00Z'; } catch (e) { return '1970-01-01T00:00:00Z'; }
+  });
+  // On open: clear badge by stamping latest viewed time
+  React.useEffect(() => {
+    try { localStorage.setItem(lvKey, new Date().toISOString()); } catch (e) {}
+  }, [lvKey]);
+
+  const stCol = {
+    'Pending Approval':{bg:'#e3a00820',c:'#e3a008'},
+    'Approved':        {bg:'#4ade8020',c:'#4ade80'},
+    'Rejected':        {bg:'#f4706720',c:'#f47067'},
+    'PO Generated':    {bg:'#06b6d420',c:'#06b6d4'},
+    'PO Sent':         {bg:'#3b82f620',c:'#3b82f6'},
+    'Completed':       {bg:'#8b5cf620',c:'#8b5cf6'},
+    'Cancelled':       {bg:'#64748b20',c:'#64748b'},
+  };
+  const firmColor = code => ({JPP:'#e3a008',JXT:'#3b82f6',VHD:'#8b5cf6'})[code] || '#64748b';
+
+  const fmtDate = iso => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mm = d.toLocaleString('en-IN',{month:'short'});
+      const yy = String(d.getFullYear()).slice(-2);
+      const hh = String(d.getHours()).padStart(2,'0');
+      const mn = String(d.getMinutes()).padStart(2,'0');
+      return `${dd} ${mm} ${yy}, ${hh}:${mn}`;
+    } catch (e) { return iso; }
+  };
+  const relTime = iso => {
+    if (!iso) return '';
+    try {
+      const diff = Date.now() - new Date(iso).getTime();
+      if (diff < 0) return 'just now';
+      const m = Math.floor(diff/60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return m + 'm ago';
+      const h = Math.floor(m/60);
+      if (h < 24) return h + 'h ago';
+      const d = Math.floor(h/24);
+      if (d < 30) return d + 'd ago';
+      return Math.floor(d/30) + 'mo ago';
+    } catch (e) { return ''; }
+  };
+
+  // Scope filtering
+  const inScope = (pr) => {
+    if (scope === 'all') return true;
+    const isMine = pr.created_by && pr.created_by.toUpperCase() === uname;
+    if (scope === 'mine') return isMine;
+    // dept
+    if (isMine) return true;
+    return myDeptTag && pr.requestor_dept === myDeptTag;
+  };
+
+  const STATUS_OPTS = ['Active','All','Pending Approval','Approved','Rejected','PO Generated','PO Sent','Completed'];
+  const passesStatus = (pr) => {
+    if (statusFilter === 'All') return true;
+    if (statusFilter === 'Active') return pr.status !== 'Completed' && pr.status !== 'Cancelled' && pr.status !== 'Rejected';
+    return pr.status === statusFilter;
+  };
+
+  const visible = (prs || [])
+    .filter(inScope)
+    .filter(passesStatus)
+    .sort((a,b) => {
+      const ta = a.last_status_change_at || a.created_at || '';
+      const tb = b.last_status_change_at || b.created_at || '';
+      return tb.localeCompare(ta);
+    });
+
+  const myCount = (prs||[]).filter(p => p.created_by && p.created_by.toUpperCase() === uname).length;
+  const deptCount = (prs||[]).filter(p => myDeptTag && p.requestor_dept === myDeptTag).length;
+
+  const isUnread = (pr) => {
+    if (pr.status === 'Pending Approval') return false; // never "unread" — nothing happened yet
+    const ts = pr.last_status_change_at || pr.created_at || '';
+    return ts > unreadCutoff;
+  };
+
+  const openJob = (jobId) => {
+    if (!jobId) return;
+    const j = (jobs||[]).find(x => x.id === jobId);
+    if (j && sm) sm({t: 'Job ' + jobId, jobId});
+  };
+
+  const openPO = (url) => {
+    if (url) window.open(url, '_blank');
+  };
+
+  const jobLabel = (jobId) => {
+    if (!jobId) return '—';
+    const j = (jobs||[]).find(x => x.id === jobId);
+    return j && j.project ? jobId + ' (' + j.project + ')' : jobId;
+  };
+
+  return (
+    <div style={{padding:12, overflowY:'auto', height:'100%'}}>
+      {/* Header */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8}}>
+        <div>
+          <h2 style={{fontSize:14, fontWeight:800, color:'#f59e0b', margin:0}}>📑 My PRs</h2>
+          <p style={{fontSize:10, color:'#64748b', margin:'2px 0 0'}}>
+            Track status of your purchase requests {myDeptTag ? <span>· dept: <strong style={{color:'#8b949e'}}>{myDeptTag}</strong></span> : ''}
+          </p>
+        </div>
+        <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
+          <button className={`b bs ${scope==='mine'?'bp':''}`} onClick={() => setScope('mine')}
+            style={{fontSize:9, padding:'3px 8px', ...(scope==='mine'?{background:'#f59e0b20',borderColor:'#f59e0b',color:'#f59e0b'}:{})}}>
+            Mine ({myCount})
+          </button>
+          {myDeptTag && (
+            <button className={`b bs ${scope==='dept'?'bp':''}`} onClick={() => setScope('dept')}
+              style={{fontSize:9, padding:'3px 8px', ...(scope==='dept'?{background:'#3b82f620',borderColor:'#3b82f6',color:'#3b82f6'}:{})}}>
+              My Dept ({deptCount})
+            </button>
+          )}
+          <button className={`b bs ${scope==='all'?'bp':''}`} onClick={() => setScope('all')}
+            style={{fontSize:9, padding:'3px 8px', ...(scope==='all'?{background:'#8b5cf620',borderColor:'#8b5cf6',color:'#8b5cf6'}:{})}}>
+            All ({(prs||[]).length})
+          </button>
+        </div>
+      </div>
+
+      {/* Status filter chips */}
+      <div style={{display:'flex', gap:4, flexWrap:'wrap', marginBottom:10}}>
+        {STATUS_OPTS.map(s => (
+          <button key={s} className={`b bs ${statusFilter===s?'bp':''}`} onClick={() => setStatusFilter(s)}
+            style={{fontSize:8, padding:'2px 6px',
+              ...(statusFilter===s && stCol[s] ? {background: stCol[s].bg, borderColor: stCol[s].c, color: stCol[s].c} : {})}}>
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {/* No-data states */}
+      {!myStaffKey && scope !== 'all' && (
+        <div style={{background:'#161d2e', border:'1px solid #2a3548', borderRadius:8, padding:16, textAlign:'center'}}>
+          <p style={{fontSize:11, color:'#f59e0b', fontWeight:700, marginBottom:4}}>👤 User not mapped</p>
+          <p style={{fontSize:9, color:'#8b949e'}}>Your user name "{user?.name}" isn't in the staff/dept map. Switch to "All" to see every PR, or ask Jigar to add you to STAFF_DEPTS.</p>
+        </div>
+      )}
+
+      {visible.length === 0 && (
+        <div style={{background:'#0a0f1a', border:'1px solid #1a2030', borderRadius:8, padding:24, textAlign:'center'}}>
+          <p style={{fontSize:11, color:'#64748b'}}>
+            {scope==='mine' ? "You haven't raised any PRs yet that match this filter."
+              : scope==='dept' ? `No PRs from your dept (${myDeptTag||'—'}) match this filter.`
+              : 'No PRs match this filter.'}
+          </p>
+        </div>
+      )}
+
+      {/* PR list */}
+      {visible.length > 0 && (
+        <div style={{display:'flex', flexDirection:'column', gap:6}}>
+          {visible.map(pr => {
+            const sc = stCol[pr.status] || {bg:'#64748b20', c:'#64748b'};
+            const unread = isUnread(pr);
+            const isMine = pr.created_by && pr.created_by.toUpperCase() === uname;
+            return (
+              <div key={pr.id} style={{
+                background:'#0a0f1a',
+                border: `1px solid ${unread ? '#f59e0b66' : '#1a2030'}`,
+                borderLeft: `3px solid ${sc.c}`,
+                borderRadius:8,
+                padding:'8px 12px',
+                position:'relative'
+              }}>
+                {unread && <span title="New status update since you last viewed" style={{position:'absolute',top:6,right:6,width:7,height:7,background:'#f59e0b',borderRadius:'50%',boxShadow:'0 0 6px #f59e0b'}}/>}
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr 1fr', gap:8, alignItems:'center'}}>
+                  {/* Col 1: PR No + firm */}
+                  <div>
+                    <div style={{fontSize:10, fontWeight:800, color:'#e3a008'}}>{pr.pr_no}</div>
+                    <div style={{display:'flex', gap:4, alignItems:'center', marginTop:2}}>
+                      <span className="bd" style={{background:firmColor(pr.firm_code)+'20', color:firmColor(pr.firm_code), fontSize:7}}>{pr.firm_code}</span>
+                      {!isMine && <span style={{fontSize:7, color:'#64748b'}}>by {pr.created_by}</span>}
+                    </div>
+                  </div>
+
+                  {/* Col 2: Job */}
+                  <div>
+                    <div style={{fontSize:7, color:'#64748b'}}>JOB</div>
+                    {pr.job_id ? (
+                      <a onClick={() => openJob(pr.job_id)} style={{fontSize:9, color:'#3b82f6', cursor:'pointer', textDecoration:'underline'}}>{jobLabel(pr.job_id)}</a>
+                    ) : <div style={{fontSize:9, color:'#64748b'}}>—</div>}
+                  </div>
+
+                  {/* Col 3: Vendor */}
+                  <div>
+                    <div style={{fontSize:7, color:'#64748b'}}>VENDOR</div>
+                    <div style={{fontSize:9, color:'#e6edf3'}} title={pr.vendor_name}>{pr.vendor_name||'—'}</div>
+                    <div style={{fontSize:7, color:'#64748b'}}>{(pr.items||[]).length} item{(pr.items||[]).length===1?'':'s'}</div>
+                  </div>
+
+                  {/* Col 4: Amount */}
+                  <div>
+                    <div style={{fontSize:7, color:'#64748b'}}>AMOUNT</div>
+                    <div className="mn" style={{fontSize:10, fontWeight:700, color:'#e6edf3'}}>₹{(+pr.total||0).toLocaleString('en-IN')}</div>
+                  </div>
+
+                  {/* Col 5: Status */}
+                  <div>
+                    <div style={{fontSize:7, color:'#64748b', marginBottom:2}}>STATUS</div>
+                    <span className="bd" style={{background:sc.bg, color:sc.c, fontSize:8, fontWeight:700, padding:'2px 7px'}}>
+                      {pr.status}
+                    </span>
+                    {pr.po_no && <div style={{fontSize:8, color:'#06b6d4', marginTop:2, fontWeight:700}}>PO: {pr.po_no}</div>}
+                  </div>
+
+                  {/* Col 6: Last update + actions */}
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontSize:7, color:'#64748b'}}>UPDATED</div>
+                    <div style={{fontSize:9, color:'#8b949e'}} title={fmtDate(pr.last_status_change_at||pr.created_at)}>
+                      {relTime(pr.last_status_change_at||pr.created_at)}
+                    </div>
+                    {pr.po_pdf_url && (
+                      <button className="b bs" onClick={() => openPO(pr.po_pdf_url)}
+                        style={{fontSize:8, padding:'2px 6px', marginTop:3, borderColor:'#06b6d4', color:'#06b6d4'}}>
+                        📄 View PO
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Rejection reason or notes row */}
+                {pr.status === 'Rejected' && pr.rejection_reason && (
+                  <div style={{marginTop:6, padding:'4px 8px', background:'#f4706715', border:'1px solid #f4706733', borderRadius:4}}>
+                    <span style={{fontSize:8, color:'#f47067', fontWeight:700}}>REJECTION REASON: </span>
+                    <span style={{fontSize:9, color:'#e6edf3'}}>{pr.rejection_reason}</span>
+                  </div>
+                )}
+                {pr.status === 'Completed' && pr.received_at && (
+                  <div style={{marginTop:4, fontSize:8, color:'#8b5cf6'}}>
+                    ✅ Goods received {relTime(pr.received_at)} by {pr.received_by||'—'} {pr.grn_id?` · ${pr.grn_id}`:''}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p style={{fontSize:8, color:'#475569', textAlign:'center', marginTop:16}}>
+        💡 Yellow dot = status changed since you last viewed this page · Click job # to open job detail
+      </p>
+    </div>
+  );
+}
+
 function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const [filter, setFilter] = React.useState('Pending Approval');
   const [rejecting, setRejecting] = React.useState(null); // pr id being rejected
@@ -3641,7 +3945,8 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
 
   const approvePR = async (pr) => {
     setProcessing(pr.id);
-    const updates = {status:'Approved', approved_by:'Jigar', approved_at: new Date().toISOString()};
+    const nowIso = new Date().toISOString();
+    const updates = {status:'Approved', approved_by:'Jigar', approved_at: nowIso, last_status_change_at: nowIso};
     const {error} = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
     if (error) { show('⚠️ Update failed: ' + error.message, false); setProcessing(null); return; }
     const updated = {...pr, ...updates};
@@ -3649,21 +3954,35 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
     setProcessing(null);
     setWaButtons(p => ({...p, [pr.id]: true}));
     show('✅ ' + pr.pr_no + ' approved! Send WhatsApp notifications below.');
+    // Auto-notify requestor (in addition to manual buttons below)
+    const reqPhone = WA_NUMBERS[pr.created_by];
+    if (reqPhone) {
+      const msg = `✅ Your PR *${pr.pr_no}* has been *APPROVED* by Jigar.\n\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\nShreya will generate the PO shortly. Track status in *My PRs* tab.`;
+      sendWhatsApp(reqPhone, msg, 'iprint_pr_approved');
+    }
   };
 
   const rejectPR = async (pr) => {
     if (!rejReason.trim()) { show('Enter rejection reason', false); return; }
     setProcessing(pr.id);
-    const updates = {status:'Rejected', rejected_by:'Jigar', rejected_at: new Date().toISOString(), rejection_reason: rejReason.trim()};
+    const nowIso = new Date().toISOString();
+    const updates = {status:'Rejected', rejected_by:'Jigar', rejected_at: nowIso, rejection_reason: rejReason.trim(), last_status_change_at: nowIso};
     const {error} = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
     if (error) { show('⚠️ Update failed: ' + error.message, false); setProcessing(null); return; }
     const updated = {...pr, ...updates};
     setPrs(p => p.map(x => x.id === pr.id ? updated : x));
     setProcessing(null);
     setRejecting(null);
+    const reasonText = rejReason.trim();
     setRejReason('');
     setWaButtons(p => ({...p, [pr.id]: true}));
     show('PR rejected. Send WhatsApp notification to requestor.');
+    // Auto-notify requestor with rejection reason
+    const reqPhone = WA_NUMBERS[pr.created_by];
+    if (reqPhone) {
+      const msg = `❌ Your PR *${pr.pr_no}* has been *REJECTED* by Jigar.\n\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\n*Reason:* ${reasonText}\n\nPlease revise and resubmit if needed. Track status in *My PRs* tab.`;
+      sendWhatsApp(reqPhone, msg, 'iprint_pr_rejected');
+    }
   };
 
   const job = (jobId) => (jobs||[]).find(j => j.id === jobId);
