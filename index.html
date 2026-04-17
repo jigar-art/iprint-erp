@@ -135,6 +135,18 @@ const UNIT_MODES = [
     areaFn:(w,h,q)=>0,
     totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
     displayFn:(a)=>'—' },
+  // Roll modes for vendor-supplied roll material (laminate, vinyl, fabric).
+  // W is roll width in METERS, H is roll length in METERS, Qty = number of rolls.
+  // Per-sqft: vendor invoices by area consumed (rate × total sqft). 1 m² = 10.7639 ft².
+  // Per-roll: vendor invoices by whole roll (rate × qty). Sqft is shown as reference only.
+  { value:'Roll M×M (per sqft)', label:'Roll M×M (per sqft)', needsWH:true, dimUnit:'m',
+    areaFn:(w,h,q)=>Math.round((+w||0)*(+h||0)*(+q||1)*10.7639*100)/100,
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' ft² ('+'rolls)':'—' },
+  { value:'Roll M×M (per roll)', label:'Roll M×M (per roll)', needsWH:true, dimUnit:'m',
+    areaFn:(w,h,q)=>Math.round((+w||0)*(+h||0)*(+q||1)*10.7639*100)/100,
+    totalFn:(a,q,r)=>Math.round((+q||1)*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?'rolls ('+a+' ft² ref.)':'—' },
 ];
 const getUnitMode = (rm) => UNIT_MODES.find(u=>u.value===rm) || UNIT_MODES[0];
 // Keep legacy RATES for backward compat in other places
@@ -801,7 +813,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
-          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
+          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user} items={items} osItems={osItems}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
           {pg==="appr"&&<ApprovalsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
@@ -1290,7 +1302,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_GST=[0,5,12,18,28];
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
-      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:''};
+      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
       const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
@@ -1318,9 +1330,18 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const addItem=()=>setPrf(p=>({...p,items:[...p.items,{...blankItem}]}));
       const delItem=(i)=>setPrf(p=>({...p,items:p.items.filter((_,xi)=>xi!==i)}));
 
+      // Compute one line's amount using its unit_mode (falls back to qty*rate for legacy items).
+      const lineAmount=(x)=>{
+        if(x && x.unit_mode){
+          const um=getUnitMode(x.unit_mode);
+          const a=um.areaFn(+x.width||0,+x.height||0,+x.qty||1);
+          return um.totalFn(a,+x.qty||1,+x.rate||0);
+        }
+        return (+x.qty||0)*(+x.rate||0);
+      };
       const calcTotals=(items,transport)=>{
-        const sub=items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0),0);
-        const gstTotal=items.reduce((s,x)=>s+(+x.qty||0)*(+x.rate||0)*(+x.gst_pct||0)/100,0);
+        const sub=items.reduce((s,x)=>s+lineAmount(x),0);
+        const gstTotal=items.reduce((s,x)=>s+lineAmount(x)*(+x.gst_pct||0)/100,0);
         const total=sub+gstTotal+(+transport||0);
         return {subtotal:+sub.toFixed(2),gst_total:+gstTotal.toFixed(2),total:+total.toFixed(2)};
       };
@@ -1394,7 +1415,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         setPrf(p=>({
           ...p,
           notes:p.notes||(quoteReview.workDesc||''),
-          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:''}))
+          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0}))
         }));
         // If there are rejected items with notes — send WhatsApp to vendor + user + group
         if(rejectedItems.length>0 && prf.vendor_phone){
@@ -1529,7 +1550,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 </div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {rItems.map((x,xi)=><span key={xi} style={{color:"#8b949e"}}>{x.product}{x.size?' ('+x.size+')':''} × {x.qty} {x.per} @ ₹{x.rate} <span style={{color:"#64748b"}}>GST {x.gst_pct}%</span></span>)}
+                {rItems.map((x,xi)=>{
+                  const um=x.unit_mode?getUnitMode(x.unit_mode):null;
+                  const dimStr=um&&um.needsWH&&(x.width||x.height)?` ${x.width||''}×${x.height||''}${um.dimUnit?' '+um.dimUnit:''}`:(x.size?' ('+x.size+')':'');
+                  const modeStr=um&&um.value!=='NOS'?` [${um.value}]`:'';
+                  return <span key={xi} style={{color:"#8b949e"}}>{x.product}{dimStr}{modeStr} × {x.qty} @ ₹{x.rate} <span style={{color:"#64748b"}}>GST {x.gst_pct}%</span></span>;
+                })}
                 {(+r.transport>0)&&<span style={{color:"#64748b"}}>+ Transport ₹{r.transport}</span>}
               </div>
               {r.rejection_reason&&<div style={{marginTop:3,padding:"3px 6px",background:"#f4706710",border:"1px solid #f4706733",borderRadius:4,fontSize:8,color:"#f47067"}}>❌ Rejected: {r.rejection_reason}</div>}
@@ -1752,29 +1778,58 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           {/* Items Table */}
           <p style={{fontSize:8,color:"#f59e0b",fontWeight:700,marginBottom:4}}>LINE ITEMS</p>
           <div style={{overflowX:"auto",marginBottom:6}}>
-            <table style={{minWidth:600}}>
+            <table style={{minWidth:780}}>
               <thead><tr>
-                <th style={{fontSize:8,minWidth:140}}>Product / Description</th>
-                <th style={{fontSize:8,width:65}}>Size/Spec</th>
+                <th style={{fontSize:8,minWidth:120}}>Product / Description</th>
+                <th style={{fontSize:8,width:50}}>Width</th>
+                <th style={{fontSize:8,width:50}}>Height</th>
+                <th style={{fontSize:8,width:110}}>Unit Mode</th>
                 <th style={{fontSize:8,width:45}}>Qty</th>
-                <th style={{fontSize:8,width:75}}>Rate ₹</th>
-                <th style={{fontSize:8,width:70}}>Per</th>
+                <th style={{fontSize:8,width:70}}>Rate ₹</th>
                 <th style={{fontSize:8,width:55}}>GST %</th>
-                <th style={{fontSize:8,width:70}}>Amount</th>
+                <th style={{fontSize:8,width:90}}>Amount</th>
                 <th style={{width:18}}></th>
               </tr></thead>
               <tbody>{prf.items.map((x,xi)=>{
-                const lineAmt=(+x.qty||0)*(+x.rate||0);
+                const um=getUnitMode(x.unit_mode||'NOS');
+                const area=um.areaFn(+x.width||0,+x.height||0,+x.qty||1);
+                const lineAmt=um.totalFn(area,+x.qty||1,+x.rate||0);
                 const lineGst=lineAmt*(+x.gst_pct||0)/100;
+                const whDisabled=!um.needsWH;
+                // When user changes unit_mode, also refresh stored size string for backward compat in display/PO
+                const onModeChange=(v)=>{
+                  setPrf(p=>({...p,items:p.items.map((it,i)=>{
+                    if(i!==xi)return it;
+                    const newUm=getUnitMode(v);
+                    const newArea=newUm.areaFn(+it.width||0,+it.height||0,+it.qty||1);
+                    const sizeStr=newUm.needsWH&&(it.width||it.height)?`${it.width||''}×${it.height||''} ${newUm.dimUnit||''}`.trim():'';
+                    return {...it,unit_mode:v,area:newArea,size:sizeStr};
+                  })}));
+                };
+                // When W/H/Qty change, also refresh area + size
+                const onDimChange=(field,v)=>{
+                  setPrf(p=>({...p,items:p.items.map((it,i)=>{
+                    if(i!==xi)return it;
+                    const merged={...it,[field]:v};
+                    const um2=getUnitMode(merged.unit_mode||'NOS');
+                    const newArea=um2.areaFn(+merged.width||0,+merged.height||0,+merged.qty||1);
+                    const sizeStr=um2.needsWH&&(merged.width||merged.height)?`${merged.width||''}×${merged.height||''} ${um2.dimUnit||''}`.trim():'';
+                    return {...merged,area:newArea,size:sizeStr};
+                  })}));
+                };
                 return <tr key={xi}>
                   <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-                  <td><input className="in" value={x.size} onChange={e=>updItem(xi,'size',e.target.value)} placeholder="4×8ft" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-                  <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>updItem(xi,'qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
+                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
+                  <td><select className="in" value={x.unit_mode||'NOS'} onChange={e=>onModeChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
+                    {UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
+                  </select></td>
+                  <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>onDimChange('qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><input className="in mn" type="number" min="0" value={x.rate} onChange={e=>updItem(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-                  <td><select className="in" value={x.per} onChange={e=>updItem(xi,'per',e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>{PR_PER.map(p=><option key={p}>{p}</option>)}</select></td>
                   <td><select className="in" value={x.gst_pct} onChange={e=>updItem(xi,'gst_pct',+e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",color:x.gst_pct===0?'#64748b':'inherit'}}>{PR_GST.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
                   <td style={{fontSize:9,color:"#e3a008",fontWeight:700,textAlign:"right",paddingRight:4}}>
                     <span style={{display:"block"}}>₹{lineAmt.toFixed(0)}</span>
+                    {area>0&&<span style={{fontSize:7,color:"#64748b",display:"block"}}>{um.displayFn(area)}</span>}
                     {x.gst_pct>0&&<span style={{fontSize:7,color:"#64748b"}}>+₹{lineGst.toFixed(0)} GST</span>}
                   </td>
                   <td>{prf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:10,padding:0}} onClick={()=>delItem(xi)}>✕</button>}</td>
@@ -2956,15 +3011,195 @@ function numToWords(n) {
   return words + ' Only';
 }
 
+// ══════════════════════════════════════════════════════════
+// buildPOHtml — top-level, pure. Used by POPage AND MyPRsPage.
+// Accepts (pr, poNo, firm, jobsArr) and returns the full PO HTML doc string.
+// jobsArr is required to surface project name on the PO header.
+// ══════════════════════════════════════════════════════════
+function buildPOHtml(pr, poNo, firm, jobsArr) {
+  const items = Array.isArray(pr.items) ? pr.items : [];
+  const job = (jobsArr||[]).find(j => j.id === pr.job_id);
+  const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
+  const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
+  const _lineBase = (x) => {
+    if (x && x.unit_mode) {
+      const um = getUnitMode(x.unit_mode);
+      const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
+      return um.totalFn(a, +x.qty||1, +x.rate||0);
+    }
+    return (+x.qty||0)*(+x.rate||0);
+  };
+  const subtotal = +pr.subtotal || items.reduce((s,x) => s + _lineBase(x), 0);
+  const gstTotal = (pr.gst_total !== null && pr.gst_total !== undefined && pr.gst_total !== '')
+    ? +pr.gst_total
+    : items.reduce((s,x) => s + _lineBase(x)*(+x.gst_pct||0)/100, 0);
+  const transport = +pr.transport || 0;
+  const grandTotal = subtotal + gstTotal + transport;
+  const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
+  const gstGroups = {};
+  items.forEach(x => {
+    const base = _lineBase(x);
+    const gp = +x.gst_pct || 0;
+    const key = gp;
+    if (!gstGroups[key]) gstGroups[key] = {base:0, tax:0};
+    gstGroups[key].base += base;
+    gstGroups[key].tax += base * gp / 100;
+  });
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'2-digit'});
+  const itemRows = items.map((x, i) => {
+    const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
+    const area = um ? um.areaFn(+x.width||0, +x.height||0, +x.qty||1) : 0;
+    const dimLine = um && um.needsWH && (x.width || x.height)
+      ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
+      : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
+    const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
+    const qtyUnit = um ? (um.value==='NOS'||um.value==='SET'||um.value==='LOT'||um.value==='KG' ? um.label : (um.value.indexOf('Roll')===0 ? 'roll' : (x.per||'nos'))) : (x.per||'nos');
+    const lineAmt = _lineBase(x);
+    return `
+    <tr>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${i+1}</td>
+      <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product||''}${dimLine}${hsnLine}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${pr.expected_delivery||dateStr}</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.qty||0).toFixed(2)} ${qtyUnit}</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.rate||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${qtyUnit}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;"></td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${lineAmt.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+    </tr>`;
+  }).join('');
+  const gstRows = Object.entries(gstGroups).map(([pct, {base, tax}]) => {
+    if (+pct === 0 || tax === 0) return '';
+    if (isIntraState) {
+      return `
+        <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input CGST @ ${pct/2}%</td>
+        <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${(tax/2).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
+        <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input SGST @ ${pct/2}%</td>
+        <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${(tax/2).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>`;
+    } else {
+      return `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input IGST @ ${pct}%</td>
+        <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${tax.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>`;
+    }
+  }).join('');
+  const transportRow = transport > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport / Freight</td>
+    <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: Arial, sans-serif; font-size: 11px; color: #222; padding: 24px; }
+.po-header { text-align: center; margin-bottom: 12px; }
+.po-header h2 { font-size: 15px; font-weight: 800; }
+.po-header p { font-size: 10px; color: #333; line-height: 1.5; }
+.po-title { font-size: 14px; font-weight: 800; text-align: center; border: 2px solid #222; padding: 4px; margin: 10px 0; letter-spacing: 1px; }
+.meta-row { display: flex; justify-content: space-between; font-size: 10px; color: #555; margin-bottom: 8px; }
+.party-box { border: 1px solid #ccc; padding: 8px; margin-bottom: 10px; font-size: 10px; }
+.party-box strong { font-size: 11px; }
+.pt-box { border: 1px solid #ccc; padding: 6px 8px; margin-bottom: 10px; font-size: 10px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+th { background: #f0f0f0; font-size: 10px; font-weight: 700; padding: 5px 6px; border: 1px solid #ccc; text-align: center; }
+.words-box { border: 1px solid #ccc; padding: 6px 8px; font-size: 10px; margin-bottom: 8px; }
+.footer-row { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 6px; }
+.sig-box { text-align: right; margin-top: 20px; font-size: 10px; }
+.sig-img { width: 120px; height: 60px; object-fit: contain; }
+.computer-gen { text-align: center; font-size: 9px; color: #888; margin-top: 16px; border-top: 1px solid #ccc; padding-top: 6px; }
+@media print { body { padding: 12px; } }
+</style></head><body>
+
+<div class="meta-row">
+  <span>Voucher No. &nbsp;<strong>${poNo}</strong></span>
+  <span>Dated &nbsp;<strong>${dateStr}</strong></span>
+</div>
+<div class="meta-row" style="margin-top:-4px">
+  <span>Ref. No./PR No. : &nbsp;<strong>${pr.pr_no}</strong></span>
+</div>
+${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
+  <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${jobLabel}</strong></span>
+</div>` : ''}
+
+<div class="po-header">
+  <h2>${firm.name}</h2>
+  <p>${firm.address}</p>
+  <p>GSTIN/UIN: ${firm.gstin}</p>
+  <p>State Name : ${firm.state}, Code : ${firm.state_code}</p>
+  ${firm.email ? '<p>E-Mail : ' + firm.email + '</p>' : ''}
+</div>
+
+<div class="po-title">PURCHASE ORDER</div>
+
+<div class="party-box">
+  <div style="margin-bottom:4px"><span style="color:#555">Party : </span><strong>${pr.vendor_name}</strong></div>
+  ${pr.vendor_address ? '<div style="color:#444;line-height:1.6;margin-left:44px">' + pr.vendor_address + '</div>' : ''}
+  ${pr.vendor_gstin ? '<div style="margin-top:4px">GSTIN/UIN &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin + '</strong></div>' : ''}
+  <div>State Name &nbsp;: &nbsp;${(pr.vendor_state||'Maharashtra')}, Code : ${(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'27':'—'}</div>
+</div>
+
+<div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms||'To be confirmed'}</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:30px">Sl<br>No.</th>
+      <th>Description of Goods</th>
+      <th style="width:70px">Due on</th>
+      <th style="width:80px">Quantity</th>
+      <th style="width:70px">Rate</th>
+      <th style="width:50px">per</th>
+      <th style="width:40px">Disc. %</th>
+      <th style="width:80px">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${itemRows}
+    <tr>
+      <td colspan="7" style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Subtotal</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${subtotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+    </tr>
+    ${gstRows}
+    ${transportRow}
+    <tr style="background:#f9f9f9">
+      <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
+      <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
+      <td colspan="3" style="border:1px solid #ccc;"></td>
+      <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;">₹ ${grandTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="words-box">
+  <strong>Amount Chargeable (in words)</strong>
+  <span style="float:right;font-style:italic;font-size:9px">E. &amp; O.E</span><br>
+  <strong>INR ${numToWords(grandTotal)}</strong>
+</div>
+
+<div class="footer-row">
+  <div>
+    <div>Company's PAN &nbsp;&nbsp;: &nbsp;<strong>${firm.pan}</strong></div>
+    ${firm.msme ? '<div style="margin-top:2px">MSME Reg.No (UAN) : &nbsp;<strong>' + firm.msme + '</strong></div>' : ''}
+  </div>
+</div>
+
+<div class="sig-box">
+  <img src="${SIGNATURE_IMG}" style="width:120px;height:65px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
+  <div style="font-weight:700;font-size:11px">for ${firm.short}</div>
+  <div style="font-size:10px;color:#555;margin-top:2px">Authorised Signatory</div>
+</div>
+
+<div class="computer-gen">This is a Computer Generated Document</div>
+
+</body></html>`;
+}
+
 
 // ══════════════════════════════════════════════════════════
 // PHASE D — GRN / RECEIVE MATERIAL PAGE
 // ══════════════════════════════════════════════════════════
 function GRNReceivePage({prs, setPrs, jobs, user, show}) {
   const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
-  const STATUS_FILTERS = ['PO Sent','PO Generated','Approved','All'];
+  const STATUS_FILTERS = ['PO Generated','PO Sent','Approved','All'];
 
-  const [filter, setFilter] = React.useState('PO Sent');
+  const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
   const [gf, setGf] = React.useState({
     received_by: user?.name || 'Murli Shetty',
@@ -2993,14 +3228,26 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
       invoice_no: '',
       received_notes: '',
       partial_delivery: false,
-      items_received: items.map((x,i) => ({
-        index: i,
-        product: x.product,
-        ordered_qty: +x.qty || 0,
-        per: x.per || 'nos',
-        received_qty: +x.qty || 0,
-        ok: true
-      }))
+      items_received: items.map((x,i) => {
+        const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
+        const area = um ? um.areaFn(+x.width||0, +x.height||0, +x.qty||1) : 0;
+        // For area-mode lines we display the computed area as the "ordered amount"
+        // (e.g. 850 ft²), but we still keep raw qty for legacy/per-roll/per-piece lines.
+        const isAreaMode = um && um.needsWH && area > 0 && um.value !== 'Roll M×M (per roll)';
+        return {
+          index: i,
+          product: x.product,
+          unit_mode: x.unit_mode || null,
+          width: x.width || '',
+          height: x.height || '',
+          area: area,
+          ordered_qty: +x.qty || 0,
+          ordered_display: isAreaMode ? area : (+x.qty || 0),
+          per: isAreaMode ? (um.displayFn(area).split(' ')[1] || um.dimUnit || 'nos') : (x.per || (um ? um.value : 'nos')),
+          received_qty: isAreaMode ? area : (+x.qty || 0),
+          ok: true
+        };
+      })
     });
     setReceiving(pr);
   };
@@ -3019,9 +3266,9 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
         gf.invoice_no ? 'Invoice: ' + gf.invoice_no : '',
         gf.received_notes || '',
         gf.partial_delivery ? 'PARTIAL DELIVERY' : '',
-        gf.items_received.some(x => +x.received_qty !== +x.ordered_qty)
-          ? 'Qty variances: ' + gf.items_received.filter(x => +x.received_qty !== +x.ordered_qty)
-              .map(x => x.product + ' (ordered ' + x.ordered_qty + ', received ' + x.received_qty + ')').join('; ')
+        gf.items_received.some(x => +x.received_qty !== +(x.ordered_display ?? x.ordered_qty))
+          ? 'Qty variances: ' + gf.items_received.filter(x => +x.received_qty !== +(x.ordered_display ?? x.ordered_qty))
+              .map(x => x.product + ' (ordered ' + (x.ordered_display ?? x.ordered_qty) + ', received ' + x.received_qty + ')').join('; ')
           : ''
       ].filter(Boolean).join(' | ') || null,
       invoice_no: gf.invoice_no || null,
@@ -3144,11 +3391,13 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
               </tr></thead>
               <tbody>
                 {gf.items_received.map((x, i) => {
-                  const variance = +x.received_qty !== +x.ordered_qty;
+                  const orderedRef = (x.ordered_display !== undefined && x.ordered_display !== null) ? +x.ordered_display : +x.ordered_qty;
+                  const variance = +x.received_qty !== orderedRef;
+                  const dimHint = x.unit_mode && x.width && x.height ? ` (${x.width}×${x.height} ${x.unit_mode.includes('M×M')?'m':''})` : '';
                   return (
                     <tr key={i}>
-                      <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8, paddingTop:4}}>{x.product}</td>
-                      <td style={{fontSize:9, color:'#64748b', textAlign:'right', paddingTop:4}}>{x.ordered_qty} {x.per}</td>
+                      <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8, paddingTop:4}}>{x.product}<span style={{fontSize:7,color:'#64748b'}}>{dimHint}</span></td>
+                      <td style={{fontSize:9, color:'#64748b', textAlign:'right', paddingTop:4}}>{orderedRef} {x.per}</td>
                       <td style={{textAlign:'right', paddingTop:2}}>
                         <input className="in mn" type="number" min="0" value={x.received_qty}
                           onChange={e => setGf(p => ({...p, items_received: p.items_received.map((it,xi) => xi===i ? {...it, received_qty: e.target.value} : it)}))}
@@ -3167,7 +3416,7 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
                 })}
               </tbody>
             </table>
-            {gf.items_received.some(x => +x.received_qty !== +x.ordered_qty) && (
+            {gf.items_received.some(x => +x.received_qty !== +(x.ordered_display ?? x.ordered_qty)) && (
               <div style={{marginTop:6, fontSize:8, color:'#f59e0b'}}>
                 ⚠️ Quantity variance detected — will be noted in GRN
               </div>
@@ -3281,7 +3530,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   const [generating, setGenerating] = React.useState(null);
   const [poPreview, setPoPreview] = React.useState(null); // {pr, poNo, html}
 
-  const STATUS_FILTERS = ['Approved','PO Generated','PO Sent','All'];
+  const STATUS_FILTERS = ['Approved','PO Generated','Completed','All'];
   const stCol = {
     'Approved':     {bg:'#4ade8020',c:'#4ade80'},
     'PO Generated': {bg:'#06b6d420',c:'#06b6d4'},
@@ -3290,7 +3539,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   };
 
   const filtered = React.useMemo(() => {
-    const list = filter === 'All' ? prs.filter(p=>['Approved','PO Generated','PO Sent','Completed'].includes(p.status))
+    const list = filter === 'All' ? prs.filter(p=>['Approved','PO Generated','Completed'].includes(p.status))
       : prs.filter(p => p.status === filter);
     return [...list].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
   }, [prs, filter]);
@@ -3308,17 +3557,26 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     return `${firmCode}/PO/${fy}/${next}`;
   };
 
-  const buildPOHtml = (pr, poNo, firm) => {
+  const buildPOHtml = (pr, poNo, firm, jobsArr) => {
     const items = Array.isArray(pr.items) ? pr.items : [];
-    // Bug-fix (PR2.0): look up job to surface project name on the PO header (jobs is in closure scope from POPage props).
-    const job = (jobs||[]).find(j => j.id === pr.job_id);
+    // Look up job to surface project name on the PO header. jobsArr passed in (was closure dep).
+    const job = (jobsArr||[]).find(j => j.id === pr.job_id);
     const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
     const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
-    const subtotal = +pr.subtotal || items.reduce((s,x) => s + (+x.qty||0)*(+x.rate||0), 0);
+    // Per-line amount honours unit_mode if present, falls back to qty*rate for legacy items.
+    const _lineBase = (x) => {
+      if (x && x.unit_mode) {
+        const um = getUnitMode(x.unit_mode);
+        const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
+        return um.totalFn(a, +x.qty||1, +x.rate||0);
+      }
+      return (+x.qty||0)*(+x.rate||0);
+    };
+    const subtotal = +pr.subtotal || items.reduce((s,x) => s + _lineBase(x), 0);
     // Bug-fix (PR2.0): respect stored gst_total even when it's 0; per-item gst_pct defaults to 0 (not 18) so "no GST" PRs don't silently acquire tax.
     const gstTotal = (pr.gst_total !== null && pr.gst_total !== undefined && pr.gst_total !== '')
       ? +pr.gst_total
-      : items.reduce((s,x) => s + (+x.qty||0)*(+x.rate||0)*(+x.gst_pct||0)/100, 0);
+      : items.reduce((s,x) => s + _lineBase(x)*(+x.gst_pct||0)/100, 0);
     const transport = +pr.transport || 0;
     const grandTotal = subtotal + gstTotal + transport;
     const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
@@ -3326,7 +3584,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     // GST breakdown per rate
     const gstGroups = {};
     items.forEach(x => {
-      const base = (+x.qty||0)*(+x.rate||0);
+      const base = _lineBase(x);
       // Bug-fix (PR2.0): default per-item GST to 0 (not 18) so explicit 0% on PR doesn't silently become 18% here.
       const gp = +x.gst_pct || 0;
       const key = gp;
@@ -3338,17 +3596,29 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const today = new Date();
     const dateStr = today.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'2-digit'});
 
-    const itemRows = items.map((x, i) => `
+    const itemRows = items.map((x, i) => {
+      const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
+      const area = um ? um.areaFn(+x.width||0, +x.height||0, +x.qty||1) : 0;
+      // Build the description line — show W×H + dim unit + computed area when available, else fall back to free-text size.
+      const dimLine = um && um.needsWH && (x.width || x.height)
+        ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
+        : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
+      const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
+      // Qty column shows qty + the unit (per OR unit_mode short label for area items).
+      const qtyUnit = um ? (um.value==='NOS'||um.value==='SET'||um.value==='LOT'||um.value==='KG' ? um.label : (um.value.indexOf('Roll')===0 ? 'roll' : (x.per||'nos'))) : (x.per||'nos');
+      const lineAmt = _lineBase(x);
+      return `
       <tr>
         <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${i+1}</td>
-        <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product||''}${x.size ? '<br><span style="font-weight:400;font-size:9px;color:#555">' + x.size + '</span>' : ''}${x.hsn ? '<br><span style="font-size:8px;color:#888">HSN: ' + x.hsn + '</span>' : ''}</td>
+        <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product||''}${dimLine}${hsnLine}</td>
         <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${pr.expected_delivery||dateStr}</td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.qty||0).toFixed(4)} ${x.per||'nos'}</td>
+        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.qty||0).toFixed(2)} ${qtyUnit}</td>
         <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.rate||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${x.per||'nos'}</td>
+        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${qtyUnit}</td>
         <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;"></td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${((+x.qty||0)*(+x.rate||0)).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-      </tr>`).join('');
+        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${lineAmt.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      </tr>`;
+    }).join('');
 
     const gstRows = Object.entries(gstGroups).map(([pct, {base, tax}]) => {
       // Bug-fix (PR2.0): hide tax rows entirely for 0% GST groups — cleaner PO per team feedback.
@@ -3479,7 +3749,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     setGenerating(pr.id);
     const poNo = await genPONo(pr.firm_code);
     const firm = FIRM_DATA[pr.firm_code] || FIRM_DATA.JXT;
-    const html = buildPOHtml(pr, poNo, firm);
+    const html = buildPOHtml(pr, poNo, firm, jobs);
     setPoPreview({pr, poNo, html, firm});
     setGenerating(null);
   };
@@ -3700,7 +3970,7 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
     return myDeptTag && pr.requestor_dept === myDeptTag;
   };
 
-  const STATUS_OPTS = ['Active','All','Pending Approval','Approved','Rejected','PO Generated','PO Sent','Completed'];
+  const STATUS_OPTS = ['Active','All','Pending Approval','Approved','Rejected','PO Generated','Completed'];
   const passesStatus = (pr) => {
     if (statusFilter === 'All') return true;
     if (statusFilter === 'Active') return pr.status !== 'Completed' && pr.status !== 'Cancelled' && pr.status !== 'Rejected';
@@ -3861,10 +4131,29 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
                     <div style={{fontSize:9, color:'#8b949e'}} title={fmtDate(pr.last_status_change_at||pr.created_at)}>
                       {relTime(pr.last_status_change_at||pr.created_at)}
                     </div>
-                    {pr.po_pdf_url && (
-                      <button className="b bs" onClick={() => openPO(pr.po_pdf_url)}
+                    {pr.po_no && (
+                      <button className="b bs" onClick={() => {
+                        // Prefer stored PDF url if ever populated; otherwise re-render from data using
+                        // the top-level buildPOHtml helper. Same template Shreya used to generate.
+                        if (pr.po_pdf_url) { openPO(pr.po_pdf_url); return; }
+                        try {
+                          const firm = (typeof FIRM_DATA !== 'undefined' && FIRM_DATA[pr.firm_code]) || (typeof FIRM_DATA !== 'undefined' ? FIRM_DATA.JXT : null);
+                          if (!firm || typeof buildPOHtml !== 'function') {
+                            show && show('Cannot render PO — internal template missing', false);
+                            return;
+                          }
+                          const html = buildPOHtml(pr, pr.po_no, firm, jobs);
+                          const w = window.open('', '_blank', 'width=900,height=720');
+                          if (!w) { show && show('Popup blocked — allow popups for this site', false); return; }
+                          w.document.write(html);
+                          w.document.close();
+                        } catch (e) {
+                          console.error('PO render failed', e);
+                          show && show('Could not open PO: ' + (e.message || 'unknown error'), false);
+                        }
+                      }}
                         style={{fontSize:8, padding:'2px 6px', marginTop:3, borderColor:'#06b6d4', color:'#06b6d4'}}>
-                        📄 View PO
+                        📄 View / Print PO
                       </button>
                     )}
                   </div>
@@ -5027,7 +5316,7 @@ function RootApp(){
 // ═══════════════════════════════════════════════════════════
 // BANKING CRM PAGE
 // ═══════════════════════════════════════════════════════════
-function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
+function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [sites,setSites]=useState([]);
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState('ALL');
@@ -5040,6 +5329,16 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
   const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_unique_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});
   const [siteAction,setSiteAction]=useState(null); // {type:'delete'|'move'|null, site}
   const [moveJobNo,setMoveJobNo]=useState('');
+  // ── Dept-status filter (NEW) ───────────────────────────────
+  // null = no dept filter active. Otherwise one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed'
+  const [deptFilter,setDeptFilter]=useState(null);
+  // Refresh tick — increments every 60s while page is open. Forces dept useMemo to recompute even
+  // if items/osItems references haven't changed (e.g. another user edited remotely).
+  const [refreshTick,setRefreshTick]=useState(0);
+  React.useEffect(()=>{
+    const t=setInterval(()=>setRefreshTick(p=>p+1),60000);
+    return ()=>clearInterval(t);
+  },[]);
   const pageSize=50;
 
   // Load banking sites from Supabase
@@ -5059,6 +5358,78 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     })();
   },[]);
 
+  // ── DEPT STATUS ROLLUP (Hybrid: job-level today, upgradeable to site-level later) ──
+  // For each job, compute which dept stages are CURRENTLY active by inspecting its line_items
+  // (dept_design / dept_printing / dept_fabrication / dept_dispatch booleans + area for InHouse vs Outsource)
+  // and its outsource_items (task_type tells us Printing-Outsource vs Fabrication-Outsource explicitly).
+  // Returns: Map<jobNoPrefix, {design,printIn,printOut,fabIn,fabOut,dispatch,installed, leading}>
+  // jobNoPrefix is the part before '-' in jobs.id (matches banking_sites.job_no format).
+  const jobDeptStatus = React.useMemo(() => {
+    const map = {};
+    if (!jobs || !jobs.length) return map;
+    // Index line_items + outsource_items by job_id for O(1) lookup
+    const itemsByJob = {};
+    (items||[]).forEach(it => {
+      if (!it.job_id) return;
+      (itemsByJob[it.job_id] = itemsByJob[it.job_id] || []).push(it);
+    });
+    const osByJob = {};
+    (osItems||[]).forEach(o => {
+      if (!o.job_id) return;
+      (osByJob[o.job_id] = osByJob[o.job_id] || []).push(o);
+    });
+    jobs.forEach(j => {
+      const lineItems = itemsByJob[j.id] || [];
+      const osList = osByJob[j.id] || [];
+      // dept booleans: TRUE if ANY line_item in that dept is incomplete (false) — i.e. still active there
+      // Logic: dept_X=false means "not yet done in that dept" → dept is currently doing this work
+      // If ALL line_items have dept_X=true, that dept is finished for this job
+      const anyIncomplete = (deptKey) => lineItems.some(it => !it[deptKey]);
+      const designActive   = lineItems.length > 0 && anyIncomplete('dept_design');
+      const printingActive = lineItems.length > 0 && anyIncomplete('dept_printing');
+      const fabActive      = lineItems.length > 0 && anyIncomplete('dept_fabrication');
+      const dispatchActive = lineItems.length > 0 && anyIncomplete('dept_dispatch');
+      const installActive  = lineItems.length > 0 && anyIncomplete('dept_installation');
+      // InHouse vs Outsource: split by area field on line_item AND outsource_items presence
+      // Printing-Outsource: any os entry with task_type containing 'Print', or any line_item area==='Outsource' AND printing dept active
+      const printOutsource = osList.some(o => /print/i.test(o.task_type||'')) ||
+        lineItems.some(it => it.area === 'Outsource' && !it.dept_printing);
+      const printInHouse = printingActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_printing);
+      // Fabrication-Outsource: os task_types include Router/Laser/Coating/Frames/Signages
+      const fabOutsource = osList.some(o => /router|laser|coating|frame|signage|fabric/i.test(o.task_type||'')) ||
+        lineItems.some(it => it.area === 'Outsource' && !it.dept_fabrication);
+      const fabInHouse = fabActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_fabrication);
+      // Leading edge: the furthest stage that has ANY active work. Used for clean count sums.
+      // Order: design → print → fab → dispatch → installed
+      let leading = null;
+      if (lineItems.length === 0) leading = null; // no items yet, no stage
+      else if (!installActive) leading = 'installed'; // installation done = job is fully done
+      else if (dispatchActive) leading = 'dispatch';
+      else if (fabActive) leading = fabOutsource ? 'fabOut' : 'fabIn';
+      else if (printingActive) leading = printOutsource ? 'printOut' : 'printIn';
+      else if (designActive) leading = 'design';
+      else leading = 'installed';
+      const jobNoPrefix = (j.id||'').split('-')[0];
+      if (!jobNoPrefix) return;
+      map[jobNoPrefix] = {
+        design: designActive,
+        printIn: printInHouse,
+        printOut: printOutsource,
+        fabIn: fabInHouse,
+        fabOut: fabOutsource,
+        dispatch: dispatchActive,
+        installed: !installActive,
+        leading
+      };
+    });
+    return map;
+  }, [jobs, items, osItems, refreshTick]);
+
+  // Helper to get a site's dept status (defensive: always returns an object)
+  const siteDeptStatus = React.useCallback((s) => {
+    return (s && s.job_no && jobDeptStatus[s.job_no]) || {design:false,printIn:false,printOut:false,fabIn:false,fabOut:false,dispatch:false,installed:false,leading:null};
+  }, [jobDeptStatus]);
+
   // Projects
   const projects=useMemo(()=>{
     const p={};sites.forEach(s=>{if(!p[s.project])p[s.project]=0;p[s.project]++;});
@@ -5071,6 +5442,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     if(tab!=='ALL')f=f.filter(s=>s.project===tab);
     if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
     if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
+    if(deptFilter)f=f.filter(s=>siteDeptStatus(s)[deptFilter]);
     if(search){const q=search.toLowerCase();f=f.filter(s=>
       s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||s.site_unique_id?.toLowerCase().includes(q)||
       s.city?.toLowerCase().includes(q)||s.state?.toLowerCase().includes(q)||
@@ -5078,7 +5450,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
       s.billing_status?.toLowerCase().includes(q)||s.district?.toLowerCase().includes(q)
     );}
     return f;
-  },[sites,tab,stFilter,stateFilter,search]);
+  },[sites,tab,stFilter,stateFilter,search,deptFilter,siteDeptStatus]);
 
   // Stats
   const stats=useMemo(()=>{
@@ -5093,6 +5465,18 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
       photoPending:f.filter(s=>!s.photo_status||s.photo_status.includes('Pending')||s.photo_status==='').length,
     };
   },[sites,tab]);
+
+  // Dept counts — uses leading-edge so sums are clean (each site counted once)
+  const deptCounts = useMemo(() => {
+    const f = tab==='ALL' ? sites : sites.filter(s => s.project===tab);
+    const c = {design:0, printIn:0, printOut:0, fabIn:0, fabOut:0, dispatch:0, installed:0, untracked:0};
+    f.forEach(s => {
+      const st = siteDeptStatus(s);
+      if (st.leading) c[st.leading] = (c[st.leading]||0) + 1;
+      else c.untracked++;
+    });
+    return c;
+  }, [sites, tab, siteDeptStatus]);
 
   // Unique states for filter
   const states=useMemo(()=>{
@@ -5206,6 +5590,49 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     {/* Stats Cards */}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5}}>
       <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
+    </div>
+
+    {/* Dept Status Cards (NEW) — click to filter sites by current production stage */}
+    <div style={{background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:'7px 10px',marginTop:5}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+        <p style={{fontSize:8,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600,margin:0}}>
+          🏭 Production Status — click to filter
+        </p>
+        {deptFilter && <button className="b bs" onClick={()=>setDeptFilter(null)} style={{fontSize:8,padding:'1px 7px',color:'#f47067',borderColor:'#f47067'}}>✕ Clear filter</button>}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:5}}>
+        {[
+          {k:'design',     l:'Design',          c:'#8b5cf6'},
+          {k:'printIn',    l:'Print · In-House',c:'#06b6d4'},
+          {k:'printOut',   l:'Print · Outsource',c:'#f97316'},
+          {k:'fabIn',      l:'Fab · In-House',  c:'#06b6d4'},
+          {k:'fabOut',     l:'Fab · Outsource', c:'#f97316'},
+          {k:'dispatch',   l:'Dispatch',        c:'#3b82f6'},
+          {k:'installed',  l:'Installed',       c:'#4ade80'},
+        ].map(d => {
+          const active = deptFilter === d.k;
+          return (
+            <div key={d.k}
+              onClick={()=>setDeptFilter(active ? null : d.k)}
+              style={{
+                background: active ? d.c+'30' : d.c+'15',
+                border: `1px solid ${active ? d.c : d.c+'55'}`,
+                borderRadius: 4,
+                padding: '6px 8px',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}>
+              <div style={{fontSize:7,color:d.c,fontWeight:700,letterSpacing:'.03em',textTransform:'uppercase'}}>{d.l}</div>
+              <div className="mn" style={{fontSize:14,color:d.c,fontWeight:700,marginTop:1}}>{(deptCounts[d.k]||0).toLocaleString('en-IN')}</div>
+            </div>
+          );
+        })}
+      </div>
+      {deptCounts.untracked > 0 && (
+        <p style={{fontSize:7,color:'#475569',marginTop:4,marginBottom:0}}>
+          {deptCounts.untracked.toLocaleString('en-IN')} site{deptCounts.untracked===1?'':'s'} have no linked job items yet (untracked)
+        </p>
+      )}
     </div>
 
     {/* Linked ERP Jobs Summary */}
@@ -5330,7 +5757,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     </div>}
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
-        <th style={{width:30}}>#</th><th>Job#</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
+        <th style={{width:30}}>#</th><th>Job#</th><th style={{minWidth:90}}>Stage</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
         <th>Vendor</th><th>V.Contact</th><th>Vendor PO#</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th><th style={{width:60,textAlign:'center'}}>Action</th>
       </tr></thead><tbody>
       {paged.map((s,i)=>{
@@ -5339,6 +5766,22 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
         return <tr key={s.id} style={{background:isDup?'rgba(245,158,11,0.07)':''}}>
           <td className="mn" style={{fontSize:9}}>{page*pageSize+i+1}</td>
           <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=jobs.find(j=>j.id?.includes(s.job_no));if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
+          <td style={{whiteSpace:'nowrap',padding:'2px 4px'}}>{(()=>{
+            const st=siteDeptStatus(s);
+            const active=[
+              st.design&&{l:'Design',c:'#8b5cf6'},
+              st.printIn&&{l:'P·In',c:'#06b6d4'},
+              st.printOut&&{l:'P·Out',c:'#f97316'},
+              st.fabIn&&{l:'F·In',c:'#06b6d4'},
+              st.fabOut&&{l:'F·Out',c:'#f97316'},
+              st.dispatch&&{l:'Dispatch',c:'#3b82f6'},
+              st.installed&&{l:'Done',c:'#4ade80'},
+            ].filter(Boolean);
+            if(active.length===0)return <span style={{fontSize:8,color:'#475569'}}>—</span>;
+            return <span style={{display:'inline-flex',gap:2,flexWrap:'wrap'}}>{active.map((a,i)=>(
+              <span key={i} className="bd" style={{background:a.c+'20',color:a.c,fontSize:7,fontWeight:700,padding:'1px 4px'}}>{a.l}</span>
+            ))}</span>;
+          })()}</td>
           <td style={{fontSize:8,color:'#64748b',whiteSpace:'nowrap'}}>{(()=>{const d=s.created_at?new Date(s.created_at):null;return d?d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}):'—';})()}</td>
           <td style={{fontSize:9,color:isDup?'#f59e0b':'#8b5cf6',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isDup?700:400}} title={s.atm_id}>{s.atm_id||'—'}{isDup&&<span title="Duplicate detected" style={{marginLeft:3,fontSize:8}}>⚠️</span>}</td>
           <td style={{fontSize:9,color:'#06b6d4',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_unique_id}>{s.site_unique_id||'—'}</td>
