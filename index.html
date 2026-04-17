@@ -192,6 +192,102 @@ const UNIT_MODES = [
     displayFn:(a)=>a>0?'rolls ('+a+' ft² ref.)':'—' },
 ];
 const getUnitMode = (rm) => UNIT_MODES.find(u=>u.value===rm) || UNIT_MODES[0];
+
+// ──────────────────────────────────────────────────────────────────────
+// Issue 1 (Apr 17 2026 PM): two-dropdown unit system. Dim unit and rate
+// basis are now independent. Old single-mode UNIT_MODES still works as
+// fallback for legacy line items that don't have dim_unit/rate_basis yet.
+// ──────────────────────────────────────────────────────────────────────
+const DIM_UNITS = [
+  { value:'METER', label:'meter (m)', toMeters: 1 },
+  { value:'FOOT',  label:'foot (ft)', toMeters: 0.3048 },
+  { value:'INCH',  label:'inch (in)', toMeters: 0.0254 },
+  { value:'CM',    label:'centimeter (cm)', toMeters: 0.01 },
+  { value:'MM',    label:'millimeter (mm)', toMeters: 0.001 },
+];
+const getDimUnit = (du) => DIM_UNITS.find(d=>d.value===du) || null;
+
+const RATE_BASES = [
+  { value:'per_piece', label:'per piece (NOS)', needsArea:false, areaUnit:'',
+    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
+  { value:'per_set',   label:'per set',         needsArea:false, areaUnit:'',
+    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
+  { value:'per_lot',   label:'per lot',         needsArea:false, areaUnit:'',
+    computeAmount: (area_m2, qty, rate) => Math.round((+rate||0)*100)/100 },
+  { value:'per_kg',    label:'per kg',          needsArea:false, areaUnit:'',
+    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
+  { value:'per_roll',  label:'per roll',        needsArea:false, areaUnit:'',
+    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
+  { value:'per_sqft',  label:'per sqft',        needsArea:true,  areaUnit:'ft²',
+    // 1 m² = 10.7639 ft²; total = area_in_sqft × rate (qty already baked into area_m2)
+    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*10.7639*(+rate||0)*100)/100 },
+  { value:'per_sqmtr', label:'per m²',          needsArea:true,  areaUnit:'m²',
+    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*(+rate||0)*100)/100 },
+  { value:'per_rft',   label:'per running ft',  needsArea:false, areaUnit:'rft',
+    // For RFT, we don't use area — caller passes the linear length as qty (legacy) or area_m2 holds linear meters.
+    // Convention: when rate_basis=per_rft, area_m2 holds total linear meters; convert m → ft.
+    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*3.28084*(+rate||0)*100)/100 },
+  { value:'per_rmtr',  label:'per running m',   needsArea:false, areaUnit:'rm',
+    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*(+rate||0)*100)/100 },
+];
+const getRateBasis = (rb) => RATE_BASES.find(r=>r.value===rb) || null;
+
+// computeLineAmount — pure, single source of truth for new two-dropdown items.
+// Returns an object {amount, area_m2, area_display, dim_unit_label, rate_basis_label}
+// for use in form display. Or call .amount for just the number.
+function computeLineAmount(x) {
+  if (!x) return { amount: 0, area_m2: 0, area_display: '—', dim_unit_label: '', rate_basis_label: '' };
+  const du = getDimUnit(x.dim_unit);
+  const rb = getRateBasis(x.rate_basis);
+
+  // Path 1: New two-dropdown items (rate_basis set).
+  if (rb) {
+    let area_m2 = 0;
+    if (rb.needsArea && du) {
+      // Area-based rate: convert W × H × Q to canonical m²
+      const w_m = (+x.width||0) * du.toMeters;
+      const h_m = (+x.height||0) * du.toMeters;
+      area_m2 = w_m * h_m * (+x.qty||1);
+    } else if (rb.value === 'per_rft' || rb.value === 'per_rmtr') {
+      // Linear rate: use width as length (legacy convention) × qty, in meters
+      if (du) {
+        const len_m = (+x.width||0) * du.toMeters;
+        area_m2 = len_m * (+x.qty||1); // we stash linear-meters here
+      } else {
+        // No dim unit set for linear rate? Fall back to assuming width is already in meters.
+        area_m2 = (+x.width||0) * (+x.qty||1);
+      }
+    }
+    const amount = rb.computeAmount(area_m2, +x.qty||1, +x.rate||0);
+    let area_display = '—';
+    if (rb.needsArea) {
+      const ft2 = area_m2 * 10.7639;
+      area_display = rb.value === 'per_sqft' ? ft2.toFixed(2)+' ft²' : area_m2.toFixed(2)+' m²';
+    } else if (rb.value === 'per_rft') {
+      area_display = (area_m2*3.28084).toFixed(2)+' rft';
+    } else if (rb.value === 'per_rmtr') {
+      area_display = area_m2.toFixed(2)+' rm';
+    }
+    return { amount, area_m2, area_display, dim_unit_label: du?du.label:'', rate_basis_label: rb.label };
+  }
+
+  // Path 2: Legacy unit_mode items (pre-Apr-17-PM)
+  if (x.unit_mode) {
+    const um = getUnitMode(x.unit_mode);
+    const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
+    const amount = um.totalFn(a, +x.qty||1, +x.rate||0);
+    return { amount, area_m2: 0, area_display: um.displayFn(a), dim_unit_label: '', rate_basis_label: x.unit_mode };
+  }
+
+  // Path 3: Pre-unit_mode items — simple qty × rate (the 7 legacy PRs)
+  return {
+    amount: Math.round((+x.qty||0)*(+x.rate||0)*100)/100,
+    area_m2: 0,
+    area_display: '—',
+    dim_unit_label: '',
+    rate_basis_label: ''
+  };
+}
 // Keep legacy RATES for backward compat in other places
 const SIZES=["MM","INCH","FOOT"];
 const RATES=["SQFT","SQMTR","UNIT","RFT","NOS","SET","LOT"];
@@ -1397,7 +1493,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_UNIT_ORDER=['NOS','SET','LOT','KG','SqFt (FOOT)','SqMtr (FOOT)','Roll M×M (per sqft)','Roll M×M (per roll)','SqFt (INCH)','SqMtr (INCH)','SqFt (MM)','SqMtr (MM)','RFT (FOOT)','RFT (INCH)'];
       const PR_UNIT_MODES=[...PR_UNIT_ORDER.map(v=>UNIT_MODES.find(u=>u.value===v)).filter(Boolean),...UNIT_MODES.filter(u=>!PR_UNIT_ORDER.includes(u.value))];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
-      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
+      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',dim_unit:null,rate_basis:'per_piece',area:0};
       const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
@@ -1452,6 +1548,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
 
       // Compute one line's amount using its unit_mode (falls back to qty*rate for legacy items).
       const lineAmount=(x)=>{
+        // New: prefer computeLineAmount (handles dim_unit + rate_basis, falls back to unit_mode, then qty×rate)
+        if(typeof computeLineAmount==='function'){
+          return computeLineAmount(x).amount;
+        }
+        // Legacy fallback (kept for safety if helper somehow not loaded)
         if(x && x.unit_mode){
           const um=getUnitMode(x.unit_mode);
           const a=um.areaFn(+x.width||0,+x.height||0,+x.qty||1);
@@ -1535,7 +1636,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         setPrf(p=>({
           ...p,
           notes:p.notes||(quoteReview.workDesc||''),
-          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0}))
+          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:'',width:'',height:'',unit_mode:'NOS',dim_unit:null,rate_basis:'per_piece',area:0}))
         }));
         // If there are rejected items with notes — send WhatsApp to vendor + user + group
         if(rejectedItems.length>0 && prf.vendor_phone){
@@ -1949,63 +2050,97 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           {/* Items Table */}
           <p style={{fontSize:8,color:"#f59e0b",fontWeight:700,marginBottom:4}}>LINE ITEMS</p>
           <div style={{overflowX:"auto",marginBottom:6}}>
-            <table style={{minWidth:860}}>
+            <table style={{minWidth:980}}>
               <thead><tr>
                 <th style={{fontSize:8,minWidth:120}}>Product / Description</th>
-                <th style={{fontSize:8,width:70}}>Width</th>
-                <th style={{fontSize:8,width:70}}>Height</th>
-                <th style={{fontSize:8,width:110}}>Unit Mode</th>
-                <th style={{fontSize:8,width:55}}>Qty</th>
-                <th style={{fontSize:8,width:85}}>Rate ₹</th>
+                <th style={{fontSize:8,width:65}}>Width</th>
+                <th style={{fontSize:8,width:65}}>Height</th>
+                <th style={{fontSize:8,width:90}}>Dim Unit</th>
+                <th style={{fontSize:8,width:100}}>Rate Per</th>
+                <th style={{fontSize:8,width:50}}>Qty</th>
+                <th style={{fontSize:8,width:80}}>Rate ₹</th>
                 <th style={{fontSize:8,width:55}}>GST %</th>
-                <th style={{fontSize:8,width:90}}>Amount</th>
+                <th style={{fontSize:8,width:100}}>Amount</th>
                 <th style={{width:18}}></th>
               </tr></thead>
               <tbody>{prf.items.map((x,xi)=>{
-                const um=getUnitMode(x.unit_mode||'NOS');
-                const area=um.areaFn(+x.width||0,+x.height||0,+x.qty||1);
-                const lineAmt=um.totalFn(area,+x.qty||1,+x.rate||0);
-                const lineGst=lineAmt*(+x.gst_pct||0)/100;
-                const whDisabled=!um.needsWH;
-                // When user changes unit_mode, also refresh stored size string for backward compat in display/PO
-                const onModeChange=(v)=>{
+                // New computation path — single source of truth
+                const calc = computeLineAmount(x);
+                const lineAmt = calc.amount;
+                const rb = getRateBasis(x.rate_basis);
+                const du = getDimUnit(x.dim_unit);
+                const needsArea = !!(rb && rb.needsArea);
+                const isLinear = !!(rb && (rb.value==='per_rft' || rb.value==='per_rmtr'));
+                const showWidth = needsArea || isLinear;
+                const showHeight = needsArea; // linear only uses width as length
+                const lineGst = lineAmt*(+x.gst_pct||0)/100;
+                const dimPlaceholder = du ? du.label.split(' ')[0] : '';
+                // Keep legacy unit_mode in sync (best-effort, for backward compat with anything still reading it)
+                const inferLegacyMode = (dimVal, basisVal) => {
+                  if (basisVal==='per_piece') return 'NOS';
+                  if (basisVal==='per_set')   return 'SET';
+                  if (basisVal==='per_lot')   return 'LOT';
+                  if (basisVal==='per_kg')    return 'KG';
+                  if (basisVal==='per_roll')  return 'Roll M×M (per roll)';
+                  if (basisVal==='per_sqft' && dimVal==='FOOT') return 'SqFt (FOOT)';
+                  if (basisVal==='per_sqft' && dimVal==='INCH') return 'SqFt (INCH)';
+                  if (basisVal==='per_sqft' && dimVal==='MM')   return 'SqFt (MM)';
+                  if (basisVal==='per_sqft' && dimVal==='METER') return 'Roll M×M (per sqft)';
+                  if (basisVal==='per_sqmtr'&& dimVal==='FOOT') return 'SqMtr (FOOT)';
+                  if (basisVal==='per_sqmtr'&& dimVal==='INCH') return 'SqMtr (INCH)';
+                  if (basisVal==='per_sqmtr'&& dimVal==='MM')   return 'SqMtr (MM)';
+                  if (basisVal==='per_rft'  && dimVal==='FOOT') return 'RFT (FOOT)';
+                  if (basisVal==='per_rft'  && dimVal==='INCH') return 'RFT (INCH)';
+                  return ''; // no exact legacy mapping (e.g. CM, METER+per_sqmtr) — leave blank, fallback path handles
+                };
+                const onDimUnitChange=(v)=>{
                   setPrf(p=>({...p,items:p.items.map((it,i)=>{
                     if(i!==xi)return it;
-                    const newUm=getUnitMode(v);
-                    const newArea=newUm.areaFn(+it.width||0,+it.height||0,+it.qty||1);
-                    const sizeStr=newUm.needsWH&&(it.width||it.height)?`${it.width||''}×${it.height||''} ${newUm.dimUnit||''}`.trim():'';
-                    return {...it,unit_mode:v,area:newArea,size:sizeStr};
+                    const newDim = v || null;
+                    const legacyMode = inferLegacyMode(newDim, it.rate_basis);
+                    const sizeStr = (newDim && (it.width||it.height)) ? `${it.width||''}×${it.height||''} ${newDim.toLowerCase()}`.trim() : '';
+                    return {...it, dim_unit:newDim, unit_mode:legacyMode||it.unit_mode||'NOS', size:sizeStr};
                   })}));
                 };
-                // When W/H/Qty change, also refresh area + size
+                const onRateBasisChange=(v)=>{
+                  setPrf(p=>({...p,items:p.items.map((it,i)=>{
+                    if(i!==xi)return it;
+                    const legacyMode = inferLegacyMode(it.dim_unit, v);
+                    return {...it, rate_basis:v, unit_mode:legacyMode||it.unit_mode||'NOS'};
+                  })}));
+                };
                 const onDimChange=(field,v)=>{
                   setPrf(p=>({...p,items:p.items.map((it,i)=>{
                     if(i!==xi)return it;
                     const merged={...it,[field]:v};
-                    const um2=getUnitMode(merged.unit_mode||'NOS');
-                    const newArea=um2.areaFn(+merged.width||0,+merged.height||0,+merged.qty||1);
-                    const sizeStr=um2.needsWH&&(merged.width||merged.height)?`${merged.width||''}×${merged.height||''} ${um2.dimUnit||''}`.trim():'';
-                    return {...merged,area:newArea,size:sizeStr};
+                    const sizeStr = (merged.dim_unit && (merged.width||merged.height)) ? `${merged.width||''}×${merged.height||''} ${merged.dim_unit.toLowerCase()}`.trim() : '';
+                    return {...merged, size:sizeStr};
                   })}));
                 };
                 return <tr key={xi}>
                   <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
-                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
-                  <td><select className="in" value={x.unit_mode||'NOS'} onChange={e=>onModeChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
-                    {PR_UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
+                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={!showWidth} onChange={e=>onDimChange('width',e.target.value)} placeholder={!showWidth?'—':dimPlaceholder} title={isLinear?'Length':'Width'} style={{fontSize:9,padding:"2px 4px",width:"100%",background:!showWidth?"#0a0f1a":"transparent",color:!showWidth?"#475569":"inherit"}}/></td>
+                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={!showHeight} onChange={e=>onDimChange('height',e.target.value)} placeholder={!showHeight?'—':dimPlaceholder} style={{fontSize:9,padding:"2px 4px",width:"100%",background:!showHeight?"#0a0f1a":"transparent",color:!showHeight?"#475569":"inherit"}}/></td>
+                  <td><select className="in" value={x.dim_unit||''} disabled={!(needsArea||isLinear)} onChange={e=>onDimUnitChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",background:!(needsArea||isLinear)?"#0a0f1a":"transparent",color:!(needsArea||isLinear)?"#475569":"inherit"}}>
+                    <option value="">— select —</option>
+                    {DIM_UNITS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
+                  </select></td>
+                  <td><select className="in" value={x.rate_basis||'per_piece'} onChange={e=>onRateBasisChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
+                    {RATE_BASES.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}
                   </select></td>
                   <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>onDimChange('qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><input className="in mn" type="number" min="0" value={x.rate} onChange={e=>updItem(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><select className="in" value={x.gst_pct} onChange={e=>updItem(xi,'gst_pct',+e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",color:x.gst_pct===0?'#64748b':'inherit'}}>{PR_GST.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
                   <td style={{fontSize:9,color:"#e3a008",fontWeight:700,textAlign:"right",paddingRight:4}}>
                     <span style={{display:"block"}}>
-                      {lineAmt===0 && ((+x.width>0)||(+x.height>0)||(+x.rate>0)||(+x.qty>1)) && <span title="Amount is ₹0 — check Width/Height/Unit Mode. If dimensions are in meters, pick a Roll M×M or SqMtr (FOOT/INCH) unit, not a (MM) unit." style={{color:"#f59e0b",marginRight:3,cursor:"help"}}>⚠</span>}
+                      {lineAmt===0 && ((+x.width>0)||(+x.height>0)||(+x.rate>0)||(+x.qty>1)) && <span title="Amount is ₹0 — check Dim Unit, Rate Per and dimensions. Common cause: dim unit and rate basis don't match (e.g. dim in meters but no rate basis selected)." style={{color:"#f59e0b",marginRight:3,cursor:"help"}}>⚠</span>}
                       ₹{lineAmt.toFixed(0)}
                     </span>
-                    {area>0&&<span style={{fontSize:7,color:"#64748b",display:"block"}}>{um.displayFn(area)}</span>}
+                    {calc.area_display!=='—' && <span style={{fontSize:7,color:"#64748b",display:"block"}}>{calc.area_display}</span>}
                     {x.gst_pct>0&&<span style={{fontSize:7,color:"#64748b"}}>+₹{lineGst.toFixed(0)} GST</span>}
-                    {um.needsWH && ((+x.width>0)||(+x.height>0)) && <span style={{fontSize:7,color:"#64748b",display:"block",marginTop:1}}>{(+x.width||0)} × {(+x.height||0)} × {(+x.qty||1)} = {area} {um.dimUnit==='inch'?'in²':um.dimUnit==='ft'?'ft²':um.dimUnit==='mm'?'mm²':um.dimUnit==='m'?'m²':''}</span>}
+                    {(needsArea||isLinear) && du && ((+x.width>0)||(+x.height>0)) && <span style={{fontSize:7,color:"#64748b",display:"block",marginTop:1}}>
+                      {(+x.width||0)} × {showHeight?(+x.height||0):1} × {(+x.qty||1)} {du.label.split(' ')[0]} → {calc.area_display}
+                    </span>}
                   </td>
                   <td>{prf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:10,padding:0}} onClick={()=>delItem(xi)}>✕</button>}</td>
                 </tr>;
@@ -3432,6 +3567,10 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
   const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
   const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
   const _lineBase = (x) => {
+    // Prefer computeLineAmount (handles dim_unit + rate_basis, falls back to unit_mode, then qty×rate)
+    if (typeof computeLineAmount === 'function') {
+      return computeLineAmount(x).amount;
+    }
     if (x && x.unit_mode) {
       const um = getUnitMode(x.unit_mode);
       const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
@@ -3973,8 +4112,11 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const job = (jobsArr||[]).find(j => j.id === pr.job_id);
     const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
     const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
-    // Per-line amount honours unit_mode if present, falls back to qty*rate for legacy items.
+    // Per-line amount: prefer computeLineAmount (handles dim_unit + rate_basis), fall back to legacy.
     const _lineBase = (x) => {
+      if (typeof computeLineAmount === 'function') {
+        return computeLineAmount(x).amount;
+      }
       if (x && x.unit_mode) {
         const um = getUnitMode(x.unit_mode);
         const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
