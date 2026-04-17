@@ -769,10 +769,18 @@ function MainApp({user,onLogout,masterData}){
       draft:sc('Draft'),
       estimate:scm(['Quotation Sent','PO Pending','PO Received','Recce Pending','Active','Draft']),
       design:sc('Designing'),
-      printing:sc('Printing'),
-      fab:sc('Fabrication'),
-      install:sc('Installation'),
-      delivered:sc('Delivered'),
+      // NEW: split production buckets — each card counts legacy + new value together
+      printIn:scm(['Printing','Printing · In-House']),
+      printOut:sc('Printing · Outsource'),
+      fabIn:scm(['Fabrication','Fabrication · In-House']),
+      fabOut:sc('Fabrication · Outsource'),
+      dispatch:scm(['Delivered','Dispatch','Installation']), // Installation is legacy = goods dispatched
+      installed:sc('Installed'),
+      // Keep legacy keys too (unused by new cards but referenced elsewhere) for backward compat
+      printing:scm(['Printing','Printing · In-House','Printing · Outsource']),
+      fab:scm(['Fabrication','Fabrication · In-House','Fabrication · Outsource']),
+      install:scm(['Installation','Installed']),
+      delivered:scm(['Delivered','Dispatch']),
       billPend:scm(['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending']),
       billed:scm(['Billing Done','Cash Received']),
       poPend:filteredJobs.filter(j=>!j.po_number&&!['Billing Done','Cancelled','No Bill','Cash Received','Draft'].includes(j.status)).length,
@@ -917,6 +925,14 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
     active:jl.filter(j=>!activeStatuses.includes(j.status)).length,
     estimate:jl.filter(j=>['Quotation Sent','PO Pending','PO Received','Recce Pending','Active','Draft'].includes(j.status)).length,
     design:jl.filter(j=>j.status==='Designing').length,
+    // NEW granular split
+    printIn:jl.filter(j=>['Printing','Printing · In-House'].includes(j.status)).length,
+    printOut:jl.filter(j=>j.status==='Printing · Outsource').length,
+    fabIn:jl.filter(j=>['Fabrication','Fabrication · In-House'].includes(j.status)).length,
+    fabOut:jl.filter(j=>j.status==='Fabrication · Outsource').length,
+    dispatch:jl.filter(j=>['Delivered','Dispatch','Installation'].includes(j.status)).length,
+    installed:jl.filter(j=>j.status==='Installed').length,
+    // Old keys still in use below (summed legacy+new)
     printing:jl.filter(j=>['Printing','Printing · In-House','Printing · Outsource'].includes(j.status)).length,
     fab:jl.filter(j=>['Fabrication','Fabrication · In-House','Fabrication · Outsource'].includes(j.status)).length,
     install:jl.filter(j=>['Installation','Installed'].includes(j.status)).length,
@@ -988,7 +1004,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       {cmpDays>0&&<span style={{fontSize:9,color:"#64748b"}}>Showing changes in last {cmpDays} days</span>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30} delta={deltas.estimate}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60} delta={deltas.design}/><SC l="Printing" v={s.printing} c="#ef4444" d={90} delta={deltas.printing}/><SC l="Fabrication" v={s.fab} c="#dc2626" d={120} delta={deltas.fab}/><SC l="Installation" v={s.install} c="#059669" d={150} delta={deltas.install}/><SC l="Dispatch" v={s.delivered} c="#10b981" d={180} delta={deltas.delivered}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210} delta={deltas.billPend}/><SC l="Billed" v={s.billed} c="#4ade80" d={240} delta={deltas.billed}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270} delta={deltas.poPend}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30} delta={deltas.estimate}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60} delta={deltas.design}/><SC l="Print·In-House" v={s.printIn} c="#06b6d4" d={90} delta={deltas.printing}/><SC l="Print·Outsource" v={s.printOut} c="#f97316" d={100}/><SC l="Fab·In-House" v={s.fabIn} c="#06b6d4" d={120} delta={deltas.fab}/><SC l="Fab·Outsource" v={s.fabOut} c="#f97316" d={130}/><SC l="Dispatch" v={s.dispatch} c="#3b82f6" d={150} delta={deltas.delivered}/><SC l="Installed" v={s.installed} c="#4ade80" d={180}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210} delta={deltas.billPend}/><SC l="Billed" v={s.billed} c="#4ade80" d={240} delta={deltas.billed}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270} delta={deltas.poPend}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
@@ -2688,20 +2704,21 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
         const installTotal = legacyCounts['Installation'] + legacyCounts['Installed'];
         const dispatchTotal = legacyCounts['Delivered'] + legacyCounts['Dispatch'];
         return (
-          <div style={{background:'#0a0f1a',border:'0.5px solid #1a2030',borderRadius:6,padding:'5px 10px',fontSize:8,color:'#64748b',display:'flex',gap:16,flexWrap:'wrap'}}>
-            <span style={{fontWeight:700,color:'#8b949e',textTransform:'uppercase',letterSpacing:'.05em'}}>Count check:</span>
+          <div style={{background:'#0a0f1a',border:'0.5px solid #1a2030',borderRadius:6,padding:'5px 10px',fontSize:8,color:'#64748b',display:'flex',gap:12,flexWrap:'wrap',alignItems:'center'}}>
+            <span style={{fontWeight:700,color:'#8b949e',textTransform:'uppercase',letterSpacing:'.05em'}} title="Counts raw jobs.status values only — does not use dept rollup. Use this to verify the team's migration from legacy to new status values.">Raw status count (for migration tracking):</span>
             {printingTotal > 0 && (
-              <span>Printing total <strong style={{color:'#e2e8f0'}}>{printingTotal}</strong> = legacy {legacyCounts['Printing']} + In-House {legacyCounts['Printing · In-House']} + Outsource {legacyCounts['Printing · Outsource']}</span>
+              <span>Printing <strong style={{color:'#e2e8f0'}}>{printingTotal}</strong> = legacy "Printing" {legacyCounts['Printing']} + "In-House" {legacyCounts['Printing · In-House']} + "Outsource" {legacyCounts['Printing · Outsource']}</span>
             )}
             {fabTotal > 0 && (
-              <span>Fabrication total <strong style={{color:'#e2e8f0'}}>{fabTotal}</strong> = legacy {legacyCounts['Fabrication']} + In-House {legacyCounts['Fabrication · In-House']} + Outsource {legacyCounts['Fabrication · Outsource']}</span>
+              <span>Fab <strong style={{color:'#e2e8f0'}}>{fabTotal}</strong> = legacy "Fabrication" {legacyCounts['Fabrication']} + "In-House" {legacyCounts['Fabrication · In-House']} + "Outsource" {legacyCounts['Fabrication · Outsource']}</span>
             )}
             {installTotal > 0 && (
-              <span>Install total <strong style={{color:'#e2e8f0'}}>{installTotal}</strong> = legacy {legacyCounts['Installation']} + new {legacyCounts['Installed']}</span>
+              <span>Install <strong style={{color:'#e2e8f0'}}>{installTotal}</strong> = legacy "Installation" {legacyCounts['Installation']} + new "Installed" {legacyCounts['Installed']}</span>
             )}
             {dispatchTotal > 0 && (
-              <span>Dispatch total <strong style={{color:'#e2e8f0'}}>{dispatchTotal}</strong> = legacy {legacyCounts['Delivered']} + new {legacyCounts['Dispatch']}</span>
+              <span>Dispatch <strong style={{color:'#e2e8f0'}}>{dispatchTotal}</strong> = legacy "Delivered" {legacyCounts['Delivered']} + new "Dispatch" {legacyCounts['Dispatch']}</span>
             )}
+            <span style={{color:'#475569',fontStyle:'italic',marginLeft:'auto'}}>Cards above use granular rollup (different count, by design)</span>
           </div>
         );
       })()}
