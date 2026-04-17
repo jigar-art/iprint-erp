@@ -813,7 +813,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
-          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user}/>}
+          {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user} items={items} osItems={osItems}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
           {pg==="appr"&&<ApprovalsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
@@ -5316,7 +5316,7 @@ function RootApp(){
 // ═══════════════════════════════════════════════════════════
 // BANKING CRM PAGE
 // ═══════════════════════════════════════════════════════════
-function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
+function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [sites,setSites]=useState([]);
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState('ALL');
@@ -5329,6 +5329,16 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
   const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_unique_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending'});
   const [siteAction,setSiteAction]=useState(null); // {type:'delete'|'move'|null, site}
   const [moveJobNo,setMoveJobNo]=useState('');
+  // ── Dept-status filter (NEW) ───────────────────────────────
+  // null = no dept filter active. Otherwise one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed'
+  const [deptFilter,setDeptFilter]=useState(null);
+  // Refresh tick — increments every 60s while page is open. Forces dept useMemo to recompute even
+  // if items/osItems references haven't changed (e.g. another user edited remotely).
+  const [refreshTick,setRefreshTick]=useState(0);
+  React.useEffect(()=>{
+    const t=setInterval(()=>setRefreshTick(p=>p+1),60000);
+    return ()=>clearInterval(t);
+  },[]);
   const pageSize=50;
 
   // Load banking sites from Supabase
@@ -5348,6 +5358,78 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     })();
   },[]);
 
+  // ── DEPT STATUS ROLLUP (Hybrid: job-level today, upgradeable to site-level later) ──
+  // For each job, compute which dept stages are CURRENTLY active by inspecting its line_items
+  // (dept_design / dept_printing / dept_fabrication / dept_dispatch booleans + area for InHouse vs Outsource)
+  // and its outsource_items (task_type tells us Printing-Outsource vs Fabrication-Outsource explicitly).
+  // Returns: Map<jobNoPrefix, {design,printIn,printOut,fabIn,fabOut,dispatch,installed, leading}>
+  // jobNoPrefix is the part before '-' in jobs.id (matches banking_sites.job_no format).
+  const jobDeptStatus = React.useMemo(() => {
+    const map = {};
+    if (!jobs || !jobs.length) return map;
+    // Index line_items + outsource_items by job_id for O(1) lookup
+    const itemsByJob = {};
+    (items||[]).forEach(it => {
+      if (!it.job_id) return;
+      (itemsByJob[it.job_id] = itemsByJob[it.job_id] || []).push(it);
+    });
+    const osByJob = {};
+    (osItems||[]).forEach(o => {
+      if (!o.job_id) return;
+      (osByJob[o.job_id] = osByJob[o.job_id] || []).push(o);
+    });
+    jobs.forEach(j => {
+      const lineItems = itemsByJob[j.id] || [];
+      const osList = osByJob[j.id] || [];
+      // dept booleans: TRUE if ANY line_item in that dept is incomplete (false) — i.e. still active there
+      // Logic: dept_X=false means "not yet done in that dept" → dept is currently doing this work
+      // If ALL line_items have dept_X=true, that dept is finished for this job
+      const anyIncomplete = (deptKey) => lineItems.some(it => !it[deptKey]);
+      const designActive   = lineItems.length > 0 && anyIncomplete('dept_design');
+      const printingActive = lineItems.length > 0 && anyIncomplete('dept_printing');
+      const fabActive      = lineItems.length > 0 && anyIncomplete('dept_fabrication');
+      const dispatchActive = lineItems.length > 0 && anyIncomplete('dept_dispatch');
+      const installActive  = lineItems.length > 0 && anyIncomplete('dept_installation');
+      // InHouse vs Outsource: split by area field on line_item AND outsource_items presence
+      // Printing-Outsource: any os entry with task_type containing 'Print', or any line_item area==='Outsource' AND printing dept active
+      const printOutsource = osList.some(o => /print/i.test(o.task_type||'')) ||
+        lineItems.some(it => it.area === 'Outsource' && !it.dept_printing);
+      const printInHouse = printingActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_printing);
+      // Fabrication-Outsource: os task_types include Router/Laser/Coating/Frames/Signages
+      const fabOutsource = osList.some(o => /router|laser|coating|frame|signage|fabric/i.test(o.task_type||'')) ||
+        lineItems.some(it => it.area === 'Outsource' && !it.dept_fabrication);
+      const fabInHouse = fabActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_fabrication);
+      // Leading edge: the furthest stage that has ANY active work. Used for clean count sums.
+      // Order: design → print → fab → dispatch → installed
+      let leading = null;
+      if (lineItems.length === 0) leading = null; // no items yet, no stage
+      else if (!installActive) leading = 'installed'; // installation done = job is fully done
+      else if (dispatchActive) leading = 'dispatch';
+      else if (fabActive) leading = fabOutsource ? 'fabOut' : 'fabIn';
+      else if (printingActive) leading = printOutsource ? 'printOut' : 'printIn';
+      else if (designActive) leading = 'design';
+      else leading = 'installed';
+      const jobNoPrefix = (j.id||'').split('-')[0];
+      if (!jobNoPrefix) return;
+      map[jobNoPrefix] = {
+        design: designActive,
+        printIn: printInHouse,
+        printOut: printOutsource,
+        fabIn: fabInHouse,
+        fabOut: fabOutsource,
+        dispatch: dispatchActive,
+        installed: !installActive,
+        leading
+      };
+    });
+    return map;
+  }, [jobs, items, osItems, refreshTick]);
+
+  // Helper to get a site's dept status (defensive: always returns an object)
+  const siteDeptStatus = React.useCallback((s) => {
+    return (s && s.job_no && jobDeptStatus[s.job_no]) || {design:false,printIn:false,printOut:false,fabIn:false,fabOut:false,dispatch:false,installed:false,leading:null};
+  }, [jobDeptStatus]);
+
   // Projects
   const projects=useMemo(()=>{
     const p={};sites.forEach(s=>{if(!p[s.project])p[s.project]=0;p[s.project]++;});
@@ -5360,6 +5442,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     if(tab!=='ALL')f=f.filter(s=>s.project===tab);
     if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
     if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
+    if(deptFilter)f=f.filter(s=>siteDeptStatus(s)[deptFilter]);
     if(search){const q=search.toLowerCase();f=f.filter(s=>
       s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||s.site_unique_id?.toLowerCase().includes(q)||
       s.city?.toLowerCase().includes(q)||s.state?.toLowerCase().includes(q)||
@@ -5367,7 +5450,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
       s.billing_status?.toLowerCase().includes(q)||s.district?.toLowerCase().includes(q)
     );}
     return f;
-  },[sites,tab,stFilter,stateFilter,search]);
+  },[sites,tab,stFilter,stateFilter,search,deptFilter,siteDeptStatus]);
 
   // Stats
   const stats=useMemo(()=>{
@@ -5382,6 +5465,18 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
       photoPending:f.filter(s=>!s.photo_status||s.photo_status.includes('Pending')||s.photo_status==='').length,
     };
   },[sites,tab]);
+
+  // Dept counts — uses leading-edge so sums are clean (each site counted once)
+  const deptCounts = useMemo(() => {
+    const f = tab==='ALL' ? sites : sites.filter(s => s.project===tab);
+    const c = {design:0, printIn:0, printOut:0, fabIn:0, fabOut:0, dispatch:0, installed:0, untracked:0};
+    f.forEach(s => {
+      const st = siteDeptStatus(s);
+      if (st.leading) c[st.leading] = (c[st.leading]||0) + 1;
+      else c.untracked++;
+    });
+    return c;
+  }, [sites, tab, siteDeptStatus]);
 
   // Unique states for filter
   const states=useMemo(()=>{
@@ -5495,6 +5590,49 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     {/* Stats Cards */}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5}}>
       <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
+    </div>
+
+    {/* Dept Status Cards (NEW) — click to filter sites by current production stage */}
+    <div style={{background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:'7px 10px',marginTop:5}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+        <p style={{fontSize:8,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600,margin:0}}>
+          🏭 Production Status — click to filter
+        </p>
+        {deptFilter && <button className="b bs" onClick={()=>setDeptFilter(null)} style={{fontSize:8,padding:'1px 7px',color:'#f47067',borderColor:'#f47067'}}>✕ Clear filter</button>}
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:5}}>
+        {[
+          {k:'design',     l:'Design',          c:'#8b5cf6'},
+          {k:'printIn',    l:'Print · In-House',c:'#06b6d4'},
+          {k:'printOut',   l:'Print · Outsource',c:'#f97316'},
+          {k:'fabIn',      l:'Fab · In-House',  c:'#06b6d4'},
+          {k:'fabOut',     l:'Fab · Outsource', c:'#f97316'},
+          {k:'dispatch',   l:'Dispatch',        c:'#3b82f6'},
+          {k:'installed',  l:'Installed',       c:'#4ade80'},
+        ].map(d => {
+          const active = deptFilter === d.k;
+          return (
+            <div key={d.k}
+              onClick={()=>setDeptFilter(active ? null : d.k)}
+              style={{
+                background: active ? d.c+'30' : d.c+'15',
+                border: `1px solid ${active ? d.c : d.c+'55'}`,
+                borderRadius: 4,
+                padding: '6px 8px',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}>
+              <div style={{fontSize:7,color:d.c,fontWeight:700,letterSpacing:'.03em',textTransform:'uppercase'}}>{d.l}</div>
+              <div className="mn" style={{fontSize:14,color:d.c,fontWeight:700,marginTop:1}}>{(deptCounts[d.k]||0).toLocaleString('en-IN')}</div>
+            </div>
+          );
+        })}
+      </div>
+      {deptCounts.untracked > 0 && (
+        <p style={{fontSize:7,color:'#475569',marginTop:4,marginBottom:0}}>
+          {deptCounts.untracked.toLocaleString('en-IN')} site{deptCounts.untracked===1?'':'s'} have no linked job items yet (untracked)
+        </p>
+      )}
     </div>
 
     {/* Linked ERP Jobs Summary */}
@@ -5619,7 +5757,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
     </div>}
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
-        <th style={{width:30}}>#</th><th>Job#</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
+        <th style={{width:30}}>#</th><th>Job#</th><th style={{minWidth:90}}>Stage</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
         <th>Vendor</th><th>V.Contact</th><th>Vendor PO#</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th><th style={{width:60,textAlign:'center'}}>Action</th>
       </tr></thead><tbody>
       {paged.map((s,i)=>{
@@ -5628,6 +5766,22 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user}){
         return <tr key={s.id} style={{background:isDup?'rgba(245,158,11,0.07)':''}}>
           <td className="mn" style={{fontSize:9}}>{page*pageSize+i+1}</td>
           <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=jobs.find(j=>j.id?.includes(s.job_no));if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
+          <td style={{whiteSpace:'nowrap',padding:'2px 4px'}}>{(()=>{
+            const st=siteDeptStatus(s);
+            const active=[
+              st.design&&{l:'Design',c:'#8b5cf6'},
+              st.printIn&&{l:'P·In',c:'#06b6d4'},
+              st.printOut&&{l:'P·Out',c:'#f97316'},
+              st.fabIn&&{l:'F·In',c:'#06b6d4'},
+              st.fabOut&&{l:'F·Out',c:'#f97316'},
+              st.dispatch&&{l:'Dispatch',c:'#3b82f6'},
+              st.installed&&{l:'Done',c:'#4ade80'},
+            ].filter(Boolean);
+            if(active.length===0)return <span style={{fontSize:8,color:'#475569'}}>—</span>;
+            return <span style={{display:'inline-flex',gap:2,flexWrap:'wrap'}}>{active.map((a,i)=>(
+              <span key={i} className="bd" style={{background:a.c+'20',color:a.c,fontSize:7,fontWeight:700,padding:'1px 4px'}}>{a.l}</span>
+            ))}</span>;
+          })()}</td>
           <td style={{fontSize:8,color:'#64748b',whiteSpace:'nowrap'}}>{(()=>{const d=s.created_at?new Date(s.created_at):null;return d?d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}):'—';})()}</td>
           <td style={{fontSize:9,color:isDup?'#f59e0b':'#8b5cf6',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isDup?700:400}} title={s.atm_id}>{s.atm_id||'—'}{isDup&&<span title="Duplicate detected" style={{marginLeft:3,fontSize:8}}>⚠️</span>}</td>
           <td style={{fontSize:9,color:'#06b6d4',maxWidth:90,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_unique_id}>{s.site_unique_id||'—'}</td>
