@@ -3284,6 +3284,9 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 
   const buildPOHtml = (pr, poNo, firm) => {
     const items = Array.isArray(pr.items) ? pr.items : [];
+    // Bug-fix (PR2.0): look up job to surface project name on the PO header (jobs is in closure scope from POPage props).
+    const job = (jobs||[]).find(j => j.id === pr.job_id);
+    const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
     const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
     const subtotal = +pr.subtotal || items.reduce((s,x) => s + (+x.qty||0)*(+x.rate||0), 0);
     // Bug-fix (PR2.0): respect stored gst_total even when it's 0; per-item gst_pct defaults to 0 (not 18) so "no GST" PRs don't silently acquire tax.
@@ -3370,7 +3373,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     <span>Ref. No./PR No. : &nbsp;<strong>${pr.pr_no}</strong></span>
   </div>
   ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
-    <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${pr.job_id}</strong></span>
+    <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${jobLabel}</strong></span>
   </div>` : ''}
 
   <div class="po-header">
