@@ -35,8 +35,6 @@ td{padding:5px 7px;font-size:11px;border-bottom:1px solid #0c1017}
 tr:hover td{background:#0a0f1a}
 .in{width:100%;padding:5px 8px;border-radius:5px;border:1px solid #1a2030;background:#060810;color:#e2e8f0;font-size:11px;outline:none}
 .in:focus{border-color:#e3a008}
-.in option{background:#060810;color:#e2e8f0}
-.in option:disabled{color:#475569}
 .mn{font-family:'JetBrains Mono',monospace}
 .done{text-decoration:line-through;opacity:.4}
 .ck{width:14px;height:14px;border-radius:3px;border:2px solid #1a2030;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;flex-shrink:0}
@@ -49,6 +47,7 @@ tr:hover td{background:#0a0f1a}
 .f3{grid-template-columns:1fr 1fr 1fr}
 .f4{grid-template-columns:1fr 1fr 1fr 1fr}
 .loader{width:24px;height:24px;border:3px solid #1a2030;border-top-color:#e3a008;border-radius:50%;animation:spin .6s linear infinite}
+@media(max-width:600px){.portal-item-grid{grid-template-columns:2fr 2fr 1fr!important}}
 </style>
 </head>
 <body>
@@ -194,102 +193,6 @@ const UNIT_MODES = [
     displayFn:(a)=>a>0?'rolls ('+a+' ft² ref.)':'—' },
 ];
 const getUnitMode = (rm) => UNIT_MODES.find(u=>u.value===rm) || UNIT_MODES[0];
-
-// ──────────────────────────────────────────────────────────────────────
-// Issue 1 (Apr 17 2026 PM): two-dropdown unit system. Dim unit and rate
-// basis are now independent. Old single-mode UNIT_MODES still works as
-// fallback for legacy line items that don't have dim_unit/rate_basis yet.
-// ──────────────────────────────────────────────────────────────────────
-const DIM_UNITS = [
-  { value:'METER', label:'meter (m)', toMeters: 1 },
-  { value:'FOOT',  label:'foot (ft)', toMeters: 0.3048 },
-  { value:'INCH',  label:'inch (in)', toMeters: 0.0254 },
-  { value:'CM',    label:'centimeter (cm)', toMeters: 0.01 },
-  { value:'MM',    label:'millimeter (mm)', toMeters: 0.001 },
-];
-const getDimUnit = (du) => DIM_UNITS.find(d=>d.value===du) || null;
-
-const RATE_BASES = [
-  { value:'per_piece', label:'per piece (NOS)', needsArea:false, areaUnit:'',
-    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
-  { value:'per_set',   label:'per set',         needsArea:false, areaUnit:'',
-    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
-  { value:'per_lot',   label:'per lot',         needsArea:false, areaUnit:'',
-    computeAmount: (area_m2, qty, rate) => Math.round((+rate||0)*100)/100 },
-  { value:'per_kg',    label:'per kg',          needsArea:false, areaUnit:'',
-    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
-  { value:'per_roll',  label:'per roll',        needsArea:false, areaUnit:'',
-    computeAmount: (area_m2, qty, rate) => Math.round((+qty||1)*(+rate||0)*100)/100 },
-  { value:'per_sqft',  label:'per sqft',        needsArea:true,  areaUnit:'ft²',
-    // 1 m² = 10.7639 ft²; total = area_in_sqft × rate (qty already baked into area_m2)
-    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*10.7639*(+rate||0)*100)/100 },
-  { value:'per_sqmtr', label:'per m²',          needsArea:true,  areaUnit:'m²',
-    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*(+rate||0)*100)/100 },
-  { value:'per_rft',   label:'per running ft',  needsArea:false, areaUnit:'rft',
-    // For RFT, we don't use area — caller passes the linear length as qty (legacy) or area_m2 holds linear meters.
-    // Convention: when rate_basis=per_rft, area_m2 holds total linear meters; convert m → ft.
-    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*3.28084*(+rate||0)*100)/100 },
-  { value:'per_rmtr',  label:'per running m',   needsArea:false, areaUnit:'rm',
-    computeAmount: (area_m2, qty, rate) => Math.round(area_m2*(+rate||0)*100)/100 },
-];
-const getRateBasis = (rb) => RATE_BASES.find(r=>r.value===rb) || null;
-
-// computeLineAmount — pure, single source of truth for new two-dropdown items.
-// Returns an object {amount, area_m2, area_display, dim_unit_label, rate_basis_label}
-// for use in form display. Or call .amount for just the number.
-function computeLineAmount(x) {
-  if (!x) return { amount: 0, area_m2: 0, area_display: '—', dim_unit_label: '', rate_basis_label: '' };
-  const du = getDimUnit(x.dim_unit);
-  const rb = getRateBasis(x.rate_basis);
-
-  // Path 1: New two-dropdown items (rate_basis set).
-  if (rb) {
-    let area_m2 = 0;
-    if (rb.needsArea && du) {
-      // Area-based rate: convert W × H × Q to canonical m²
-      const w_m = (+x.width||0) * du.toMeters;
-      const h_m = (+x.height||0) * du.toMeters;
-      area_m2 = w_m * h_m * (+x.qty||1);
-    } else if (rb.value === 'per_rft' || rb.value === 'per_rmtr') {
-      // Linear rate: use width as length (legacy convention) × qty, in meters
-      if (du) {
-        const len_m = (+x.width||0) * du.toMeters;
-        area_m2 = len_m * (+x.qty||1); // we stash linear-meters here
-      } else {
-        // No dim unit set for linear rate? Fall back to assuming width is already in meters.
-        area_m2 = (+x.width||0) * (+x.qty||1);
-      }
-    }
-    const amount = rb.computeAmount(area_m2, +x.qty||1, +x.rate||0);
-    let area_display = '—';
-    if (rb.needsArea) {
-      const ft2 = area_m2 * 10.7639;
-      area_display = rb.value === 'per_sqft' ? ft2.toFixed(2)+' ft²' : area_m2.toFixed(2)+' m²';
-    } else if (rb.value === 'per_rft') {
-      area_display = (area_m2*3.28084).toFixed(2)+' rft';
-    } else if (rb.value === 'per_rmtr') {
-      area_display = area_m2.toFixed(2)+' rm';
-    }
-    return { amount, area_m2, area_display, dim_unit_label: du?du.label:'', rate_basis_label: rb.label };
-  }
-
-  // Path 2: Legacy unit_mode items (pre-Apr-17-PM)
-  if (x.unit_mode) {
-    const um = getUnitMode(x.unit_mode);
-    const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
-    const amount = um.totalFn(a, +x.qty||1, +x.rate||0);
-    return { amount, area_m2: 0, area_display: um.displayFn(a), dim_unit_label: '', rate_basis_label: x.unit_mode };
-  }
-
-  // Path 3: Pre-unit_mode items — simple qty × rate (the 7 legacy PRs)
-  return {
-    amount: Math.round((+x.qty||0)*(+x.rate||0)*100)/100,
-    area_m2: 0,
-    area_display: '—',
-    dim_unit_label: '',
-    rate_basis_label: ''
-  };
-}
 // Keep legacy RATES for backward compat in other places
 const SIZES=["MM","INCH","FOOT"];
 const RATES=["SQFT","SQMTR","UNIT","RFT","NOS","SET","LOT"];
@@ -1489,42 +1392,12 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter','Set','Job'];
       const PR_GST=[0,5,12,18,28];
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
-      // Preferred display order for the PR-form Unit Mode dropdown.
-      // Keeps UNIT_MODES (source of truth for math) untouched; only reorders what the user sees.
-      // Units not listed here will be appended in their original UNIT_MODES order.
-      const PR_UNIT_ORDER=['NOS','SET','LOT','KG','SqFt (FOOT)','SqMtr (FOOT)','Roll M×M (per sqft)','Roll M×M (per roll)','SqFt (INCH)','SqMtr (INCH)','SqFt (MM)','SqMtr (MM)','RFT (FOOT)','RFT (INCH)'];
-      const PR_UNIT_MODES=[...PR_UNIT_ORDER.map(v=>UNIT_MODES.find(u=>u.value===v)).filter(Boolean),...UNIT_MODES.filter(u=>!PR_UNIT_ORDER.includes(u.value))];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
-      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',dim_unit:null,rate_basis:'per_piece',area:0};
+      const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
       const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
-      const [editingPrId,setEditingPrId]=React.useState(null);
-      const [editingPrNo,setEditingPrNo]=React.useState(null);
-      // Load an existing PR back into the form for "Edit & Resubmit" (revision flow)
-      const editPR=(r)=>{
-        setPrf({
-          firm_code:r.firm_code||'JPP',
-          requestor:r.created_by||user?.name||'',
-          request_type:r.request_type||'Material',
-          vendor_id:r.vendor_id||'',
-          vendor_name:r.vendor_name||'',
-          vendor_gstin:r.vendor_gstin||'',
-          vendor_phone:r.vendor_phone||'',
-          vendor_state:r.vendor_state||'Maharashtra',
-          urgency:r.urgency||'Normal',
-          expected_delivery:r.expected_delivery||'',
-          payment_terms:r.payment_terms||'',
-          transport:+r.transport||0,
-          notes:r.notes||'',
-          items:(Array.isArray(r.items)&&r.items.length?r.items.map(x=>({...blankItem,...x})):[{...blankItem}])
-        });
-        setEditingPrId(r.id);
-        setEditingPrNo(r.pr_no);
-        setShowPRForm(true);
-        loadVendors();
-      };
       const [quoteFile,setQuoteFile]=React.useState(null);
       const [quoteParsing,setQuoteParsing]=React.useState(false);
       const [quoteReview,setQuoteReview]=React.useState(null); // parsed items for review
@@ -1550,11 +1423,6 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
 
       // Compute one line's amount using its unit_mode (falls back to qty*rate for legacy items).
       const lineAmount=(x)=>{
-        // New: prefer computeLineAmount (handles dim_unit + rate_basis, falls back to unit_mode, then qty×rate)
-        if(typeof computeLineAmount==='function'){
-          return computeLineAmount(x).amount;
-        }
-        // Legacy fallback (kept for safety if helper somehow not loaded)
         if(x && x.unit_mode){
           const um=getUnitMode(x.unit_mode);
           const a=um.areaFn(+x.width||0,+x.height||0,+x.qty||1);
@@ -1638,7 +1506,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         setPrf(p=>({
           ...p,
           notes:p.notes||(quoteReview.workDesc||''),
-          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:'',width:'',height:'',unit_mode:'NOS',dim_unit:null,rate_basis:'per_piece',area:0}))
+          items:acceptedItems.map(x=>({product:x.product,size:x.size||'',qty:x.qty||1,rate:x.rate,per:x.per||'Job',gst_pct:x.gst_pct||18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0}))
         }));
         // If there are rejected items with notes — send WhatsApp to vendor + user + group
         if(rejectedItems.length>0 && prf.vendor_phone){
@@ -1682,55 +1550,9 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         if(!prf.vendor_id&&!prf.vendor_name){show('Select or enter a vendor',false);return;}
         if(!prf.items.some(x=>x.product)){show('Add at least one item',false);return;}
         setSaving(true);
+        const pr_no=await genPRNo(prf.firm_code);
         const fy=getFY();
         const {subtotal,gst_total,total}=calcTotals(prf.items,prf.transport);
-        const nowIso=new Date().toISOString();
-        if(editingPrId){
-          // ── REVISION RESUBMIT path ──
-          const existing=(prs||[]).find(p=>p.id===editingPrId);
-          const prevHistory=Array.isArray(existing?.revision_history)?existing.revision_history:[];
-          const newHistoryEntry=existing?.revision_notes?[{at:nowIso,by:prf.requestor,notes:existing.revision_notes,resubmitted:true}]:[];
-          const updates={
-            firm_code:prf.firm_code,
-            request_type:prf.request_type,
-            vendor_id:prf.vendor_id||null,
-            vendor_name:prf.vendor_name,
-            vendor_gstin:prf.vendor_gstin||null,
-            vendor_phone:prf.vendor_phone||null,
-            vendor_state:prf.vendor_state||'Maharashtra',
-            urgency:prf.urgency,
-            expected_delivery:prf.expected_delivery||null,
-            payment_terms:prf.payment_terms||null,
-            transport:+prf.transport||0,
-            items:prf.items.filter(x=>x.product),
-            subtotal,gst_total,total,
-            notes:prf.notes||null,
-            status:'Pending Approval',
-            revision_count:(+(existing?.revision_count)||0)+1,
-            revision_notes:null,
-            revision_history:[...prevHistory,...newHistoryEntry],
-            last_status_change_at:nowIso
-          };
-          const {error}=await sb.from('purchase_requests').update(updates).eq('id',editingPrId);
-          setSaving(false);
-          if(error){show('⚠️ Resubmit failed: '+error.message,false);return;}
-          setPrs(p=>p.map(r=>r.id===editingPrId?{...r,...updates}:r));
-          const prNoUsed=editingPrNo||existing?.pr_no||editingPrId;
-          show('✅ '+prNoUsed+' resubmitted for approval (revision #'+updates.revision_count+')');
-          // Notify Jigar
-          const jigarPhone=WA_NUMBERS['Jigar'];
-          if(jigarPhone){
-            const msg='🔁 *PR Resubmitted — '+prNoUsed+'*\n\nRevision #'+updates.revision_count+' from '+prf.requestor+'.\nVendor: '+prf.vendor_name+'\nAmount: ₹'+(+total||0).toLocaleString('en-IN')+'\n\nPlease review in Approvals tab.';
-            sendWhatsApp(jigarPhone,msg,'iprint_pr_resubmitted');
-          }
-          setEditingPrId(null);
-          setEditingPrNo(null);
-          setPrf(blankForm);
-          setShowPRForm(false);
-          return;
-        }
-        // ── NEW PR path (original behaviour, unchanged) ──
-        const pr_no=await genPRNo(prf.firm_code);
         const rec={
           id:'PR'+Date.now(),
           pr_no,fy,
@@ -1751,9 +1573,9 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           notes:prf.notes||null,
           status:'Pending Approval',
           created_by:prf.requestor,
-          created_at:nowIso,
+          created_at:new Date().toISOString(),
           requestor_dept: (typeof STAFF_DEPTS!=='undefined' && STAFF_DEPTS[prf.requestor]) || null,
-          last_status_change_at: nowIso
+          last_status_change_at: new Date().toISOString()
         };
         const {error}=await sb.from('purchase_requests').insert(rec);
         setSaving(false);
@@ -1782,7 +1604,6 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         'Pending Approval':{bg:'#e3a00820',c:'#e3a008'},
         'Approved':{bg:'#4ade8020',c:'#4ade80'},
         'Rejected':{bg:'#f4706720',c:'#f47067'},
-        'Revision Requested':{bg:'#14b8a620',c:'#14b8a6'},
         'PO Generated':{bg:'#06b6d420',c:'#06b6d4'},
         'PO Sent':{bg:'#3b82f620',c:'#3b82f6'},
         'Completed':{bg:'#8b5cf620',c:'#8b5cf6'},
@@ -1795,7 +1616,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
           <p style={{fontSize:10,fontWeight:700,color:"#f59e0b"}}>🛒 PURCHASE REQUESTS ({jobPRs.length})</p>
-          <button className="b" onClick={()=>{const willClose=showPRForm;setShowPRForm(!showPRForm);if(willClose&&editingPrId){setEditingPrId(null);setEditingPrNo(null);setPrf(blankForm);}if(!showPRForm)loadVendors();}} style={{fontSize:9,padding:"2px 8px",borderColor:editingPrId?"#14b8a6":"#f59e0b",color:editingPrId?"#14b8a6":"#f59e0b"}}>{showPRForm?(editingPrId?'✕ Cancel Edit':'✕ Close'):'+ New PR'}</button>
+          <button className="b" onClick={()=>{setShowPRForm(!showPRForm);if(!showPRForm)loadVendors();}} style={{fontSize:9,padding:"2px 8px",borderColor:"#f59e0b",color:"#f59e0b"}}>{showPRForm?'✕ Close':'+ New PR'}</button>
         </div>
 
         {/* Existing PRs list */}
@@ -1829,17 +1650,13 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 {(+r.transport>0)&&<span style={{color:"#64748b"}}>+ Transport ₹{r.transport}</span>}
               </div>
               {r.rejection_reason&&<div style={{marginTop:3,padding:"3px 6px",background:"#f4706710",border:"1px solid #f4706733",borderRadius:4,fontSize:8,color:"#f47067"}}>❌ Rejected: {r.rejection_reason}</div>}
-              {r.status==='Revision Requested'&&r.revision_notes&&<div style={{marginTop:3,padding:"4px 7px",background:"#14b8a610",border:"1px solid #14b8a644",borderRadius:4,fontSize:8,color:"#14b8a6",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                <span>↩ <span style={{fontWeight:700}}>Revision requested by Jigar:</span> {r.revision_notes}{(+r.revision_count>0)&&<span style={{color:"#64748b",marginLeft:4}}>(rev #{r.revision_count})</span>}</span>
-                <button className="b" onClick={()=>editPR(r)} style={{fontSize:8,padding:"2px 8px",borderColor:"#14b8a6",color:"#14b8a6",background:"#14b8a615",fontWeight:700,whiteSpace:"nowrap"}}>✏️ Edit & Resubmit</button>
-              </div>}
             </div>;
           })}
         </div>}
 
         {/* New PR Form */}
-        {showPRForm&&<div style={{background:"#0a0f1a",border:`1px solid ${editingPrId?"#14b8a644":"#f59e0b44"}`,borderRadius:8,padding:10}}>
-          <p style={{fontSize:9,fontWeight:700,color:editingPrId?"#14b8a6":"#f59e0b",marginBottom:8}}>{editingPrId?`↩ REVISING ${editingPrNo||''} — edit and resubmit for approval`:'NEW PURCHASE REQUEST'}</p>
+        {showPRForm&&<div style={{background:"#0a0f1a",border:"1px solid #f59e0b44",borderRadius:8,padding:10}}>
+          <p style={{fontSize:9,fontWeight:700,color:"#f59e0b",marginBottom:8}}>NEW PURCHASE REQUEST</p>
 
           {/* ── VENDOR QUOTE UPLOAD SECTION ────────────────────────────── */}
           <div style={{marginBottom:8,padding:'6px 10px',background:'#060810',border:'1px solid #1a2030',borderRadius:6}}>
@@ -2052,97 +1869,59 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           {/* Items Table */}
           <p style={{fontSize:8,color:"#f59e0b",fontWeight:700,marginBottom:4}}>LINE ITEMS</p>
           <div style={{overflowX:"auto",marginBottom:6}}>
-            <table style={{minWidth:980}}>
+            <table style={{minWidth:780}}>
               <thead><tr>
                 <th style={{fontSize:8,minWidth:120}}>Product / Description</th>
-                <th style={{fontSize:8,width:65}}>Width</th>
-                <th style={{fontSize:8,width:65}}>Height</th>
-                <th style={{fontSize:8,width:90}}>Dim Unit</th>
-                <th style={{fontSize:8,width:100}}>Rate Per</th>
-                <th style={{fontSize:8,width:50}}>Qty</th>
-                <th style={{fontSize:8,width:80}}>Rate ₹</th>
+                <th style={{fontSize:8,width:50}}>Width</th>
+                <th style={{fontSize:8,width:50}}>Height</th>
+                <th style={{fontSize:8,width:110}}>Unit Mode</th>
+                <th style={{fontSize:8,width:45}}>Qty</th>
+                <th style={{fontSize:8,width:70}}>Rate ₹</th>
                 <th style={{fontSize:8,width:55}}>GST %</th>
-                <th style={{fontSize:8,width:100}}>Amount</th>
+                <th style={{fontSize:8,width:90}}>Amount</th>
                 <th style={{width:18}}></th>
               </tr></thead>
               <tbody>{prf.items.map((x,xi)=>{
-                // New computation path — single source of truth
-                const calc = computeLineAmount(x);
-                const lineAmt = calc.amount;
-                const rb = getRateBasis(x.rate_basis);
-                const du = getDimUnit(x.dim_unit);
-                const needsArea = !!(rb && rb.needsArea);
-                const isLinear = !!(rb && (rb.value==='per_rft' || rb.value==='per_rmtr'));
-                const showWidth = needsArea || isLinear;
-                const showHeight = needsArea; // linear only uses width as length
-                const lineGst = lineAmt*(+x.gst_pct||0)/100;
-                const dimPlaceholder = du ? du.label.split(' ')[0] : '';
-                // Keep legacy unit_mode in sync (best-effort, for backward compat with anything still reading it)
-                const inferLegacyMode = (dimVal, basisVal) => {
-                  if (basisVal==='per_piece') return 'NOS';
-                  if (basisVal==='per_set')   return 'SET';
-                  if (basisVal==='per_lot')   return 'LOT';
-                  if (basisVal==='per_kg')    return 'KG';
-                  if (basisVal==='per_roll')  return 'Roll M×M (per roll)';
-                  if (basisVal==='per_sqft' && dimVal==='FOOT') return 'SqFt (FOOT)';
-                  if (basisVal==='per_sqft' && dimVal==='INCH') return 'SqFt (INCH)';
-                  if (basisVal==='per_sqft' && dimVal==='MM')   return 'SqFt (MM)';
-                  if (basisVal==='per_sqft' && dimVal==='METER') return 'Roll M×M (per sqft)';
-                  if (basisVal==='per_sqmtr'&& dimVal==='FOOT') return 'SqMtr (FOOT)';
-                  if (basisVal==='per_sqmtr'&& dimVal==='INCH') return 'SqMtr (INCH)';
-                  if (basisVal==='per_sqmtr'&& dimVal==='MM')   return 'SqMtr (MM)';
-                  if (basisVal==='per_rft'  && dimVal==='FOOT') return 'RFT (FOOT)';
-                  if (basisVal==='per_rft'  && dimVal==='INCH') return 'RFT (INCH)';
-                  return ''; // no exact legacy mapping (e.g. CM, METER+per_sqmtr) — leave blank, fallback path handles
-                };
-                const onDimUnitChange=(v)=>{
+                const um=getUnitMode(x.unit_mode||'NOS');
+                const area=um.areaFn(+x.width||0,+x.height||0,+x.qty||1);
+                const lineAmt=um.totalFn(area,+x.qty||1,+x.rate||0);
+                const lineGst=lineAmt*(+x.gst_pct||0)/100;
+                const whDisabled=!um.needsWH;
+                // When user changes unit_mode, also refresh stored size string for backward compat in display/PO
+                const onModeChange=(v)=>{
                   setPrf(p=>({...p,items:p.items.map((it,i)=>{
                     if(i!==xi)return it;
-                    const newDim = v || null;
-                    const legacyMode = inferLegacyMode(newDim, it.rate_basis);
-                    const sizeStr = (newDim && (it.width||it.height)) ? `${it.width||''}×${it.height||''} ${newDim.toLowerCase()}`.trim() : '';
-                    return {...it, dim_unit:newDim, unit_mode:legacyMode||it.unit_mode||'NOS', size:sizeStr};
+                    const newUm=getUnitMode(v);
+                    const newArea=newUm.areaFn(+it.width||0,+it.height||0,+it.qty||1);
+                    const sizeStr=newUm.needsWH&&(it.width||it.height)?`${it.width||''}×${it.height||''} ${newUm.dimUnit||''}`.trim():'';
+                    return {...it,unit_mode:v,area:newArea,size:sizeStr};
                   })}));
                 };
-                const onRateBasisChange=(v)=>{
-                  setPrf(p=>({...p,items:p.items.map((it,i)=>{
-                    if(i!==xi)return it;
-                    const legacyMode = inferLegacyMode(it.dim_unit, v);
-                    return {...it, rate_basis:v, unit_mode:legacyMode||it.unit_mode||'NOS'};
-                  })}));
-                };
+                // When W/H/Qty change, also refresh area + size
                 const onDimChange=(field,v)=>{
                   setPrf(p=>({...p,items:p.items.map((it,i)=>{
                     if(i!==xi)return it;
                     const merged={...it,[field]:v};
-                    const sizeStr = (merged.dim_unit && (merged.width||merged.height)) ? `${merged.width||''}×${merged.height||''} ${merged.dim_unit.toLowerCase()}`.trim() : '';
-                    return {...merged, size:sizeStr};
+                    const um2=getUnitMode(merged.unit_mode||'NOS');
+                    const newArea=um2.areaFn(+merged.width||0,+merged.height||0,+merged.qty||1);
+                    const sizeStr=um2.needsWH&&(merged.width||merged.height)?`${merged.width||''}×${merged.height||''} ${um2.dimUnit||''}`.trim():'';
+                    return {...merged,area:newArea,size:sizeStr};
                   })}));
                 };
                 return <tr key={xi}>
                   <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={!showWidth} onChange={e=>onDimChange('width',e.target.value)} placeholder={!showWidth?'—':dimPlaceholder} title={isLinear?'Length':'Width'} style={{fontSize:9,padding:"2px 4px",width:"100%",background:!showWidth?"#0a0f1a":"transparent",color:!showWidth?"#475569":"inherit"}}/></td>
-                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={!showHeight} onChange={e=>onDimChange('height',e.target.value)} placeholder={!showHeight?'—':dimPlaceholder} style={{fontSize:9,padding:"2px 4px",width:"100%",background:!showHeight?"#0a0f1a":"transparent",color:!showHeight?"#475569":"inherit"}}/></td>
-                  <td><select className="in" value={x.dim_unit||''} disabled={!(needsArea||isLinear)} onChange={e=>onDimUnitChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",background:!(needsArea||isLinear)?"#0a0f1a":"#060810",color:!(needsArea||isLinear)?"#475569":"#e2e8f0"}}>
-                    <option value="">— select —</option>
-                    {DIM_UNITS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
-                  </select></td>
-                  <td><select className="in" value={x.rate_basis||'per_piece'} onChange={e=>onRateBasisChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
-                    {RATE_BASES.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}
+                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
+                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
+                  <td><select className="in" value={x.unit_mode||'NOS'} onChange={e=>onModeChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
+                    {UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
                   </select></td>
                   <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>onDimChange('qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><input className="in mn" type="number" min="0" value={x.rate} onChange={e=>updItem(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><select className="in" value={x.gst_pct} onChange={e=>updItem(xi,'gst_pct',+e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",color:x.gst_pct===0?'#64748b':'inherit'}}>{PR_GST.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
                   <td style={{fontSize:9,color:"#e3a008",fontWeight:700,textAlign:"right",paddingRight:4}}>
-                    <span style={{display:"block"}}>
-                      {lineAmt===0 && ((+x.width>0)||(+x.height>0)||(+x.rate>0)||(+x.qty>1)) && <span title="Amount is ₹0 — check Dim Unit, Rate Per and dimensions. Common cause: dim unit and rate basis don't match (e.g. dim in meters but no rate basis selected)." style={{color:"#f59e0b",marginRight:3,cursor:"help"}}>⚠</span>}
-                      ₹{lineAmt.toFixed(0)}
-                    </span>
-                    {calc.area_display!=='—' && <span style={{fontSize:7,color:"#64748b",display:"block"}}>{calc.area_display}</span>}
+                    <span style={{display:"block"}}>₹{lineAmt.toFixed(0)}</span>
+                    {area>0&&<span style={{fontSize:7,color:"#64748b",display:"block"}}>{um.displayFn(area)}</span>}
                     {x.gst_pct>0&&<span style={{fontSize:7,color:"#64748b"}}>+₹{lineGst.toFixed(0)} GST</span>}
-                    {(needsArea||isLinear) && du && ((+x.width>0)||(+x.height>0)) && <span style={{fontSize:7,color:"#64748b",display:"block",marginTop:1}}>
-                      {(+x.width||0)} × {showHeight?(+x.height||0):1} × {(+x.qty||1)} {du.label.split(' ')[0]} → {calc.area_display}
-                    </span>}
                   </td>
                   <td>{prf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:10,padding:0}} onClick={()=>delItem(xi)}>✕</button>}</td>
                 </tr>;
@@ -3569,10 +3348,6 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
   const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
   const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
   const _lineBase = (x) => {
-    // Prefer computeLineAmount (handles dim_unit + rate_basis, falls back to unit_mode, then qty×rate)
-    if (typeof computeLineAmount === 'function') {
-      return computeLineAmount(x).amount;
-    }
     if (x && x.unit_mode) {
       const um = getUnitMode(x.unit_mode);
       const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
@@ -4114,11 +3889,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const job = (jobsArr||[]).find(j => j.id === pr.job_id);
     const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
     const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
-    // Per-line amount: prefer computeLineAmount (handles dim_unit + rate_basis), fall back to legacy.
+    // Per-line amount honours unit_mode if present, falls back to qty*rate for legacy items.
     const _lineBase = (x) => {
-      if (typeof computeLineAmount === 'function') {
-        return computeLineAmount(x).amount;
-      }
       if (x && x.unit_mode) {
         const um = getUnitMode(x.unit_mode);
         const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
@@ -4742,23 +4514,14 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const [filter, setFilter] = React.useState('Pending Approval');
   const [rejecting, setRejecting] = React.useState(null); // pr id being rejected
   const [rejReason, setRejReason] = React.useState('');
-  const [sendingBack, setSendingBack] = React.useState(null); // pr id being sent back for revision
-  const [revNotes, setRevNotes] = React.useState('');
   const [processing, setProcessing] = React.useState(null); // pr id being processed
   const [waButtons, setWaButtons] = React.useState({}); // {prId: true} = show WA buttons
-  const [expanded, setExpanded] = React.useState(() => new Set()); // pr ids whose detail panel is open
-  const toggleExpand = (id) => setExpanded(prev => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
 
-  const STATUS_FILTERS = ['Pending Approval','Approved','Revision Requested','Rejected','All'];
+  const STATUS_FILTERS = ['Pending Approval','Approved','Rejected','All'];
   const stCol = {
     'Pending Approval': {bg:'#e3a00820',c:'#e3a008'},
     'Approved':         {bg:'#4ade8020',c:'#4ade80'},
     'Rejected':         {bg:'#f4706720',c:'#f47067'},
-    'Revision Requested': {bg:'#14b8a620',c:'#14b8a6'},
     'PO Generated':     {bg:'#06b6d420',c:'#06b6d4'},
     'PO Sent':          {bg:'#3b82f620',c:'#3b82f6'},
     'Completed':        {bg:'#8b5cf620',c:'#8b5cf6'},
@@ -4834,33 +4597,6 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
     if (reqPhone) {
       const msg = `❌ Your PR *${pr.pr_no}* has been *REJECTED* by Jigar.\n\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\n*Reason:* ${reasonText}\n\nPlease revise and resubmit if needed. Track status in *My PRs* tab.`;
       sendWhatsApp(reqPhone, msg, 'iprint_pr_rejected');
-    }
-  };
-
-  const sendBackPR = async (pr) => {
-    if (!revNotes.trim()) { show('Enter revision notes', false); return; }
-    setProcessing(pr.id);
-    const nowIso = new Date().toISOString();
-    const updates = {
-      status: 'Revision Requested',
-      revision_notes: revNotes.trim(),
-      last_status_change_at: nowIso
-    };
-    const {error} = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
-    if (error) { show('⚠️ Update failed: ' + error.message, false); setProcessing(null); return; }
-    const updated = {...pr, ...updates};
-    setPrs(p => p.map(x => x.id === pr.id ? updated : x));
-    setProcessing(null);
-    setSendingBack(null);
-    const notesText = revNotes.trim();
-    setRevNotes('');
-    setWaButtons(p => ({...p, [pr.id]: true}));
-    show('↩ ' + pr.pr_no + ' sent back for revision.');
-    // Auto-notify requestor with revision notes
-    const reqPhone = WA_NUMBERS[pr.created_by];
-    if (reqPhone) {
-      const msg = `↩ Your PR *${pr.pr_no}* needs *revision* per Jigar.\n\nVendor: ${pr.vendor_name}\nAmount: ₹${(+pr.total||0).toLocaleString('en-IN')}\n\n*Changes needed:* ${notesText}\n\nOpen the job in iPrint ERP, find this PR in the list, and tap *Edit & Resubmit* to revise. Your previous entries are preserved.`;
-      sendWhatsApp(reqPhone, msg, 'iprint_pr_revision_requested');
     }
   };
 
@@ -4966,114 +4702,15 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
                 {(+pr.transport>0) && <div style={{textAlign:'right', fontSize:8, color:'#64748b', marginTop:3}}>+ Transport ₹{pr.transport}</div>}
               </div>
 
-              {/* Show details toggle */}
-              <div style={{textAlign:'center', marginBottom: expanded.has(pr.id) ? 6 : 8}}>
-                <button className="b" onClick={() => toggleExpand(pr.id)}
-                  style={{fontSize:9, padding:'2px 12px', borderColor:'#1a2030', color:'#64748b', background:'transparent'}}>
-                  {expanded.has(pr.id) ? '▲ Hide details' : '▼ Show details'}
-                </button>
-              </div>
-
-              {/* Expanded detail panel */}
-              {expanded.has(pr.id) && (
-                <div style={{background:'#060810', border:'1px solid #1a2030', borderRadius:5, padding:10, marginBottom:8, display:'flex', flexDirection:'column', gap:10}}>
-                  {/* Per-line dimensions / unit / area / HSN */}
-                  <div>
-                    <p style={{fontSize:8, fontWeight:700, color:'#64748b', marginBottom:4, letterSpacing:0.3}}>LINE DETAILS</p>
-                    <table style={{width:'100%'}}>
-                      <thead><tr>
-                        <th style={{fontSize:7, color:'#64748b', textAlign:'left', paddingBottom:3}}>Item</th>
-                        <th style={{fontSize:7, color:'#64748b', textAlign:'left'}}>Dimensions</th>
-                        <th style={{fontSize:7, color:'#64748b', textAlign:'left'}}>Unit Mode</th>
-                        <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>Computed Area</th>
-                        <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>HSN</th>
-                      </tr></thead>
-                      <tbody>{rItems.map((x,xi) => {
-                        let um = null, computedArea = null, dimStr = '—';
-                        try {
-                          if (x && x.unit_mode && typeof getUnitMode === 'function') {
-                            um = getUnitMode(x.unit_mode);
-                            if (um && um.needsWH) {
-                              const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
-                              computedArea = a;
-                              dimStr = `${x.width||'?'} × ${x.height||'?'}${um.dimUnit?' '+um.dimUnit:''}`;
-                            } else if (x.size) {
-                              dimStr = x.size;
-                            }
-                          } else if (x && x.size) {
-                            dimStr = x.size;
-                          }
-                        } catch (e) { /* defensive */ }
-                        return (
-                          <tr key={xi}>
-                            <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8, paddingTop:2}}>{x.product||'—'}</td>
-                            <td style={{fontSize:9, color:'#94a3b8', paddingRight:8, paddingTop:2}}>{dimStr}</td>
-                            <td style={{fontSize:9, color:'#94a3b8', paddingRight:8, paddingTop:2}}>{x.unit_mode||'—'}</td>
-                            <td style={{fontSize:9, color:'#06b6d4', textAlign:'right', paddingTop:2}}>{computedArea!==null ? computedArea.toFixed(2)+(um&&um.value&&um.value.includes('SqMtr')?' m²':' ft²') : '—'}</td>
-                            <td style={{fontSize:9, color:'#64748b', textAlign:'right', paddingTop:2}}>{x.hsn||'—'}</td>
-                          </tr>
-                        );
-                      })}</tbody>
-                    </table>
-                  </div>
-
-                  {/* Vendor full block */}
-                  <div>
-                    <p style={{fontSize:8, fontWeight:700, color:'#64748b', marginBottom:4, letterSpacing:0.3}}>VENDOR</p>
-                    <div style={{display:'grid', gridTemplateColumns:'auto 1fr', gap:'2px 12px', fontSize:9}}>
-                      <span style={{color:'#64748b'}}>Name</span><span style={{color:'#c9d1d9'}}>{pr.vendor_name||'—'}</span>
-                      <span style={{color:'#64748b'}}>GSTIN</span><span style={{color:'#94a3b8'}}>{pr.vendor_gstin||'—'}</span>
-                      <span style={{color:'#64748b'}}>Phone</span><span style={{color:'#94a3b8'}}>{pr.vendor_phone||'—'}</span>
-                      <span style={{color:'#64748b'}}>Address</span><span style={{color:'#94a3b8'}}>{pr.vendor_address||'—'}</span>
-                      <span style={{color:'#64748b'}}>State</span><span style={{color:'#94a3b8'}}>{pr.vendor_state||'—'} <span style={{color:'#64748b', fontSize:8}}>({(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'CGST+SGST':'IGST'})</span></span>
-                    </div>
-                  </div>
-
-                  {/* Revision history (audit trail) */}
-                  {Array.isArray(pr.revision_history) && pr.revision_history.length > 0 && (
-                    <div>
-                      <p style={{fontSize:8, fontWeight:700, color:'#14b8a6', marginBottom:4, letterSpacing:0.3}}>REVISION HISTORY ({pr.revision_history.length})</p>
-                      <div style={{display:'flex', flexDirection:'column', gap:3}}>
-                        {pr.revision_history.map((h,hi) => (
-                          <div key={hi} style={{background:'#14b8a608', border:'1px solid #14b8a622', borderRadius:4, padding:'3px 7px', fontSize:9, color:'#94a3b8'}}>
-                            <span style={{color:'#14b8a6', fontWeight:700}}>↩ Round {hi+1}:</span> {h.notes||'—'}
-                            <span style={{color:'#64748b', fontSize:8, marginLeft:6}}>
-                              {h.at ? new Date(h.at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''}
-                              {h.by ? ' · resubmitted by '+h.by : ''}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Full timestamps */}
-                  <div>
-                    <p style={{fontSize:8, fontWeight:700, color:'#64748b', marginBottom:4, letterSpacing:0.3}}>TIMELINE</p>
-                    <div style={{display:'grid', gridTemplateColumns:'auto 1fr', gap:'2px 12px', fontSize:9}}>
-                      <span style={{color:'#64748b'}}>Created</span><span style={{color:'#94a3b8'}}>{pr.created_at ? new Date(pr.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'} <span style={{color:'#64748b'}}>by {pr.created_by||'—'}</span></span>
-                      {pr.last_status_change_at && (<><span style={{color:'#64748b'}}>Last change</span><span style={{color:'#94a3b8'}}>{new Date(pr.last_status_change_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span></>)}
-                      {pr.approved_at && (<><span style={{color:'#64748b'}}>Approved</span><span style={{color:'#4ade80'}}>{new Date(pr.approved_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} {pr.approved_by?'by '+pr.approved_by:''}</span></>)}
-                      {pr.rejected_at && (<><span style={{color:'#64748b'}}>Rejected</span><span style={{color:'#f47067'}}>{new Date(pr.rejected_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} {pr.rejected_by?'by '+pr.rejected_by:''}</span></>)}
-                      {(+pr.revision_count > 0) && (<><span style={{color:'#64748b'}}>Revisions</span><span style={{color:'#14b8a6'}}>{pr.revision_count} round(s)</span></>)}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {pr.notes && <div style={{fontSize:9, color:'#64748b', marginBottom:8, fontStyle:'italic'}}>📝 {pr.notes}</div>}
               {pr.rejection_reason && <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, padding:'4px 8px', fontSize:9, color:'#f47067', marginBottom:8}}>❌ Rejected: {pr.rejection_reason}</div>}
 
               {/* Action buttons — Pending Approval */}
-              {isPending && rejecting !== pr.id && sendingBack !== pr.id && (
+              {isPending && rejecting !== pr.id && (
                 <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
                   <button className="b bp" onClick={() => approvePR(pr)} disabled={processing===pr.id}
                     style={{fontSize:10, padding:'5px 16px', background:'#4ade80', borderColor:'#4ade80', color:'#000', fontWeight:700}}>
                     {processing===pr.id ? '...' : '✅ Approve'}
-                  </button>
-                  <button className="b" onClick={() => {setSendingBack(pr.id); setRevNotes('');}}
-                    style={{fontSize:10, padding:'5px 14px', borderColor:'#14b8a6', color:'#14b8a6'}}>
-                    ↩ Send Back
                   </button>
                   <button className="b" onClick={() => {setRejecting(pr.id); setRejReason('');}}
                     style={{fontSize:10, padding:'5px 14px', borderColor:'#f47067', color:'#f47067'}}>
@@ -5084,32 +4721,10 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
                 </div>
               )}
 
-              {/* Send-back-for-revision input */}
-              {isPending && sendingBack === pr.id && (
-                <div style={{background:'#14b8a610', border:'1px solid #14b8a644', borderRadius:6, padding:8}}>
-                  <p style={{fontSize:9, color:'#14b8a6', fontWeight:700, marginBottom:6}}>↩ Send Back for Revision — what needs to change?</p>
-                  <input className="in" value={revNotes} onChange={e=>setRevNotes(e.target.value)}
-                    placeholder="e.g. Increase qty to 50, Change to Maharashtra vendor for tax efficiency, Get a quote in meters..."
-                    style={{fontSize:9, padding:'4px 8px', width:'100%', marginBottom:6, borderColor:'#14b8a666'}}
-                    onKeyDown={e => e.key==='Enter' && sendBackPR(pr)}
-                    autoFocus/>
-                  <div style={{display:'flex', gap:4, alignItems:'center'}}>
-                    <button className="b bp" onClick={() => sendBackPR(pr)} disabled={processing===pr.id}
-                      style={{fontSize:10, padding:'4px 14px', background:'#14b8a6', borderColor:'#14b8a6', color:'#fff', fontWeight:700}}>
-                      {processing===pr.id ? '...' : '↩ Send Back'}
-                    </button>
-                    <button className="b bs" onClick={() => {setSendingBack(null); setRevNotes('');}}
-                      style={{fontSize:9, padding:'4px 10px'}}>Cancel</button>
-                    <span style={{flex:1}}/>
-                    <span style={{fontSize:8, color:'#64748b'}}>{pr.created_by} can edit and resubmit — their entries are preserved.</span>
-                  </div>
-                </div>
-              )}
-
               {/* Rejection reason input */}
               {isPending && rejecting === pr.id && (
                 <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:6, padding:8}}>
-                  <p style={{fontSize:9, color:'#f47067', fontWeight:700, marginBottom:6}}>❌ Rejection Reason (permanent — use Send Back if a fix is possible)</p>
+                  <p style={{fontSize:9, color:'#f47067', fontWeight:700, marginBottom:6}}>❌ Rejection Reason</p>
                   <input className="in" value={rejReason} onChange={e=>setRejReason(e.target.value)}
                     placeholder="e.g. Rate too high — get 2 more quotes, Wrong vendor for this type of work..."
                     style={{fontSize:9, padding:'4px 8px', width:'100%', marginBottom:6, borderColor:'#f4706766'}}
@@ -6984,17 +6599,17 @@ function ClientPortal({code}){
       setLoading(true);
       let allJobs=[];
       for(const pattern of config.match){
-        const {data:j}=await sb.from('jobs').select('*').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});
+        const {data:j}=await sb.from('jobs').select('id,firm,client_name,project,delivery_address,contact_person,contact_no,client_email,po_number,status,status_dates,po_file_url,design_ref_urls,created_at').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});
         if(j)allJobs=[...allJobs,...j];
       }
       const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});
       setJobs(allJobs);
       const jids=allJobs.map(x=>x.id);
       if(jids.length>0){
-        const {data:b}=await sb.from('batches').select('*').in('job_id',jids);
+        const {data:b}=await sb.from('batches').select('id,job_id,date,note,status').in('job_id',jids);
         if(b){setBatches(b);const bids=b.map(x=>x.id);
-          if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,rate_mode,sqft,img_url,dept_estimate,dept_design,dept_production,dept_printing,dept_fabrication,dept_dispatch,dept_installation,dept_accounts').in('batch_id',bids);if(li)setItems(li);}}
-        if(allJobs[0]?.firm){const {data:f}=await sb.from('firms').select('*').eq('code',allJobs[0].firm).single();if(f)setFirm(f);}
+          if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url').in('batch_id',bids);if(li)setItems(li);}}
+        if(allJobs[0]?.firm){const {data:f}=await sb.from('firms').select('code,name,short_name').eq('code',allJobs[0].firm).single();if(f)setFirm(f);}
       }
       try{const {data:n}=await sb.from('client_notes').select('*').in('job_id',jids).order('created_at',{ascending:false});
         if(n){const g={};n.forEach(x=>{if(!g[x.job_id])g[x.job_id]=[];g[x.job_id].push(x);});setNotes(g);}
@@ -7112,16 +6727,16 @@ function ClientPortal({code}){
         let allJobs=[];
         (async()=>{
           for(const pattern of config.match){
-            const {data:j}=await sb.from('jobs').select('*').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});
+            const {data:j}=await sb.from('jobs').select('id,firm,client_name,project,delivery_address,contact_person,contact_no,client_email,po_number,status,status_dates,po_file_url,design_ref_urls,created_at').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});
             if(j)allJobs=[...allJobs,...j];
           }
           const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});
           setJobs(allJobs);
           const jids=allJobs.map(x=>x.id);
           if(jids.length>0){
-            const {data:b}=await sb.from('batches').select('*').in('job_id',jids);
+            const {data:b}=await sb.from('batches').select('id,job_id,date,note,status').in('job_id',jids);
             if(b){setBatches(b);const bids=b.map(x=>x.id);
-              if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,rate_mode,sqft,img_url,dept_estimate,dept_design,dept_production,dept_printing,dept_fabrication,dept_dispatch,dept_installation,dept_accounts').in('batch_id',bids);if(li)setItems(li);}}
+              if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url').in('batch_id',bids);if(li)setItems(li);}}
           }
         })();
       },3000);
@@ -7138,23 +6753,23 @@ function ClientPortal({code}){
         <button onClick={()=>setShowNewJob(false)} style={{background:'none',border:'1px solid #1a2030',borderRadius:6,color:'#8b949e',fontSize:14,padding:'4px 10px',cursor:'pointer'}}>✕</button>
       </div>
       {cjMsg&&<div style={{background:'#10b98120',border:'1px solid #10b98155',borderRadius:8,padding:'12px 14px',marginBottom:12}}><p style={{color:'#10b981',fontSize:12,fontWeight:700}}>{cjMsg}</p></div>}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8,marginBottom:12}}>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.project} onChange={e=>setCjf(p=>({...p,project:e.target.value}))} placeholder="e.g. Store Branding - Andheri"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>PO Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.po_number} onChange={e=>setCjf(p=>({...p,po_number:e.target.value}))} placeholder="Optional"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Person *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_person} onChange={e=>setCjf(p=>({...p,contact_person:e.target.value}))} placeholder="Your name"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Number *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_no} onChange={e=>setCjf(p=>({...p,contact_no:e.target.value}))} placeholder="Phone number"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Email</label><input type="email" style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.email} onChange={e=>setCjf(p=>({...p,email:e.target.value}))} placeholder="client@company.com"/></div>
-        <div style={{gridColumn:'span 2'}}><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Delivery Address *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.delivery_address} onChange={e=>setCjf(p=>({...p,delivery_address:e.target.value}))} placeholder="Full delivery address"/></div>
+        <div style={{gridColumn:'1 / -1'}}><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Delivery Address *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.delivery_address} onChange={e=>setCjf(p=>({...p,delivery_address:e.target.value}))} placeholder="Full delivery address"/></div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12,background:'#060810',border:'1px solid #1a2030',borderRadius:8,padding:10}}>
-        <div style={{gridColumn:'span 2'}}><p style={{fontSize:10,fontWeight:700,color:'#8b5cf6',margin:'0 0 4px'}}>📍 Site Contact</p></div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:8,marginBottom:12,background:'#060810',border:'1px solid #1a2030',borderRadius:8,padding:10}}>
+        <div style={{gridColumn:'1 / -1'}}><p style={{fontSize:10,fontWeight:700,color:'#8b5cf6',margin:'0 0 4px'}}>📍 Site Contact</p></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Site Contact Person</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.site_contact_person} onChange={e=>setCjf(p=>({...p,site_contact_person:e.target.value}))} placeholder="Person at site"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Site Contact Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.site_contact_no} onChange={e=>setCjf(p=>({...p,site_contact_no:e.target.value}))} placeholder="Site phone number"/></div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12,background:'#060810',border:'1px solid #1a2030',borderRadius:8,padding:10}}>
-        <div style={{gridColumn:'span 2'}}><p style={{fontSize:10,fontWeight:700,color:'#3b82f6',margin:'0 0 4px'}}>🎨 Design Team Coordination</p></div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:8,marginBottom:12,background:'#060810',border:'1px solid #1a2030',borderRadius:8,padding:10}}>
+        <div style={{gridColumn:'1 / -1'}}><p style={{fontSize:10,fontWeight:700,color:'#3b82f6',margin:'0 0 4px'}}>🎨 Design Team Coordination</p></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Coordination Person Name</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.design_coord_person} onChange={e=>setCjf(p=>({...p,design_coord_person:e.target.value}))} placeholder="Design team contact name"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Coordination Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.design_coord_no} onChange={e=>setCjf(p=>({...p,design_coord_no:e.target.value}))} placeholder="Design team phone"/></div>
       </div>
@@ -7169,12 +6784,12 @@ function ClientPortal({code}){
             <span style={{fontSize:10,fontWeight:700,color:'#e3a008'}}>Item {i+1}</span>
             {cjItems.length>1&&<button onClick={()=>removeCjItem(i)} style={{background:'none',border:'none',color:'#f47067',fontSize:11,cursor:'pointer',padding:'2px 6px'}}>✕ Remove</button>}
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'2fr 2fr 1fr',gap:6,marginBottom:6}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:6,marginBottom:6}}>
             <div><label style={{fontSize:8,color:'#64748b'}}>Type *</label><select style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #e3a00844',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.type} onChange={e=>updateCjItem(i,'type',e.target.value)}><option value="">Select Type...</option>{ITEM_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
             <div><label style={{fontSize:8,color:'#64748b'}}>Description / Location</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.desc} onChange={e=>updateCjItem(i,'desc',e.target.value)} placeholder="e.g. Main entrance, 2nd floor lobby"/></div>
             <div><label style={{fontSize:8,color:'#64748b'}}>Qty</label><input type="number" style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.qty} onChange={e=>updateCjItem(i,'qty',e.target.value)} min="1"/></div>
           </div>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr 1fr',gap:6}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(80px,1fr))',gap:6}}>
             <div><label style={{fontSize:8,color:'#64748b'}}>Width</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.width} onChange={e=>updateCjItem(i,'width',e.target.value)} placeholder="W"/></div>
             <div><label style={{fontSize:8,color:'#64748b'}}>Height</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.height} onChange={e=>updateCjItem(i,'height',e.target.value)} placeholder="H"/></div>
             <div><label style={{fontSize:8,color:'#64748b'}}>Unit</label><select style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.size_unit} onChange={e=>updateCjItem(i,'size_unit',e.target.value)}><option>MM</option><option>INCH</option><option>FT</option><option>CM</option></select></div>
@@ -7186,7 +6801,7 @@ function ClientPortal({code}){
 
       <div style={{borderTop:'1px solid #1a2030',paddingTop:12,marginBottom:10}}>
         <p style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:8}}>🎨 Artwork & Files</p>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:8}}>
           <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Upload Artwork Files</label><input type="file" accept=".jpg,.jpeg,.png,.pdf,.ai,.psd,.cdr,.eps,.svg,.zip,.rar" multiple style={{width:'100%',padding:6,borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:10,marginTop:3}} onChange={e=>setCjFiles([...e.target.files])}/>{cjFiles.length>0&&<p style={{fontSize:9,color:'#4ade80',marginTop:3}}>✓ {cjFiles.length} file(s) selected</p>}</div>
           <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>WeTransfer / Google Drive Links</label><textarea style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:11,outline:'none',marginTop:3,minHeight:60,resize:'vertical',fontFamily:'inherit'}} value={cjf.wetransfer_links} onChange={e=>setCjf(p=>({...p,wetransfer_links:e.target.value}))} placeholder={"Paste WeTransfer, Google Drive, or Dropbox links here...\nOne link per line"}/></div>
         </div>
@@ -7294,10 +6909,10 @@ function ClientPortal({code}){
       // Refresh after delay
       setTimeout(()=>{setShowBOQ(false);setBoqStep(1);setBoqItems([]);setBoqFile(null);setBoqPO(null);setBoqMsg('');
         setBoqForm({project:'',po_number:'',contact_person:'',contact_no:'',delivery_address:'',remark:''});
-        (async()=>{let allJobs=[];for(const pattern of config.match){const {data:j}=await sb.from('jobs').select('*').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});if(j)allJobs=[...allJobs,...j];}
+        (async()=>{let allJobs=[];for(const pattern of config.match){const {data:j}=await sb.from('jobs').select('id,firm,client_name,project,delivery_address,contact_person,contact_no,client_email,po_number,status,status_dates,po_file_url,design_ref_urls,created_at').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});if(j)allJobs=[...allJobs,...j];}
         const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});setJobs(allJobs);
-        const jids=allJobs.map(x=>x.id);if(jids.length>0){const {data:b}=await sb.from('batches').select('*').in('job_id',jids);
-        if(b){setBatches(b);const bids=b.map(x=>x.id);if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,rate_mode,sqft,img_url,dept_estimate,dept_design,dept_production,dept_printing,dept_fabrication,dept_dispatch,dept_installation,dept_accounts').in('batch_id',bids);if(li)setItems(li);}}}})();
+        const jids=allJobs.map(x=>x.id);if(jids.length>0){const {data:b}=await sb.from('batches').select('id,job_id,date,note,status').in('job_id',jids);
+        if(b){setBatches(b);const bids=b.map(x=>x.id);if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url').in('batch_id',bids);if(li)setItems(li);}}}})();
       },4000);
     }catch(ex){alert('Error: '+ex.message);}
     setBoqSubmitting(false);
@@ -7320,12 +6935,12 @@ function ClientPortal({code}){
       </div>}
 
       {boqStep===2&&<div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8,marginBottom:12}}>
           <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.project} onChange={e=>setBoqForm(p=>({...p,project:e.target.value}))} placeholder="e.g. SBI ATM Branding"/></div>
           <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>PO Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.po_number} onChange={e=>setBoqForm(p=>({...p,po_number:e.target.value}))} placeholder="PO#"/></div>
           <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Person</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.contact_person} onChange={e=>setBoqForm(p=>({...p,contact_person:e.target.value}))}/></div>
           <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.contact_no} onChange={e=>setBoqForm(p=>({...p,contact_no:e.target.value}))}/></div>
-          <div style={{gridColumn:'span 2'}}><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Delivery Address</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.delivery_address} onChange={e=>setBoqForm(p=>({...p,delivery_address:e.target.value}))}/></div>
+          <div style={{gridColumn:'1 / -1'}}><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Delivery Address</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={boqForm.delivery_address} onChange={e=>setBoqForm(p=>({...p,delivery_address:e.target.value}))}/></div>
         </div>
         <div style={{marginBottom:12}}>
           <label style={{fontSize:9,color:'#64748b',fontWeight:600}}>📎 Upload PO Copy (PDF/Image)</label>
@@ -7366,47 +6981,51 @@ function ClientPortal({code}){
 
   if(!config) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}><div style={{textAlign:"center",padding:40}}><p style={{fontSize:48}}>🔒</p><h2 style={{color:"#f47067",fontSize:18}}>Invalid Portal Link</h2><p style={{color:"#64748b",fontSize:12,marginTop:8}}>Contact your iPrint representative for access.</p></div></div>;
 
-  if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
-    <div style={{width:420,padding:36,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
+  if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810",padding:"20px"}}>
+    <div style={{width:"100%",maxWidth:420,padding:"32px 28px",background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:20}}>
-        <div style={{width:56,height:56,borderRadius:10,background:"#e3a008",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:"#fff",letterSpacing:-0.5}}>ANA</div>
+        {config.logo?<img src={config.logo} alt={config.name} style={{width:56,height:56,borderRadius:10,objectFit:"cover",border:"2px solid #e3a00844"}} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex';}}/>:null}
+        <div style={{width:56,height:56,borderRadius:10,background:"#e3a008",display:config.logo?"none":"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:"#fff",letterSpacing:-0.5}}>ANA</div>
         <span style={{fontSize:22,color:"#475569",fontWeight:300}}>×</span>
         <div style={{width:56,height:56,borderRadius:10,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontWeight:900,fontSize:11,color:"#060810",lineHeight:1}}>iPrint<sup style={{fontSize:6,verticalAlign:"super"}}>TM</sup></span></div>
       </div>
       <h1 style={{fontSize:20,fontWeight:800,color:"#e3a008",marginBottom:2}}>{config.name}</h1>
       <p style={{fontSize:10,color:"#64748b",marginBottom:4}}>in collaboration with</p>
-      <p style={{fontSize:13,fontWeight:700,color:"#ca8a04",marginBottom:20}}>iPrint · Juxtapose</p>
-      <p style={{fontSize:11,color:"#64748b",marginBottom:20}}>Select your department to continue</p>
+      <p style={{fontSize:13,fontWeight:700,color:"#ca8a04",marginBottom:24}}>iPrint · Juxtapose</p>
+      <p style={{fontSize:11,color:"#8b949e",marginBottom:14,fontWeight:500}}>Select your department to continue</p>
       <div style={{display:"grid",gap:8}}>
-        {config.depts.map(d=><button key={d.id} onClick={()=>{setDept(d);setTab(d.seeAll?'all':d.id);}} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .15s"}} onMouseEnter={e=>e.target.style.borderColor='#e3a008'} onMouseLeave={e=>e.target.style.borderColor='#1a2030'}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
+        {config.depts.map(d=><button key={d.id} onClick={()=>{setDept(d);setTab(d.seeAll?'all':d.id);}} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor='#e3a008';e.currentTarget.style.background='#e3a00808';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#1a2030';e.currentTarget.style.background='#060810';}}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
       </div>
-      <p style={{fontSize:8,color:"#333",marginTop:16}}>Powered by iPrint ERP</p>
+      <p style={{fontSize:8,color:"#333",marginTop:20}}>Powered by iPrint ERP</p>
     </div>
   </div>;
 
   if(loading) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,background:"#060810"}}><div className="loader"/><p style={{color:"#64748b",fontSize:12}}>Loading {dept.name} view...</p></div>;
 
   return <div style={{minHeight:"100vh",background:"#060810",color:"#c9d1d9"}}>
-    <header style={{background:"#0c1017",borderBottom:"2px solid #e3a00833",padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <div style={{width:34,height:34,borderRadius:8,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#060810"}}>iP</div>
-        <div><h1 style={{fontSize:15,fontWeight:800,color:"#e3a008",margin:0}}>{config.name}</h1><p style={{fontSize:10,color:"#64748b",margin:0}}>{dept.icon} {dept.name} · {firm?.name||'iPrint'}</p></div>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:8}}>
-        <button onClick={()=>setShowNewJob(true)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>➕ Submit New Job</button>
-        {dept?.canEditPO&&<button onClick={()=>setShowBOQ(true)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid #3b82f655",background:"linear-gradient(135deg,#3b82f620,#2563eb10)",color:"#3b82f6",fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>📊 Import BOQ</button>}
-        <span style={{fontSize:10,color:"#64748b"}}>{filtered.length} jobs</span>
-        <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer"}}>↩ Switch Dept</button>
+    <header style={{background:"#0c1017",borderBottom:"2px solid #e3a00833",padding:"10px 16px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {config.logo?<img src={config.logo} alt="" style={{width:34,height:34,borderRadius:8,objectFit:"cover"}} onError={e=>{e.target.style.display='none';e.target.nextSibling.style.display='flex';}}/>:null}
+          <div style={{width:34,height:34,borderRadius:8,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:config.logo?"none":"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:13,color:"#060810"}}>iP</div>
+          <div><h1 style={{fontSize:14,fontWeight:800,color:"#e3a008",margin:0}}>{config.name}</h1><p style={{fontSize:9,color:"#64748b",margin:0}}>{dept.icon} {dept.name}</p></div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+          <button onClick={()=>setShowNewJob(true)} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>➕ New Job</button>
+          {dept?.canEditPO&&<button onClick={()=>setShowBOQ(true)} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #3b82f655",background:"linear-gradient(135deg,#3b82f620,#2563eb10)",color:"#3b82f6",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>📊 Import BOQ</button>}
+          <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:9,cursor:"pointer",whiteSpace:"nowrap"}}>↩ Switch</button>
+        </div>
       </div>
     </header>
-    <div style={{padding:"14px 20px"}}>
-      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-          {deptTabs.map(t=>{const cnt=t.st?full.filter(j=>t.st.includes(j.status)).length:full.length;return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>{t.icon} {t.l} <span style={{background:"#1a2030",borderRadius:8,padding:"1px 6px",fontSize:9}}>{cnt}</span></button>;})}
+    <div style={{padding:"12px 16px"}}>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",flex:1,minWidth:0}}>
+          {deptTabs.map(t=>{const cnt=t.st?full.filter(j=>t.st.includes(j.status)).length:full.length;return <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"5px 10px",borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:10,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:3,whiteSpace:"nowrap"}}>{t.icon} {t.l} <span style={{background:"#1a2030",borderRadius:8,padding:"1px 5px",fontSize:8}}>{cnt}</span></button>;})}
         </div>
-        <div style={{position:"relative"}}><input style={{padding:"7px 12px 7px 30px",borderRadius:8,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:12,outline:"none",width:250}} placeholder="🔍 Search project, job#, address, PO..." value={portalSearch} onChange={e=>setPortalSearch(e.target.value)}/>{portalSearch&&<button onClick={()=>setPortalSearch('')} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:12}}>✕</button>}</div>
+        <div style={{position:"relative",flexShrink:0}}><input style={{padding:"6px 10px 6px 28px",borderRadius:8,border:"1px solid #1a2030",background:"#0c1017",color:"#c9d1d9",fontSize:11,outline:"none",width:220}} placeholder="Search project, job#, PO..." value={portalSearch} onChange={e=>setPortalSearch(e.target.value)}/><span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",fontSize:11,color:"#64748b",pointerEvents:"none"}}>🔍</span>{portalSearch&&<button onClick={()=>setPortalSearch('')} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:11}}>✕</button>}</div>
       </div>
       {portalSearch&&<p style={{fontSize:10,color:"#64748b",marginBottom:6}}>{filtered.length} result{filtered.length!==1?'s':''} for "{portalSearch}"</p>}
+      {!portalSearch&&<p style={{fontSize:9,color:"#475569",marginBottom:6}}>{filtered.length} job{filtered.length!==1?'s':''}</p>}
       <div style={{maxHeight:"calc(100vh - 140px)",overflowY:"auto",display:"grid",gap:8}}>
         {filtered.map(j=>{const idx=pipeIdx(j.status);const allItems=(j.batches||[]).flatMap(b=>b.items||[]);const sd=j.status_dates||{};const jN=notes[j.id]||[];const isOpen=selJob===j.id;
           return <div key={j.id} style={{background:"#0c1017",border:`1px solid ${isOpen?'#e3a00855':'#1a2030'}`,borderRadius:10,overflow:"hidden",transition:"border .2s"}}>
@@ -7414,7 +7033,7 @@ function ClientPortal({code}){
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                 <div><p style={{fontSize:13,fontWeight:700,color:"#e3a008"}}>{j.id}</p><p style={{fontSize:11,fontWeight:600}}>{j.project||'—'}</p><p style={{fontSize:9,color:"#64748b"}}>{j.delivery_address?.slice(0,55)||''}</p></div>
                 <div style={{textAlign:"right"}}><span style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b',padding:"3px 10px",borderRadius:5,fontSize:10,fontWeight:700,display:"inline-block"}}>{j.status}</span>
-                  {jN.length>0&&<p style={{fontSize:8,color:"#8b5cf6",marginTop:3}}>💬 {jN.length} note{jN.length>1?'s':''}</p>}
+                  {(()=>{const vc=jN.filter(n=>n.dept!=='SYSTEM'&&!n.text?.includes('🗑️ Batch deleted')).length;return vc>0?<p style={{fontSize:8,color:"#8b5cf6",marginTop:3}}>💬 {vc} note{vc>1?'s':''}</p>:null;})()}
                 </div>
               </div>
               <div style={{display:"flex",gap:0,alignItems:"center",margin:"6px 0"}}>
@@ -7431,35 +7050,35 @@ function ClientPortal({code}){
             {isOpen&&<div style={{borderTop:"1px solid #1a2030",padding:"10px 14px",background:"#080c14"}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:10,marginBottom:8}}>
                 <div><span style={{color:"#64748b"}}>PO:</span> {dept?.canEditPO?<span style={{display:'inline-flex',gap:3,alignItems:'center'}}><input style={{padding:'3px 6px',borderRadius:4,border:'1px solid #1a2030',background:'#060810',color:'#4ade80',fontSize:10,width:120,outline:'none',fontFamily:'monospace'}} value={poEdits[j.id]!=null?poEdits[j.id]:(j.po_number||'')} onChange={e=>setPoEdits(p=>({...p,[j.id]:e.target.value}))} placeholder="Enter PO#" onKeyDown={e=>{if(e.key==='Enter')savePO(j.id,e.target.value);}}/>{poEdits[j.id]!=null&&poEdits[j.id]!==(j.po_number||'')&&<button onClick={()=>savePO(j.id,poEdits[j.id])} style={{padding:'2px 8px',borderRadius:4,border:'none',background:'#4ade80',color:'#060810',fontSize:8,fontWeight:700,cursor:'pointer'}}>Save</button>}</span>:<span style={{color:j.po_number?'#4ade80':'#f47067'}}>{j.po_number||'Pending'}</span>}</div>
-                <div><span style={{color:"#64748b"}}>Firm:</span> {firm?.name||'—'}</div>
                 <div><span style={{color:"#64748b"}}>Items:</span> {allItems.length}</div>
-                <div><span style={{color:"#64748b"}}>Client:</span> {j.client_name}</div>
+                <div><span style={{color:"#64748b"}}>Contact:</span> {j.contact_person||'—'}</div>
+                <div><span style={{color:"#64748b"}}>Date:</span> {j.created_at?new Date(j.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'}):'—'}</div>
               </div>
               {(()=>{const poUrls=Array.isArray(j.po_file_url)?j.po_file_url:j.po_file_url?[j.po_file_url]:[];return poUrls.length>0?<div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:8}}><span style={{fontSize:9,color:'#64748b',fontWeight:600}}>📎 PO:</span>{poUrls.map((u,i)=><a key={i} href={u} target="_blank" rel="noopener" style={{fontSize:9,color:'#3b82f6',background:'#3b82f615',padding:'2px 8px',borderRadius:4,border:'1px solid #3b82f633'}}>📄 PO Copy {poUrls.length>1?i+1:''} ↓</a>)}</div>:null;})()}
-              {allItems.length>0&&<table style={{width:"100%",borderCollapse:"collapse",marginBottom:8}}><thead><tr style={{borderBottom:"1px solid #1a2030"}}><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>#</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Item</th>{allItems.some(it=>it.img_url)&&<th style={{padding:"3px",fontSize:8,color:"#64748b"}}>Img</th>}<th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Spec</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Size</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Qty</th></tr></thead><tbody>
-                {allItems.map((it,i)=><tr key={it.id} style={{borderBottom:"1px solid #0c1017"}}><td style={{padding:"3px",fontSize:9}}>{i+1}</td><td style={{padding:"3px",fontSize:10,fontWeight:600}}>{it.client_name||it.internal_name}</td>{allItems.some(x=>x.img_url)&&<td style={{padding:"2px"}}>{it.img_url?<a href={it.img_url} target="_blank"><img src={it.img_url} style={{width:24,height:24,objectFit:"cover",borderRadius:3}}/></a>:'—'}</td>}<td style={{padding:"3px",fontSize:9,color:"#8b949e"}}>{it.media?.slice(0,20)||'—'}</td><td style={{padding:"3px",fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td style={{padding:"3px",fontSize:10,fontWeight:700}}>{it.qty}</td></tr>)}
-              </tbody></table>}
+              {allItems.length>0&&<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",marginBottom:8}}><thead><tr style={{borderBottom:"1px solid #1a2030"}}><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>#</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Item</th>{allItems.some(it=>it.img_url)&&<th style={{padding:"3px",fontSize:8,color:"#64748b"}}>Img</th>}<th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Spec</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Size</th><th style={{padding:"3px",fontSize:8,textAlign:"left",color:"#64748b"}}>Qty</th></tr></thead><tbody>
+                {allItems.map((it,i)=><tr key={it.id} style={{borderBottom:"1px solid #0c1017"}}><td style={{padding:"3px",fontSize:9}}>{i+1}</td><td style={{padding:"3px",fontSize:10,fontWeight:600,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{it.client_name||it.internal_name}</td>{allItems.some(x=>x.img_url)&&<td style={{padding:"2px"}}>{it.img_url?<a href={it.img_url} target="_blank"><img src={it.img_url} style={{width:24,height:24,objectFit:"cover",borderRadius:3}}/></a>:'—'}</td>}<td style={{padding:"3px",fontSize:9,color:"#8b949e"}}>{it.media?.slice(0,20)||'—'}</td><td style={{padding:"3px",fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}</td><td style={{padding:"3px",fontSize:10,fontWeight:700}}>{it.qty}</td></tr>)}
+              </tbody></table></div>}
               {allItems.some(it=>it.img_url)&&<div style={{marginTop:6,marginBottom:8}}><p style={{fontSize:9,color:"#64748b",fontWeight:600,marginBottom:4}}>Design References</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{allItems.filter(it=>it.img_url).map((it,i)=><a key={i} href={it.img_url} target="_blank" rel="noopener"><img src={it.img_url} style={{width:50,height:50,objectFit:"cover",borderRadius:4,border:"1px solid #1a2030"}}/></a>)}</div></div>}
-              <div style={{borderTop:"1px solid #1a2030",paddingTop:8}}>
-                <p style={{fontSize:9,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>💬 Notes & Approvals</p>
-                {jN.map(n=><div key={n.id} style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:6,padding:"6px 8px",marginBottom:4}}>
+              {(()=>{const visibleNotes=jN.filter(n=>n.dept!=='SYSTEM'&&!n.text?.includes('🗑️ Batch deleted'));return <div style={{borderTop:"1px solid #1a2030",paddingTop:8}}>
+                <p style={{fontSize:9,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>💬 Notes & Communication</p>
+                {visibleNotes.map(n=><div key={n.id} style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:6,padding:"6px 8px",marginBottom:4}}>
                   <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,fontWeight:700,color:"#e3a008"}}>{n.dept}</span><span style={{fontSize:7,color:"#64748b"}}>{new Date(n.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</span></div>
-                  <p style={{fontSize:10,marginTop:2,color:"#c9d1d9"}}>{n.text}</p>
+                  <p style={{fontSize:10,marginTop:2,color:"#c9d1d9",wordBreak:"break-word"}}>{n.text}</p>
                 </div>)}
-                {jN.length===0&&<p style={{fontSize:9,color:"#475569",marginBottom:4}}>No notes yet. Add the first one below.</p>}
+                {visibleNotes.length===0&&<p style={{fontSize:9,color:"#475569",marginBottom:4}}>No notes yet. Start the conversation below.</p>}
                 <div style={{display:"flex",gap:4,marginTop:4}}>
                   <input style={{flex:1,padding:"7px 10px",borderRadius:6,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:11,outline:"none"}} placeholder={"Add note as "+dept.name+"..."} value={noteText[j.id]||''} onChange={e=>setNoteText(p=>({...p,[j.id]:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')addNote(j.id);}}/>
                   <button onClick={()=>addNote(j.id)} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"#8b5cf6",color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}}>Send</button>
                 </div>
-              </div>
+              </div>;})()}
             </div>}
           </div>;})}
-        {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#64748b"}}><p style={{fontSize:32}}>✨</p><p>No projects in this category</p></div>}
+        {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#64748b"}}><p style={{fontSize:32}}>📋</p><p style={{fontSize:12}}>No projects in this view</p></div>}
       </div>
     </div>
     {showNewJob&&<NewJobForm/>}
     {showBOQ&&<BOQModal/>}
-    <footer style={{textAlign:"center",padding:"16px",borderTop:"1px solid #1a2030",marginTop:20}}><p style={{fontSize:9,color:"#475569"}}>Powered by iPrint ERP · {firm?.name||''} · {new Date().getFullYear()}</p></footer>
+    <footer style={{textAlign:"center",padding:"14px 16px",borderTop:"1px solid #1a2030",marginTop:20}}><p style={{fontSize:8,color:"#333"}}>Powered by iPrint ERP · © {new Date().getFullYear()}</p></footer>
   </div>;
 }
 
