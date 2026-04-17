@@ -790,33 +790,64 @@ function MainApp({user,onLogout,masterData}){
 
   // Role-based nav
   const allNav=[
+    // Dashboard — everyone
     {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
-    {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"]},
-    {id:"new",l:"New Job",e:"➕",roles:["admin","sales"],users:["JIGAR","RUCHITA","AMOL"]},
-    {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","RUCHITA","AMOL"]},
-    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer"]},
-    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts"]},
-    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing","designer"]},
-    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication","designer"]},
-    {id:"os",l:"Outsource",e:"📤",roles:["admin","production","printing","fabrication","designer"]},
-    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch","designer"]},
-    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch","accounts"]},
-    {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales","accounts"]},
-    {id:"cli",l:"Clients",e:"👥",roles:["admin","sales","accounts"]},
-    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"]},
-    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"]},
+    // All Jobs — tier-1 + Aparna + Priyanka + Shreya (BATUL removed per revised matrix)
+    {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
+    // New Job — admin role + PRIYANKA + ANKITA (sales role added so Priyanka passes role check)
+    {id:"new",l:"New Job",e:"➕",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","PRIYANKA"]},
+    // Import BOQ — admin + sales role; tier-1 + APARNA + PRIYANKA
+    {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA"]},
+    // Dept Tracker — tier-1 + APARNA + PRIYANKA + designers + HARISH + MURLI + ANKITA (BATUL removed)
+    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer","printing","fabrication","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI"]},
+    // Material In (GRN) — tier-1 + Shreya + Murli
+    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI"]},
+    // Printing — tier-1 + PRIYANKA + designers + Harish
+    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing","designer","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH"]},
+    // Fabrication — tier-1 + PRIYANKA + designers + Harish + Murli (dispatch role added)
+    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication","designer","printing","sales","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI"]},
+    // Outsource — tier-1 + PRIYANKA + SHREYA + designers + Harish (accounts role added for Shreya)
+    {id:"os",l:"Outsource",e:"📤",roles:["admin","production","printing","fabrication","designer","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","SHREYA","PRAJAKTA","MEDHA","HARISH"]},
+    // Dispatch — tier-1 + PRIYANKA + Murli + Harish (BATUL removed)
+    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch","designer","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","MURLI","HARISH"]},
+    // Stock — tier-1 + Shreya + Murli
+    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI"]},
+    // PO Reminders — tightened to tier-1 + RUCHITA + ANKITA only (per your correction)
+    {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA"]},
+    // Clients — tier-1 + Aparna + Priyanka + Shreya (BATUL removed)
+    {id:"cli",l:"Clients",e:"👥",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
+    // Accounts — tier-1 + Aparna + Shreya
+    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","SHREYA"]},
+    // Expenses — tier-1 + Shreya
+    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA"]},
+    // Backup Data — admin role only (tier-1 access via FULL_ACCESS shortcut covers all 4 existing admins; Ankita as tier-2 admin is NOT in the user-gate)
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
-    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"]},
-    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
-    {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL"]},
+    // Banking CRM — tier-1 + Aparna + Priyanka + Shreya (Harish/Murli removed per your correction)
+    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
+    // Sales CRM — tier-1 + Batul
+    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","BATUL"]},
+    // Job Notes — tier-1 + Batul
+    {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","BATUL"]},
+    // Approvals — JIGAR only (historical; not changing today)
     {id:"appr",l:"Approvals",e:"🔔",roles:["admin"],users:["JIGAR"]},
-    {id:"myprs",l:"My PRs",e:"📑",roles:["admin","sales","production","accounts","printing","fabrication","designer"]},
-    {id:"po",l:"PO Generator",e:"📄",roles:["admin","accounts"],users:["JIGAR","SHREYA"]},
-    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","accounts","dispatch"],users:["JIGAR","SHREYA","MURLI","ACCOUNTS"]},
+    // My PRs — everyone (tier-1 auto, everyone else by role)
+    {id:"myprs",l:"My PRs",e:"📑",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
+    // PO Generator — accounts role only (admin removed per your deliberate call). Tier-1 still sees via FULL_ACCESS.
+    {id:"po",l:"PO Generator",e:"📄",roles:["accounts"],users:["SHREYA"]},
+    // Receive Material — tier-1 + Shreya + Murli + Harish
+    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","HARISH"]},
   ];
+  // ── ACCESS CONTROL (17 Apr 26 rework) ─────────────────────────────────
+  // TIER 1 (FULL_ACCESS): see every module automatically. Bypass role + user-gate.
+  //   Includes: JIGAR (owner), AMOL (operations), CHANDNI S (co-admin), RUCHITA (backend ops)
+  // TIER 2 (everyone else): must pass role AND (if module has users:[...]) be named in that list.
+  //   Substring match: "JIGAR" matches "JIGAR"; "HARISH" matches "HARISH - Fab/Graphic Designer".
+  const FULL_ACCESS = ["JIGAR","AMOL","CHANDNI","RUCHITA"];
   const nav=allNav.filter(n=>{
+    const uName=(user.name||'').toUpperCase();
+    if(FULL_ACCESS.some(u=>uName.includes(u))) return true; // tier-1 sees everything
     if(!n.roles.includes(user.role))return false;
-    if(n.users){const uName=(user.name||'').toUpperCase();return n.users.some(u=>uName.includes(u));}
+    if(n.users){return n.users.some(u=>uName.includes(u));}
     return true;
   });
 
@@ -1355,7 +1386,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const [showPRForm,setShowPRForm]=React.useState(false);
       const [vendors,setVendors]=React.useState(null); // null=not loaded yet
       const [showAddVendor,setShowAddVendor]=React.useState(false);
-      const PR_REQUESTORS=['Amol','Murli Shetty','Harish','Priyanka','Jigar','Printing Dept'];
+      const PR_REQUESTORS=['Amol','Murli Shetty','Harish','Priyanka','Jigar'];
       const PR_PAYMENT_TERMS=['Advance 100%','Advance 50% + Balance on delivery','COD','15 days from invoice','30 days from invoice','45 days from invoice','60 days from invoice','Custom'];
       const PR_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter','Set','Job'];
       const PR_GST=[0,5,12,18,28];
@@ -3195,7 +3226,6 @@ const WA_NUMBERS = {
   'Harish':          '919326282238',
   'Priyanka':        '917400214057',
   'Jigar':           '919076270111',
-  'Printing Dept':   '919326282238', // Harish handles Printing Dept
   'Shreya':          '917304008506',
 };
 // Maps PR_REQUESTORS values to a dept tag — used by My PRs page for "PRs from my dept" filter.
@@ -3204,7 +3234,6 @@ const STAFF_DEPTS = {
   'Amol':          'Production',
   'Murli Shetty':  'Production',
   'Harish':        'Printing',
-  'Printing Dept': 'Printing',
   'Priyanka':      'Office',
   'Jigar':         'Admin',
   'Shreya':        'Accounts',
