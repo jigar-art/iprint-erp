@@ -3286,7 +3286,10 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const items = Array.isArray(pr.items) ? pr.items : [];
     const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
     const subtotal = +pr.subtotal || items.reduce((s,x) => s + (+x.qty||0)*(+x.rate||0), 0);
-    const gstTotal = +pr.gst_total || items.reduce((s,x) => s + (+x.qty||0)*(+x.rate||0)*(+x.gst_pct||18)/100, 0);
+    // Bug-fix (PR2.0): respect stored gst_total even when it's 0; per-item gst_pct defaults to 0 (not 18) so "no GST" PRs don't silently acquire tax.
+    const gstTotal = (pr.gst_total !== null && pr.gst_total !== undefined && pr.gst_total !== '')
+      ? +pr.gst_total
+      : items.reduce((s,x) => s + (+x.qty||0)*(+x.rate||0)*(+x.gst_pct||0)/100, 0);
     const transport = +pr.transport || 0;
     const grandTotal = subtotal + gstTotal + transport;
     const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
@@ -3295,7 +3298,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const gstGroups = {};
     items.forEach(x => {
       const base = (+x.qty||0)*(+x.rate||0);
-      const gp = +x.gst_pct || 18;
+      // Bug-fix (PR2.0): default per-item GST to 0 (not 18) so explicit 0% on PR doesn't silently become 18% here.
+      const gp = +x.gst_pct || 0;
       const key = gp;
       if (!gstGroups[key]) gstGroups[key] = {base:0, tax:0};
       gstGroups[key].base += base;
@@ -3318,6 +3322,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
       </tr>`).join('');
 
     const gstRows = Object.entries(gstGroups).map(([pct, {base, tax}]) => {
+      // Bug-fix (PR2.0): hide tax rows entirely for 0% GST groups — cleaner PO per team feedback.
+      if (+pct === 0 || tax === 0) return '';
       if (isIntraState) {
         return `
           <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input CGST @ ${pct/2}%</td>
@@ -3363,6 +3369,9 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   <div class="meta-row" style="margin-top:-4px">
     <span>Ref. No./PR No. : &nbsp;<strong>${pr.pr_no}</strong></span>
   </div>
+  ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
+    <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${pr.job_id}</strong></span>
+  </div>` : ''}
 
   <div class="po-header">
     <h2>${firm.name}</h2>
