@@ -35,6 +35,8 @@ td{padding:5px 7px;font-size:11px;border-bottom:1px solid #0c1017}
 tr:hover td{background:#0a0f1a}
 .in{width:100%;padding:5px 8px;border-radius:5px;border:1px solid #1a2030;background:#060810;color:#e2e8f0;font-size:11px;outline:none}
 .in:focus{border-color:#e3a008}
+.in option{background:#060810;color:#e2e8f0}
+.in option:disabled{color:#475569}
 .mn{font-family:'JetBrains Mono',monospace}
 .done{text-decoration:line-through;opacity:.4}
 .ck{width:14px;height:14px;border-radius:3px;border:2px solid #1a2030;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;flex-shrink:0}
@@ -2121,7 +2123,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                   <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={!showWidth} onChange={e=>onDimChange('width',e.target.value)} placeholder={!showWidth?'—':dimPlaceholder} title={isLinear?'Length':'Width'} style={{fontSize:9,padding:"2px 4px",width:"100%",background:!showWidth?"#0a0f1a":"transparent",color:!showWidth?"#475569":"inherit"}}/></td>
                   <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={!showHeight} onChange={e=>onDimChange('height',e.target.value)} placeholder={!showHeight?'—':dimPlaceholder} style={{fontSize:9,padding:"2px 4px",width:"100%",background:!showHeight?"#0a0f1a":"transparent",color:!showHeight?"#475569":"inherit"}}/></td>
-                  <td><select className="in" value={x.dim_unit||''} disabled={!(needsArea||isLinear)} onChange={e=>onDimUnitChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",background:!(needsArea||isLinear)?"#0a0f1a":"transparent",color:!(needsArea||isLinear)?"#475569":"inherit"}}>
+                  <td><select className="in" value={x.dim_unit||''} disabled={!(needsArea||isLinear)} onChange={e=>onDimUnitChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",background:!(needsArea||isLinear)?"#0a0f1a":"#060810",color:!(needsArea||isLinear)?"#475569":"#e2e8f0"}}>
                     <option value="">— select —</option>
                     {DIM_UNITS.map(d=><option key={d.value} value={d.value}>{d.label}</option>)}
                   </select></td>
