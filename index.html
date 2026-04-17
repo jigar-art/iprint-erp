@@ -315,6 +315,7 @@ function MainApp({user,onLogout,masterData}){
   const [loading,setLoading]=useState(true);
   const [modal,setModal]=useState(null);
   const [fyFilter,setFyFilter]=useState('2627'); // default to current FY
+  const [portalAlert,setPortalAlert]=useState(null);
 
   const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
   window._showToast=show;
@@ -352,6 +353,20 @@ function MainApp({user,onLogout,masterData}){
       setJobs(j); setGrnData(g); setExpenses(ex);
       console.log('Phase 1: Loaded',j.length,'current FY jobs');
       setLoading(false);
+
+      // Check for unacknowledged client-portal-submitted jobs
+      try{
+        const portalJobs=j.filter(x=>x.made_by&&(x.made_by.includes('CLIENT PORTAL')));
+        const ackKey='portal_ack_'+user?.name;
+        const lastAck=localStorage.getItem(ackKey)||'';
+        const newPortalJobs=portalJobs.filter(x=>{
+          const ts=x.created_at||'';
+          return ts>lastAck;
+        });
+        if(newPortalJobs.length>0){
+          setPortalAlert(newPortalJobs);
+        }
+      }catch(e){console.log('Portal notification check error:',e);}
       
       // Phase 2: Load batches + line items for current FY jobs
       const curJobIds=j.map(x=>x.id);
@@ -907,6 +922,34 @@ function MainApp({user,onLogout,masterData}){
       </main>
 
       {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs}/>:modal.x}</div></div>}
+      {portalAlert&&portalAlert.length>0&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:250,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+        <div style={{background:"#0c1017",border:"2px solid #e3a008",borderRadius:14,width:"100%",maxWidth:550,padding:24,animation:"fi .3s"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+            <div style={{width:40,height:40,borderRadius:10,background:"#e3a00820",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🔔</div>
+            <div><h3 style={{fontSize:16,fontWeight:800,color:"#e3a008",margin:0}}>New Client Portal Submissions</h3>
+            <p style={{fontSize:10,color:"#64748b",margin:"2px 0 0"}}>{portalAlert.length} new job{portalAlert.length>1?'s':''} submitted via client portal</p></div>
+          </div>
+          <div style={{maxHeight:300,overflowY:"auto",marginBottom:16}}>
+            {portalAlert.map(j=><div key={j.id} style={{background:"#060810",border:"1px solid #e3a00833",borderRadius:8,padding:"10px 14px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div><p style={{fontSize:13,fontWeight:700,color:"#e3a008"}}>{j.id}</p>
+                  <p style={{fontSize:11,fontWeight:600,color:"#c9d1d9"}}>{j.project||'—'}</p>
+                  <p style={{fontSize:9,color:"#64748b"}}>{j.client_name} · {j.contact_person||''} {j.contact_no?'('+j.contact_no+')':''}</p>
+                  <p style={{fontSize:9,color:"#64748b"}}>{j.delivery_address?.slice(0,60)||''}</p>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <span style={{background:"#e3a00820",color:"#e3a008",padding:"2px 8px",borderRadius:4,fontSize:9,fontWeight:700}}>{j.made_by}</span>
+                  <p style={{fontSize:8,color:"#64748b",marginTop:3}}>{j.created_at?new Date(j.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):''}</p>
+                </div>
+              </div>
+            </div>)}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>{try{localStorage.setItem('portal_ack_'+user?.name,new Date().toISOString());}catch(e){}setPortalAlert(null);if(portalAlert[0]?.id)setModal({t:'Job Detail — '+portalAlert[0].id,jobId:portalAlert[0].id,fallback:portalAlert[0]});}} style={{flex:1,padding:"10px 16px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#e3a008,#ca8a04)",color:"#060810",fontSize:12,fontWeight:800,cursor:"pointer"}}>👁️ View First Job & Acknowledge</button>
+            <button onClick={()=>{try{localStorage.setItem('portal_ack_'+user?.name,new Date().toISOString());}catch(e){}setPortalAlert(null);}} style={{padding:"10px 16px",borderRadius:8,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:11,cursor:"pointer"}}>✓ Dismiss</button>
+          </div>
+        </div>
+      </div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
     </div>
   );
@@ -3228,6 +3271,7 @@ const WA_NUMBERS = {
   'Priyanka':        '917400214057',
   'Jigar':           '919076270111',
   'Shreya':          '917304008506',
+  'Ruchita':         '918591872142',
 };
 // Maps PR_REQUESTORS values to a dept tag — used by My PRs page for "PRs from my dept" filter.
 // Keep keys aligned with PR_REQUESTORS list at line ~1285.
@@ -6718,6 +6762,22 @@ function ClientPortal({code}){
 
       // Reset form & reload
       setCjMsg('✅ Job '+jid+' submitted successfully! Our team will review it shortly.');
+
+      // Send WhatsApp notification to iPrint team (via Interakt proxy)
+      try{
+        const waMsg='🔔 *New Client Portal Job*\n\n'
+          +'Job #: '+jid+'\n'
+          +'Client: '+config.name+'\n'
+          +'Project: '+cjf.project+'\n'
+          +'Contact: '+cjf.contact_person+' ('+cjf.contact_no+')\n'
+          +'Delivery: '+cjf.delivery_address+'\n'
+          +(cjf.po_number?'PO #: '+cjf.po_number+'\n':'')
+          +(cjf.site_contact_person?'Site Contact: '+cjf.site_contact_person+' ('+cjf.site_contact_no+')\n':'')
+          +'\nPlease review in iPrint ERP.';
+        sendWhatsApp(WA_NUMBERS['Jigar'],waMsg,'client_portal_new_job');
+        if(WA_NUMBERS['Ruchita'])setTimeout(()=>sendWhatsApp(WA_NUMBERS['Ruchita'],waMsg,'client_portal_new_job'),1500);
+      }catch(e){console.log('WA notification error:',e);}
+
       setCjf({project:'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:'',site_contact_person:'',site_contact_no:'',design_coord_person:'',design_coord_no:''});
       setCjItems([{id:Date.now()+'',type:'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
       setCjFiles([]);
@@ -6906,6 +6966,21 @@ function ClientPortal({code}){
 
       setBoqMsg('✅ Job '+jid+' created with '+incl.length+' items!'+(poUrl?' PO copy uploaded.':''));
       setBoqStep(3);
+
+      // Send WhatsApp notification to iPrint team (via Interakt proxy)
+      try{
+        const waMsg='📊 *BOQ Import via Client Portal*\n\n'
+          +'Job #: '+jid+'\n'
+          +'Client: '+config.name+'\n'
+          +'Project: '+boqForm.project+'\n'
+          +'PO #: '+(boqForm.po_number||'—')+'\n'
+          +'Items: '+incl.length+'\n'
+          +(poUrl?'📎 PO Copy attached\n':'')
+          +'\nPlease review in iPrint ERP.';
+        sendWhatsApp(WA_NUMBERS['Jigar'],waMsg,'client_portal_boq_import');
+        if(WA_NUMBERS['Ruchita'])setTimeout(()=>sendWhatsApp(WA_NUMBERS['Ruchita'],waMsg,'client_portal_boq_import'),1500);
+      }catch(e){console.log('WA notification error:',e);}
+
       // Refresh after delay
       setTimeout(()=>{setShowBOQ(false);setBoqStep(1);setBoqItems([]);setBoqFile(null);setBoqPO(null);setBoqMsg('');
         setBoqForm({project:'',po_number:'',contact_person:'',contact_no:'',delivery_address:'',remark:''});
