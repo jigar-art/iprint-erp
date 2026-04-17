@@ -4602,6 +4602,12 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const [revNotes, setRevNotes] = React.useState('');
   const [processing, setProcessing] = React.useState(null); // pr id being processed
   const [waButtons, setWaButtons] = React.useState({}); // {prId: true} = show WA buttons
+  const [expanded, setExpanded] = React.useState(() => new Set()); // pr ids whose detail panel is open
+  const toggleExpand = (id) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const STATUS_FILTERS = ['Pending Approval','Approved','Revision Requested','Rejected','All'];
   const stCol = {
@@ -4815,6 +4821,101 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
                 </table>
                 {(+pr.transport>0) && <div style={{textAlign:'right', fontSize:8, color:'#64748b', marginTop:3}}>+ Transport ₹{pr.transport}</div>}
               </div>
+
+              {/* Show details toggle */}
+              <div style={{textAlign:'center', marginBottom: expanded.has(pr.id) ? 6 : 8}}>
+                <button className="b" onClick={() => toggleExpand(pr.id)}
+                  style={{fontSize:9, padding:'2px 12px', borderColor:'#1a2030', color:'#64748b', background:'transparent'}}>
+                  {expanded.has(pr.id) ? '▲ Hide details' : '▼ Show details'}
+                </button>
+              </div>
+
+              {/* Expanded detail panel */}
+              {expanded.has(pr.id) && (
+                <div style={{background:'#060810', border:'1px solid #1a2030', borderRadius:5, padding:10, marginBottom:8, display:'flex', flexDirection:'column', gap:10}}>
+                  {/* Per-line dimensions / unit / area / HSN */}
+                  <div>
+                    <p style={{fontSize:8, fontWeight:700, color:'#64748b', marginBottom:4, letterSpacing:0.3}}>LINE DETAILS</p>
+                    <table style={{width:'100%'}}>
+                      <thead><tr>
+                        <th style={{fontSize:7, color:'#64748b', textAlign:'left', paddingBottom:3}}>Item</th>
+                        <th style={{fontSize:7, color:'#64748b', textAlign:'left'}}>Dimensions</th>
+                        <th style={{fontSize:7, color:'#64748b', textAlign:'left'}}>Unit Mode</th>
+                        <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>Computed Area</th>
+                        <th style={{fontSize:7, color:'#64748b', textAlign:'right'}}>HSN</th>
+                      </tr></thead>
+                      <tbody>{rItems.map((x,xi) => {
+                        let um = null, computedArea = null, dimStr = '—';
+                        try {
+                          if (x && x.unit_mode && typeof getUnitMode === 'function') {
+                            um = getUnitMode(x.unit_mode);
+                            if (um && um.needsWH) {
+                              const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
+                              computedArea = a;
+                              dimStr = `${x.width||'?'} × ${x.height||'?'}${um.dimUnit?' '+um.dimUnit:''}`;
+                            } else if (x.size) {
+                              dimStr = x.size;
+                            }
+                          } else if (x && x.size) {
+                            dimStr = x.size;
+                          }
+                        } catch (e) { /* defensive */ }
+                        return (
+                          <tr key={xi}>
+                            <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8, paddingTop:2}}>{x.product||'—'}</td>
+                            <td style={{fontSize:9, color:'#94a3b8', paddingRight:8, paddingTop:2}}>{dimStr}</td>
+                            <td style={{fontSize:9, color:'#94a3b8', paddingRight:8, paddingTop:2}}>{x.unit_mode||'—'}</td>
+                            <td style={{fontSize:9, color:'#06b6d4', textAlign:'right', paddingTop:2}}>{computedArea!==null ? computedArea.toFixed(2)+(um&&um.value&&um.value.includes('SqMtr')?' m²':' ft²') : '—'}</td>
+                            <td style={{fontSize:9, color:'#64748b', textAlign:'right', paddingTop:2}}>{x.hsn||'—'}</td>
+                          </tr>
+                        );
+                      })}</tbody>
+                    </table>
+                  </div>
+
+                  {/* Vendor full block */}
+                  <div>
+                    <p style={{fontSize:8, fontWeight:700, color:'#64748b', marginBottom:4, letterSpacing:0.3}}>VENDOR</p>
+                    <div style={{display:'grid', gridTemplateColumns:'auto 1fr', gap:'2px 12px', fontSize:9}}>
+                      <span style={{color:'#64748b'}}>Name</span><span style={{color:'#c9d1d9'}}>{pr.vendor_name||'—'}</span>
+                      <span style={{color:'#64748b'}}>GSTIN</span><span style={{color:'#94a3b8'}}>{pr.vendor_gstin||'—'}</span>
+                      <span style={{color:'#64748b'}}>Phone</span><span style={{color:'#94a3b8'}}>{pr.vendor_phone||'—'}</span>
+                      <span style={{color:'#64748b'}}>Address</span><span style={{color:'#94a3b8'}}>{pr.vendor_address||'—'}</span>
+                      <span style={{color:'#64748b'}}>State</span><span style={{color:'#94a3b8'}}>{pr.vendor_state||'—'} <span style={{color:'#64748b', fontSize:8}}>({(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'CGST+SGST':'IGST'})</span></span>
+                    </div>
+                  </div>
+
+                  {/* Revision history (audit trail) */}
+                  {Array.isArray(pr.revision_history) && pr.revision_history.length > 0 && (
+                    <div>
+                      <p style={{fontSize:8, fontWeight:700, color:'#14b8a6', marginBottom:4, letterSpacing:0.3}}>REVISION HISTORY ({pr.revision_history.length})</p>
+                      <div style={{display:'flex', flexDirection:'column', gap:3}}>
+                        {pr.revision_history.map((h,hi) => (
+                          <div key={hi} style={{background:'#14b8a608', border:'1px solid #14b8a622', borderRadius:4, padding:'3px 7px', fontSize:9, color:'#94a3b8'}}>
+                            <span style={{color:'#14b8a6', fontWeight:700}}>↩ Round {hi+1}:</span> {h.notes||'—'}
+                            <span style={{color:'#64748b', fontSize:8, marginLeft:6}}>
+                              {h.at ? new Date(h.at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''}
+                              {h.by ? ' · resubmitted by '+h.by : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Full timestamps */}
+                  <div>
+                    <p style={{fontSize:8, fontWeight:700, color:'#64748b', marginBottom:4, letterSpacing:0.3}}>TIMELINE</p>
+                    <div style={{display:'grid', gridTemplateColumns:'auto 1fr', gap:'2px 12px', fontSize:9}}>
+                      <span style={{color:'#64748b'}}>Created</span><span style={{color:'#94a3b8'}}>{pr.created_at ? new Date(pr.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'} <span style={{color:'#64748b'}}>by {pr.created_by||'—'}</span></span>
+                      {pr.last_status_change_at && (<><span style={{color:'#64748b'}}>Last change</span><span style={{color:'#94a3b8'}}>{new Date(pr.last_status_change_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span></>)}
+                      {pr.approved_at && (<><span style={{color:'#64748b'}}>Approved</span><span style={{color:'#4ade80'}}>{new Date(pr.approved_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} {pr.approved_by?'by '+pr.approved_by:''}</span></>)}
+                      {pr.rejected_at && (<><span style={{color:'#64748b'}}>Rejected</span><span style={{color:'#f47067'}}>{new Date(pr.rejected_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})} {pr.rejected_by?'by '+pr.rejected_by:''}</span></>)}
+                      {(+pr.revision_count > 0) && (<><span style={{color:'#64748b'}}>Revisions</span><span style={{color:'#14b8a6'}}>{pr.revision_count} round(s)</span></>)}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {pr.notes && <div style={{fontSize:9, color:'#64748b', marginBottom:8, fontStyle:'italic'}}>📝 {pr.notes}</div>}
               {pr.rejection_reason && <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, padding:'4px 8px', fontSize:9, color:'#f47067', marginBottom:8}}>❌ Rejected: {pr.rejection_reason}</div>}
