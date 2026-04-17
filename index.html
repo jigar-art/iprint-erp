@@ -2555,41 +2555,34 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     (jobs||[]).forEach(j => {
       const li = itemsByJob[j.id] || [];
       const os = osByJob[j.id] || [];
+      // STATUS WINS: `leading` always comes from jobs.status. Card counts are predictable.
+      const leading = STATUS_TO_LEADING(j.status);
+      if (leading === null) return; // Draft/Quotation Sent/Cancelled/etc. don't count in production buckets
+      // `all` = secondary signal: shows dept_* tick pattern and outsource_items in the Stage pill column.
+      // This gives a multi-stage visual without letting ticks override the status.
+      const all = [leading];
       const hasGranular = os.length > 0 || li.some(it => it.dept_design||it.dept_printing||it.dept_fabrication||it.dept_dispatch||it.dept_installation||it.dept_accounts);
-      if (!hasGranular || li.length === 0) {
-        const leading = STATUS_TO_LEADING(j.status);
-        if (leading !== null) map[j.id] = {leading, source:'status', all:[leading]};
-        return;
+      if (hasGranular && li.length > 0) {
+        const anyIncomplete = (k) => li.some(it => !it[k]);
+        const designA = anyIncomplete('dept_design');
+        const printingA = anyIncomplete('dept_printing');
+        const fabA = anyIncomplete('dept_fabrication');
+        const dispA = anyIncomplete('dept_dispatch');
+        const installA = anyIncomplete('dept_installation');
+        const printOut = os.some(o => /print/i.test(o.task_type||'')) || li.some(it => it.area==='Outsource' && !it.dept_printing);
+        const fabOut = os.some(o => /router|laser|coating|frame|signage|fabric/i.test(o.task_type||'')) || li.some(it => it.area==='Outsource' && !it.dept_fabrication);
+        const printIn = printingA && li.some(it => it.area!=='Outsource' && !it.dept_printing);
+        const fabIn = fabA && li.some(it => it.area!=='Outsource' && !it.dept_fabrication);
+        // Extra pills beyond the leading one
+        if (designA && leading !== 'design') all.push('design');
+        if (printIn && leading !== 'printIn') all.push('printIn');
+        if (printOut && leading !== 'printOut') all.push('printOut');
+        if (fabIn && leading !== 'fabIn') all.push('fabIn');
+        if (fabOut && leading !== 'fabOut') all.push('fabOut');
+        if (dispA && leading !== 'dispatch') all.push('dispatch');
+        if (!installA && leading !== 'installed') all.push('installed');
       }
-      // Granular path
-      const anyIncomplete = (k) => li.some(it => !it[k]);
-      const designA = anyIncomplete('dept_design');
-      const printingA = anyIncomplete('dept_printing');
-      const fabA = anyIncomplete('dept_fabrication');
-      const dispA = anyIncomplete('dept_dispatch');
-      const installA = anyIncomplete('dept_installation');
-      const printOut = os.some(o => /print/i.test(o.task_type||'')) || li.some(it => it.area==='Outsource' && !it.dept_printing);
-      const fabOut = os.some(o => /router|laser|coating|frame|signage|fabric/i.test(o.task_type||'')) || li.some(it => it.area==='Outsource' && !it.dept_fabrication);
-      const printIn = printingA && li.some(it => it.area!=='Outsource' && !it.dept_printing);
-      const fabIn = fabA && li.some(it => it.area!=='Outsource' && !it.dept_fabrication);
-      // Leading edge (for tab bucketing + card counting)
-      let leading;
-      if (!installA) leading = 'installed';
-      else if (dispA) leading = 'dispatch';
-      else if (fabA) leading = fabOut ? 'fabOut' : 'fabIn';
-      else if (printingA) leading = printOut ? 'printOut' : 'printIn';
-      else if (designA) leading = 'design';
-      else leading = 'installed';
-      // All active stages (for multi-pill display in row)
-      const all = [];
-      if (designA) all.push('design');
-      if (printIn) all.push('printIn');
-      if (printOut) all.push('printOut');
-      if (fabIn) all.push('fabIn');
-      if (fabOut) all.push('fabOut');
-      if (dispA) all.push('dispatch');
-      if (!installA) all.push('installed');
-      map[j.id] = {leading, source:'granular', all};
+      map[j.id] = {leading, source: hasGranular && li.length > 0 ? 'granular' : 'status', all};
     });
     return map;
   }, [jobs, items, osItems]);
@@ -5686,59 +5679,27 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       if (!jobNoPrefix) return;
       const lineItems = itemsByJob[j.id] || [];
       const osList = osByJob[j.id] || [];
-      // Detect granular signal: any dept_* true on any line_item, OR any outsource entry.
+      // OPTION B (17 Apr 26): STATUS WINS. `leading` always comes from jobs.status.
+      // dept_* ticks are recorded separately for debug but no longer drive card counts.
+      // This gives predictable, status-consistent counts that match the Dashboard.
+      const leading = STATUS_TO_LEADING(j.status);
+      if (leading === null) return; // Draft/Cancelled/etc. — don't count this site at all
       const hasGranularSignal = osList.length > 0 || lineItems.some(it =>
         it.dept_design || it.dept_printing || it.dept_fabrication ||
         it.dept_dispatch || it.dept_installation || it.dept_accounts
       );
-      // Also route through status fallback if the job has no line_items at all (old jobs
-      // without BOQ data). Without this, old zero-item jobs would wrongly show as "installed".
-      if (!hasGranularSignal || lineItems.length === 0) {
-        const leading = STATUS_TO_LEADING(j.status);
-        if (leading === null) return; // Draft/Cancelled/etc. — don't count this job at all
-        map[jobNoPrefix] = {
-          design:    leading === 'design',
-          printIn:   leading === 'printIn',
-          printOut:  false,
-          fabIn:     leading === 'fabIn',
-          fabOut:    false,
-          dispatch:  leading === 'dispatch',
-          installed: leading === 'installed',
-          leading,
-          source: 'status'
-        };
-        return;
-      }
-      // ── GRANULAR path (new jobs with actual dept ticking) ──
-      const anyIncomplete = (deptKey) => lineItems.some(it => !it[deptKey]);
-      const designActive   = anyIncomplete('dept_design');
-      const printingActive = anyIncomplete('dept_printing');
-      const fabActive      = anyIncomplete('dept_fabrication');
-      const dispatchActive = anyIncomplete('dept_dispatch');
-      const installActive  = anyIncomplete('dept_installation');
-      const printOutsource = osList.some(o => /print/i.test(o.task_type||'')) ||
-        lineItems.some(it => it.area === 'Outsource' && !it.dept_printing);
-      const printInHouse = printingActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_printing);
-      const fabOutsource = osList.some(o => /router|laser|coating|frame|signage|fabric/i.test(o.task_type||'')) ||
-        lineItems.some(it => it.area === 'Outsource' && !it.dept_fabrication);
-      const fabInHouse = fabActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_fabrication);
-      let leading;
-      if (!installActive) leading = 'installed';
-      else if (dispatchActive) leading = 'dispatch';
-      else if (fabActive) leading = fabOutsource ? 'fabOut' : 'fabIn';
-      else if (printingActive) leading = printOutsource ? 'printOut' : 'printIn';
-      else if (designActive) leading = 'design';
-      else leading = 'installed';
+      // Booleans: each site belongs to exactly ONE bucket = its leading bucket.
+      // This makes card-click filtering and count totals line up cleanly.
       map[jobNoPrefix] = {
-        design: designActive,
-        printIn: printInHouse,
-        printOut: printOutsource,
-        fabIn: fabInHouse,
-        fabOut: fabOutsource,
-        dispatch: dispatchActive,
-        installed: !installActive,
+        design:    leading === 'design',
+        printIn:   leading === 'printIn',
+        printOut:  leading === 'printOut',
+        fabIn:     leading === 'fabIn',
+        fabOut:    leading === 'fabOut',
+        dispatch:  leading === 'dispatch',
+        installed: leading === 'installed',
         leading,
-        source: 'granular'
+        source: (hasGranularSignal && lineItems.length > 0) ? 'granular' : 'status'
       };
     });
     return map;
