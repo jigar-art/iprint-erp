@@ -3011,15 +3011,195 @@ function numToWords(n) {
   return words + ' Only';
 }
 
+// ══════════════════════════════════════════════════════════
+// buildPOHtml — top-level, pure. Used by POPage AND MyPRsPage.
+// Accepts (pr, poNo, firm, jobsArr) and returns the full PO HTML doc string.
+// jobsArr is required to surface project name on the PO header.
+// ══════════════════════════════════════════════════════════
+function buildPOHtml(pr, poNo, firm, jobsArr) {
+  const items = Array.isArray(pr.items) ? pr.items : [];
+  const job = (jobsArr||[]).find(j => j.id === pr.job_id);
+  const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
+  const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
+  const _lineBase = (x) => {
+    if (x && x.unit_mode) {
+      const um = getUnitMode(x.unit_mode);
+      const a = um.areaFn(+x.width||0, +x.height||0, +x.qty||1);
+      return um.totalFn(a, +x.qty||1, +x.rate||0);
+    }
+    return (+x.qty||0)*(+x.rate||0);
+  };
+  const subtotal = +pr.subtotal || items.reduce((s,x) => s + _lineBase(x), 0);
+  const gstTotal = (pr.gst_total !== null && pr.gst_total !== undefined && pr.gst_total !== '')
+    ? +pr.gst_total
+    : items.reduce((s,x) => s + _lineBase(x)*(+x.gst_pct||0)/100, 0);
+  const transport = +pr.transport || 0;
+  const grandTotal = subtotal + gstTotal + transport;
+  const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
+  const gstGroups = {};
+  items.forEach(x => {
+    const base = _lineBase(x);
+    const gp = +x.gst_pct || 0;
+    const key = gp;
+    if (!gstGroups[key]) gstGroups[key] = {base:0, tax:0};
+    gstGroups[key].base += base;
+    gstGroups[key].tax += base * gp / 100;
+  });
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'2-digit'});
+  const itemRows = items.map((x, i) => {
+    const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
+    const area = um ? um.areaFn(+x.width||0, +x.height||0, +x.qty||1) : 0;
+    const dimLine = um && um.needsWH && (x.width || x.height)
+      ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
+      : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
+    const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
+    const qtyUnit = um ? (um.value==='NOS'||um.value==='SET'||um.value==='LOT'||um.value==='KG' ? um.label : (um.value.indexOf('Roll')===0 ? 'roll' : (x.per||'nos'))) : (x.per||'nos');
+    const lineAmt = _lineBase(x);
+    return `
+    <tr>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${i+1}</td>
+      <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product||''}${dimLine}${hsnLine}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${pr.expected_delivery||dateStr}</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.qty||0).toFixed(2)} ${qtyUnit}</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.rate||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${qtyUnit}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;"></td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${lineAmt.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+    </tr>`;
+  }).join('');
+  const gstRows = Object.entries(gstGroups).map(([pct, {base, tax}]) => {
+    if (+pct === 0 || tax === 0) return '';
+    if (isIntraState) {
+      return `
+        <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input CGST @ ${pct/2}%</td>
+        <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${(tax/2).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>
+        <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input SGST @ ${pct/2}%</td>
+        <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${(tax/2).toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>`;
+    } else {
+      return `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input IGST @ ${pct}%</td>
+        <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${tax.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>`;
+    }
+  }).join('');
+  const transportRow = transport > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport / Freight</td>
+    <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: Arial, sans-serif; font-size: 11px; color: #222; padding: 24px; }
+.po-header { text-align: center; margin-bottom: 12px; }
+.po-header h2 { font-size: 15px; font-weight: 800; }
+.po-header p { font-size: 10px; color: #333; line-height: 1.5; }
+.po-title { font-size: 14px; font-weight: 800; text-align: center; border: 2px solid #222; padding: 4px; margin: 10px 0; letter-spacing: 1px; }
+.meta-row { display: flex; justify-content: space-between; font-size: 10px; color: #555; margin-bottom: 8px; }
+.party-box { border: 1px solid #ccc; padding: 8px; margin-bottom: 10px; font-size: 10px; }
+.party-box strong { font-size: 11px; }
+.pt-box { border: 1px solid #ccc; padding: 6px 8px; margin-bottom: 10px; font-size: 10px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+th { background: #f0f0f0; font-size: 10px; font-weight: 700; padding: 5px 6px; border: 1px solid #ccc; text-align: center; }
+.words-box { border: 1px solid #ccc; padding: 6px 8px; font-size: 10px; margin-bottom: 8px; }
+.footer-row { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 6px; }
+.sig-box { text-align: right; margin-top: 20px; font-size: 10px; }
+.sig-img { width: 120px; height: 60px; object-fit: contain; }
+.computer-gen { text-align: center; font-size: 9px; color: #888; margin-top: 16px; border-top: 1px solid #ccc; padding-top: 6px; }
+@media print { body { padding: 12px; } }
+</style></head><body>
+
+<div class="meta-row">
+  <span>Voucher No. &nbsp;<strong>${poNo}</strong></span>
+  <span>Dated &nbsp;<strong>${dateStr}</strong></span>
+</div>
+<div class="meta-row" style="margin-top:-4px">
+  <span>Ref. No./PR No. : &nbsp;<strong>${pr.pr_no}</strong></span>
+</div>
+${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
+  <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${jobLabel}</strong></span>
+</div>` : ''}
+
+<div class="po-header">
+  <h2>${firm.name}</h2>
+  <p>${firm.address}</p>
+  <p>GSTIN/UIN: ${firm.gstin}</p>
+  <p>State Name : ${firm.state}, Code : ${firm.state_code}</p>
+  ${firm.email ? '<p>E-Mail : ' + firm.email + '</p>' : ''}
+</div>
+
+<div class="po-title">PURCHASE ORDER</div>
+
+<div class="party-box">
+  <div style="margin-bottom:4px"><span style="color:#555">Party : </span><strong>${pr.vendor_name}</strong></div>
+  ${pr.vendor_address ? '<div style="color:#444;line-height:1.6;margin-left:44px">' + pr.vendor_address + '</div>' : ''}
+  ${pr.vendor_gstin ? '<div style="margin-top:4px">GSTIN/UIN &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin + '</strong></div>' : ''}
+  <div>State Name &nbsp;: &nbsp;${(pr.vendor_state||'Maharashtra')}, Code : ${(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'27':'—'}</div>
+</div>
+
+<div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms||'To be confirmed'}</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:30px">Sl<br>No.</th>
+      <th>Description of Goods</th>
+      <th style="width:70px">Due on</th>
+      <th style="width:80px">Quantity</th>
+      <th style="width:70px">Rate</th>
+      <th style="width:50px">per</th>
+      <th style="width:40px">Disc. %</th>
+      <th style="width:80px">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${itemRows}
+    <tr>
+      <td colspan="7" style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Subtotal</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${subtotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+    </tr>
+    ${gstRows}
+    ${transportRow}
+    <tr style="background:#f9f9f9">
+      <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
+      <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
+      <td colspan="3" style="border:1px solid #ccc;"></td>
+      <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;">₹ ${grandTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="words-box">
+  <strong>Amount Chargeable (in words)</strong>
+  <span style="float:right;font-style:italic;font-size:9px">E. &amp; O.E</span><br>
+  <strong>INR ${numToWords(grandTotal)}</strong>
+</div>
+
+<div class="footer-row">
+  <div>
+    <div>Company's PAN &nbsp;&nbsp;: &nbsp;<strong>${firm.pan}</strong></div>
+    ${firm.msme ? '<div style="margin-top:2px">MSME Reg.No (UAN) : &nbsp;<strong>' + firm.msme + '</strong></div>' : ''}
+  </div>
+</div>
+
+<div class="sig-box">
+  <img src="${SIGNATURE_IMG}" style="width:120px;height:65px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
+  <div style="font-weight:700;font-size:11px">for ${firm.short}</div>
+  <div style="font-size:10px;color:#555;margin-top:2px">Authorised Signatory</div>
+</div>
+
+<div class="computer-gen">This is a Computer Generated Document</div>
+
+</body></html>`;
+}
+
 
 // ══════════════════════════════════════════════════════════
 // PHASE D — GRN / RECEIVE MATERIAL PAGE
 // ══════════════════════════════════════════════════════════
 function GRNReceivePage({prs, setPrs, jobs, user, show}) {
   const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
-  const STATUS_FILTERS = ['PO Sent','PO Generated','Approved','All'];
+  const STATUS_FILTERS = ['PO Generated','PO Sent','Approved','All'];
 
-  const [filter, setFilter] = React.useState('PO Sent');
+  const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
   const [gf, setGf] = React.useState({
     received_by: user?.name || 'Murli Shetty',
@@ -3350,7 +3530,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   const [generating, setGenerating] = React.useState(null);
   const [poPreview, setPoPreview] = React.useState(null); // {pr, poNo, html}
 
-  const STATUS_FILTERS = ['Approved','PO Generated','PO Sent','All'];
+  const STATUS_FILTERS = ['Approved','PO Generated','Completed','All'];
   const stCol = {
     'Approved':     {bg:'#4ade8020',c:'#4ade80'},
     'PO Generated': {bg:'#06b6d420',c:'#06b6d4'},
@@ -3359,7 +3539,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   };
 
   const filtered = React.useMemo(() => {
-    const list = filter === 'All' ? prs.filter(p=>['Approved','PO Generated','PO Sent','Completed'].includes(p.status))
+    const list = filter === 'All' ? prs.filter(p=>['Approved','PO Generated','Completed'].includes(p.status))
       : prs.filter(p => p.status === filter);
     return [...list].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
   }, [prs, filter]);
@@ -3377,10 +3557,10 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     return `${firmCode}/PO/${fy}/${next}`;
   };
 
-  const buildPOHtml = (pr, poNo, firm) => {
+  const buildPOHtml = (pr, poNo, firm, jobsArr) => {
     const items = Array.isArray(pr.items) ? pr.items : [];
-    // Bug-fix (PR2.0): look up job to surface project name on the PO header (jobs is in closure scope from POPage props).
-    const job = (jobs||[]).find(j => j.id === pr.job_id);
+    // Look up job to surface project name on the PO header. jobsArr passed in (was closure dep).
+    const job = (jobsArr||[]).find(j => j.id === pr.job_id);
     const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
     const isIntraState = (pr.vendor_state||'Maharashtra').toLowerCase() === 'maharashtra';
     // Per-line amount honours unit_mode if present, falls back to qty*rate for legacy items.
@@ -3569,7 +3749,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     setGenerating(pr.id);
     const poNo = await genPONo(pr.firm_code);
     const firm = FIRM_DATA[pr.firm_code] || FIRM_DATA.JXT;
-    const html = buildPOHtml(pr, poNo, firm);
+    const html = buildPOHtml(pr, poNo, firm, jobs);
     setPoPreview({pr, poNo, html, firm});
     setGenerating(null);
   };
@@ -3790,7 +3970,7 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
     return myDeptTag && pr.requestor_dept === myDeptTag;
   };
 
-  const STATUS_OPTS = ['Active','All','Pending Approval','Approved','Rejected','PO Generated','PO Sent','Completed'];
+  const STATUS_OPTS = ['Active','All','Pending Approval','Approved','Rejected','PO Generated','Completed'];
   const passesStatus = (pr) => {
     if (statusFilter === 'All') return true;
     if (statusFilter === 'Active') return pr.status !== 'Completed' && pr.status !== 'Cancelled' && pr.status !== 'Rejected';
@@ -3951,10 +4131,29 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
                     <div style={{fontSize:9, color:'#8b949e'}} title={fmtDate(pr.last_status_change_at||pr.created_at)}>
                       {relTime(pr.last_status_change_at||pr.created_at)}
                     </div>
-                    {pr.po_pdf_url && (
-                      <button className="b bs" onClick={() => openPO(pr.po_pdf_url)}
+                    {pr.po_no && (
+                      <button className="b bs" onClick={() => {
+                        // Prefer stored PDF url if ever populated; otherwise re-render from data using
+                        // the top-level buildPOHtml helper. Same template Shreya used to generate.
+                        if (pr.po_pdf_url) { openPO(pr.po_pdf_url); return; }
+                        try {
+                          const firm = (typeof FIRM_DATA !== 'undefined' && FIRM_DATA[pr.firm_code]) || (typeof FIRM_DATA !== 'undefined' ? FIRM_DATA.JXT : null);
+                          if (!firm || typeof buildPOHtml !== 'function') {
+                            show && show('Cannot render PO — internal template missing', false);
+                            return;
+                          }
+                          const html = buildPOHtml(pr, pr.po_no, firm, jobs);
+                          const w = window.open('', '_blank', 'width=900,height=720');
+                          if (!w) { show && show('Popup blocked — allow popups for this site', false); return; }
+                          w.document.write(html);
+                          w.document.close();
+                        } catch (e) {
+                          console.error('PO render failed', e);
+                          show && show('Could not open PO: ' + (e.message || 'unknown error'), false);
+                        }
+                      }}
                         style={{fontSize:8, padding:'2px 6px', marginTop:3, borderColor:'#06b6d4', color:'#06b6d4'}}>
-                        📄 View PO
+                        📄 View / Print PO
                       </button>
                     )}
                   </div>
