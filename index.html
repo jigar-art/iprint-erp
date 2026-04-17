@@ -1391,6 +1391,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter','Set','Job'];
       const PR_GST=[0,5,12,18,28];
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
+      // Preferred display order for the PR-form Unit Mode dropdown.
+      // Keeps UNIT_MODES (source of truth for math) untouched; only reorders what the user sees.
+      // Units not listed here will be appended in their original UNIT_MODES order.
+      const PR_UNIT_ORDER=['NOS','SET','LOT','KG','SqFt (FOOT)','SqMtr (FOOT)','Roll M×M (per sqft)','Roll M×M (per roll)','SqFt (INCH)','SqMtr (INCH)','SqFt (MM)','SqMtr (MM)','RFT (FOOT)','RFT (INCH)'];
+      const PR_UNIT_MODES=[...PR_UNIT_ORDER.map(v=>UNIT_MODES.find(u=>u.value===v)).filter(Boolean),...UNIT_MODES.filter(u=>!PR_UNIT_ORDER.includes(u.value))];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
       const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
       const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
@@ -1868,14 +1873,14 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           {/* Items Table */}
           <p style={{fontSize:8,color:"#f59e0b",fontWeight:700,marginBottom:4}}>LINE ITEMS</p>
           <div style={{overflowX:"auto",marginBottom:6}}>
-            <table style={{minWidth:780}}>
+            <table style={{minWidth:860}}>
               <thead><tr>
                 <th style={{fontSize:8,minWidth:120}}>Product / Description</th>
-                <th style={{fontSize:8,width:50}}>Width</th>
-                <th style={{fontSize:8,width:50}}>Height</th>
+                <th style={{fontSize:8,width:70}}>Width</th>
+                <th style={{fontSize:8,width:70}}>Height</th>
                 <th style={{fontSize:8,width:110}}>Unit Mode</th>
-                <th style={{fontSize:8,width:45}}>Qty</th>
-                <th style={{fontSize:8,width:70}}>Rate ₹</th>
+                <th style={{fontSize:8,width:55}}>Qty</th>
+                <th style={{fontSize:8,width:85}}>Rate ₹</th>
                 <th style={{fontSize:8,width:55}}>GST %</th>
                 <th style={{fontSize:8,width:90}}>Amount</th>
                 <th style={{width:18}}></th>
@@ -1912,15 +1917,19 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                   <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
                   <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
                   <td><select className="in" value={x.unit_mode||'NOS'} onChange={e=>onModeChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
-                    {UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
+                    {PR_UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
                   </select></td>
                   <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>onDimChange('qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><input className="in mn" type="number" min="0" value={x.rate} onChange={e=>updItem(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><select className="in" value={x.gst_pct} onChange={e=>updItem(xi,'gst_pct',+e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",color:x.gst_pct===0?'#64748b':'inherit'}}>{PR_GST.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
                   <td style={{fontSize:9,color:"#e3a008",fontWeight:700,textAlign:"right",paddingRight:4}}>
-                    <span style={{display:"block"}}>₹{lineAmt.toFixed(0)}</span>
+                    <span style={{display:"block"}}>
+                      {lineAmt===0 && ((+x.width>0)||(+x.height>0)||(+x.rate>0)||(+x.qty>1)) && <span title="Amount is ₹0 — check Width/Height/Unit Mode. If dimensions are in meters, pick a Roll M×M or SqMtr (FOOT/INCH) unit, not a (MM) unit." style={{color:"#f59e0b",marginRight:3,cursor:"help"}}>⚠</span>}
+                      ₹{lineAmt.toFixed(0)}
+                    </span>
                     {area>0&&<span style={{fontSize:7,color:"#64748b",display:"block"}}>{um.displayFn(area)}</span>}
                     {x.gst_pct>0&&<span style={{fontSize:7,color:"#64748b"}}>+₹{lineGst.toFixed(0)} GST</span>}
+                    {um.needsWH && ((+x.width>0)||(+x.height>0)) && <span style={{fontSize:7,color:"#64748b",display:"block",marginTop:1}}>{(+x.width||0)} × {(+x.height||0)} × {(+x.qty||1)} = {area} {um.dimUnit==='inch'?'in²':um.dimUnit==='ft'?'ft²':um.dimUnit==='mm'?'mm²':um.dimUnit==='m'?'m²':''}</span>}
                   </td>
                   <td>{prf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:10,padding:0}} onClick={()=>delItem(xi)}>✕</button>}</td>
                 </tr>;
