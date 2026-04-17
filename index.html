@@ -5358,12 +5358,32 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     })();
   },[]);
 
-  // ── DEPT STATUS ROLLUP (Hybrid: job-level today, upgradeable to site-level later) ──
-  // For each job, compute which dept stages are CURRENTLY active by inspecting its line_items
-  // (dept_design / dept_printing / dept_fabrication / dept_dispatch booleans + area for InHouse vs Outsource)
-  // and its outsource_items (task_type tells us Printing-Outsource vs Fabrication-Outsource explicitly).
-  // Returns: Map<jobNoPrefix, {design,printIn,printOut,fabIn,fabOut,dispatch,installed, leading}>
+  // ── DEPT STATUS ROLLUP (Hybrid: granular per-job, falling back to jobs.status for old jobs) ──
+  // For each job, compute which dept stages are CURRENTLY active. Two routes per job:
+  //   1) GRANULAR — any dept_* tick on any line_item OR any outsource_items row → use new logic
+  //   2) STATUS — no granular signal at all → fall back to jobs.status mapping (for old jobs)
+  // Each map entry records `source: 'granular'|'status'` for debugging.
+  // Returns: Map<jobNoPrefix, {design,printIn,printOut,fabIn,fabOut,dispatch,installed, leading, source}>
   // jobNoPrefix is the part before '-' in jobs.id (matches banking_sites.job_no format).
+  //
+  // Status→stage fallback mapping (approved 17 Apr 26):
+  //   Draft/Quotation Sent/PO Pending/PO Received/Recce Pending/Cancelled/No Bill → null (untracked, not counted)
+  //   Designing / Active (legacy) → design
+  //   Printing → printIn (in-house default; status alone can't distinguish in/out)
+  //   Fabrication → fabIn
+  //   Installation → dispatch
+  //   Delivered/Billing Pending/Given for Billing/Cash Pending/Proforma Invoice/IC Pending/Billing Done/Cash Received → installed
+  const statusToLeading = (status) => {
+    if (!status) return null;
+    const s = String(status).trim();
+    if (['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Cancelled','No Bill'].includes(s)) return null;
+    if (s === 'Designing' || s === 'Active') return 'design';
+    if (s === 'Printing') return 'printIn';
+    if (s === 'Fabrication') return 'fabIn';
+    if (s === 'Installation') return 'dispatch';
+    if (['Delivered','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'].includes(s)) return 'installed';
+    return null;
+  };
   const jobDeptStatus = React.useMemo(() => {
     const map = {};
     if (!jobs || !jobs.length) return map;
@@ -5379,38 +5399,53 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       (osByJob[o.job_id] = osByJob[o.job_id] || []).push(o);
     });
     jobs.forEach(j => {
+      const jobNoPrefix = (j.id||'').split('-')[0];
+      if (!jobNoPrefix) return;
       const lineItems = itemsByJob[j.id] || [];
       const osList = osByJob[j.id] || [];
-      // dept booleans: TRUE if ANY line_item in that dept is incomplete (false) — i.e. still active there
-      // Logic: dept_X=false means "not yet done in that dept" → dept is currently doing this work
-      // If ALL line_items have dept_X=true, that dept is finished for this job
+      // Detect granular signal: any dept_* true on any line_item, OR any outsource entry.
+      const hasGranularSignal = osList.length > 0 || lineItems.some(it =>
+        it.dept_design || it.dept_printing || it.dept_fabrication ||
+        it.dept_dispatch || it.dept_installation || it.dept_accounts
+      );
+      // Also route through status fallback if the job has no line_items at all (old jobs
+      // without BOQ data). Without this, old zero-item jobs would wrongly show as "installed".
+      if (!hasGranularSignal || lineItems.length === 0) {
+        const leading = statusToLeading(j.status);
+        if (leading === null) return; // Draft/Cancelled/etc. — don't count this job at all
+        map[jobNoPrefix] = {
+          design:    leading === 'design',
+          printIn:   leading === 'printIn',
+          printOut:  false,
+          fabIn:     leading === 'fabIn',
+          fabOut:    false,
+          dispatch:  leading === 'dispatch',
+          installed: leading === 'installed',
+          leading,
+          source: 'status'
+        };
+        return;
+      }
+      // ── GRANULAR path (new jobs with actual dept ticking) ──
       const anyIncomplete = (deptKey) => lineItems.some(it => !it[deptKey]);
-      const designActive   = lineItems.length > 0 && anyIncomplete('dept_design');
-      const printingActive = lineItems.length > 0 && anyIncomplete('dept_printing');
-      const fabActive      = lineItems.length > 0 && anyIncomplete('dept_fabrication');
-      const dispatchActive = lineItems.length > 0 && anyIncomplete('dept_dispatch');
-      const installActive  = lineItems.length > 0 && anyIncomplete('dept_installation');
-      // InHouse vs Outsource: split by area field on line_item AND outsource_items presence
-      // Printing-Outsource: any os entry with task_type containing 'Print', or any line_item area==='Outsource' AND printing dept active
+      const designActive   = anyIncomplete('dept_design');
+      const printingActive = anyIncomplete('dept_printing');
+      const fabActive      = anyIncomplete('dept_fabrication');
+      const dispatchActive = anyIncomplete('dept_dispatch');
+      const installActive  = anyIncomplete('dept_installation');
       const printOutsource = osList.some(o => /print/i.test(o.task_type||'')) ||
         lineItems.some(it => it.area === 'Outsource' && !it.dept_printing);
       const printInHouse = printingActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_printing);
-      // Fabrication-Outsource: os task_types include Router/Laser/Coating/Frames/Signages
       const fabOutsource = osList.some(o => /router|laser|coating|frame|signage|fabric/i.test(o.task_type||'')) ||
         lineItems.some(it => it.area === 'Outsource' && !it.dept_fabrication);
       const fabInHouse = fabActive && lineItems.some(it => it.area !== 'Outsource' && !it.dept_fabrication);
-      // Leading edge: the furthest stage that has ANY active work. Used for clean count sums.
-      // Order: design → print → fab → dispatch → installed
-      let leading = null;
-      if (lineItems.length === 0) leading = null; // no items yet, no stage
-      else if (!installActive) leading = 'installed'; // installation done = job is fully done
+      let leading;
+      if (!installActive) leading = 'installed';
       else if (dispatchActive) leading = 'dispatch';
       else if (fabActive) leading = fabOutsource ? 'fabOut' : 'fabIn';
       else if (printingActive) leading = printOutsource ? 'printOut' : 'printIn';
       else if (designActive) leading = 'design';
       else leading = 'installed';
-      const jobNoPrefix = (j.id||'').split('-')[0];
-      if (!jobNoPrefix) return;
       map[jobNoPrefix] = {
         design: designActive,
         printIn: printInHouse,
@@ -5419,7 +5454,8 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         fabOut: fabOutsource,
         dispatch: dispatchActive,
         installed: !installActive,
-        leading
+        leading,
+        source: 'granular'
       };
     });
     return map;
