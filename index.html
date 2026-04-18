@@ -123,6 +123,37 @@ const STATUS_TO_LEADING = (status) => {
   return null;
 };
 
+// ─── STATUS_CARDS: single source of truth for status cards across ERP ────────
+// Added 18 Apr 26 to unify Dashboard, Dept Tracker, and Banking CRM cards.
+// 12 cards in lifecycle order. Same labels, same colors, same order everywhere.
+// Each entry:
+//   key       — internal id (also used as Dept Tracker tab id and leading-edge bucket)
+//   label     — display label (UPPERCASE for cards; tabs may title-case if needed)
+//   statuses  — array of jobs.status values that fall into this bucket
+//   color     — hex color
+//   isLeading — true if this card maps to a STATUS_TO_LEADING bucket (used by site-level rollup)
+const STATUS_CARDS = [
+  { key:'estimate',  label:'ESTIMATE',       statuses:['Quotation Sent','PO Pending','PO Received','Recce Pending'],                                                       color:'#3b82f6', isLeading:false },
+  { key:'draft',     label:'DRAFT',          statuses:['Draft'],                                                                                                            color:'#64748b', isLeading:false },
+  { key:'design',    label:'DESIGN',         statuses:['Designing'],                                                                                                        color:'#8b5cf6', isLeading:true  },
+  { key:'printIn',   label:'PRINT-IN-HOUSE', statuses:['Printing · In-House'],                                                                                              color:'#06b6d4', isLeading:true  },
+  { key:'printOut',  label:'PRINT-OUT',      statuses:['Printing · Outsource'],                                                                                             color:'#f97316', isLeading:true  },
+  { key:'fabIn',     label:'FAB-IN-HOUSE',   statuses:['Fabrication · In-House'],                                                                                           color:'#dc2626', isLeading:true  },
+  { key:'fabOut',    label:'FAB-OUT',        statuses:['Fabrication · Outsource'],                                                                                          color:'#ea580c', isLeading:true  },
+  { key:'dispatch',  label:'DISPATCH',       statuses:['Dispatch'],                                                                                                         color:'#3b82f6', isLeading:true  },
+  { key:'installed', label:'INSTALLED',      statuses:['Installed'],                                                                                                        color:'#059669', isLeading:true  },
+  { key:'accounts',  label:'ACCOUNTS',       statuses:['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'], color:'#06b6d4', isLeading:false },
+  { key:'nobill',    label:'NO BILL',        statuses:['No Bill'],                                                                                                          color:'#64748b', isLeading:false },
+  { key:'cancelled', label:'CANCELLED',      statuses:['Cancelled'],                                                                                                        color:'#475569', isLeading:false },
+];
+// Quick lookup helpers
+const STATUS_CARD_BY_KEY = Object.fromEntries(STATUS_CARDS.map(c => [c.key, c]));
+const countJobsByCard = (jobs, cardKey) => {
+  const card = STATUS_CARD_BY_KEY[cardKey];
+  if (!card) return 0;
+  return (jobs||[]).filter(j => card.statuses.includes(j.status)).length;
+};
+
 // UNIT_MODES: single source of truth for billing unit
 // Each mode: {label, needsWH, dimUnit, areaFn, totalFn, displayFn}
 // needsWH = true → show W & H inputs; false → hide them (just use qty)
@@ -1079,7 +1110,8 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       {cmpDays>0&&<span style={{fontSize:9,color:"#64748b"}}>Showing changes in last {cmpDays} days</span>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30} delta={deltas.estimate}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60} delta={deltas.design}/><SC l="Print·In-House" v={s.printIn} c="#06b6d4" d={90} delta={deltas.printing}/><SC l="Print·Outsource" v={s.printOut} c="#f97316" d={100}/><SC l="Fab·In-House" v={s.fabIn} c="#06b6d4" d={120} delta={deltas.fab}/><SC l="Fab·Outsource" v={s.fabOut} c="#f97316" d={130}/><SC l="Dispatch" v={s.dispatch} c="#3b82f6" d={150} delta={deltas.delivered}/><SC l="Installed" v={s.installed} c="#4ade80" d={180}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210} delta={deltas.billPend}/><SC l="Billed" v={s.billed} c="#4ade80" d={240} delta={deltas.billed}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270} delta={deltas.poPend}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/>
+      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15}/>)}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
@@ -2662,20 +2694,20 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     return map;
   }, [jobs, items, osItems]);
 
-  // Tabs — 8 now: Estimate + Design + Print·InHouse + Print·Outsource + Fab·InHouse + Fab·Outsource + Dispatch + Accounts.
-  // Estimate + Accounts stay STATUS-based (pre/post production). Middle 6 are LEADING-based.
-  // Each entry carries a `match(j)` function for bucketing.
-  const tabs = [
-    {id:'Estimate',    l:'Estimate',          c:'#3b82f6', match:(j)=>['Quotation Sent','PO Pending','PO Received','Recce Pending','Draft'].includes(j.status)},
-    {id:'design',      l:'Design',            c:'#8b5cf6', match:(j)=>jobLeading[j.id]?.leading==='design'},
-    {id:'printIn',     l:'Print · In-House',  c:'#06b6d4', match:(j)=>jobLeading[j.id]?.leading==='printIn'},
-    {id:'printOut',    l:'Print · Outsource', c:'#f97316', match:(j)=>jobLeading[j.id]?.leading==='printOut'},
-    {id:'fabIn',       l:'Fab · In-House',    c:'#06b6d4', match:(j)=>jobLeading[j.id]?.leading==='fabIn'},
-    {id:'fabOut',      l:'Fab · Outsource',   c:'#f97316', match:(j)=>jobLeading[j.id]?.leading==='fabOut'},
-    {id:'dispatch',    l:'Dispatch',          c:'#3b82f6', match:(j)=>jobLeading[j.id]?.leading==='dispatch'},
-    {id:'installed',   l:'Installed',         c:'#4ade80', match:(j)=>jobLeading[j.id]?.leading==='installed' && !['Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status)},
-    {id:'Accounts',    l:'Accounts',          c:'#06b6d4', match:(j)=>['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'].includes(j.status)},
-  ];
+  // Tabs — 12 buckets, 1-for-1 with STATUS_CARDS. Same colors, same labels, same order.
+  // Middle 7 (isLeading) match by jobLeading rollup. Rest match by j.status directly.
+  // Note: 'installed' tab additionally excludes terminal accounts/cancelled states so
+  // jobs that have moved on don't double-show in both Installed and Accounts.
+  const tabs = STATUS_CARDS.map(card => ({
+    id: card.key,
+    l: card.label,
+    c: card.color,
+    match: card.isLeading
+      ? (card.key === 'installed'
+          ? (j) => jobLeading[j.id]?.leading === 'installed' && !['Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status)
+          : (j) => jobLeading[j.id]?.leading === card.key)
+      : (j) => card.statuses.includes(j.status)
+  }));
   const [ad,sad]=useState(tabs[0].id);
   const cur=tabs.find(t=>t.id===ad) || tabs[0];
   const pen=useMemo(()=>jobs.filter(j=>{
@@ -2683,21 +2715,21 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     return cur.match(j);
   }),[jobs,cur,s,jobLeading]);
 
-  // Card counts — same leading-edge rollup, same 7 buckets as Banking CRM (excluding Estimate/Accounts)
-  const cardDefs = [
-    {k:'design',    l:'Design',            c:'#8b5cf6'},
-    {k:'printIn',   l:'Print · In-House',  c:'#06b6d4'},
-    {k:'printOut',  l:'Print · Outsource', c:'#f97316'},
-    {k:'fabIn',     l:'Fab · In-House',    c:'#06b6d4'},
-    {k:'fabOut',    l:'Fab · Outsource',   c:'#f97316'},
-    {k:'dispatch',  l:'Dispatch',          c:'#3b82f6'},
-    {k:'installed', l:'Installed',         c:'#4ade80'},
-  ];
+  // Card counts — uses unified STATUS_CARDS (12 buckets).
+  // Middle 7 (isLeading=true) count from jobLeading rollup; rest count from j.status directly.
+  const cardDefs = STATUS_CARDS.map(c => ({k:c.key, l:c.label, c:c.color}));
   const cardCounts = useMemo(() => {
-    const c = {design:0,printIn:0,printOut:0,fabIn:0,fabOut:0,dispatch:0,installed:0};
+    const c = Object.fromEntries(STATUS_CARDS.map(card => [card.key, 0]));
     (jobs||[]).forEach(j => {
-      const st = jobLeading[j.id];
-      if (st && st.leading && c[st.leading] !== undefined) c[st.leading]++;
+      // Walk STATUS_CARDS in order; first matching bucket wins (jobs in only one bucket)
+      for (const card of STATUS_CARDS) {
+        if (card.isLeading) {
+          const st = jobLeading[j.id];
+          if (st && st.leading === card.key) { c[card.key]++; return; }
+        } else {
+          if (card.statuses.includes(j.status)) { c[card.key]++; return; }
+        }
+      }
     });
     return c;
   }, [jobs, jobLeading]);
@@ -2730,12 +2762,12 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
         <p style={{fontSize:8,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600,margin:'0 0 5px'}}>
           🏭 Production Status — click to filter
         </p>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:5}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:5}}>
           {cardDefs.map(d => {
             const active = ad === d.k;
             return (
               <div key={d.k}
-                onClick={() => sad(active ? 'Estimate' : d.k)}
+                onClick={() => sad(active ? STATUS_CARDS[0].key : d.k)}
                 style={{
                   background: active ? d.c+'30' : d.c+'15',
                   border: `1px solid ${active ? d.c : d.c+'55'}`,
@@ -2752,46 +2784,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
         </div>
       </div>
 
-      {/* Legacy-count reconciliation strip — ensures old status counts are visible and match */}
-      {(() => {
-        const byStatus = (s) => (jobs||[]).filter(j => j.status === s).length;
-        const legacyCounts = {
-          'Printing': byStatus('Printing'),
-          'Printing · In-House': byStatus('Printing · In-House'),
-          'Printing · Outsource': byStatus('Printing · Outsource'),
-          'Fabrication': byStatus('Fabrication'),
-          'Fabrication · In-House': byStatus('Fabrication · In-House'),
-          'Fabrication · Outsource': byStatus('Fabrication · Outsource'),
-          'Installation': byStatus('Installation'),
-          'Installed': byStatus('Installed'),
-          'Delivered': byStatus('Delivered'),
-          'Dispatch': byStatus('Dispatch'),
-        };
-        const printingTotal = legacyCounts['Printing'] + legacyCounts['Printing · In-House'] + legacyCounts['Printing · Outsource'];
-        const fabTotal = legacyCounts['Fabrication'] + legacyCounts['Fabrication · In-House'] + legacyCounts['Fabrication · Outsource'];
-        const installTotal = legacyCounts['Installation'] + legacyCounts['Installed'];
-        const dispatchTotal = legacyCounts['Delivered'] + legacyCounts['Dispatch'];
-        return (
-          <div style={{background:'#0a0f1a',border:'0.5px solid #1a2030',borderRadius:6,padding:'5px 10px',fontSize:8,color:'#64748b',display:'flex',gap:12,flexWrap:'wrap',alignItems:'center'}}>
-            <span style={{fontWeight:700,color:'#8b949e',textTransform:'uppercase',letterSpacing:'.05em'}} title="Counts raw jobs.status values only — does not use dept rollup. Use this to verify the team's migration from legacy to new status values.">Raw status count (for migration tracking):</span>
-            {printingTotal > 0 && (
-              <span>Printing <strong style={{color:'#e2e8f0'}}>{printingTotal}</strong> = legacy "Printing" {legacyCounts['Printing']} + "In-House" {legacyCounts['Printing · In-House']} + "Outsource" {legacyCounts['Printing · Outsource']}</span>
-            )}
-            {fabTotal > 0 && (
-              <span>Fab <strong style={{color:'#e2e8f0'}}>{fabTotal}</strong> = legacy "Fabrication" {legacyCounts['Fabrication']} + "In-House" {legacyCounts['Fabrication · In-House']} + "Outsource" {legacyCounts['Fabrication · Outsource']}</span>
-            )}
-            {installTotal > 0 && (
-              <span>Install <strong style={{color:'#e2e8f0'}}>{installTotal}</strong> = legacy "Installation" {legacyCounts['Installation']} + new "Installed" {legacyCounts['Installed']}</span>
-            )}
-            {dispatchTotal > 0 && (
-              <span>Dispatch <strong style={{color:'#e2e8f0'}}>{dispatchTotal}</strong> = legacy "Delivered" {legacyCounts['Delivered']} + new "Dispatch" {legacyCounts['Dispatch']}</span>
-            )}
-            <span style={{color:'#475569',fontStyle:'italic',marginLeft:'auto'}}>Cards above use granular rollup (different count, by design)</span>
-          </div>
-        );
-      })()}
-
-      {/* Tabs — now 9 (Estimate + 7 production buckets + Accounts) */}
+      {/* Tabs — 12 buckets, fully derived from STATUS_CARDS for consistency with cards above */}
       <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
         {tabs.map(t => {
           const count = jobs.filter(t.match).length;
@@ -5770,8 +5763,9 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       // OPTION B (17 Apr 26): STATUS WINS. `leading` always comes from jobs.status.
       // dept_* ticks are recorded separately for debug but no longer drive card counts.
       // This gives predictable, status-consistent counts that match the Dashboard.
+      // 18 Apr 26 update: also keep raw status so non-leading STATUS_CARDS buckets
+      // (estimate/draft/accounts/nobill/cancelled) can roll up at site level too.
       const leading = STATUS_TO_LEADING(j.status);
-      if (leading === null) return; // Draft/Cancelled/etc. — don't count this site at all
       const hasGranularSignal = osList.length > 0 || lineItems.some(it =>
         it.dept_design || it.dept_printing || it.dept_fabrication ||
         it.dept_dispatch || it.dept_installation || it.dept_accounts
@@ -5787,6 +5781,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         dispatch:  leading === 'dispatch',
         installed: leading === 'installed',
         leading,
+        status:    j.status,  // raw status — used for non-leading STATUS_CARDS buckets
         source: (hasGranularSignal && lineItems.length > 0) ? 'granular' : 'status'
       };
     });
@@ -5795,7 +5790,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
   // Helper to get a site's dept status (defensive: always returns an object)
   const siteDeptStatus = React.useCallback((s) => {
-    return (s && s.job_no && jobDeptStatus[s.job_no]) || {design:false,printIn:false,printOut:false,fabIn:false,fabOut:false,dispatch:false,installed:false,leading:null};
+    return (s && s.job_no && jobDeptStatus[s.job_no]) || {design:false,printIn:false,printOut:false,fabIn:false,fabOut:false,dispatch:false,installed:false,leading:null,status:null};
   }, [jobDeptStatus]);
 
   // Projects
@@ -5810,7 +5805,16 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     if(tab!=='ALL')f=f.filter(s=>s.project===tab);
     if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
     if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
-    if(deptFilter)f=f.filter(s=>siteDeptStatus(s)[deptFilter]);
+    if(deptFilter){
+      const card = STATUS_CARD_BY_KEY[deptFilter];
+      if(card){
+        f=f.filter(s=>{
+          const st = siteDeptStatus(s);
+          if(card.isLeading) return st.leading === card.key;
+          return st.status && card.statuses.includes(st.status);
+        });
+      }
+    }
     if(search){const q=search.toLowerCase();f=f.filter(s=>
       s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||s.site_unique_id?.toLowerCase().includes(q)||
       s.city?.toLowerCase().includes(q)||s.state?.toLowerCase().includes(q)||
@@ -5835,13 +5839,24 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   },[sites,tab]);
 
   // Dept counts — uses leading-edge so sums are clean (each site counted once)
+  // Site-level rollup over all 12 STATUS_CARDS buckets. Each site counts in exactly one bucket
+  // (its linked job's classification). Sites with no linked job land in untracked.
+  // 18 Apr 26: expanded from 7 production buckets to all 12 for cross-page consistency.
   const deptCounts = useMemo(() => {
     const f = tab==='ALL' ? sites : sites.filter(s => s.project===tab);
-    const c = {design:0, printIn:0, printOut:0, fabIn:0, fabOut:0, dispatch:0, installed:0, untracked:0};
+    const c = Object.fromEntries(STATUS_CARDS.map(card => [card.key, 0]));
+    c.untracked = 0;
     f.forEach(s => {
       const st = siteDeptStatus(s);
-      if (st.leading) c[st.leading] = (c[st.leading]||0) + 1;
-      else c.untracked++;
+      let matched = false;
+      for (const card of STATUS_CARDS) {
+        if (card.isLeading) {
+          if (st.leading === card.key) { c[card.key]++; matched = true; break; }
+        } else {
+          if (st.status && card.statuses.includes(st.status)) { c[card.key]++; matched = true; break; }
+        }
+      }
+      if (!matched) c.untracked++;
     });
     return c;
   }, [sites, tab, siteDeptStatus]);
@@ -5971,30 +5986,22 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         </p>
         {deptFilter && <button className="b bs" onClick={()=>setDeptFilter(null)} style={{fontSize:8,padding:'1px 7px',color:'#f47067',borderColor:'#f47067'}}>✕ Clear filter</button>}
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:5}}>
-        {[
-          {k:'design',     l:'Design',          c:'#8b5cf6'},
-          {k:'printIn',    l:'Print · In-House',c:'#06b6d4'},
-          {k:'printOut',   l:'Print · Outsource',c:'#f97316'},
-          {k:'fabIn',      l:'Fab · In-House',  c:'#06b6d4'},
-          {k:'fabOut',     l:'Fab · Outsource', c:'#f97316'},
-          {k:'dispatch',   l:'Dispatch',        c:'#3b82f6'},
-          {k:'installed',  l:'Installed',       c:'#4ade80'},
-        ].map(d => {
-          const active = deptFilter === d.k;
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:5}}>
+        {STATUS_CARDS.map(d => {
+          const active = deptFilter === d.key;
           return (
-            <div key={d.k}
-              onClick={()=>setDeptFilter(active ? null : d.k)}
+            <div key={d.key}
+              onClick={()=>setDeptFilter(active ? null : d.key)}
               style={{
-                background: active ? d.c+'30' : d.c+'15',
-                border: `1px solid ${active ? d.c : d.c+'55'}`,
+                background: active ? d.color+'30' : d.color+'15',
+                border: `1px solid ${active ? d.color : d.color+'55'}`,
                 borderRadius: 4,
                 padding: '6px 8px',
                 cursor: 'pointer',
                 transition: 'all 0.15s',
               }}>
-              <div style={{fontSize:7,color:d.c,fontWeight:700,letterSpacing:'.03em',textTransform:'uppercase'}}>{d.l}</div>
-              <div className="mn" style={{fontSize:14,color:d.c,fontWeight:700,marginTop:1}}>{(deptCounts[d.k]||0).toLocaleString('en-IN')}</div>
+              <div style={{fontSize:7,color:d.color,fontWeight:700,letterSpacing:'.03em',textTransform:'uppercase'}}>{d.label}</div>
+              <div className="mn" style={{fontSize:14,color:d.color,fontWeight:700,marginTop:1}}>{(deptCounts[d.key]||0).toLocaleString('en-IN')}</div>
             </div>
           );
         })}
