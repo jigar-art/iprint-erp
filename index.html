@@ -2058,7 +2058,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           <input className="in" value={b.delivery_address||''} placeholder="Delivery address for this batch..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,delivery_address:v}:x));}} onBlur={e=>updateBatchField(b.id,'delivery_address',e.target.value)} style={{flex:1,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030"}}/>
         </div>
       </div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>Unit</th><th>Area/Qty</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>Unit</th><th>Area/Qty</th>{canSeeRates&&<><th>Rate</th><th>Amt (incl GST)</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
         <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;const itOs=jobOsItems.filter(o=>o.line_item_id===it.id);
           return <React.Fragment key={it.id}><tr className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
@@ -2704,7 +2704,11 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     c: card.color,
     match: card.isLeading
       ? (card.key === 'installed'
-          ? (j) => jobLeading[j.id]?.leading === 'installed' && !['Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status)
+          // 'installed' tab = only jobs still literally in the 'Installed' stage; any job
+          // that has moved on to any accounts status, no-bill, or cancelled belongs in
+          // that later bucket instead. Keeps lifecycle stages mutually exclusive so a
+          // job is counted in exactly one card/tab (matches Dashboard's count too).
+          ? (j) => jobLeading[j.id]?.leading === 'installed' && !STATUS_CARD_BY_KEY.accounts.statuses.includes(j.status) && !['No Bill','Cancelled'].includes(j.status)
           : (j) => jobLeading[j.id]?.leading === card.key)
       : (j) => card.statuses.includes(j.status)
   }));
@@ -2715,24 +2719,22 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     return cur.match(j);
   }),[jobs,cur,s,jobLeading]);
 
-  // Card counts — uses unified STATUS_CARDS (12 buckets).
-  // Middle 7 (isLeading=true) count from jobLeading rollup; rest count from j.status directly.
+  // Card counts — derive from the SAME match functions the tabs use, so cards and
+  // tabs cannot drift (fixed 18 Apr 26 — audit caught ACCOUNTS card=0 vs tab=10 and
+  // INSTALLED card=11 vs tab=7 because the old walk was leading-first and put every
+  // accounts-status job into the earlier-indexed INSTALLED bucket before reaching ACCOUNTS).
   const cardDefs = STATUS_CARDS.map(c => ({k:c.key, l:c.label, c:c.color}));
   const cardCounts = useMemo(() => {
     const c = Object.fromEntries(STATUS_CARDS.map(card => [card.key, 0]));
     (jobs||[]).forEach(j => {
-      // Walk STATUS_CARDS in order; first matching bucket wins (jobs in only one bucket)
-      for (const card of STATUS_CARDS) {
-        if (card.isLeading) {
-          const st = jobLeading[j.id];
-          if (st && st.leading === card.key) { c[card.key]++; return; }
-        } else {
-          if (card.statuses.includes(j.status)) { c[card.key]++; return; }
-        }
+      for (const t of tabs) {
+        if (t.match(j)) { c[t.id]++; /* note: a job may satisfy multiple tab matches,
+                                         but we break after the first so cards sum to
+                                         jobs.length just like sequential bucketing */ break; }
       }
     });
     return c;
-  }, [jobs, jobLeading]);
+  }, [jobs, jobLeading, tabs]);
 
   // Status pill colors — covers new + legacy values
   const sc = {
