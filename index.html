@@ -1639,6 +1639,14 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         if(!prf.requestor){show('Select requestor',false);return;}
         if(!prf.vendor_id&&!prf.vendor_name){show('Select or enter a vendor',false);return;}
         if(!prf.items.some(x=>x.product)){show('Add at least one item',false);return;}
+        // Every item with a product must have a unit_mode. blankItem defaults to 'NOS',
+        // so this only fires if someone explicitly cleared the dropdown. Closes the
+        // theoretical hole where a PR could be saved without a unit, causing PO display issues.
+        const missingUnit = prf.items.findIndex(x => x.product && !x.unit_mode);
+        if (missingUnit >= 0) {
+          show(`Select a unit for item ${missingUnit + 1} (${prf.items[missingUnit].product.slice(0,30)})`, false);
+          return;
+        }
         setSaving(true);
         const pr_no=await genPRNo(prf.firm_code);
         const fy=getFY();
@@ -3448,7 +3456,11 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
       ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
       : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
     const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-    const qtyUnit = um ? (um.value==='NOS'||um.value==='SET'||um.value==='LOT'||um.value==='KG' ? um.label : (um.value.indexOf('Roll')===0 ? 'roll' : (x.per||'nos'))) : (x.per||'nos');
+    // Use um.label when unit_mode is set so the PO shows the real unit (SqFt (INCH), RFT, NOS, etc.).
+    // Previous logic special-cased only NOS/SET/LOT/KG and fell through to x.per (stored as literal
+    // "Sheet" for every PR item regardless of actual unit) for SqFt/RFT/MTR/FT/UNIT — bug reported
+    // 18 Apr: PR saved as SqFt, PO displayed as "Sheet". Roll modes still render as "roll" (short form).
+    const qtyUnit = um ? (um.value.indexOf('Roll')===0 ? 'roll' : um.label) : (x.per||'nos');
     const lineAmt = _lineBase(x);
     return `
     <tr>
@@ -3998,8 +4010,9 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
         ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
         : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
       const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-      // Qty column shows qty + the unit (per OR unit_mode short label for area items).
-      const qtyUnit = um ? (um.value==='NOS'||um.value==='SET'||um.value==='LOT'||um.value==='KG' ? um.label : (um.value.indexOf('Roll')===0 ? 'roll' : (x.per||'nos'))) : (x.per||'nos');
+      // Qty column shows qty + the real unit. Use um.label for every mode when unit_mode is set
+      // (was falling back to x.per="Sheet" for SqFt/RFT/MTR/FT/UNIT — bug reported 18 Apr).
+      const qtyUnit = um ? (um.value.indexOf('Roll')===0 ? 'roll' : um.label) : (x.per||'nos');
       const lineAmt = _lineBase(x);
       return `
       <tr>
