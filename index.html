@@ -4741,7 +4741,7 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
               <div style={{display:'flex', gap:12, flexWrap:'wrap', marginBottom:8, fontSize:9}}>
                 <span>🏢 <strong style={{color:'#c9d1d9'}}>{pr.vendor_name}</strong>{pr.vendor_gstin&&<span style={{color:'#64748b'}}> · {pr.vendor_gstin}</span>}</span>
                 <span>👤 <span style={{color:'#94a3b8'}}>by {pr.created_by}</span></span>
-                {jb && <span>📋 <span style={{color:'#64748b'}}>Job {pr.job_id} · {jb.client_name}</span></span>}
+                {jb && <span>📋 <span style={{color:'#64748b'}}>Job {pr.job_id} · {jb.client_name}{jb.project ? ' · ' + (jb.project.length > 45 ? jb.project.slice(0,45) + '…' : jb.project) : ''}</span></span>}
                 {pr.expected_delivery && <span>📅 <span style={{color:'#06b6d4'}}>By {pr.expected_delivery}</span></span>}
                 {pr.payment_terms && <span>💳 <span style={{color:'#64748b'}}>{pr.payment_terms}</span></span>}
                 <span style={{color:'#64748b', fontSize:8}}>{new Date(pr.created_at).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
@@ -4760,7 +4760,7 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
                   <tbody>{rItems.map((x,xi) => (
                     <tr key={xi}>
                       <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8}}>{x.product}{x.size ? <span style={{color:'#64748b'}}> ({x.size})</span> : ''}</td>
-                      <td style={{fontSize:9, color:'#94a3b8', textAlign:'right'}}>{x.qty} {x.per}</td>
+                      <td style={{fontSize:9, color:'#94a3b8', textAlign:'right'}}>{x.qty} {x.unit_mode || x.per || 'Unit'}</td>
                       <td style={{fontSize:9, color:'#94a3b8', textAlign:'right'}}>₹{x.rate}</td>
                       <td style={{fontSize:9, color:'#64748b', textAlign:'right'}}>{x.gst_pct}%</td>
                       <td style={{fontSize:9, color:'#e3a008', fontWeight:700, textAlign:'right'}}>₹{((+x.qty||0)*(+x.rate||0)).toFixed(0)}</td>
