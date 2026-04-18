@@ -3285,20 +3285,6 @@ const STAFF_DEPTS = {
 };
 const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
 
-// Canonical list of Indian States + UTs — single source of truth for state dropdowns.
-// Added 18 Apr 26 alongside banking_sites.state data cleanup (3,558 rows remapped).
-// Free-text entry is disallowed everywhere; users must pick from this list.
-const INDIAN_STATES = [
-  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa',
-  'Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala',
-  'Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland',
-  'Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura',
-  'Uttar Pradesh','Uttarakhand','West Bengal',
-  // Union Territories
-  'Andaman and Nicobar Islands','Chandigarh','Dadra and Nagar Haveli','Daman and Diu',
-  'Delhi','J&K','Ladakh','Lakshadweep','Puducherry'
-];
-
 // ── WhatsApp sending via Interakt (through serverless proxy) ──
 // Credentials live server-side in Vercel env var INTERAKT_KEY.
 // Proxy endpoint: /api/wa-send  (see api/wa-send.js)
@@ -5848,11 +5834,8 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
   // Unique states for filter
   const states=useMemo(()=>{
-    // Pull distinct state values present in sites data, then intersect with
-    // INDIAN_STATES to enforce canonical ordering + drop any non-canonical
-    // stragglers (e.g. empty string, legacy variants that slipped past cleanup).
-    const present=new Set();sites.forEach(r=>{if(r.state)present.add(r.state);});
-    return INDIAN_STATES.filter(s=>present.has(s));
+    const s=new Set();sites.forEach(r=>{if(r.state)s.add(r.state);});
+    return [...s].sort();
   },[sites]);
 
   // Billing categories for filter
@@ -6062,10 +6045,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Site Address</label><input className="in" value={newSite.site_address} onChange={e=>setNewSite(s=>({...s,site_address:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>City</label><input className="in" value={newSite.city} onChange={e=>setNewSite(s=>({...s,city:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>District</label><input className="in" value={newSite.district} onChange={e=>setNewSite(s=>({...s,district:e.target.value}))} style={{fontSize:10}}/></div>
-        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><select className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}>
-          <option value="">Select state...</option>
-          {INDIAN_STATES.map(s=><option key={s} value={s}>{s}</option>)}
-        </select></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><input className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Pincode</label><input className="in" value={newSite.pincode} onChange={e=>setNewSite(s=>({...s,pincode:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Name</label><input className="in" value={newSite.vendor_name} onChange={e=>setNewSite(s=>({...s,vendor_name:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Contact</label><input className="in" value={newSite.vendor_contact} onChange={e=>setNewSite(s=>({...s,vendor_contact:e.target.value}))} style={{fontSize:10}}/></div>
@@ -6653,6 +6633,7 @@ function ClientPortal({code}){
       {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing','Fabrication','Installation','Delivered'],seeAll:false},
       {id:'purchase',name:'Purchase Team',icon:'📦',st:null,seeAll:true,canEditPO:true},
       {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice'],seeAll:false},
+      {id:'indriya',name:'Indriya Project',icon:'💎',st:null,seeAll:false,projectMatch:['NJL'],jobPrefix:'NJL - '},
     ]},
   };
   const config=portalConfigs[code.toUpperCase()];
@@ -6687,9 +6668,9 @@ function ClientPortal({code}){
   const sc={'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b','PO Pending':'#f47067','Recce Pending':'#f59e0b'};
   const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing',l:'Design',e:'🎨'},{k:'printing',l:'Print',e:'🖨️'},{k:'fabrication',l:'Fab',e:'🔧'},{k:'installation',l:'Install',e:'🔩'},{k:'delivered',l:'Done',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
   const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Active':0,'Recce Pending':0,'Designing':1,'Printing':2,'Fabrication':3,'Installation':4,'Delivered':5,'Billing Pending':5,'Given for Billing':5,'Billing Done':6,'Cash Received':6}[st]??-1);
-  const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null}];
+  const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null,projectMatch:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st,projectMatch:d.projectMatch}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null,projectMatch:dept?.projectMatch||null}];
   const curTab=deptTabs.find(t=>t.id===tab)||deptTabs[0];
-  const filtered=(()=>{let f=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;if(portalSearch){const q=portalSearch.toLowerCase();f=f.filter(j=>j.id?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.delivery_address?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q));}return f;})();
+  const filtered=(()=>{let f=full;if(curTab?.projectMatch&&curTab.projectMatch.length){f=f.filter(j=>curTab.projectMatch.some(p=>(j.project||'').toLowerCase().includes(p.toLowerCase())));}else if(curTab?.st){f=f.filter(j=>curTab.st.includes(j.status));}if(portalSearch){const q=portalSearch.toLowerCase();f=f.filter(j=>j.id?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.delivery_address?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q));}return f;})();
 
   const addNote=async(jobId)=>{
     const text=noteText[jobId];if(!text?.trim())return;
@@ -6798,7 +6779,7 @@ function ClientPortal({code}){
         if(WA_NUMBERS['Ruchita'])setTimeout(()=>sendWhatsApp(WA_NUMBERS['Ruchita'],waMsg,'client_portal_new_job'),1500);
       }catch(e){console.log('WA notification error:',e);}
 
-      setCjf({project:'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:'',site_contact_person:'',site_contact_no:'',design_coord_person:'',design_coord_no:''});
+      setCjf({project:dept?.jobPrefix||'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:'',site_contact_person:'',site_contact_no:'',design_coord_person:'',design_coord_no:''});
       setCjItems([{id:Date.now()+'',type:'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
       setCjFiles([]);
 
@@ -6834,7 +6815,7 @@ function ClientPortal({code}){
       </div>
       {cjMsg&&<div style={{background:'#10b98120',border:'1px solid #10b98155',borderRadius:8,padding:'12px 14px',marginBottom:12}}><p style={{color:'#10b981',fontSize:12,fontWeight:700}}>{cjMsg}</p></div>}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8,marginBottom:12}}>
-        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.project} onChange={e=>setCjf(p=>({...p,project:e.target.value}))} placeholder="e.g. Store Branding - Andheri"/></div>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *{dept?.jobPrefix&&<span style={{color:'#e3a008',marginLeft:6,fontSize:8}}>(keeps "{dept.jobPrefix.trim()}" prefix)</span>}</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.project} onChange={e=>setCjf(p=>({...p,project:e.target.value}))} placeholder={dept?.jobPrefix?dept.jobPrefix+'Store Name - Location':"e.g. Store Branding - Andheri"}/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>PO Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.po_number} onChange={e=>setCjf(p=>({...p,po_number:e.target.value}))} placeholder="Optional"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Person *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_person} onChange={e=>setCjf(p=>({...p,contact_person:e.target.value}))} placeholder="Your name"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Number *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_no} onChange={e=>setCjf(p=>({...p,contact_no:e.target.value}))} placeholder="Phone number"/></div>
@@ -7106,7 +7087,7 @@ function ClientPortal({code}){
           <div><h1 style={{fontSize:14,fontWeight:800,color:"#e3a008",margin:0}}>{config.name}</h1><p style={{fontSize:9,color:"#64748b",margin:0}}>{dept.icon} {dept.name}</p></div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-          <button onClick={()=>setShowNewJob(true)} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>➕ New Job</button>
+          <button onClick={()=>{if(dept?.jobPrefix&&!cjf.project)setCjf(p=>({...p,project:dept.jobPrefix}));setShowNewJob(true);}} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>➕ New Job</button>
           {dept?.canEditPO&&<button onClick={()=>setShowBOQ(true)} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #3b82f655",background:"linear-gradient(135deg,#3b82f620,#2563eb10)",color:"#3b82f6",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>📊 Import BOQ</button>}
           <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:9,cursor:"pointer",whiteSpace:"nowrap"}}>↩ Switch</button>
         </div>
