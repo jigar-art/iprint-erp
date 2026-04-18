@@ -123,52 +123,6 @@ const STATUS_TO_LEADING = (status) => {
   return null;
 };
 
-// ─── STATUS_CARDS: single source of truth for status cards across ERP ────────
-// Added 18 Apr 26 to unify Dashboard, Dept Tracker, and Banking CRM cards.
-// 12 cards in lifecycle order. Same labels, same colors, same order everywhere.
-// Each entry:
-//   key       — internal id (also used as Dept Tracker tab id and leading-edge bucket)
-//   label     — display label (UPPERCASE for cards; tabs may title-case if needed)
-//   statuses  — array of jobs.status values that fall into this bucket
-//   color     — hex color
-//   isLeading — true if this card maps to a STATUS_TO_LEADING bucket (used by site-level rollup)
-const STATUS_CARDS = [
-  { key:'estimate',  label:'ESTIMATE',       statuses:['Quotation Sent','PO Pending','PO Received','Recce Pending'],                                                       color:'#3b82f6', isLeading:false },
-  { key:'draft',     label:'DRAFT',          statuses:['Draft'],                                                                                                            color:'#64748b', isLeading:false },
-  { key:'design',    label:'DESIGN',         statuses:['Designing'],                                                                                                        color:'#8b5cf6', isLeading:true  },
-  { key:'printIn',   label:'PRINT-IN-HOUSE', statuses:['Printing · In-House'],                                                                                              color:'#06b6d4', isLeading:true  },
-  { key:'printOut',  label:'PRINT-OUT',      statuses:['Printing · Outsource'],                                                                                             color:'#f97316', isLeading:true  },
-  { key:'fabIn',     label:'FAB-IN-HOUSE',   statuses:['Fabrication · In-House'],                                                                                           color:'#dc2626', isLeading:true  },
-  { key:'fabOut',    label:'FAB-OUT',        statuses:['Fabrication · Outsource'],                                                                                          color:'#ea580c', isLeading:true  },
-  { key:'dispatch',  label:'DISPATCH',       statuses:['Dispatch'],                                                                                                         color:'#3b82f6', isLeading:true  },
-  { key:'installed', label:'INSTALLED',      statuses:['Installed'],                                                                                                        color:'#059669', isLeading:true  },
-  { key:'accounts',  label:'ACCOUNTS',       statuses:['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'], color:'#06b6d4', isLeading:false },
-  { key:'nobill',    label:'NO BILL',        statuses:['No Bill'],                                                                                                          color:'#64748b', isLeading:false },
-  { key:'cancelled', label:'CANCELLED',      statuses:['Cancelled'],                                                                                                        color:'#475569', isLeading:false },
-];
-// Quick lookup helpers
-const STATUS_CARD_BY_KEY = Object.fromEntries(STATUS_CARDS.map(c => [c.key, c]));
-// Count jobs in a card bucket. Semantics mirror Dept Tracker's tabs[].match (line ~2705):
-// - isLeading cards: use STATUS_TO_LEADING rollup so legacy statuses ('Active'→design,
-//   'Installation'→dispatch, 'Printing'→printIn etc.) land in the right bucket.
-// - 'installed' card: additionally excludes any job whose status has moved on to
-//   accounts/nobill/cancelled, so lifecycle buckets stay mutually exclusive.
-// - Non-leading cards: strict status match.
-const countJobsByCard = (jobs, cardKey) => {
-  const card = STATUS_CARD_BY_KEY[cardKey];
-  if (!card) return 0;
-  if (card.isLeading) {
-    if (cardKey === 'installed') {
-      const accountsSt = STATUS_CARD_BY_KEY.accounts.statuses;
-      return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === 'installed'
-        && !accountsSt.includes(j.status)
-        && !['No Bill','Cancelled'].includes(j.status)).length;
-    }
-    return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === cardKey).length;
-  }
-  return (jobs||[]).filter(j => card.statuses.includes(j.status)).length;
-};
-
 // UNIT_MODES: single source of truth for billing unit
 // Each mode: {label, needsWH, dimUnit, areaFn, totalFn, displayFn}
 // needsWH = true → show W & H inputs; false → hide them (just use qty)
@@ -178,35 +132,35 @@ const countJobsByCard = (jobs, cardKey) => {
 // displayFn(area) → what to show in the Area column
 const UNIT_MODES = [
   { value:'SqFt (INCH)',  label:'SqFt (INCH)',  needsWH:true,  dimUnit:'inch',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/144*100)/100;},
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/144*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
   { value:'SqFt (FOOT)',  label:'SqFt (FOOT)',  needsWH:true,  dimUnit:'ft',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
   { value:'SqFt (MM)',    label:'SqFt (MM)',    needsWH:true,  dimUnit:'mm',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/92903.04*100)/100;},
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/92903.04*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
   { value:'SqMtr (INCH)', label:'SqMtr (INCH)', needsWH:true,  dimUnit:'inch',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1550.0031*100)/100;},
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/1550.0031*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'SqMtr (FOOT)', label:'SqMtr (FOOT)', needsWH:true,  dimUnit:'ft',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/10.7639*100)/100;},
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/10.7639*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'SqMtr (MM)',   label:'SqMtr (MM)',   needsWH:true,  dimUnit:'mm',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1000000*100)/100;},
+    areaFn:(w,h,q)=>Math.round(+w*+h*(+q||1)/1000000*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'RFT (INCH)',   label:'RFT (INCH)',   needsWH:true,  dimUnit:'inch',
-    areaFn:(w,h,q)=>{const W=+w||0;if(W===0)return Math.round((+q||0)*100)/100;return Math.round(W*(+q||1)*100)/100;},
+    areaFn:(w,h,q)=>Math.round((+w||0)*(+q||1)*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' rft':'—' },
   { value:'RFT (FOOT)',   label:'RFT (FOOT)',   needsWH:true,  dimUnit:'ft',
-    areaFn:(w,h,q)=>{const W=+w||0;if(W===0)return Math.round((+q||0)*100)/100;return Math.round(W*(+q||1)*100)/100;},
+    areaFn:(w,h,q)=>Math.round((+w||0)*(+q||1)*100)/100,
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' rft':'—' },
   { value:'NOS',   label:'NOS',   needsWH:false, dimUnit:'',
@@ -884,6 +838,8 @@ function MainApp({user,onLogout,masterData}){
     {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA"]},
     // Backup Data — admin role only (tier-1 access via FULL_ACCESS shortcut covers all 4 existing admins; Ankita as tier-2 admin is NOT in the user-gate)
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
+    // Reports & Analytics — admin tier only (portal usage, job stats, billing trends, dept activity)
+    {id:"reports",l:"Reports",e:"📈",roles:["admin"],users:["JIGAR","AMOL","CHANDNI","RUCHITA"]},
     // Banking CRM — tier-1 + Aparna + Priyanka + Shreya (Harish/Murli removed per your correction)
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
     // Sales CRM — tier-1 + Batul
@@ -957,6 +913,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
+          {pg==="reports"&&<ReportsPage jobs={fullJobs} batches={batches} items={items} expenses={expenses} firms={firms} clients={clients}/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user} items={items} osItems={osItems}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
@@ -1125,8 +1082,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       {cmpDays>0&&<span style={{fontSize:9,color:"#64748b"}}>Showing changes in last {cmpDays} days</span>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/>
-      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15}/>)}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/><SC l="Estimate" v={s.estimate} c="#3b82f6" d={30} delta={deltas.estimate}/><SC l="Designing" v={s.design} c="#8b5cf6" d={60} delta={deltas.design}/><SC l="Print·In-House" v={s.printIn} c="#06b6d4" d={90} delta={deltas.printing}/><SC l="Print·Outsource" v={s.printOut} c="#f97316" d={100}/><SC l="Fab·In-House" v={s.fabIn} c="#06b6d4" d={120} delta={deltas.fab}/><SC l="Fab·Outsource" v={s.fabOut} c="#f97316" d={130}/><SC l="Dispatch" v={s.dispatch} c="#3b82f6" d={150} delta={deltas.delivered}/><SC l="Installed" v={s.installed} c="#4ade80" d={180}/><SC l="Billing Pending" v={s.billPend} c="#06b6d4" d={210} delta={deltas.billPend}/><SC l="Billed" v={s.billed} c="#4ade80" d={240} delta={deltas.billed}/><SC l="PO Pending" v={s.poPend} c="#f47067" d={270} delta={deltas.poPend}/>{s.draft>0&&<SC l="Draft" v={s.draft} c="#64748b" d={300}/>}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
@@ -2073,7 +2029,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           <input className="in" value={b.delivery_address||''} placeholder="Delivery address for this batch..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,delivery_address:v}:x));}} onBlur={e=>updateBatchField(b.id,'delivery_address',e.target.value)} style={{flex:1,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030"}}/>
         </div>
       </div>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>Unit</th><th>Area/Qty</th>{canSeeRates&&<><th>Rate</th><th>Amt (incl GST)</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>Unit</th><th>Area/Qty</th>{canSeeRates&&<><th>Rate</th><th>Amt</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
         <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
         {(b.items||[]).map((it,ii)=>{const dn=DEPTS.every(d=>it['dept_'+d.toLowerCase()]);window._itemCache[it.id]=it;const itOs=jobOsItems.filter(o=>o.line_item_id===it.id);
           return <React.Fragment key={it.id}><tr className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
@@ -2709,24 +2665,20 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     return map;
   }, [jobs, items, osItems]);
 
-  // Tabs — 12 buckets, 1-for-1 with STATUS_CARDS. Same colors, same labels, same order.
-  // Middle 7 (isLeading) match by jobLeading rollup. Rest match by j.status directly.
-  // Note: 'installed' tab additionally excludes terminal accounts/cancelled states so
-  // jobs that have moved on don't double-show in both Installed and Accounts.
-  const tabs = STATUS_CARDS.map(card => ({
-    id: card.key,
-    l: card.label,
-    c: card.color,
-    match: card.isLeading
-      ? (card.key === 'installed'
-          // 'installed' tab = only jobs still literally in the 'Installed' stage; any job
-          // that has moved on to any accounts status, no-bill, or cancelled belongs in
-          // that later bucket instead. Keeps lifecycle stages mutually exclusive so a
-          // job is counted in exactly one card/tab (matches Dashboard's count too).
-          ? (j) => jobLeading[j.id]?.leading === 'installed' && !STATUS_CARD_BY_KEY.accounts.statuses.includes(j.status) && !['No Bill','Cancelled'].includes(j.status)
-          : (j) => jobLeading[j.id]?.leading === card.key)
-      : (j) => card.statuses.includes(j.status)
-  }));
+  // Tabs — 8 now: Estimate + Design + Print·InHouse + Print·Outsource + Fab·InHouse + Fab·Outsource + Dispatch + Accounts.
+  // Estimate + Accounts stay STATUS-based (pre/post production). Middle 6 are LEADING-based.
+  // Each entry carries a `match(j)` function for bucketing.
+  const tabs = [
+    {id:'Estimate',    l:'Estimate',          c:'#3b82f6', match:(j)=>['Quotation Sent','PO Pending','PO Received','Recce Pending','Draft'].includes(j.status)},
+    {id:'design',      l:'Design',            c:'#8b5cf6', match:(j)=>jobLeading[j.id]?.leading==='design'},
+    {id:'printIn',     l:'Print · In-House',  c:'#06b6d4', match:(j)=>jobLeading[j.id]?.leading==='printIn'},
+    {id:'printOut',    l:'Print · Outsource', c:'#f97316', match:(j)=>jobLeading[j.id]?.leading==='printOut'},
+    {id:'fabIn',       l:'Fab · In-House',    c:'#06b6d4', match:(j)=>jobLeading[j.id]?.leading==='fabIn'},
+    {id:'fabOut',      l:'Fab · Outsource',   c:'#f97316', match:(j)=>jobLeading[j.id]?.leading==='fabOut'},
+    {id:'dispatch',    l:'Dispatch',          c:'#3b82f6', match:(j)=>jobLeading[j.id]?.leading==='dispatch'},
+    {id:'installed',   l:'Installed',         c:'#4ade80', match:(j)=>jobLeading[j.id]?.leading==='installed' && !['Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status)},
+    {id:'Accounts',    l:'Accounts',          c:'#06b6d4', match:(j)=>['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'].includes(j.status)},
+  ];
   const [ad,sad]=useState(tabs[0].id);
   const cur=tabs.find(t=>t.id===ad) || tabs[0];
   const pen=useMemo(()=>jobs.filter(j=>{
@@ -2734,22 +2686,24 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     return cur.match(j);
   }),[jobs,cur,s,jobLeading]);
 
-  // Card counts — derive from the SAME match functions the tabs use, so cards and
-  // tabs cannot drift (fixed 18 Apr 26 — audit caught ACCOUNTS card=0 vs tab=10 and
-  // INSTALLED card=11 vs tab=7 because the old walk was leading-first and put every
-  // accounts-status job into the earlier-indexed INSTALLED bucket before reaching ACCOUNTS).
-  const cardDefs = STATUS_CARDS.map(c => ({k:c.key, l:c.label, c:c.color}));
+  // Card counts — same leading-edge rollup, same 7 buckets as Banking CRM (excluding Estimate/Accounts)
+  const cardDefs = [
+    {k:'design',    l:'Design',            c:'#8b5cf6'},
+    {k:'printIn',   l:'Print · In-House',  c:'#06b6d4'},
+    {k:'printOut',  l:'Print · Outsource', c:'#f97316'},
+    {k:'fabIn',     l:'Fab · In-House',    c:'#06b6d4'},
+    {k:'fabOut',    l:'Fab · Outsource',   c:'#f97316'},
+    {k:'dispatch',  l:'Dispatch',          c:'#3b82f6'},
+    {k:'installed', l:'Installed',         c:'#4ade80'},
+  ];
   const cardCounts = useMemo(() => {
-    const c = Object.fromEntries(STATUS_CARDS.map(card => [card.key, 0]));
+    const c = {design:0,printIn:0,printOut:0,fabIn:0,fabOut:0,dispatch:0,installed:0};
     (jobs||[]).forEach(j => {
-      for (const t of tabs) {
-        if (t.match(j)) { c[t.id]++; /* note: a job may satisfy multiple tab matches,
-                                         but we break after the first so cards sum to
-                                         jobs.length just like sequential bucketing */ break; }
-      }
+      const st = jobLeading[j.id];
+      if (st && st.leading && c[st.leading] !== undefined) c[st.leading]++;
     });
     return c;
-  }, [jobs, jobLeading, tabs]);
+  }, [jobs, jobLeading]);
 
   // Status pill colors — covers new + legacy values
   const sc = {
@@ -2779,12 +2733,12 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
         <p style={{fontSize:8,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600,margin:'0 0 5px'}}>
           🏭 Production Status — click to filter
         </p>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:5}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:5}}>
           {cardDefs.map(d => {
             const active = ad === d.k;
             return (
               <div key={d.k}
-                onClick={() => sad(active ? STATUS_CARDS[0].key : d.k)}
+                onClick={() => sad(active ? 'Estimate' : d.k)}
                 style={{
                   background: active ? d.c+'30' : d.c+'15',
                   border: `1px solid ${active ? d.c : d.c+'55'}`,
@@ -2801,7 +2755,46 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
         </div>
       </div>
 
-      {/* Tabs — 12 buckets, fully derived from STATUS_CARDS for consistency with cards above */}
+      {/* Legacy-count reconciliation strip — ensures old status counts are visible and match */}
+      {(() => {
+        const byStatus = (s) => (jobs||[]).filter(j => j.status === s).length;
+        const legacyCounts = {
+          'Printing': byStatus('Printing'),
+          'Printing · In-House': byStatus('Printing · In-House'),
+          'Printing · Outsource': byStatus('Printing · Outsource'),
+          'Fabrication': byStatus('Fabrication'),
+          'Fabrication · In-House': byStatus('Fabrication · In-House'),
+          'Fabrication · Outsource': byStatus('Fabrication · Outsource'),
+          'Installation': byStatus('Installation'),
+          'Installed': byStatus('Installed'),
+          'Delivered': byStatus('Delivered'),
+          'Dispatch': byStatus('Dispatch'),
+        };
+        const printingTotal = legacyCounts['Printing'] + legacyCounts['Printing · In-House'] + legacyCounts['Printing · Outsource'];
+        const fabTotal = legacyCounts['Fabrication'] + legacyCounts['Fabrication · In-House'] + legacyCounts['Fabrication · Outsource'];
+        const installTotal = legacyCounts['Installation'] + legacyCounts['Installed'];
+        const dispatchTotal = legacyCounts['Delivered'] + legacyCounts['Dispatch'];
+        return (
+          <div style={{background:'#0a0f1a',border:'0.5px solid #1a2030',borderRadius:6,padding:'5px 10px',fontSize:8,color:'#64748b',display:'flex',gap:12,flexWrap:'wrap',alignItems:'center'}}>
+            <span style={{fontWeight:700,color:'#8b949e',textTransform:'uppercase',letterSpacing:'.05em'}} title="Counts raw jobs.status values only — does not use dept rollup. Use this to verify the team's migration from legacy to new status values.">Raw status count (for migration tracking):</span>
+            {printingTotal > 0 && (
+              <span>Printing <strong style={{color:'#e2e8f0'}}>{printingTotal}</strong> = legacy "Printing" {legacyCounts['Printing']} + "In-House" {legacyCounts['Printing · In-House']} + "Outsource" {legacyCounts['Printing · Outsource']}</span>
+            )}
+            {fabTotal > 0 && (
+              <span>Fab <strong style={{color:'#e2e8f0'}}>{fabTotal}</strong> = legacy "Fabrication" {legacyCounts['Fabrication']} + "In-House" {legacyCounts['Fabrication · In-House']} + "Outsource" {legacyCounts['Fabrication · Outsource']}</span>
+            )}
+            {installTotal > 0 && (
+              <span>Install <strong style={{color:'#e2e8f0'}}>{installTotal}</strong> = legacy "Installation" {legacyCounts['Installation']} + new "Installed" {legacyCounts['Installed']}</span>
+            )}
+            {dispatchTotal > 0 && (
+              <span>Dispatch <strong style={{color:'#e2e8f0'}}>{dispatchTotal}</strong> = legacy "Delivered" {legacyCounts['Delivered']} + new "Dispatch" {legacyCounts['Dispatch']}</span>
+            )}
+            <span style={{color:'#475569',fontStyle:'italic',marginLeft:'auto'}}>Cards above use granular rollup (different count, by design)</span>
+          </div>
+        );
+      })()}
+
+      {/* Tabs — now 9 (Estimate + 7 production buckets + Accounts) */}
       <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
         {tabs.map(t => {
           const count = jobs.filter(t.match).length;
@@ -3295,19 +3288,69 @@ const STAFF_DEPTS = {
 };
 const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
 
-// Canonical list of Indian States + UTs — single source of truth for state dropdowns.
-// Added 18 Apr 26 alongside banking_sites.state data cleanup (3,558 rows remapped).
-// Free-text entry is disallowed everywhere; users must pick from this list.
-const INDIAN_STATES = [
-  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa',
-  'Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala',
-  'Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland',
-  'Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura',
-  'Uttar Pradesh','Uttarakhand','West Bengal',
-  // Union Territories
-  'Andaman and Nicobar Islands','Chandigarh','Dadra and Nagar Haveli','Daman and Diu',
-  'Delhi','J&K','Ladakh','Lakshadweep','Puducherry'
-];
+// ══════════════════════════════════════════════════════════
+// CLIENT PORTAL — Templates + Per-Client Configs
+// ══════════════════════════════════════════════════════════
+// Three reusable templates cover ~90% of client needs.
+// To onboard a new client: pick a template, override pins/icons, add to PORTAL_CONFIGS.
+//
+// Template A (FULL) — 4 depts: Design, Projects, Purchase (admin), Accounts.
+// Template B (SIMPLE) — 2 depts: Design + Accounts. For low-volume clients.
+// Template C (BANKING) — 3 depts: Design, Projects, Banking-Admin (seeAll). For ATM/site-rollout clients.
+// Add `extraDepts:[...]` per client for sub-brand depts (e.g. ANA's Indriya).
+//
+// Each dept supports 3 filter modes:
+//   st: ['Status1','Status2']  — show jobs with these statuses
+//   seeAll: true               — admin-level, see all client jobs
+//   projectMatch: ['NJL','XYZ'] — show jobs whose project field contains any of these strings
+// Optional: jobPrefix — auto-prefills project field on New Job submission.
+// Optional: canEditPO — enables BOQ Import button (Purchase teams).
+
+const PORTAL_DEPT_TEMPLATES = {
+  // Template A — Full workflow (default for most clients)
+  FULL: [
+    {id:'design',   name:'Design Team',             icon:'🎨', st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending'], seeAll:false},
+    {id:'projects', name:'Projects & Installation', icon:'🏗️', st:['Printing','Fabrication','Installation','Delivered'], seeAll:false},
+    {id:'purchase', name:'Purchase Team',           icon:'📦', st:null, seeAll:true, canEditPO:true},
+    {id:'accounts', name:'Accounts & Billing',      icon:'🧾', st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice'], seeAll:false},
+  ],
+  // Template B — Simple (small clients, no separate purchase team)
+  SIMPLE: [
+    {id:'design',   name:'Design & Production', icon:'🎨', st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending','Printing','Fabrication','Installation','Delivered'], seeAll:false},
+    {id:'accounts', name:'Accounts & Billing',  icon:'🧾', st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice'], seeAll:false},
+  ],
+  // Template C — Banking / ATM rollouts
+  BANKING: [
+    {id:'design',   name:'Design Team',          icon:'🎨', st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending'], seeAll:false},
+    {id:'projects', name:'Projects & Site Team', icon:'🏗️', st:['Printing','Fabrication','Installation','Delivered'], seeAll:false},
+    {id:'admin',    name:'Banking Admin',        icon:'🏦', st:null, seeAll:true, canEditPO:true},
+  ],
+};
+
+// Helper — clones template + applies per-client PIN overrides + appends extraDepts.
+// Usage: buildDepts('FULL', {design:'2580', projects:'7410', purchase:'9632', accounts:'1470'}, [extraDept])
+function buildDepts(templateName, pins, extraDepts) {
+  const tpl = PORTAL_DEPT_TEMPLATES[templateName] || [];
+  const built = tpl.map(d => ({...d, pin: pins[d.id] || '0000'}));
+  return extraDepts && extraDepts.length ? [...built, ...extraDepts] : built;
+}
+
+// PORTAL_CONFIGS — single source of truth for all client portals.
+// To add a Wave 1 client: copy an existing block, change code/name/match/logo/pins.
+const PORTAL_CONFIGS = {
+  'ANA': {
+    name: 'ANA Designs',
+    match: ['ANA DESIGNS'],
+    logo: 'https://idjeniwznjiaanaxcjvg.supabase.co/storage/v1/object/public/Uploads/logos/ana-logo.jpg',
+    accent: '#e3a008', // brand accent (defaults to iPrint gold if omitted)
+    notify: ['Jigar','Ruchita'], // WA_NUMBERS keys to notify on portal events
+    depts: buildDepts('FULL',
+      {design:'2580', projects:'7410', purchase:'9632', accounts:'1470'},
+      [{id:'indriya', name:'Indriya Project', icon:'💎', pin:'3690',
+        st:null, seeAll:false, projectMatch:['NJL'], jobPrefix:'NJL - '}]
+    ),
+  },
+};
 
 // ── WhatsApp sending via Interakt (through serverless proxy) ──
 // Credentials live server-side in Vercel env var INTERAKT_KEY.
@@ -5780,9 +5823,8 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       // OPTION B (17 Apr 26): STATUS WINS. `leading` always comes from jobs.status.
       // dept_* ticks are recorded separately for debug but no longer drive card counts.
       // This gives predictable, status-consistent counts that match the Dashboard.
-      // 18 Apr 26 update: also keep raw status so non-leading STATUS_CARDS buckets
-      // (estimate/draft/accounts/nobill/cancelled) can roll up at site level too.
       const leading = STATUS_TO_LEADING(j.status);
+      if (leading === null) return; // Draft/Cancelled/etc. — don't count this site at all
       const hasGranularSignal = osList.length > 0 || lineItems.some(it =>
         it.dept_design || it.dept_printing || it.dept_fabrication ||
         it.dept_dispatch || it.dept_installation || it.dept_accounts
@@ -5798,7 +5840,6 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         dispatch:  leading === 'dispatch',
         installed: leading === 'installed',
         leading,
-        status:    j.status,  // raw status — used for non-leading STATUS_CARDS buckets
         source: (hasGranularSignal && lineItems.length > 0) ? 'granular' : 'status'
       };
     });
@@ -5807,7 +5848,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
   // Helper to get a site's dept status (defensive: always returns an object)
   const siteDeptStatus = React.useCallback((s) => {
-    return (s && s.job_no && jobDeptStatus[s.job_no]) || {design:false,printIn:false,printOut:false,fabIn:false,fabOut:false,dispatch:false,installed:false,leading:null,status:null};
+    return (s && s.job_no && jobDeptStatus[s.job_no]) || {design:false,printIn:false,printOut:false,fabIn:false,fabOut:false,dispatch:false,installed:false,leading:null};
   }, [jobDeptStatus]);
 
   // Projects
@@ -5822,16 +5863,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     if(tab!=='ALL')f=f.filter(s=>s.project===tab);
     if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
     if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
-    if(deptFilter){
-      const card = STATUS_CARD_BY_KEY[deptFilter];
-      if(card){
-        f=f.filter(s=>{
-          const st = siteDeptStatus(s);
-          if(card.isLeading) return st.leading === card.key;
-          return st.status && card.statuses.includes(st.status);
-        });
-      }
-    }
+    if(deptFilter)f=f.filter(s=>siteDeptStatus(s)[deptFilter]);
     if(search){const q=search.toLowerCase();f=f.filter(s=>
       s.site_address?.toLowerCase().includes(q)||s.atm_id?.toLowerCase().includes(q)||s.site_unique_id?.toLowerCase().includes(q)||
       s.city?.toLowerCase().includes(q)||s.state?.toLowerCase().includes(q)||
@@ -5856,35 +5888,21 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   },[sites,tab]);
 
   // Dept counts — uses leading-edge so sums are clean (each site counted once)
-  // Site-level rollup over all 12 STATUS_CARDS buckets. Each site counts in exactly one bucket
-  // (its linked job's classification). Sites with no linked job land in untracked.
-  // 18 Apr 26: expanded from 7 production buckets to all 12 for cross-page consistency.
   const deptCounts = useMemo(() => {
     const f = tab==='ALL' ? sites : sites.filter(s => s.project===tab);
-    const c = Object.fromEntries(STATUS_CARDS.map(card => [card.key, 0]));
-    c.untracked = 0;
+    const c = {design:0, printIn:0, printOut:0, fabIn:0, fabOut:0, dispatch:0, installed:0, untracked:0};
     f.forEach(s => {
       const st = siteDeptStatus(s);
-      let matched = false;
-      for (const card of STATUS_CARDS) {
-        if (card.isLeading) {
-          if (st.leading === card.key) { c[card.key]++; matched = true; break; }
-        } else {
-          if (st.status && card.statuses.includes(st.status)) { c[card.key]++; matched = true; break; }
-        }
-      }
-      if (!matched) c.untracked++;
+      if (st.leading) c[st.leading] = (c[st.leading]||0) + 1;
+      else c.untracked++;
     });
     return c;
   }, [sites, tab, siteDeptStatus]);
 
   // Unique states for filter
   const states=useMemo(()=>{
-    // Pull distinct state values present in sites data, then intersect with
-    // INDIAN_STATES to enforce canonical ordering + drop any non-canonical
-    // stragglers (e.g. empty string, legacy variants that slipped past cleanup).
-    const present=new Set();sites.forEach(r=>{if(r.state)present.add(r.state);});
-    return INDIAN_STATES.filter(s=>present.has(s));
+    const s=new Set();sites.forEach(r=>{if(r.state)s.add(r.state);});
+    return [...s].sort();
   },[sites]);
 
   // Billing categories for filter
@@ -6003,22 +6021,30 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         </p>
         {deptFilter && <button className="b bs" onClick={()=>setDeptFilter(null)} style={{fontSize:8,padding:'1px 7px',color:'#f47067',borderColor:'#f47067'}}>✕ Clear filter</button>}
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:5}}>
-        {STATUS_CARDS.map(d => {
-          const active = deptFilter === d.key;
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:5}}>
+        {[
+          {k:'design',     l:'Design',          c:'#8b5cf6'},
+          {k:'printIn',    l:'Print · In-House',c:'#06b6d4'},
+          {k:'printOut',   l:'Print · Outsource',c:'#f97316'},
+          {k:'fabIn',      l:'Fab · In-House',  c:'#06b6d4'},
+          {k:'fabOut',     l:'Fab · Outsource', c:'#f97316'},
+          {k:'dispatch',   l:'Dispatch',        c:'#3b82f6'},
+          {k:'installed',  l:'Installed',       c:'#4ade80'},
+        ].map(d => {
+          const active = deptFilter === d.k;
           return (
-            <div key={d.key}
-              onClick={()=>setDeptFilter(active ? null : d.key)}
+            <div key={d.k}
+              onClick={()=>setDeptFilter(active ? null : d.k)}
               style={{
-                background: active ? d.color+'30' : d.color+'15',
-                border: `1px solid ${active ? d.color : d.color+'55'}`,
+                background: active ? d.c+'30' : d.c+'15',
+                border: `1px solid ${active ? d.c : d.c+'55'}`,
                 borderRadius: 4,
                 padding: '6px 8px',
                 cursor: 'pointer',
                 transition: 'all 0.15s',
               }}>
-              <div style={{fontSize:7,color:d.color,fontWeight:700,letterSpacing:'.03em',textTransform:'uppercase'}}>{d.label}</div>
-              <div className="mn" style={{fontSize:14,color:d.color,fontWeight:700,marginTop:1}}>{(deptCounts[d.key]||0).toLocaleString('en-IN')}</div>
+              <div style={{fontSize:7,color:d.c,fontWeight:700,letterSpacing:'.03em',textTransform:'uppercase'}}>{d.l}</div>
+              <div className="mn" style={{fontSize:14,color:d.c,fontWeight:700,marginTop:1}}>{(deptCounts[d.k]||0).toLocaleString('en-IN')}</div>
             </div>
           );
         })}
@@ -6086,10 +6112,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Site Address</label><input className="in" value={newSite.site_address} onChange={e=>setNewSite(s=>({...s,site_address:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>City</label><input className="in" value={newSite.city} onChange={e=>setNewSite(s=>({...s,city:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>District</label><input className="in" value={newSite.district} onChange={e=>setNewSite(s=>({...s,district:e.target.value}))} style={{fontSize:10}}/></div>
-        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><select className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}>
-          <option value="">Select state...</option>
-          {INDIAN_STATES.map(s=><option key={s} value={s}>{s}</option>)}
-        </select></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><input className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Pincode</label><input className="in" value={newSite.pincode} onChange={e=>setNewSite(s=>({...s,pincode:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Name</label><input className="in" value={newSite.vendor_name} onChange={e=>setNewSite(s=>({...s,vendor_name:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Contact</label><input className="in" value={newSite.vendor_contact} onChange={e=>setNewSite(s=>({...s,vendor_contact:e.target.value}))} style={{fontSize:10}}/></div>
@@ -6317,6 +6340,277 @@ function BackupPage(){
         <p>• Your data is stored on <strong style={{color:"#4ade80"}}>AWS cloud servers</strong> in Mumbai region</p>
       </div>
     </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// REPORTS & ANALYTICS PAGE — admin overview of jobs, billing, portal usage
+// ═══════════════════════════════════════════════════════════
+function ReportsPage({jobs,batches,items,expenses,firms,clients}){
+  const [tab,setTab]=useState('overview');
+  const [period,setPeriod]=useState('30'); // days lookback
+  const [portalLogs,setPortalLogs]=useState(null); // null = loading, [] = empty/no table
+  const [logErr,setLogErr]=useState('');
+
+  // Load portal access logs (if table exists). Silently degrades if table missing.
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const since=new Date(Date.now()-parseInt(period)*24*60*60*1000).toISOString();
+        const {data,error}=await sb.from('portal_access_log').select('*').gte('created_at',since).order('created_at',{ascending:false}).limit(5000);
+        if(error){setLogErr('Portal access log table not yet created. Run portal_access_log.sql in Supabase to enable usage analytics.');setPortalLogs([]);return;}
+        setPortalLogs(data||[]);setLogErr('');
+      }catch(e){setLogErr(e.message||'Could not load portal logs');setPortalLogs([]);}
+    })();
+  },[period]);
+
+  const periodMs=parseInt(period)*24*60*60*1000;
+  const periodStart=Date.now()-periodMs;
+
+  // ── Compute job stats ──
+  const stats=React.useMemo(()=>{
+    const recent=(jobs||[]).filter(j=>{
+      const t=new Date(j.created_at||0).getTime();
+      return t>=periodStart;
+    });
+    const byStatus={};
+    (jobs||[]).forEach(j=>{byStatus[j.status||'Unknown']=(byStatus[j.status||'Unknown']||0)+1;});
+    const byFirm={};
+    (jobs||[]).forEach(j=>{byFirm[j.firm||'Unknown']=(byFirm[j.firm||'Unknown']||0)+1;});
+    const byClient={};
+    (jobs||[]).forEach(j=>{const c=j.client_name||'Unknown';byClient[c]=(byClient[c]||0)+1;});
+    const topClients=Object.entries(byClient).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    // Monthly trend (last 6 months)
+    const monthly={};
+    const now=new Date();
+    for(let i=5;i>=0;i--){
+      const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+      const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      monthly[k]={jobs:0,billed:0};
+    }
+    (jobs||[]).forEach(j=>{
+      const t=new Date(j.created_at||0);
+      const k=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
+      if(monthly[k])monthly[k].jobs++;
+    });
+    // Billed amount per month from batches.bill_no
+    (batches||[]).forEach(b=>{
+      if(!b.bill_no)return;
+      const t=new Date(b.date||0);
+      const k=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
+      if(monthly[k]){
+        // Sum line_items amount for this batch
+        const bItems=(items||[]).filter(it=>it.batch_id===b.id);
+        const amt=bItems.reduce((s,it)=>{const w=parseFloat(it.width)||1,h=parseFloat(it.height)||1,q=parseFloat(it.qty)||1,r=parseFloat(it.rate)||0;return s+w*h*q*r;},0);
+        monthly[k].billed+=amt;
+      }
+    });
+    return {recent,byStatus,byFirm,byClient,topClients,monthly,total:(jobs||[]).length};
+  },[jobs,batches,items,periodStart]);
+
+  // ── Compute portal stats ──
+  const portalStats=React.useMemo(()=>{
+    if(!portalLogs)return null;
+    const byClient={},byEvent={},byDept={};
+    const uniqueSessions={}; // client+dept+date
+    portalLogs.forEach(l=>{
+      byClient[l.client_code]=(byClient[l.client_code]||0)+1;
+      byEvent[l.event_type]=(byEvent[l.event_type]||0)+1;
+      const dk=l.client_code+'|'+(l.dept_id||'-');
+      byDept[dk]=(byDept[dk]||0)+1;
+      const day=(l.created_at||'').slice(0,10);
+      uniqueSessions[l.client_code+'|'+(l.dept_id||'-')+'|'+day]=true;
+    });
+    const failedLogins=portalLogs.filter(l=>l.event_type==='pin_fail').length;
+    const lockouts=portalLogs.filter(l=>l.event_type==='pin_locked').length;
+    const submissions=portalLogs.filter(l=>l.event_type==='job_submit'||l.event_type==='boq_import').length;
+    return {byClient,byEvent,byDept,uniqueSessions:Object.keys(uniqueSessions).length,failedLogins,lockouts,submissions,total:portalLogs.length};
+  },[portalLogs]);
+
+  const fmt=n=>(n||0).toLocaleString('en-IN');
+  const fmtINR=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
+
+  return <div className="cp">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+      <div>
+        <h1 style={{fontSize:20,fontWeight:800,color:'#e3a008',margin:0}}>📈 Reports & Analytics</h1>
+        <p style={{fontSize:11,color:'#64748b',margin:'2px 0 0'}}>Operational insights · job pipeline · billing trends · portal usage</p>
+      </div>
+      <select value={period} onChange={e=>setPeriod(e.target.value)} style={{padding:'7px 12px',borderRadius:7,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11}}>
+        <option value="7">Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="180">Last 180 days</option>
+        <option value="365">Last 1 year</option>
+      </select>
+    </div>
+    <div style={{display:'flex',gap:4,marginBottom:14,flexWrap:'wrap'}}>
+      {[
+        {id:'overview',l:'📊 Overview'},
+        {id:'jobs',l:'📋 Jobs'},
+        {id:'billing',l:'💰 Billing'},
+        {id:'portal',l:'🔐 Portal Usage'},
+        {id:'clients',l:'👥 Clients'},
+      ].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'6px 14px',borderRadius:7,border:`1px solid ${tab===t.id?'#e3a008':'#1a2030'}`,background:tab===t.id?'#e3a00815':'transparent',color:tab===t.id?'#e3a008':'#8b949e',fontSize:11,fontWeight:600,cursor:'pointer'}}>{t.l}</button>)}
+    </div>
+
+    {tab==='overview'&&<div style={{display:'grid',gap:12}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:8}}>
+        <div className="c" style={{padding:14}}><div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Total Jobs</div><div style={{fontSize:24,fontWeight:800,color:'#e3a008',marginTop:4}}>{fmt(stats.total)}</div><div style={{fontSize:9,color:'#475569',marginTop:2}}>{fmt(stats.recent.length)} in last {period}d</div></div>
+        <div className="c" style={{padding:14}}><div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Active Pipeline</div><div style={{fontSize:24,fontWeight:800,color:'#3b82f6',marginTop:4}}>{fmt((jobs||[]).filter(j=>!['Billing Done','Cash Received','Cancelled','No Bill'].includes(j.status)).length)}</div><div style={{fontSize:9,color:'#475569',marginTop:2}}>open jobs</div></div>
+        <div className="c" style={{padding:14}}><div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Clients</div><div style={{fontSize:24,fontWeight:800,color:'#8b5cf6',marginTop:4}}>{fmt((clients||[]).length)}</div><div style={{fontSize:9,color:'#475569',marginTop:2}}>in master</div></div>
+        <div className="c" style={{padding:14}}><div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Portal Logins</div><div style={{fontSize:24,fontWeight:800,color:'#4ade80',marginTop:4}}>{portalStats?fmt(portalStats.uniqueSessions):'—'}</div><div style={{fontSize:9,color:'#475569',marginTop:2}}>unique session-days</div></div>
+        <div className="c" style={{padding:14}}><div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Portal Submissions</div><div style={{fontSize:24,fontWeight:800,color:'#f59e0b',marginTop:4}}>{portalStats?fmt(portalStats.submissions):'—'}</div><div style={{fontSize:9,color:'#475569',marginTop:2}}>jobs/BOQs from clients</div></div>
+        <div className="c" style={{padding:14}}><div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',fontWeight:700,letterSpacing:.5}}>Failed PINs</div><div style={{fontSize:24,fontWeight:800,color:portalStats&&portalStats.failedLogins>10?'#f47067':'#64748b',marginTop:4}}>{portalStats?fmt(portalStats.failedLogins):'—'}</div><div style={{fontSize:9,color:'#475569',marginTop:2}}>{portalStats?fmt(portalStats.lockouts)+' lockouts':''}</div></div>
+      </div>
+      <div className="c" style={{padding:14}}>
+        <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Monthly Trend (last 6 months)</h3>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:6}}>
+          {Object.entries(stats.monthly).map(([k,v])=>{
+            const maxJ=Math.max(1,...Object.values(stats.monthly).map(x=>x.jobs));
+            const h=Math.round((v.jobs/maxJ)*80)+10;
+            return <div key={k} style={{textAlign:'center'}}>
+              <div style={{height:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+                <div style={{width:'70%',height:h,background:'linear-gradient(180deg,#e3a008,#ca8a04)',borderRadius:'4px 4px 0 0',position:'relative'}}>
+                  <div style={{position:'absolute',top:-14,left:0,right:0,fontSize:9,fontWeight:700,color:'#e3a008'}}>{v.jobs}</div>
+                </div>
+              </div>
+              <div style={{fontSize:9,color:'#64748b',marginTop:4}}>{k.slice(2)}</div>
+              {v.billed>0&&<div style={{fontSize:8,color:'#4ade80',fontWeight:600}}>{fmtINR(v.billed)}</div>}
+            </div>;
+          })}
+        </div>
+      </div>
+    </div>}
+
+    {tab==='jobs'&&<div className="c" style={{padding:14}}>
+      <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Jobs by Status</h3>
+      <div style={{display:'grid',gap:4}}>
+        {Object.entries(stats.byStatus).sort((a,b)=>b[1]-a[1]).map(([s,c])=>{
+          const max=Math.max(...Object.values(stats.byStatus));
+          const pct=Math.round((c/max)*100);
+          return <div key={s} style={{display:'grid',gridTemplateColumns:'180px 1fr 50px',gap:8,alignItems:'center'}}>
+            <div style={{fontSize:11,color:'#c9d1d9'}}>{s}</div>
+            <div style={{height:14,background:'#0c1017',borderRadius:3,overflow:'hidden'}}>
+              <div style={{width:pct+'%',height:'100%',background:'linear-gradient(90deg,#e3a008,#ca8a04)'}}/>
+            </div>
+            <div style={{fontSize:11,fontWeight:700,color:'#e3a008',textAlign:'right'}}>{c}</div>
+          </div>;
+        })}
+      </div>
+      <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',margin:'18px 0 10px'}}>Jobs by Firm</h3>
+      <div style={{display:'grid',gap:4}}>
+        {Object.entries(stats.byFirm).sort((a,b)=>b[1]-a[1]).map(([s,c])=>{
+          const max=Math.max(...Object.values(stats.byFirm));
+          const pct=Math.round((c/max)*100);
+          return <div key={s} style={{display:'grid',gridTemplateColumns:'180px 1fr 50px',gap:8,alignItems:'center'}}>
+            <div style={{fontSize:11,color:'#c9d1d9'}}>{s}</div>
+            <div style={{height:14,background:'#0c1017',borderRadius:3,overflow:'hidden'}}>
+              <div style={{width:pct+'%',height:'100%',background:'linear-gradient(90deg,#3b82f6,#2563eb)'}}/>
+            </div>
+            <div style={{fontSize:11,fontWeight:700,color:'#3b82f6',textAlign:'right'}}>{c}</div>
+          </div>;
+        })}
+      </div>
+    </div>}
+
+    {tab==='billing'&&<div className="c" style={{padding:14}}>
+      <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Billing Trend (last 6 months)</h3>
+      <table style={{width:'100%',borderCollapse:'collapse'}}>
+        <thead><tr style={{borderBottom:'1px solid #1a2030'}}>
+          <th style={{padding:6,fontSize:10,color:'#64748b',textAlign:'left'}}>Month</th>
+          <th style={{padding:6,fontSize:10,color:'#64748b',textAlign:'right'}}>New Jobs</th>
+          <th style={{padding:6,fontSize:10,color:'#64748b',textAlign:'right'}}>Billed Amount</th>
+        </tr></thead>
+        <tbody>{Object.entries(stats.monthly).map(([k,v])=>
+          <tr key={k} style={{borderBottom:'1px solid #0c1017'}}>
+            <td style={{padding:6,fontSize:11,color:'#c9d1d9'}}>{k}</td>
+            <td style={{padding:6,fontSize:11,color:'#e3a008',textAlign:'right',fontWeight:600}}>{fmt(v.jobs)}</td>
+            <td style={{padding:6,fontSize:11,color:'#4ade80',textAlign:'right',fontWeight:600}}>{fmtINR(v.billed)}</td>
+          </tr>
+        )}</tbody>
+      </table>
+      <p style={{fontSize:10,color:'#64748b',marginTop:10}}>Note: Billed amount = Σ (line_item.width × height × qty × rate) across batches with bill_no in that month.</p>
+    </div>}
+
+    {tab==='portal'&&<div style={{display:'grid',gap:12}}>
+      {logErr&&<div className="c" style={{padding:14,borderColor:'#f4706744'}}>
+        <p style={{fontSize:11,color:'#f47067',fontWeight:600,marginBottom:6}}>⚠ {logErr}</p>
+        <p style={{fontSize:10,color:'#8b949e'}}>Portal usage stats need the <code style={{background:'#1a2030',padding:'1px 4px',borderRadius:3}}>portal_access_log</code> table. Open Supabase SQL Editor and run the SQL provided in this session's deploy notes.</p>
+      </div>}
+      {!logErr&&portalStats&&<>
+        <div className="c" style={{padding:14}}>
+          <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Activity by Client (last {period} days)</h3>
+          {Object.keys(portalStats.byClient).length===0
+            ? <p style={{fontSize:11,color:'#64748b'}}>No portal activity in this period.</p>
+            : <div style={{display:'grid',gap:4}}>
+                {Object.entries(portalStats.byClient).sort((a,b)=>b[1]-a[1]).map(([c,n])=>{
+                  const max=Math.max(...Object.values(portalStats.byClient));
+                  const pct=Math.round((n/max)*100);
+                  return <div key={c} style={{display:'grid',gridTemplateColumns:'120px 1fr 60px',gap:8,alignItems:'center'}}>
+                    <div style={{fontSize:11,color:'#c9d1d9',fontWeight:600}}>{c}</div>
+                    <div style={{height:14,background:'#0c1017',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{width:pct+'%',height:'100%',background:'linear-gradient(90deg,#4ade80,#22c55e)'}}/>
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:'#4ade80',textAlign:'right'}}>{n}</div>
+                  </div>;
+                })}
+              </div>}
+        </div>
+        <div className="c" style={{padding:14}}>
+          <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Event Breakdown</h3>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:8}}>
+            {Object.entries(portalStats.byEvent).sort((a,b)=>b[1]-a[1]).map(([e,n])=>{
+              const colors={dept_select:'#8b5cf6',pin_success:'#4ade80',pin_fail:'#f59e0b',pin_locked:'#f47067',auto_restore:'#06b6d4',logout:'#64748b',job_submit:'#e3a008',note_add:'#3b82f6',boq_import:'#ec4899'};
+              return <div key={e} style={{padding:10,background:'#060810',borderRadius:6,border:'1px solid #1a2030'}}>
+                <div style={{fontSize:9,color:'#64748b',textTransform:'capitalize'}}>{e.replace(/_/g,' ')}</div>
+                <div style={{fontSize:18,fontWeight:800,color:colors[e]||'#c9d1d9',marginTop:2}}>{n}</div>
+              </div>;
+            })}
+          </div>
+        </div>
+        <div className="c" style={{padding:14}}>
+          <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Recent Activity</h3>
+          <div style={{maxHeight:300,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead><tr style={{borderBottom:'1px solid #1a2030',position:'sticky',top:0,background:'#0c1017'}}>
+                <th style={{padding:6,fontSize:9,color:'#64748b',textAlign:'left'}}>Time</th>
+                <th style={{padding:6,fontSize:9,color:'#64748b',textAlign:'left'}}>Client</th>
+                <th style={{padding:6,fontSize:9,color:'#64748b',textAlign:'left'}}>Dept</th>
+                <th style={{padding:6,fontSize:9,color:'#64748b',textAlign:'left'}}>Event</th>
+              </tr></thead>
+              <tbody>{portalLogs.slice(0,50).map(l=>
+                <tr key={l.id} style={{borderBottom:'1px solid #0c1017'}}>
+                  <td style={{padding:5,fontSize:10,color:'#8b949e'}}>{(l.created_at||'').replace('T',' ').slice(0,16)}</td>
+                  <td style={{padding:5,fontSize:10,color:'#c9d1d9',fontWeight:600}}>{l.client_code}</td>
+                  <td style={{padding:5,fontSize:10,color:'#c9d1d9'}}>{l.dept_id||'—'}</td>
+                  <td style={{padding:5,fontSize:10,color:l.event_type==='pin_fail'||l.event_type==='pin_locked'?'#f47067':'#4ade80'}}>{l.event_type}</td>
+                </tr>
+              )}</tbody>
+            </table>
+          </div>
+        </div>
+      </>}
+      {!logErr&&!portalStats&&<div className="c" style={{padding:14}}><p style={{fontSize:11,color:'#64748b'}}>Loading portal usage data…</p></div>}
+    </div>}
+
+    {tab==='clients'&&<div className="c" style={{padding:14}}>
+      <h3 style={{fontSize:12,fontWeight:700,color:'#e3a008',marginBottom:10}}>Top 10 Clients (all time)</h3>
+      <table style={{width:'100%',borderCollapse:'collapse'}}>
+        <thead><tr style={{borderBottom:'1px solid #1a2030'}}>
+          <th style={{padding:6,fontSize:10,color:'#64748b',textAlign:'left'}}>#</th>
+          <th style={{padding:6,fontSize:10,color:'#64748b',textAlign:'left'}}>Client</th>
+          <th style={{padding:6,fontSize:10,color:'#64748b',textAlign:'right'}}>Total Jobs</th>
+        </tr></thead>
+        <tbody>{stats.topClients.map(([c,n],i)=>
+          <tr key={c} style={{borderBottom:'1px solid #0c1017'}}>
+            <td style={{padding:6,fontSize:11,color:'#475569',fontWeight:700}}>{i+1}</td>
+            <td style={{padding:6,fontSize:11,color:'#c9d1d9',fontWeight:600}}>{c}</td>
+            <td style={{padding:6,fontSize:11,color:'#e3a008',textAlign:'right',fontWeight:700}}>{n}</td>
+          </tr>
+        )}</tbody>
+      </table>
+    </div>}
   </div>;
 }
 
@@ -6651,6 +6945,11 @@ function ClientPortal({code}){
   const [firm,setFirm]=useState(null);const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState('all');const [selJob,setSelJob]=useState(null);
   const [dept,setDept]=useState(null);
+  const [pendingDept,setPendingDept]=useState(null);
+  const [pinInput,setPinInput]=useState('');
+  const [pinError,setPinError]=useState('');
+  const [pinLockUntil,setPinLockUntil]=useState(0); // 0 = unlocked; epoch-ms when lock expires
+  const [pinLockTick,setPinLockTick]=useState(0);   // forces re-render every second while locked
   const [noteText,setNoteText]=useState({});const [notes,setNotes]=useState({});
   const [showNewJob,setShowNewJob]=useState(false);
   const [submittingJob,setSubmittingJob]=useState(false);
@@ -6669,17 +6968,133 @@ function ClientPortal({code}){
   const [cjFiles,setCjFiles]=useState([]);
   const [cjMsg,setCjMsg]=useState('');
 
-  const portalConfigs={
-    'ANA':{name:'ANA Designs',match:['ANA DESIGNS'],
-      logo:'https://idjeniwznjiaanaxcjvg.supabase.co/storage/v1/object/public/Uploads/logos/ana-logo.jpg',
-      depts:[
-      {id:'design',name:'Design Team',icon:'🎨',st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending'],seeAll:false},
-      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing','Fabrication','Installation','Delivered'],seeAll:false},
-      {id:'purchase',name:'Purchase Team',icon:'📦',st:null,seeAll:true,canEditPO:true},
-      {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice'],seeAll:false},
-    ]},
+  // Portal config sourced from top-level PORTAL_CONFIGS — see top of file for templates + per-client setup.
+  const config=PORTAL_CONFIGS[code.toUpperCase()];
+
+  // Auto-restore previously verified dept from localStorage (30 day expiry)
+  useEffect(()=>{
+    if(!config||dept)return;
+    try{
+      const key='portal_auth_'+code.toUpperCase();
+      const stored=localStorage.getItem(key);
+      if(stored){
+        const {deptId,ts}=JSON.parse(stored);
+        const daysSince=(Date.now()-ts)/(1000*60*60*24);
+        if(daysSince<30){
+          const d=config.depts.find(x=>x.id===deptId);
+          if(d){
+            setDept(d);setTab(d.seeAll?'all':d.id);
+            // fire-and-forget log; don't reference logPortalEvent here (defined below) — inline minimal logger
+            try{
+              const id='PE'+Date.now()+Math.random().toString(36).slice(2,7);
+              sb.from('portal_access_log').insert({
+                id, client_code: code.toUpperCase(), dept_id: d.id,
+                event_type: 'auto_restore', meta: {days_since: Math.round(daysSince*10)/10},
+                ua: (typeof navigator!=='undefined'?navigator.userAgent:'').slice(0,200),
+                created_at: new Date().toISOString()
+              }).then(()=>{}).catch(()=>{});
+            }catch(e){}
+          }
+          else localStorage.removeItem(key);
+        }else localStorage.removeItem(key);
+      }
+    }catch(e){}
+  },[config]);
+
+  // Portal access logging — fire-and-forget. Requires Supabase table `portal_access_log`.
+  // Schema (run in Supabase SQL editor — included in deploy notes):
+  //   id text primary key, client_code text, dept_id text, event_type text,
+  //   meta jsonb, ua text, created_at timestamptz default now()
+  // event_type values: 'dept_select' | 'pin_success' | 'pin_fail' | 'pin_locked'
+  //                  | 'auto_restore' | 'logout' | 'job_submit' | 'note_add' | 'boq_import'
+  const logPortalEvent=(eventType,deptId,meta)=>{
+    try{
+      const id='PE'+Date.now()+Math.random().toString(36).slice(2,7);
+      const ua=(typeof navigator!=='undefined'?navigator.userAgent:'').slice(0,200);
+      sb.from('portal_access_log').insert({
+        id,
+        client_code: code.toUpperCase(),
+        dept_id: deptId||null,
+        event_type: eventType,
+        meta: meta||{},
+        ua,
+        created_at: new Date().toISOString(),
+      }).then(()=>{}).catch(e=>console.warn('portal_access_log insert failed:',e?.message||e));
+    }catch(e){console.warn('logPortalEvent error:',e);}
   };
-  const config=portalConfigs[code.toUpperCase()];
+  // Storage key: portal_pin_attempts_{CODE}_{deptId} = {fails:N, lockUntil:ts}
+  const pinAttemptsKey=(deptId)=>'portal_pin_attempts_'+code.toUpperCase()+'_'+deptId;
+  const PIN_MAX_ATTEMPTS=5;
+  const PIN_LOCK_MS=15*60*1000; // 15 minutes
+
+  // When pendingDept changes, hydrate lockout state from localStorage
+  useEffect(()=>{
+    if(!pendingDept){setPinLockUntil(0);return;}
+    try{
+      const raw=localStorage.getItem(pinAttemptsKey(pendingDept.id));
+      if(raw){
+        const {lockUntil}=JSON.parse(raw);
+        if(lockUntil&&lockUntil>Date.now()){setPinLockUntil(lockUntil);}
+        else{setPinLockUntil(0);}
+      }else setPinLockUntil(0);
+    }catch(e){setPinLockUntil(0);}
+  },[pendingDept]);
+
+  // Tick every second while locked so the countdown updates
+  useEffect(()=>{
+    if(!pinLockUntil||pinLockUntil<=Date.now())return;
+    const t=setInterval(()=>{
+      if(Date.now()>=pinLockUntil){setPinLockUntil(0);clearInterval(t);}
+      else setPinLockTick(x=>x+1);
+    },1000);
+    return ()=>clearInterval(t);
+  },[pinLockUntil]);
+
+  const verifyPin=()=>{
+    if(!pendingDept)return;
+    // Block if locked
+    if(pinLockUntil&&pinLockUntil>Date.now()){
+      const mins=Math.ceil((pinLockUntil-Date.now())/60000);
+      setPinError('Too many wrong attempts. Locked for '+mins+' min.');
+      return;
+    }
+    const key=pinAttemptsKey(pendingDept.id);
+    if(pinInput===pendingDept.pin){
+      // Correct PIN — clear attempts, save auth, proceed
+      try{localStorage.removeItem(key);}catch(e){}
+      try{localStorage.setItem('portal_auth_'+code.toUpperCase(),JSON.stringify({deptId:pendingDept.id,ts:Date.now()}));}catch(e){}
+      logPortalEvent('pin_success',pendingDept.id);
+      setDept(pendingDept);
+      setTab(pendingDept.seeAll?'all':pendingDept.id);
+      setPendingDept(null);setPinInput('');setPinError('');setPinLockUntil(0);
+    }else{
+      // Wrong PIN — increment counter, possibly lock
+      let fails=1;
+      try{
+        const raw=localStorage.getItem(key);
+        if(raw){const obj=JSON.parse(raw);fails=(obj.fails||0)+1;}
+      }catch(e){}
+      if(fails>=PIN_MAX_ATTEMPTS){
+        const lockUntil=Date.now()+PIN_LOCK_MS;
+        try{localStorage.setItem(key,JSON.stringify({fails,lockUntil}));}catch(e){}
+        setPinLockUntil(lockUntil);
+        setPinError('Too many wrong attempts. Locked for 15 min.');
+        logPortalEvent('pin_locked',pendingDept.id,{fails});
+      }else{
+        try{localStorage.setItem(key,JSON.stringify({fails,lockUntil:0}));}catch(e){}
+        const left=PIN_MAX_ATTEMPTS-fails;
+        setPinError('Incorrect PIN. '+left+' attempt'+(left===1?'':'s')+' left.');
+        logPortalEvent('pin_fail',pendingDept.id,{fails});
+      }
+      setPinInput('');
+    }
+  };
+
+  const logoutDept=()=>{
+    if(dept)logPortalEvent('logout',dept.id);
+    try{localStorage.removeItem('portal_auth_'+code.toUpperCase());}catch(e){}
+    setDept(null);setTab('all');setPendingDept(null);setPinInput('');setPinError('');
+  };
 
   useEffect(()=>{
     if(!config||!dept)return;
@@ -6711,9 +7126,9 @@ function ClientPortal({code}){
   const sc={'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b','PO Pending':'#f47067','Recce Pending':'#f59e0b'};
   const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing',l:'Design',e:'🎨'},{k:'printing',l:'Print',e:'🖨️'},{k:'fabrication',l:'Fab',e:'🔧'},{k:'installation',l:'Install',e:'🔩'},{k:'delivered',l:'Done',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
   const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Active':0,'Recce Pending':0,'Designing':1,'Printing':2,'Fabrication':3,'Installation':4,'Delivered':5,'Billing Pending':5,'Given for Billing':5,'Billing Done':6,'Cash Received':6}[st]??-1);
-  const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null}];
+  const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null,projectMatch:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st,projectMatch:d.projectMatch}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null,projectMatch:dept?.projectMatch||null}];
   const curTab=deptTabs.find(t=>t.id===tab)||deptTabs[0];
-  const filtered=(()=>{let f=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;if(portalSearch){const q=portalSearch.toLowerCase();f=f.filter(j=>j.id?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.delivery_address?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q));}return f;})();
+  const filtered=(()=>{let f=full;if(curTab?.projectMatch&&curTab.projectMatch.length){f=f.filter(j=>curTab.projectMatch.some(p=>(j.project||'').toLowerCase().includes(p.toLowerCase())));}else if(curTab?.st){f=f.filter(j=>curTab.st.includes(j.status));}if(portalSearch){const q=portalSearch.toLowerCase();f=f.filter(j=>j.id?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.delivery_address?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q));}return f;})();
 
   const addNote=async(jobId)=>{
     const text=noteText[jobId];if(!text?.trim())return;
@@ -6729,7 +7144,19 @@ function ClientPortal({code}){
   };
 
   // ── Client Job Submission ──
-  const ITEM_TYPES=['Graphics (Vinyl)','Graphics (Canvas)','Glass Film (Clear)','Glass Film (Frosted)','Glass Film (UV)','Glass Film (PrePrinted)','Canvas Frames','Reception Logo','Signages','Other'];
+  // Broad item categories with grouped sub-types — easier mental model for clients than a flat list.
+  // Each entry is a category with options. Selecting an option submits the category-name as the type.
+  const ITEM_CATEGORIES=[
+    {cat:'Graphics & Vinyl',options:['Vinyl Printing','Canvas Printing','Wall Graphics','Floor Graphics','Backlit Graphics','One-Way Vision']},
+    {cat:'Glass Films',options:['Clear Film','Frosted Film','UV Film','Pre-Printed Film','Custom Cut Film']},
+    {cat:'Signage',options:['ACP Signage','Acrylic Signage','LED Signage','Channel Letters','Backlit Box','Reception Logo','Wayfinding/Direction Boards']},
+    {cat:'Print Collateral',options:['Business Cards','Brochures','Flyers','Posters','Stickers','Banners','Standees']},
+    {cat:'Frames & Display',options:['Canvas Frames','Photo Frames','Acrylic Frames','Foam Board Display']},
+    {cat:'Fabrication',options:['MS Fabrication','SS Fabrication','Wooden Fabrication','Mounting Structure']},
+    {cat:'Installation Services',options:['Site Survey/Recce','Installation Only','Removal/De-installation']},
+    {cat:'Other',options:['Other (please describe)']},
+  ];
+  const ITEM_TYPES=ITEM_CATEGORIES.flatMap(c=>c.options);
   const addCjItem=()=>setCjItems(p=>[...p,{id:Date.now()+'',type:'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
   const removeCjItem=(i)=>setCjItems(p=>p.filter((_,x)=>x!==i));
   const updateCjItem=(i,k,v)=>setCjItems(p=>{const n=[...p];n[i]={...n[i],[k]:v};return n;});
@@ -6818,11 +7245,15 @@ function ClientPortal({code}){
           +(cjf.po_number?'PO #: '+cjf.po_number+'\n':'')
           +(cjf.site_contact_person?'Site Contact: '+cjf.site_contact_person+' ('+cjf.site_contact_no+')\n':'')
           +'\nPlease review in iPrint ERP.';
-        sendWhatsApp(WA_NUMBERS['Jigar'],waMsg,'client_portal_new_job');
-        if(WA_NUMBERS['Ruchita'])setTimeout(()=>sendWhatsApp(WA_NUMBERS['Ruchita'],waMsg,'client_portal_new_job'),1500);
+        // Route to recipients defined in PORTAL_CONFIGS[code].notify (defaults to ['Jigar','Ruchita'])
+        const recipients=(config.notify&&config.notify.length?config.notify:['Jigar','Ruchita']).filter(n=>WA_NUMBERS[n]);
+        recipients.forEach((name,idx)=>{
+          setTimeout(()=>sendWhatsApp(WA_NUMBERS[name],waMsg,'client_portal_new_job'),idx*1500);
+        });
+        logPortalEvent('job_submit',dept?.id,{job_id:jid,recipients});
       }catch(e){console.log('WA notification error:',e);}
 
-      setCjf({project:'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:'',site_contact_person:'',site_contact_no:'',design_coord_person:'',design_coord_no:''});
+      setCjf({project:dept?.jobPrefix||'',contact_person:'',contact_no:'',delivery_address:'',po_number:'',email:'',remark:'',wetransfer_links:'',site_contact_person:'',site_contact_no:'',design_coord_person:'',design_coord_no:''});
       setCjItems([{id:Date.now()+'',type:'',desc:'',qty:1,width:'',height:'',size_unit:'MM',material:'',notes:''}]);
       setCjFiles([]);
 
@@ -6858,7 +7289,7 @@ function ClientPortal({code}){
       </div>
       {cjMsg&&<div style={{background:'#10b98120',border:'1px solid #10b98155',borderRadius:8,padding:'12px 14px',marginBottom:12}}><p style={{color:'#10b981',fontSize:12,fontWeight:700}}>{cjMsg}</p></div>}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:8,marginBottom:12}}>
-        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.project} onChange={e=>setCjf(p=>({...p,project:e.target.value}))} placeholder="e.g. Store Branding - Andheri"/></div>
+        <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Project / Site Name *{dept?.jobPrefix&&<span style={{color:'#e3a008',marginLeft:6,fontSize:8}}>(keeps "{dept.jobPrefix.trim()}" prefix)</span>}</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.project} onChange={e=>setCjf(p=>({...p,project:e.target.value}))} placeholder={dept?.jobPrefix?dept.jobPrefix+'Store Name - Location':"e.g. Store Branding - Andheri"}/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>PO Number</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.po_number} onChange={e=>setCjf(p=>({...p,po_number:e.target.value}))} placeholder="Optional"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Person *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_person} onChange={e=>setCjf(p=>({...p,contact_person:e.target.value}))} placeholder="Your name"/></div>
         <div><label style={{fontSize:9,color:'#64748b',fontWeight:600}}>Contact Number *</label><input style={{width:'100%',padding:'8px 10px',borderRadius:7,border:'1px solid #1a2030',background:'#060810',color:'#c9d1d9',fontSize:12,outline:'none',marginTop:3}} value={cjf.contact_no} onChange={e=>setCjf(p=>({...p,contact_no:e.target.value}))} placeholder="Phone number"/></div>
@@ -6889,7 +7320,7 @@ function ClientPortal({code}){
             {cjItems.length>1&&<button onClick={()=>removeCjItem(i)} style={{background:'none',border:'none',color:'#f47067',fontSize:11,cursor:'pointer',padding:'2px 6px'}}>✕ Remove</button>}
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:6,marginBottom:6}}>
-            <div><label style={{fontSize:8,color:'#64748b'}}>Type *</label><select style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #e3a00844',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.type} onChange={e=>updateCjItem(i,'type',e.target.value)}><option value="">Select Type...</option>{ITEM_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+            <div><label style={{fontSize:8,color:'#64748b'}}>Type *</label><select style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #e3a00844',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.type} onChange={e=>updateCjItem(i,'type',e.target.value)}><option value="">Select Type...</option>{ITEM_CATEGORIES.map(c=><optgroup key={c.cat} label={c.cat}>{c.options.map(t=><option key={t} value={t}>{t}</option>)}</optgroup>)}</select></div>
             <div><label style={{fontSize:8,color:'#64748b'}}>Description / Location</label><input style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.desc} onChange={e=>updateCjItem(i,'desc',e.target.value)} placeholder="e.g. Main entrance, 2nd floor lobby"/></div>
             <div><label style={{fontSize:8,color:'#64748b'}}>Qty</label><input type="number" style={{width:'100%',padding:'6px 8px',borderRadius:5,border:'1px solid #1a2030',background:'#0c1017',color:'#c9d1d9',fontSize:11,outline:'none'}} value={it.qty} onChange={e=>updateCjItem(i,'qty',e.target.value)} min="1"/></div>
           </div>
@@ -7021,8 +7452,12 @@ function ClientPortal({code}){
           +'Items: '+incl.length+'\n'
           +(poUrl?'📎 PO Copy attached\n':'')
           +'\nPlease review in iPrint ERP.';
-        sendWhatsApp(WA_NUMBERS['Jigar'],waMsg,'client_portal_boq_import');
-        if(WA_NUMBERS['Ruchita'])setTimeout(()=>sendWhatsApp(WA_NUMBERS['Ruchita'],waMsg,'client_portal_boq_import'),1500);
+        // Route to recipients defined in PORTAL_CONFIGS[code].notify (defaults to ['Jigar','Ruchita'])
+        const recipients=(config.notify&&config.notify.length?config.notify:['Jigar','Ruchita']).filter(n=>WA_NUMBERS[n]);
+        recipients.forEach((name,idx)=>{
+          setTimeout(()=>sendWhatsApp(WA_NUMBERS[name],waMsg,'client_portal_boq_import'),idx*1500);
+        });
+        logPortalEvent('boq_import',dept?.id,{job_id:jid,recipients});
       }catch(e){console.log('WA notification error:',e);}
 
       // Refresh after delay
@@ -7100,6 +7535,41 @@ function ClientPortal({code}){
 
   if(!config) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}><div style={{textAlign:"center",padding:40}}><p style={{fontSize:48}}>🔒</p><h2 style={{color:"#f47067",fontSize:18}}>Invalid Portal Link</h2><p style={{color:"#64748b",fontSize:12,marginTop:8}}>Contact your iPrint representative for access.</p></div></div>;
 
+  // PIN ENTRY SCREEN — shown when dept is selected but PIN not yet verified
+  if(!dept && pendingDept){
+    const isLocked=pinLockUntil&&pinLockUntil>Date.now();
+    const lockSecs=isLocked?Math.ceil((pinLockUntil-Date.now())/1000):0;
+    const lockMins=Math.floor(lockSecs/60),lockSS=lockSecs%60;
+    const lockTimeStr=lockMins+':'+String(lockSS).padStart(2,'0');
+    return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810",padding:"20px"}}>
+    <div style={{width:"100%",maxWidth:380,padding:"32px 28px",background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
+      <div style={{width:64,height:64,borderRadius:14,background:isLocked?"#f4706720":"#e3a00820",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",fontSize:32}}>{isLocked?'🔒':pendingDept.icon}</div>
+      <h2 style={{fontSize:17,fontWeight:800,color:isLocked?"#f47067":"#e3a008",margin:"0 0 4px"}}>{pendingDept.name}</h2>
+      <p style={{fontSize:10,color:"#64748b",marginBottom:22}}>{isLocked?'Locked due to too many wrong attempts':'Enter your 4-digit team PIN to continue'}</p>
+      {isLocked
+        ? <div style={{padding:"22px 14px",borderRadius:10,border:"1px solid #f4706744",background:"#f4706710"}}>
+            <p style={{fontSize:11,color:"#f47067",margin:0,fontWeight:600}}>⏱ Try again in</p>
+            <p style={{fontSize:32,color:"#f47067",margin:"6px 0 0",fontWeight:800,fontFamily:"monospace",letterSpacing:2}}>{lockTimeStr}</p>
+          </div>
+        : <input type="password" inputMode="numeric" maxLength={4} autoFocus value={pinInput}
+            onChange={e=>{const v=e.target.value.replace(/\D/g,'').slice(0,4);setPinInput(v);setPinError('');}}
+            onKeyDown={e=>{if(e.key==='Enter'&&pinInput.length===4)verifyPin();}}
+            placeholder="● ● ● ●"
+            style={{width:"100%",padding:"14px 16px",borderRadius:10,border:pinError?"1px solid #f47067":"1px solid #1a2030",background:"#060810",color:"#e3a008",fontSize:22,outline:"none",textAlign:"center",letterSpacing:8,fontWeight:700,fontFamily:"monospace"}}/>}
+      {pinError&&!isLocked&&<p style={{fontSize:10,color:"#f47067",marginTop:10,marginBottom:0}}>⚠ {pinError}</p>}
+      {!isLocked&&<button onClick={verifyPin} disabled={pinInput.length!==4}
+        style={{width:"100%",padding:"12px",borderRadius:10,border:"none",background:pinInput.length===4?"linear-gradient(135deg,#e3a008,#ca8a04)":"#1a2030",color:pinInput.length===4?"#060810":"#64748b",fontSize:13,fontWeight:700,cursor:pinInput.length===4?"pointer":"not-allowed",marginTop:14,transition:"all .2s"}}>
+        Continue →
+      </button>}
+      <button onClick={()=>{setPendingDept(null);setPinInput('');setPinError('');}}
+        style={{width:"100%",padding:"8px",borderRadius:8,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:10,cursor:"pointer",marginTop:8}}>
+        ← Back to department selection
+      </button>
+      <p style={{fontSize:9,color:"#475569",marginTop:16,lineHeight:1.5}}>🔐 PIN remembered on this device for 30 days. After 5 wrong tries, dept locks for 15 min.<br/>Forgot your PIN? Contact Jigar or Ruchita.</p>
+    </div>
+  </div>;
+  }
+
   if(!dept) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810",padding:"20px"}}>
     <div style={{width:"100%",maxWidth:420,padding:"32px 28px",background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:20}}>
@@ -7113,7 +7583,7 @@ function ClientPortal({code}){
       <p style={{fontSize:13,fontWeight:700,color:"#ca8a04",marginBottom:24}}>iPrint · Juxtapose</p>
       <p style={{fontSize:11,color:"#8b949e",marginBottom:14,fontWeight:500}}>Select your department to continue</p>
       <div style={{display:"grid",gap:8}}>
-        {config.depts.map(d=><button key={d.id} onClick={()=>{setDept(d);setTab(d.seeAll?'all':d.id);}} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor='#e3a008';e.currentTarget.style.background='#e3a00808';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#1a2030';e.currentTarget.style.background='#060810';}}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
+        {config.depts.map(d=><button key={d.id} onClick={()=>{setPendingDept(d);setPinInput('');setPinError('');logPortalEvent('dept_select',d.id);}} style={{padding:"14px 18px",borderRadius:10,border:"1px solid #1a2030",background:"#060810",color:"#c9d1d9",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:10,transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor='#e3a008';e.currentTarget.style.background='#e3a00808';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#1a2030';e.currentTarget.style.background='#060810';}}><span style={{fontSize:22}}>{d.icon}</span>{d.name}</button>)}
       </div>
       <p style={{fontSize:8,color:"#333",marginTop:20}}>Powered by iPrint ERP</p>
     </div>
@@ -7130,9 +7600,9 @@ function ClientPortal({code}){
           <div><h1 style={{fontSize:14,fontWeight:800,color:"#e3a008",margin:0}}>{config.name}</h1><p style={{fontSize:9,color:"#64748b",margin:0}}>{dept.icon} {dept.name}</p></div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-          <button onClick={()=>setShowNewJob(true)} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>➕ New Job</button>
+          <button onClick={()=>{if(dept?.jobPrefix&&!cjf.project)setCjf(p=>({...p,project:dept.jobPrefix}));setShowNewJob(true);}} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #e3a00855",background:"linear-gradient(135deg,#e3a00820,#ca8a0410)",color:"#e3a008",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>➕ New Job</button>
           {dept?.canEditPO&&<button onClick={()=>setShowBOQ(true)} style={{padding:"6px 12px",borderRadius:7,border:"1px solid #3b82f655",background:"linear-gradient(135deg,#3b82f620,#2563eb10)",color:"#3b82f6",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>📊 Import BOQ</button>}
-          <button onClick={()=>{setDept(null);setTab('all');}} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:9,cursor:"pointer",whiteSpace:"nowrap"}}>↩ Switch</button>
+          <button onClick={logoutDept} style={{padding:"5px 10px",borderRadius:6,border:"1px solid #1a2030",background:"transparent",color:"#8b949e",fontSize:9,cursor:"pointer",whiteSpace:"nowrap"}}>↩ Switch</button>
         </div>
       </div>
     </header>
