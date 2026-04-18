@@ -3285,6 +3285,20 @@ const STAFF_DEPTS = {
 };
 const WA_GROUP = 'https://chat.whatsapp.com/JUcusgs0e36597Zkv36MTn';
 
+// Canonical list of Indian States + UTs — single source of truth for state dropdowns.
+// Added 18 Apr 26 alongside banking_sites.state data cleanup (3,558 rows remapped).
+// Free-text entry is disallowed everywhere; users must pick from this list.
+const INDIAN_STATES = [
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa',
+  'Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala',
+  'Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland',
+  'Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura',
+  'Uttar Pradesh','Uttarakhand','West Bengal',
+  // Union Territories
+  'Andaman and Nicobar Islands','Chandigarh','Dadra and Nagar Haveli','Daman and Diu',
+  'Delhi','J&K','Ladakh','Lakshadweep','Puducherry'
+];
+
 // ── WhatsApp sending via Interakt (through serverless proxy) ──
 // Credentials live server-side in Vercel env var INTERAKT_KEY.
 // Proxy endpoint: /api/wa-send  (see api/wa-send.js)
@@ -5834,8 +5848,11 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
   // Unique states for filter
   const states=useMemo(()=>{
-    const s=new Set();sites.forEach(r=>{if(r.state)s.add(r.state);});
-    return [...s].sort();
+    // Pull distinct state values present in sites data, then intersect with
+    // INDIAN_STATES to enforce canonical ordering + drop any non-canonical
+    // stragglers (e.g. empty string, legacy variants that slipped past cleanup).
+    const present=new Set();sites.forEach(r=>{if(r.state)present.add(r.state);});
+    return INDIAN_STATES.filter(s=>present.has(s));
   },[sites]);
 
   // Billing categories for filter
@@ -6045,7 +6062,10 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Site Address</label><input className="in" value={newSite.site_address} onChange={e=>setNewSite(s=>({...s,site_address:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>City</label><input className="in" value={newSite.city} onChange={e=>setNewSite(s=>({...s,city:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>District</label><input className="in" value={newSite.district} onChange={e=>setNewSite(s=>({...s,district:e.target.value}))} style={{fontSize:10}}/></div>
-        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><input className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>State</label><select className="in" value={newSite.state} onChange={e=>setNewSite(s=>({...s,state:e.target.value}))} style={{fontSize:10}}>
+          <option value="">Select state...</option>
+          {INDIAN_STATES.map(s=><option key={s} value={s}>{s}</option>)}
+        </select></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Pincode</label><input className="in" value={newSite.pincode} onChange={e=>setNewSite(s=>({...s,pincode:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Name</label><input className="in" value={newSite.vendor_name} onChange={e=>setNewSite(s=>({...s,vendor_name:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Contact</label><input className="in" value={newSite.vendor_contact} onChange={e=>setNewSite(s=>({...s,vendor_contact:e.target.value}))} style={{fontSize:10}}/></div>
