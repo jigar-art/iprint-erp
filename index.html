@@ -148,9 +148,24 @@ const STATUS_CARDS = [
 ];
 // Quick lookup helpers
 const STATUS_CARD_BY_KEY = Object.fromEntries(STATUS_CARDS.map(c => [c.key, c]));
+// Count jobs in a card bucket. Semantics mirror Dept Tracker's tabs[].match (line ~2705):
+// - isLeading cards: use STATUS_TO_LEADING rollup so legacy statuses ('Active'→design,
+//   'Installation'→dispatch, 'Printing'→printIn etc.) land in the right bucket.
+// - 'installed' card: additionally excludes any job whose status has moved on to
+//   accounts/nobill/cancelled, so lifecycle buckets stay mutually exclusive.
+// - Non-leading cards: strict status match.
 const countJobsByCard = (jobs, cardKey) => {
   const card = STATUS_CARD_BY_KEY[cardKey];
   if (!card) return 0;
+  if (card.isLeading) {
+    if (cardKey === 'installed') {
+      const accountsSt = STATUS_CARD_BY_KEY.accounts.statuses;
+      return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === 'installed'
+        && !accountsSt.includes(j.status)
+        && !['No Bill','Cancelled'].includes(j.status)).length;
+    }
+    return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === cardKey).length;
+  }
   return (jobs||[]).filter(j => card.statuses.includes(j.status)).length;
 };
 
