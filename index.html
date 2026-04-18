@@ -954,7 +954,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
-          {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob}/>}
+          {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob} sm={setModal}/>}
           {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user} items={items} osItems={osItems}/>}
@@ -4916,7 +4916,7 @@ function CliPage({clients,jobs,s}){const fl=clients.filter(c=>!s||c.name?.toLowe
 }
 
 // ACCOUNTS
-function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFile,appendJobFiles,removeJobFile,show,addBatchToJob}){
+function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFile,appendJobFiles,removeJobFile,show,addBatchToJob,sm}){
   const [tab,setTab]=useState('pending');
   const [invoices,setInvoices]=useState({});
   const [sq,setSq]=useState('');
@@ -4927,6 +4927,10 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     {id:'done',l:'Billing Completed',c:'#4ade80',statuses:['Billing Done','Cash Received','No Bill']},
   ];
   const cur=tabs.find(t=>t.id===tab);
+  // openJob: same pattern as every other page (DashPage, JobsPage, DeptPage, etc.) — opens
+  // the Job Detail modal via the setModal helper passed in as sm. Audit 18 Apr noted
+  // Accounts Job# cells were inconsistent with other pages; this fixes that.
+  const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   const filtered=jobs.filter(j=>{
     if(!cur.statuses.includes(j.status))return false;
     if(statusFilter!=='All'&&j.status!==statusFilter)return false;
@@ -4980,7 +4984,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     </div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:cur.c}}>{statusFilter!=='All'?statusFilter:cur.l} — {filtered.length} jobs{sq?` matching "${sq}"`:''}</span></div>
     <div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>PO</th><th>Invoices</th>{tab!=='done'&&<><th>📎 DC</th><th>📎 IC</th><th>Action</th></>}</tr></thead><tbody>
-      {filtered.map(j=>{ return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
+      {filtered.map(j=>{ return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,18)}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td style={{fontSize:10}}>{j.po_number?<span style={{color:"#4ade80"}}>✓</span>:<span style={{color:"#f47067"}}>⚠️</span>}</td>
         <td style={{minWidth:140}}><InvChips j={j} editable={tab!=='done'}/></td>
         {tab!=='done'&&<><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.dc_file_url)?j.dc_file_url:j.dc_file_url?[j.dc_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this DC file?'))removeJobFile(j.id,'dc_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-dc');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'dc_file_url',newUrls);}}}/></div>;})()}</td><td style={{minWidth:90}}>{(()=>{const urls=Array.isArray(j.ic_file_url)?j.ic_file_url:j.ic_file_url?[j.ic_file_url]:[];return <div>{urls.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>{urls.map((u,i)=><span key={i} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#3b82f615",border:"1px solid #3b82f633",padding:"2px 6px",borderRadius:4}}><a href={u} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📄{i+1}</a><button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:9,padding:"0 4px",lineHeight:"14px",fontWeight:700}} onClick={()=>{if(confirm('Remove this IC file?'))removeJobFile(j.id,'ic_file_url',u)}}>✕</button></span>)}</div>}<input type="file" accept=".pdf,.jpg,.png" multiple className="in" style={{padding:1,fontSize:8,width:70}} onChange={async e=>{const files=[...e.target.files];if(files.length){const newUrls=await uploadMultiple(files,'accounts-ic');if(newUrls.length&&appendJobFiles)appendJobFiles(j.id,'ic_file_url',newUrls);}}}/></div>;})()}</td><td><button className="b bg bs" onClick={()=>markBilled(j)}>✓ Bill Done</button></td></>}
       </tr>})}
