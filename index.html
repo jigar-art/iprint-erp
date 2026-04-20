@@ -177,39 +177,39 @@ const countJobsByCard = (jobs, cardKey) => {
 // totalFn(area, qty, rate) → line total
 // displayFn(area) → what to show in the Area column
 const UNIT_MODES = [
-  { value:'SqFt (INCH)',  label:'SqFt (INCH)',  needsWH:true,  dimUnit:'inch',
+  { value:'SqFt (INCH)',  label:'Inches → sqft',    needsWH:true,  dimUnit:'inch',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/144*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
-  { value:'SqFt (FOOT)',  label:'SqFt (FOOT)',  needsWH:true,  dimUnit:'ft',
+  { value:'SqFt (FOOT)',  label:'Feet → sqft',      needsWH:true,  dimUnit:'ft',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
-  { value:'SqFt (MM)',    label:'SqFt (MM)',    needsWH:true,  dimUnit:'mm',
+  { value:'SqFt (MM)',    label:'MM → sqft',        needsWH:true,  dimUnit:'mm',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/92903.04*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
-  { value:'SqMtr (INCH)', label:'SqMtr (INCH)', needsWH:true,  dimUnit:'inch',
+  { value:'SqMtr (INCH)', label:'Inches → sqmtr',   needsWH:true,  dimUnit:'inch',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1550.0031*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
-  { value:'SqMtr (FOOT)', label:'SqMtr (FOOT)', needsWH:true,  dimUnit:'ft',
+  { value:'SqMtr (FOOT)', label:'Feet → sqmtr',     needsWH:true,  dimUnit:'ft',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/10.7639*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
-  { value:'SqMtr (MM)',   label:'SqMtr (MM)',   needsWH:true,  dimUnit:'mm',
+  { value:'SqMtr (MM)',   label:'MM → sqmtr',       needsWH:true,  dimUnit:'mm',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1000000*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
-  { value:'SqMtr (MTR)',  label:'SqMtr (MTR)',  needsWH:true,  dimUnit:'m',
+  { value:'SqMtr (MTR)',  label:'Meters → sqmtr',   needsWH:true,  dimUnit:'m',
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
-  { value:'RFT (INCH)',   label:'RFT (INCH)',   needsWH:true,  dimUnit:'inch',
+  { value:'RFT (INCH)',   label:'Inches → rft',     needsWH:true,  dimUnit:'inch',
     areaFn:(w,h,q)=>{const W=+w||0;if(W===0)return Math.round((+q||0)*100)/100;return Math.round(W*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' rft':'—' },
-  { value:'RFT (FOOT)',   label:'RFT (FOOT)',   needsWH:true,  dimUnit:'ft',
+  { value:'RFT (FOOT)',   label:'Feet → rft',       needsWH:true,  dimUnit:'ft',
     areaFn:(w,h,q)=>{const W=+w||0;if(W===0)return Math.round((+q||0)*100)/100;return Math.round(W*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' rft':'—' },
@@ -2015,8 +2015,18 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 };
                 return <tr key={xi}>
                   <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
-                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
-                  <td><input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",width:"100%",background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/></td>
+                  <td>
+                    <div style={{display:"flex",alignItems:"center",gap:2}}>
+                      <input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
+                      {!whDisabled && um.dimUnit && <span style={{fontSize:9,color:"#f59e0b",fontWeight:600,minWidth:18}}>{um.dimUnit}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{display:"flex",alignItems:"center",gap:2}}>
+                      <input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
+                      {!whDisabled && um.dimUnit && <span style={{fontSize:9,color:"#f59e0b",fontWeight:600,minWidth:18}}>{um.dimUnit}</span>}
+                    </div>
+                  </td>
                   <td><select className="in" value={x.unit_mode||'NOS'} onChange={e=>onModeChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
                     {UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
                   </select></td>
@@ -3474,11 +3484,10 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
       ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
       : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
     const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-    // Use um.label when unit_mode is set so the PO shows the real unit (SqFt (INCH), RFT, NOS, etc.).
-    // Previous logic special-cased only NOS/SET/LOT/KG and fell through to x.per (stored as literal
-    // "Sheet" for every PR item regardless of actual unit) for SqFt/RFT/MTR/FT/UNIT — bug reported
-    // 18 Apr: PR saved as SqFt, PO displayed as "Sheet". Roll modes still render as "roll" (short form).
-    const qtyUnit = um ? (um.value.indexOf('Roll')===0 ? 'roll' : um.label) : (x.per||'nos');
+    // Use um.value on the PO (compact like "SqFt (INCH)", "RFT (FOOT)", "NOS"). The um.label
+    // was rewritten 20 Apr to read as a sentence ("Feet → sqft") for dropdown clarity, which
+    // is too verbose for PO documents. Roll modes still render as "roll" (short form).
+    const qtyUnit = um ? (um.value.indexOf('Roll')===0 ? 'roll' : um.value) : (x.per||'nos');
     const lineAmt = _lineBase(x);
     return `
     <tr>
@@ -4044,9 +4053,9 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
         ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width||''}×${x.height||''} ${um.dimUnit||''}${area>0 ? ' = '+um.displayFn(area) : ''}</span>`
         : (x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '');
       const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-      // Qty column shows qty + the real unit. Use um.label for every mode when unit_mode is set
-      // (was falling back to x.per="Sheet" for SqFt/RFT/MTR/FT/UNIT — bug reported 18 Apr).
-      const qtyUnit = um ? (um.value.indexOf('Roll')===0 ? 'roll' : um.label) : (x.per||'nos');
+      // Qty column shows qty + the real unit. Use um.value (compact like "SqFt (INCH)")
+      // instead of um.label (rewritten 20 Apr to be a verbose dropdown-clarity sentence).
+      const qtyUnit = um ? (um.value.indexOf('Roll')===0 ? 'roll' : um.value) : (x.per||'nos');
       const lineAmt = _lineBase(x);
       return `
       <tr>
