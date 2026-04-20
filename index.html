@@ -5106,6 +5106,19 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const [importMode,setImportMode]=useState('one_job'); // 'one_job' or 'multi_job'
   const [syncBanking,setSyncBanking]=useState(false);
   const [bankProject,setBankProject]=useState('');
+  // 20 Apr: Template system — save/load column mappings per client
+  const [boqTemplates,setBoqTemplates]=useState([]); // loaded on mount
+  const [templateMatched,setTemplateMatched]=useState(null); // {id, template_name} if auto-match found
+  const [manualMode,setManualMode]=useState(false); // user toggled manual column mapping wizard
+  const [saveAsTemplate,setSaveAsTemplate]=useState(false);
+  const [templateNameInput,setTemplateNameInput]=useState('');
+  // Fetch BOQ templates for current client on mount
+  React.useEffect(()=>{
+    (async()=>{
+      const {data,error}=await sb.from('boq_templates').select('*').eq('active',true).order('use_count',{ascending:false});
+      if(!error) setBoqTemplates(data||[]);
+    })();
+  },[]);
   const BANK_PROJECTS=['NCR SBI BRANDING','NCR SBI GSB','NCR PNB GSB','NCR BOB GSB','CMS SBI GSB+LOLLIPOP','CMS SBI BRANDING','CMS BOB GSB+BRANDING','Diebold HDFC GSB'];
   const BANK_MAP={'NCR SBI BRANDING':['NCR','SBI'],'NCR SBI GSB':['NCR','SBI'],'NCR PNB GSB':['NCR','PNB'],'NCR BOB GSB':['NCR','BOB'],'CMS SBI GSB+LOLLIPOP':['CMS','SBI'],'CMS SBI BRANDING':['CMS','SBI'],'CMS BOB GSB+BRANDING':['CMS','BOB'],'Diebold HDFC GSB':['Diebold','HDFC']};
 
@@ -5180,13 +5193,14 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
     };
   };
 
-  // Parse an Excel sheet into standardized items
-  const parseSheet=(data,sheetName)=>{
+  // Parse an Excel sheet into standardized items.
+  // overrideCols/overrideHeaderRow: optional — when provided, skip auto-detect (used by manual mapping + templates).
+  const parseSheet=(data,sheetName,overrideCols,overrideHeaderRow)=>{
     if(!data||data.length<2) return [];
-    const hRow=findHeaderRow(data);
+    const hRow=(overrideHeaderRow!==undefined&&overrideHeaderRow!==null)?overrideHeaderRow:findHeaderRow(data);
     const headers=data[hRow];
     const nextRow=data[hRow+1]||[];
-    const cols=detectColumns(headers,nextRow);
+    const cols=overrideCols||detectColumns(headers,nextRow);
     // Check if next row is a sub-header (e.g. WIDTH|HEIGHT under "SIZES IN INCHES")
     const nextRowTxt=(nextRow||[]).map(c=>String(c||'').toLowerCase().trim()).join(' ');
     const hasSplitHeader=/width|height|breadth/.test(nextRowTxt)&&cols.desc>-1;
@@ -5278,6 +5292,8 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 
   const handleFile=async(e)=>{
     const file=e.target.files[0];if(!file)return;setErr("");setFileName(file.name);
+    // Reset template state for new file
+    setTemplateMatched(null);setManualMode(false);setColMap({});setHeaderRow(0);
     try{
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
@@ -5288,6 +5304,21 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       }).filter(s=>s.rowCount>0);
       setSheets(allSheets);
       setSelSheets(allSheets.map(s=>s.name));
+      // 20 Apr: Template auto-match — check if any saved template matches this file's filename OR first sheet name
+      if(boqTemplates.length>0&&allSheets.length>0){
+        const fname=(file.name||'').toLowerCase();
+        const firstSheet=(allSheets[0].name||'').toLowerCase();
+        const match=boqTemplates.find(t=>{
+          if(t.filename_pattern){const p=t.filename_pattern.toLowerCase();if(fname.includes(p))return true;}
+          if(t.sheet_name_pattern){const p=t.sheet_name_pattern.toLowerCase();if(firstSheet.includes(p))return true;}
+          return false;
+        });
+        if(match){
+          setTemplateMatched({id:match.id,template_name:match.template_name,client_name:match.client_name});
+          setColMap(match.column_map||{});
+          setHeaderRow(match.header_row||0);
+        }
+      }
       setStep(2);
     }catch(ex){
       setErr("Could not read file: "+ex.message);
@@ -5296,9 +5327,13 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 
   const buildFromSheets=()=>{
     let all=[];
+    // Use manual mapping if user edited it OR template is applied (non-empty colMap signals override)
+    const useOverride=(manualMode||templateMatched)&&Object.keys(colMap||{}).length>0;
+    const overrideCols=useOverride?colMap:undefined;
+    const overrideHRow=useOverride?headerRow:undefined;
     for(const s of sheets){
       if(!selSheets.includes(s.name))continue;
-      const items=parseSheet(s.data,s.name);
+      const items=parseSheet(s.data,s.name,overrideCols,overrideHRow);
       all=all.concat(items);
     }
     // Re-number
@@ -5340,6 +5375,44 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const jid=`${nextNum}-${curFY}`;
   const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||''}));};
 
+  // 20 Apr: Persist BOQ template on successful import (save new / bump use_count)
+  // Wrapped in try/catch — template errors never block job creation (main flow already succeeded).
+  const persistTemplate=async()=>{
+    try{
+      if(saveAsTemplate&&templateNameInput&&templateNameInput.trim()&&Object.keys(colMap||{}).length>0){
+        // New template — derive patterns from filename + first selected sheet name
+        const firstSheet=(selSheets[0]||sheets[0]?.name||'').trim();
+        const baseFname=(fileName||'').replace(/\.(xlsx|xls|csv)$/i,'').trim();
+        // filename_pattern: first word of the base filename (e.g. "AP_Reliance Sheet (1).xlsx" → "AP_Reliance")
+        const fnameTokens=baseFname.split(/[\s_\-(]+/).filter(t=>t.length>=3);
+        const fnamePat=fnameTokens[0]||'';
+        const sheetPat=firstSheet&&firstSheet.toLowerCase()!=='sheet1'?firstSheet:'';
+        await sb.from('boq_templates').insert({
+          client_id:f.cl||null,
+          client_name:f.cn||'Unknown',
+          template_name:templateNameInput.trim(),
+          sheet_name_pattern:sheetPat||null,
+          filename_pattern:fnamePat||null,
+          column_map:colMap,
+          header_row:headerRow||0,
+          data_start_row:(headerRow||0)+1,
+          created_by:user?.name||null,
+          use_count:1,
+          last_used_at:new Date().toISOString(),
+        });
+      } else if(templateMatched&&templateMatched.id){
+        // Existing template — bump use_count + last_used_at
+        const cur=boqTemplates.find(t=>t.id===templateMatched.id);
+        await sb.from('boq_templates').update({
+          use_count:(cur?.use_count||0)+1,
+          last_used_at:new Date().toISOString(),
+        }).eq('id',templateMatched.id);
+      }
+    }catch(ex){
+      console.warn('BOQ template persist failed (non-fatal):',ex);
+    }
+  };
+
   const submitJob=async()=>{
     if(!f.cn){alert("Select client");return;}
     if(its.length===0){alert("No items");return;}
@@ -5366,6 +5439,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
           await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:String(lastNum).padStart(4,'0'),po_number:f.po||'',atm_id:siteCode.trim(),site_unique_id:'',site_address:it.siteAddr||it.m||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
         }
       }
+      await persistTemplate();
       setSubmitting(false);
     } else {
       // All items = one job
@@ -5382,6 +5456,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
         await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:jid.split('-')[0],po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
       }
+      await persistTemplate();
       setSubmitting(false);
     }
   };
@@ -5414,6 +5489,26 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 
     {step===2&&<>
       <div className="c a" style={{padding:12}}>
+        {templateMatched&&<div style={{background:"#05966920",border:"1px solid #059669",borderRadius:6,padding:"8px 10px",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:16}}>⚡</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#6ee7b7"}}>Template matched: {templateMatched.template_name}</div>
+            <div style={{fontSize:9,color:"#94a3b8"}}>Auto-applied column mapping for {templateMatched.client_name}. Review on next step, or redo.</div>
+          </div>
+          <button className="b" style={{fontSize:9,padding:"3px 8px"}} onClick={()=>{setTemplateMatched(null);setColMap({});setHeaderRow(0);}}>Redo mapping</button>
+        </div>}
+        {!templateMatched&&boqTemplates.length>0&&<details style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:6,padding:"6px 10px",marginBottom:8}}>
+          <summary style={{fontSize:10,fontWeight:700,color:"#94a3b8",cursor:"pointer"}}>📚 {boqTemplates.length} saved template{boqTemplates.length>1?'s':''} — click to apply one manually</summary>
+          <div style={{marginTop:6,display:"flex",flexDirection:"column",gap:3}}>
+            {boqTemplates.slice(0,6).map(t=><div key={t.id} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 6px",background:"#060810",borderRadius:4,fontSize:10}}>
+              <div style={{flex:1}}>
+                <span style={{fontWeight:600,color:"#e2e8f0"}}>{t.template_name}</span>
+                <span style={{fontSize:9,color:"#64748b",marginLeft:6}}>{t.client_name} · used {t.use_count||0}×</span>
+              </div>
+              <button className="b bp" style={{fontSize:9,padding:"2px 6px"}} onClick={()=>{setTemplateMatched({id:t.id,template_name:t.template_name,client_name:t.client_name});setColMap(t.column_map||{});setHeaderRow(t.header_row||0);}}>Apply</button>
+            </div>)}
+          </div>
+        </details>}
         <p style={{fontSize:10,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 {sheets.length} SHEET(S) DETECTED — Select which to import</p>
         {sheets.map(s=>{const hRow=findHeaderRow(s.data);
           return <div key={s.name} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:6,marginBottom:4,background:selSheets.includes(s.name)?"#18150a":"#0c1017",border:`1px solid ${selSheets.includes(s.name)?"#e3a00833":"#1a2030"}`,cursor:"pointer"}} onClick={()=>setSelSheets(p=>p.includes(s.name)?p.filter(x=>x!==s.name):[...p,s.name])}>
@@ -5430,30 +5525,33 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
             // Auto-detect columns, then show mapping UI
             const s=sheets.find(x=>selSheets.includes(x.name));
             if(!s)return;
-            const hRow=findHeaderRow(s.data);
+            // If template matched, use template's headerRow; otherwise auto-detect
+            const hRow=templateMatched?headerRow:findHeaderRow(s.data);
             const headers=(s.data[hRow]||[]).map((h,i)=>({idx:i,label:String(h||'Column '+(i+1)).trim()}));
             setColHeaders(headers);
-            setHeaderRow(hRow);
-            // Auto-detect
-            const auto=detectColumns(s.data[hRow]||[],s.data[hRow+1]||[]);
-            const m={};
-            if(auto.desc>=0)m[auto.desc]='item_name';
-            if(auto.spec>=0)m[auto.spec]='material';
-            if(auto.width>=0)m[auto.width]='width';
-            if(auto.height>=0)m[auto.height]='height';
-            if(auto.size>=0&&auto.width<0)m[auto.size]='size';
-            if(auto.qty>=0)m[auto.qty]='qty';
-            if(auto.supplyRate>=0)m[auto.supplyRate]='rate';
-            if(auto.remarks>=0)m[auto.remarks]='remarks';
-            if(auto.siteCode>=0)m[auto.siteCode]='site_code';
-            if(auto.address>=0)m[auto.address]='address';
-            if(auto.refImage>=0)m[auto.refImage]='ref_image';
-            if(auto.pincode>=0)m[auto.pincode]='pincode';
-            if(auto.city>=0)m[auto.city]='city';
-            if(auto.district>=0)m[auto.district]='district';
-            if(auto.state>=0)m[auto.state]='state';
-            if(auto.fieldOfficer>=0)m[auto.fieldOfficer]='field_officer';
-            setColMap(m);
+            if(!templateMatched){
+              setHeaderRow(hRow);
+              // Auto-detect only when no template — template's colMap preserved
+              const auto=detectColumns(s.data[hRow]||[],s.data[hRow+1]||[]);
+              const m={};
+              if(auto.desc>=0)m[auto.desc]='item_name';
+              if(auto.spec>=0)m[auto.spec]='material';
+              if(auto.width>=0)m[auto.width]='width';
+              if(auto.height>=0)m[auto.height]='height';
+              if(auto.size>=0&&auto.width<0)m[auto.size]='size';
+              if(auto.qty>=0)m[auto.qty]='qty';
+              if(auto.supplyRate>=0)m[auto.supplyRate]='rate';
+              if(auto.remarks>=0)m[auto.remarks]='remarks';
+              if(auto.siteCode>=0)m[auto.siteCode]='site_code';
+              if(auto.address>=0)m[auto.address]='address';
+              if(auto.refImage>=0)m[auto.refImage]='ref_image';
+              if(auto.pincode>=0)m[auto.pincode]='pincode';
+              if(auto.city>=0)m[auto.city]='city';
+              if(auto.district>=0)m[auto.district]='district';
+              if(auto.state>=0)m[auto.state]='state';
+              if(auto.fieldOfficer>=0)m[auto.fieldOfficer]='field_officer';
+              setColMap(m);
+            }
             setStep(2.5);
           }} disabled={selSheets.length===0}>Map Columns →</button>
         </div>
@@ -5495,6 +5593,21 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
           {Object.entries(colMap).map(([idx,role])=><span key={idx} className="bd" style={{background:"#23863620",color:"#4ade80",fontSize:8}}>{colHeaders.find(h=>h.idx===+idx)?.label?.slice(0,15)} → {role}</span>)}
           {Object.keys(colMap).length===0&&<span style={{fontSize:9,color:"#f47067"}}>⚠️ No columns mapped — assign at least Item Name</span>}
         </div>
+        {templateMatched?<div style={{background:"#05966915",border:"1px solid #05966940",borderRadius:8,padding:"8px 10px",marginTop:8,display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12}}>⚡</span>
+          <span style={{fontSize:10,color:"#6ee7b7",fontWeight:600}}>Using template: {templateMatched.template_name}</span>
+          <span style={{fontSize:9,color:"#94a3b8",marginLeft:"auto"}}>(will increment use_count on import)</span>
+        </div>:<div style={{background:"#0a0f1a",border:"1px solid #1a2030",borderRadius:8,padding:10,marginTop:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}} onClick={()=>{if(!saveAsTemplate&&!templateNameInput){const guess=(fileName||'').replace(/\.(xlsx|xls|csv)$/i,'').slice(0,40);setTemplateNameInput(guess);}setSaveAsTemplate(p=>!p);}}>
+            <div className={`ck ${saveAsTemplate?"on":""}`} style={{flexShrink:0}}>{saveAsTemplate?"✓":""}</div>
+            <span style={{fontSize:10,fontWeight:700,color:saveAsTemplate?"#e3a008":"#64748b"}}>📌 Save this mapping as a template</span>
+            <span style={{fontSize:8,color:"#64748b"}}>— so next BOQ with similar layout auto-applies it</span>
+          </div>
+          {saveAsTemplate&&<div style={{marginTop:6}}>
+            <input className="in" value={templateNameInput} onChange={e=>setTemplateNameInput(e.target.value)} placeholder="Template name, e.g. Reliance Site List" style={{fontSize:10,padding:"4px 8px",width:"100%"}}/>
+            <p style={{fontSize:8,color:"#64748b",marginTop:3}}>Client name will be taken from Step 3. Template matches future files by filename/sheet name containing this text.</p>
+          </div>}
+        </div>}
         <div style={{background:"#0a0f1a",border:"1px solid #1a2030",borderRadius:8,padding:10,marginTop:8}}>
           <p style={{fontSize:9,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>📋 IMPORT MODE — How should rows be treated?</p>
           <div style={{display:"flex",gap:6}}>
