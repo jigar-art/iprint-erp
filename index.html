@@ -201,6 +201,10 @@ const UNIT_MODES = [
     areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1000000*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
+  { value:'SqMtr (MTR)',  label:'SqMtr (MTR)',  needsWH:true,  dimUnit:'m',
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
+    totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
+    displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'RFT (INCH)',   label:'RFT (INCH)',   needsWH:true,  dimUnit:'inch',
     areaFn:(w,h,q)=>{const W=+w||0;if(W===0)return Math.round((+q||0)*100)/100;return Math.round(W*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
@@ -1484,7 +1488,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
       const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
-      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
+      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,transport_gst_pct:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
@@ -1520,11 +1524,12 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
         }
         return (+x.qty||0)*(+x.rate||0);
       };
-      const calcTotals=(items,transport)=>{
+      const calcTotals=(items,transport,transport_gst_pct)=>{
         const sub=items.reduce((s,x)=>s+lineAmount(x),0);
         const gstTotal=items.reduce((s,x)=>s+lineAmount(x)*(+x.gst_pct||0)/100,0);
-        const total=sub+gstTotal+(+transport||0);
-        return {subtotal:+sub.toFixed(2),gst_total:+gstTotal.toFixed(2),total:+total.toFixed(2)};
+        const transportGst=(+transport||0)*(+transport_gst_pct||0)/100;
+        const total=sub+gstTotal+(+transport||0)+transportGst;
+        return {subtotal:+sub.toFixed(2),gst_total:+gstTotal.toFixed(2),transport_gst:+transportGst.toFixed(2),total:+total.toFixed(2)};
       };
 
       const getFY=()=>{const n=new Date();const m=n.getMonth(),y=n.getFullYear();return m>=3?`${String(y).slice(2)}-${String(y+1).slice(2)}`:`${String(y-1).slice(2)}-${String(y).slice(2)}`;};
@@ -1650,7 +1655,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         setSaving(true);
         const pr_no=await genPRNo(prf.firm_code);
         const fy=getFY();
-        const {subtotal,gst_total,total}=calcTotals(prf.items,prf.transport);
+        const {subtotal,gst_total,transport_gst,total}=calcTotals(prf.items,prf.transport,prf.transport_gst_pct);
         const rec={
           id:'PR'+Date.now(),
           pr_no,fy,
@@ -1667,6 +1672,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           expected_delivery:prf.expected_delivery||null,
           payment_terms:prf.payment_terms||null,
           transport:+prf.transport||0,
+          transport_gst_pct:+prf.transport_gst_pct||0,
           items:prf.items.filter(x=>x.product),
           subtotal,gst_total,total,
           notes:prf.notes||null,
@@ -1709,7 +1715,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         'Cancelled':{bg:'#64748b20',c:'#64748b'},
       };
 
-      const totals=React.useMemo(()=>calcTotals(prf.items,prf.transport),[prf.items,prf.transport]);
+      const totals=React.useMemo(()=>calcTotals(prf.items,prf.transport,prf.transport_gst_pct),[prf.items,prf.transport,prf.transport_gst_pct]);
 
       return <div style={{marginTop:6}}>
         {/* Header */}
@@ -2034,12 +2040,17 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             <div style={{display:"flex",alignItems:"center",gap:4}}>
               <span style={{fontSize:8,color:"#64748b"}}>Transport ₹</span>
               <input className="in mn" type="number" min="0" value={prf.transport} onChange={e=>setPrf(p=>({...p,transport:e.target.value}))} style={{fontSize:9,padding:"2px 4px",width:70}}/>
+              <span style={{fontSize:8,color:"#64748b"}}>GST</span>
+              <select className="in" value={prf.transport_gst_pct||0} onChange={e=>setPrf(p=>({...p,transport_gst_pct:+e.target.value}))} style={{fontSize:9,padding:"2px 3px",width:52}}>
+                {[0,5,12,18].map(g=><option key={g} value={g}>{g}%</option>)}
+              </select>
             </div>
             <span style={{flex:1}}/>
             <div style={{textAlign:"right",fontSize:9}}>
               <div style={{color:"#64748b"}}>Subtotal: <strong style={{color:"#c9d1d9"}}>₹{totals.subtotal.toFixed(0)}</strong></div>
               <div style={{color:"#64748b"}}>GST: <strong style={{color:"#c9d1d9"}}>₹{totals.gst_total.toFixed(0)}</strong></div>
               {(+prf.transport>0)&&<div style={{color:"#64748b"}}>Transport: <strong style={{color:"#c9d1d9"}}>₹{(+prf.transport).toFixed(0)}</strong></div>}
+              {(+totals.transport_gst>0)&&<div style={{color:"#64748b"}}>Transport GST: <strong style={{color:"#c9d1d9"}}>₹{totals.transport_gst.toFixed(0)}</strong></div>}
               <div style={{fontSize:11,fontWeight:800,color:"#e3a008"}}>Total: ₹{totals.total.toFixed(0)}</div>
             </div>
             <button className="b bp" onClick={savePR} disabled={saving} style={{fontSize:10,padding:"5px 16px",background:"#f59e0b",borderColor:"#f59e0b",color:"#000",fontWeight:700,alignSelf:"flex-end"}}>{saving?'Saving...':'📋 Submit PR'}</button>
@@ -3437,7 +3448,12 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
     ? +pr.gst_total
     : items.reduce((s,x) => s + _lineBase(x)*(+x.gst_pct||0)/100, 0);
   const transport = +pr.transport || 0;
-  const grandTotal = subtotal + gstTotal + transport;
+  const transportGstPct = +pr.transport_gst_pct || 0;
+  const transportGst = transport * transportGstPct / 100;
+  const tdsPct = +pr.tds_pct || 0;
+  const tdsAmount = +pr.tds_amount || (subtotal * tdsPct / 100);
+  const grandTotal = subtotal + gstTotal + transport + transportGst;
+  const netPayable = grandTotal - tdsAmount;
   const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
   const gstGroups = {};
   items.forEach(x => {
@@ -3490,6 +3506,12 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
   }).join('');
   const transportRow = transport > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport / Freight</td>
     <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+  const transportGstRow = transportGst > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport GST @ ${transportGstPct}%</td>
+    <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transportGst.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+  const tdsRow = tdsAmount > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;color:#b91c1c;">Less: TDS @ ${tdsPct}% (on subtotal)</td>
+    <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;color:#b91c1c;">(${tdsAmount.toLocaleString('en-IN',{minimumFractionDigits:2})})</td></tr>
+    <tr><td colspan="7" style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:11px;font-weight:700;background:#f0fdf4;">Net Payable to Vendor</td>
+    <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;background:#f0fdf4;">₹ ${netPayable.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
 
   return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
@@ -3567,12 +3589,14 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
     </tr>
     ${gstRows}
     ${transportRow}
+    ${transportGstRow}
     <tr style="background:#f9f9f9">
       <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
       <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
       <td colspan="3" style="border:1px solid #ccc;"></td>
       <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;">₹ ${grandTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
     </tr>
+    ${tdsRow}
   </tbody>
 </table>
 
@@ -3938,6 +3962,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   const [filter, setFilter] = React.useState('Approved');
   const [generating, setGenerating] = React.useState(null);
   const [poPreview, setPoPreview] = React.useState(null); // {pr, poNo, html}
+  const [tdsByPr, setTdsByPr] = React.useState({}); // Shreya's TDS% selection per-PR, keyed by pr.id
 
   const STATUS_FILTERS = ['Approved','PO Generated','Completed','All'];
   const stCol = {
@@ -3987,7 +4012,12 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
       ? +pr.gst_total
       : items.reduce((s,x) => s + _lineBase(x)*(+x.gst_pct||0)/100, 0);
     const transport = +pr.transport || 0;
-    const grandTotal = subtotal + gstTotal + transport;
+    const transportGstPct = +pr.transport_gst_pct || 0;
+    const transportGst = transport * transportGstPct / 100;
+    const tdsPct = +pr.tds_pct || 0;
+    const tdsAmount = +pr.tds_amount || (subtotal * tdsPct / 100);
+    const grandTotal = subtotal + gstTotal + transport + transportGst;
+    const netPayable = grandTotal - tdsAmount;
     const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
 
     // GST breakdown per rate
@@ -4047,6 +4077,12 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 
     const transportRow = transport > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport / Freight</td>
       <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+    const transportGstRow = transportGst > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport GST @ ${transportGstPct}%</td>
+      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transportGst.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+    const tdsRow = tdsAmount > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;color:#b91c1c;">Less: TDS @ ${tdsPct}% (on subtotal)</td>
+      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;color:#b91c1c;">(${tdsAmount.toLocaleString('en-IN',{minimumFractionDigits:2})})</td></tr>
+      <tr><td colspan="7" style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:11px;font-weight:700;background:#f0fdf4;">Net Payable to Vendor</td>
+      <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;background:#f0fdf4;">₹ ${netPayable.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
 
     return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
@@ -4124,12 +4160,14 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
       </tr>
       ${gstRows}
       ${transportRow}
+      ${transportGstRow}
       <tr style="background:#f9f9f9">
         <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
         <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
         <td colspan="3" style="border:1px solid #ccc;"></td>
         <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;">₹ ${grandTotal.toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
       </tr>
+      ${tdsRow}
     </tbody>
   </table>
 
@@ -4159,10 +4197,20 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 
   const generatePO = async (pr) => {
     setGenerating(pr.id);
-    const poNo = await genPONo(pr.firm_code);
+    // Reuse existing PO number when re-generating. Only mint a new number on first generation.
+    // Prevents accidental PO counter increments when users click Re-generate to view/reprint.
+    const poNo = pr.po_no || await genPONo(pr.firm_code);
     const firm = FIRM_DATA[pr.firm_code] || FIRM_DATA.JXT;
-    const html = buildPOHtml(pr, poNo, firm, jobs);
-    setPoPreview({pr, poNo, html, firm});
+    // Apply Shreya's TDS% for first-time generation; re-gen keeps stored tds_pct.
+    const effectiveTdsPct = pr.po_no ? (+pr.tds_pct || 0) : (+tdsByPr[pr.id] || 0);
+    const subtotal = +pr.subtotal || 0;
+    const enhancedPr = {
+      ...pr,
+      tds_pct: effectiveTdsPct,
+      tds_amount: +(subtotal * effectiveTdsPct / 100).toFixed(2)
+    };
+    const html = buildPOHtml(enhancedPr, poNo, firm, jobs);
+    setPoPreview({pr: enhancedPr, poNo, html, firm});
     setGenerating(null);
   };
 
@@ -4188,10 +4236,13 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const {error} = await sb.from('purchase_requests').update({
       po_no: poNo, status: 'PO Generated',
       po_generated_by: user?.name||'', po_generated_at: nowIso,
-      last_status_change_at: nowIso
+      last_status_change_at: nowIso,
+      tds_pct: +pr.tds_pct || 0,
+      tds_amount: +pr.tds_amount || 0
     }).eq('id', pr.id);
     if (error) { show('⚠️ Save failed: ' + error.message, false); return; }
-    setPrs(p => p.map(x => x.id === pr.id ? {...x, po_no: poNo, status:'PO Generated', po_generated_by:user?.name, po_generated_at:nowIso, last_status_change_at:nowIso} : x));
+    setPrs(p => p.map(x => x.id === pr.id ? {...x, po_no: poNo, status:'PO Generated', po_generated_by:user?.name, po_generated_at:nowIso, last_status_change_at:nowIso, tds_pct:pr.tds_pct, tds_amount:pr.tds_amount} : x));
+    setTdsByPr(prev => { const next = {...prev}; delete next[pr.id]; return next; });
     show('✅ PO ' + poNo + ' saved!');
     // Auto-notify requestor that their PR is now a PO
     const reqPhone = WA_NUMBERS[pr.created_by];
@@ -4286,9 +4337,22 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
                 </div>
                 <div style={{display:'flex', alignItems:'center', gap:8}}>
                   <span style={{fontWeight:800, color:'#e3a008', fontSize:12}}>₹{(+pr.total||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</span>
+                  {!pr.po_no && (
+                    <div style={{display:'flex', alignItems:'center', gap:3}}>
+                      <span style={{fontSize:8, color:'#64748b'}}>TDS</span>
+                      <select value={tdsByPr[pr.id]||0} onChange={e=>setTdsByPr(prev=>({...prev,[pr.id]:+e.target.value}))}
+                        style={{fontSize:9, padding:'2px 3px', width:52, background:'#0c1017', color:'#e2e8f0', border:'1px solid #1a2030', borderRadius:3}}
+                        title="TDS % to deduct before payment (set by Shreya)">
+                        {[0,1,2,10].map(g=><option key={g} value={g}>{g}%</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {pr.po_no && (+pr.tds_pct > 0) && (
+                    <span style={{fontSize:8, color:'#b91c1c', fontWeight:700}}>TDS {pr.tds_pct}%</span>
+                  )}
                   <button className="b bp" onClick={() => generatePO(pr)} disabled={generating===pr.id}
                     style={{fontSize:10, padding:'5px 14px', background:'#06b6d4', borderColor:'#06b6d4', color:'#000', fontWeight:700}}>
-                    {generating===pr.id ? '⏳ Generating...' : pr.po_no ? '🔄 Re-generate PO' : '📄 Generate PO'}
+                    {generating===pr.id ? '⏳ Generating...' : pr.po_no ? '📄 View / Print PO' : '📄 Generate PO'}
                   </button>
                 </div>
               </div>
