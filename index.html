@@ -1500,7 +1500,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       // Load vendors on first form open
       const loadVendors=async()=>{
         if(vendors!==null)return;
-        const {data,error}=await sb.from('vendors').select('id,name,category,gstin,phone,state,contact_person,active').eq('active',true).order('name');
+        const {data,error}=await sb.from('vendors').select('id,name,category,gstin,address,phone,state,contact_person,active').eq('active',true).order('name');
         setVendors(error?[]:data||[]);
       };
 
@@ -2751,8 +2751,9 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
   const cur=tabs.find(t=>t.id===ad) || tabs[0];
   const pen=useMemo(()=>jobs.filter(j=>{
     if(s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
+    if(ad===null) return true; // No card selected → show all jobs
     return cur.match(j);
-  }),[jobs,cur,s,jobLeading]);
+  }),[jobs,cur,s,ad,jobLeading]);
 
   // Card counts — derive from the SAME match functions the tabs use, so cards and
   // tabs cannot drift (fixed 18 Apr 26 — audit caught ACCOUNTS card=0 vs tab=10 and
@@ -2804,7 +2805,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
             const active = ad === d.k;
             return (
               <div key={d.k}
-                onClick={() => sad(active ? STATUS_CARDS[0].key : d.k)}
+                onClick={() => sad(active ? null : d.k)}
                 style={{
                   background: active ? d.c+'30' : d.c+'15',
                   border: `1px solid ${active ? d.c : d.c+'55'}`,
@@ -2836,9 +2837,9 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
 
       {/* Job list */}
       <div className="c" style={{padding:0}}>
-        <div style={{padding:"6px 8px",borderBottom:`2px solid ${cur.c}`,background:"#0a0f1a",display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <span style={{fontSize:10,fontWeight:700,color:cur.c}}>{cur.l} — {pen.length} jobs</span>
-          <span style={{fontSize:8,color:'#64748b'}}>Granular rollup first · falls back to jobs.status</span>
+        <div style={{padding:"6px 8px",borderBottom:`2px solid ${ad===null?'#64748b':cur.c}`,background:"#0a0f1a",display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span style={{fontSize:10,fontWeight:700,color:ad===null?'#94a3b8':cur.c}}>{ad===null?'All jobs':cur.l} — {pen.length} jobs</span>
+          <span style={{fontSize:8,color:'#64748b'}}>{ad===null?'Click a card above to filter':'Granular rollup first · falls back to jobs.status'}</span>
         </div>
         <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}>
           <table>
