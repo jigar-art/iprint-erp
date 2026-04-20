@@ -1484,7 +1484,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
       const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
-      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
+      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
@@ -1539,8 +1539,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
 
       const selectVendor=(vid)=>{
         const v=(vendors||[]).find(x=>x.id===vid);
-        if(!v)return setPrf(p=>({...p,vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_phone:'',vendor_state:'Maharashtra'}));
-        setPrf(p=>({...p,vendor_id:v.id,vendor_name:v.name,vendor_gstin:v.gstin||'',vendor_phone:v.phone||'',vendor_state:v.state||'Maharashtra'}));
+        if(!v)return setPrf(p=>({...p,vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra'}));
+        setPrf(p=>({...p,vendor_id:v.id,vendor_name:v.name,vendor_gstin:v.gstin||'',vendor_address:v.address||'',vendor_phone:v.phone||'',vendor_state:v.state||'Maharashtra'}));
       };
 
       // ── VENDOR QUOTE PARSER ─────────────────────────────────────────────────
@@ -1660,6 +1660,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           vendor_id:prf.vendor_id||null,
           vendor_name:prf.vendor_name,
           vendor_gstin:prf.vendor_gstin||null,
+          vendor_address:prf.vendor_address||null,
           vendor_phone:prf.vendor_phone||null,
           vendor_state:prf.vendor_state||'Maharashtra',
           urgency:prf.urgency,
@@ -3538,6 +3539,8 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
   <div style="margin-bottom:4px"><span style="color:#555">Party : </span><strong>${pr.vendor_name}</strong></div>
   ${pr.vendor_address ? '<div style="color:#444;line-height:1.6;margin-left:44px">' + pr.vendor_address + '</div>' : ''}
   ${pr.vendor_gstin ? '<div style="margin-top:4px">GSTIN/UIN &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin + '</strong></div>' : ''}
+  ${pr.vendor_gstin && pr.vendor_gstin.length >= 12 ? '<div>PAN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin.substring(2, 12) + '</strong></div>' : ''}
+  ${pr.vendor_phone ? '<div>Phone &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;' + pr.vendor_phone + '</div>' : ''}
   <div>State Name &nbsp;: &nbsp;${(pr.vendor_state||'Maharashtra')}, Code : ${(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'27':'—'}</div>
 </div>
 
@@ -3587,7 +3590,7 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
 </div>
 
 <div class="sig-box">
-  <img src="${SIGNATURE_IMG}" style="width:120px;height:65px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
+  <img src="${SIGNATURE_IMG}" style="width:180px;height:98px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
   <div style="font-weight:700;font-size:11px">for ${firm.short}</div>
   <div style="font-size:10px;color:#555;margin-top:2px">Authorised Signatory</div>
 </div>
@@ -4093,6 +4096,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     <div style="margin-bottom:4px"><span style="color:#555">Party : </span><strong>${pr.vendor_name}</strong></div>
     ${pr.vendor_address ? '<div style="color:#444;line-height:1.6;margin-left:44px">' + pr.vendor_address + '</div>' : ''}
     ${pr.vendor_gstin ? '<div style="margin-top:4px">GSTIN/UIN &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin + '</strong></div>' : ''}
+    ${pr.vendor_gstin && pr.vendor_gstin.length >= 12 ? '<div>PAN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin.substring(2, 12) + '</strong></div>' : ''}
+    ${pr.vendor_phone ? '<div>Phone &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;' + pr.vendor_phone + '</div>' : ''}
     <div>State Name &nbsp;: &nbsp;${(pr.vendor_state||'Maharashtra')}, Code : ${(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'27':'—'}</div>
   </div>
 
@@ -4142,7 +4147,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   </div>
 
   <div class="sig-box">
-    <img src="${SIGNATURE_IMG}" style="width:120px;height:65px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
+    <img src="${SIGNATURE_IMG}" style="width:180px;height:98px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
     <div style="font-weight:700;font-size:11px">for ${firm.short}</div>
     <div style="font-size:10px;color:#555;margin-top:2px">Authorised Signatory</div>
   </div>
