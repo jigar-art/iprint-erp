@@ -947,7 +947,7 @@ function MainApp({user,onLogout,masterData}){
 
       {/* MAIN */}
       <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        <header style={{height:38,borderBottom:"1px solid #1a2030",display:"flex",alignItems:"center",padding:"0 12px",gap:8,flexShrink:0}}>
+        <header style={{height:38,minHeight:38,background:"#060810",borderBottom:"1px solid #1a2030",display:"flex",alignItems:"center",padding:"0 12px",gap:8,flexShrink:0,position:"sticky",top:0,zIndex:10}}>
           <h2 style={{fontWeight:700,fontSize:12,flex:1}}>{nav.find(n=>n.id===pg)?.l||"iPrint"}</h2>
           <div style={{display:"flex",gap:2,alignItems:"center"}}>
             {[{id:'2526',l:'FY 25-26'},{id:'2627',l:'FY 26-27'},{id:'all',l:'All Years'}].map(fy=><button key={fy.id} className={`b bs ${fyFilter===fy.id?'bp':''}`} onClick={()=>setFyFilter(fy.id)} style={{fontSize:8,padding:"2px 7px",lineHeight:"14px"}}>{fy.l}</button>)}
@@ -1204,7 +1204,17 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
     </div>
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Batches</th><th>PO</th><th>By</th></tr></thead><tbody>
       {fl.map(j=>{const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
-        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table></div></div>
+        return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table>
+    {/* 21 Apr: Empty-state hint — protects against double-FY-filter confusion (top-header FY vs this page's local FY). */}
+    {fl.length===0 && <div style={{padding:"24px 16px",textAlign:"center",color:"#64748b",fontSize:11,lineHeight:1.6}}>
+      <div style={{fontSize:24,marginBottom:6}}>📭</div>
+      <div style={{fontWeight:700,color:"#94a3b8",marginBottom:4}}>No jobs match your current filters</div>
+      <div>Try:</div>
+      <div style={{marginTop:4}}>• The <b>FY selector at the top of the screen</b> — it filters all pages globally. If set to FY 26-27, you'll only see FY 26-27 jobs here.</div>
+      <div>• The firm filter ({ff==='All'?'showing all firms':'showing '+ff} right now) and FY filter ({fy==='All'?'showing all years':'showing FY '+fy} right now) on this page</div>
+      <div style={{marginTop:8,fontSize:10,color:"#475569"}}>Both filter sets apply together — you need to match on both.</div>
+    </div>}
+    </div></div>
   </div>;
 }
 
