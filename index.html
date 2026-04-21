@@ -178,31 +178,31 @@ const countJobsByCard = (jobs, cardKey) => {
 // displayFn(area) → what to show in the Area column
 const UNIT_MODES = [
   { value:'SqFt (INCH)',  label:'Inches → sqft',    needsWH:true,  dimUnit:'inch',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/144*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/144*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
   { value:'SqFt (FOOT)',  label:'Feet → sqft',      needsWH:true,  dimUnit:'ft',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
   { value:'SqFt (MM)',    label:'MM → sqft',        needsWH:true,  dimUnit:'mm',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/92903.04*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/92903.04*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' ft²':'—' },
   { value:'SqMtr (INCH)', label:'Inches → sqmtr',   needsWH:true,  dimUnit:'inch',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1550.0031*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1550.0031*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'SqMtr (FOOT)', label:'Feet → sqmtr',     needsWH:true,  dimUnit:'ft',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/10.7639*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/10.7639*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'SqMtr (MM)',   label:'MM → sqmtr',       needsWH:true,  dimUnit:'mm',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1000000*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)/1000000*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'SqMtr (MTR)',  label:'Meters → sqmtr',   needsWH:true,  dimUnit:'m',
-    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0&&H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
+    areaFn:(w,h,q)=>{const W=+w||0,H=+h||0;if(W===0||H===0)return Math.round((+q||0)*100)/100;return Math.round(W*H*(+q||1)*100)/100;},
     totalFn:(a,q,r)=>Math.round(a*(+r||0)*100)/100,
     displayFn:(a)=>a>0?a+' m²':'—' },
   { value:'RFT (INCH)',   label:'Inches → rft',     needsWH:true,  dimUnit:'inch',
@@ -1997,8 +1997,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             <table style={{minWidth:780}}>
               <thead><tr>
                 <th style={{fontSize:8,minWidth:120}}>Product / Description</th>
-                <th style={{fontSize:8,width:50}}>Width</th>
-                <th style={{fontSize:8,width:50}}>Height</th>
+                <th style={{fontSize:8,width:70}}>Width</th>
+                <th style={{fontSize:8,width:70}}>Height</th>
                 <th style={{fontSize:8,width:110}}>Unit Mode</th>
                 <th style={{fontSize:8,width:45}}>Qty</th>
                 <th style={{fontSize:8,width:70}}>Rate ₹</th>
@@ -2037,13 +2037,13 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                   <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td>
                     <div style={{display:"flex",alignItems:"center",gap:2}}>
-                      <input className="in mn" type="number" min="0" step="0.01" value={x.width||''} disabled={whDisabled} onChange={e=>onDimChange('width',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
+                      <input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={x.width||''} disabled={whDisabled} onChange={e=>{const v=e.target.value;if(v===''||/^\d*\.?\d*$/.test(v))onDimChange('width',v);}} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,minWidth:0,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
                       {!whDisabled && um.dimUnit && <span style={{fontSize:9,color:"#f59e0b",fontWeight:600,minWidth:18}}>{um.dimUnit}</span>}
                     </div>
                   </td>
                   <td>
                     <div style={{display:"flex",alignItems:"center",gap:2}}>
-                      <input className="in mn" type="number" min="0" step="0.01" value={x.height||''} disabled={whDisabled} onChange={e=>onDimChange('height',e.target.value)} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
+                      <input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={x.height||''} disabled={whDisabled} onChange={e=>{const v=e.target.value;if(v===''||/^\d*\.?\d*$/.test(v))onDimChange('height',v);}} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,minWidth:0,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
                       {!whDisabled && um.dimUnit && <span style={{fontSize:9,color:"#f59e0b",fontWeight:600,minWidth:18}}>{um.dimUnit}</span>}
                     </div>
                   </td>
