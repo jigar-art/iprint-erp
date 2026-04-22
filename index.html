@@ -119,7 +119,11 @@ const STATUS_TO_LEADING = (status) => {
   if (s === 'Fabrication · Outsource') return 'fabOut';
   if (s === 'Delivered') return 'delivered';
   if (s === 'Installation WIP') return 'installation';
-  if (['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending','Billing Done','Cash Received'].includes(s)) return 'installation';
+  // Accounts-stage statuses return null so they fall through to the non-leading
+  // ACCOUNTS card in deptCounts (via card.statuses.includes(st.status)).
+  // Previously these were mapped to 'installation', which caused all accounts jobs
+  // to be misclassified as Installation in every site-level rollup.
+  if (['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending','Billing Done','Cash Received'].includes(s)) return null;
   // Fallback for any legacy status that might resurface (defensive)
   if (s === 'Designing' || s === 'Active') return 'design';
   if (s === 'Printing') return 'printIn';
