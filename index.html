@@ -672,6 +672,17 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── UPDATE JOB STATUS ─────────────────────────────────────
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
+    // ── Defensive validation (22 Apr 26): reject legacy/removed statuses.
+    // Catches cached-UI scenarios where a user's old browser tab has stale
+    // dropdown options (Active, Designing, Dispatch, etc.) from before the
+    // 22 Apr status overhaul. Without this check, the DB accepts the write
+    // and a row ends up on a status that no longer exists in ALL_ST_NEW.
+    if (newStatus && !ALL_ST_NEW.includes(newStatus)) {
+      show('⚠️ "'+newStatus+'" is no longer a valid status. Please refresh the page (Ctrl+Shift+R) and try again.', false);
+      console.warn('updateJobStatus rejected legacy status:', newStatus, 'for job', jobId);
+      return;
+    }
+    
     // Instant UI update — don't wait for DB
     let skip=false;
     let newDates={};
@@ -1484,12 +1495,20 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       {jfDirty&&<div style={{gridColumn:"span 3"}}><button className="b bg" onClick={saveJF} style={{width:"100%",justifyContent:"center",padding:6}}>💾 Save Changes</button></div>}
     </div>
     {(()=>{const sd=j.status_dates||{};const steps=[
-      {k:'quotation_sent',l:'Quotation',c:'#3b82f6',e:'📝'},{k:'po_received',l:'PO Received',c:'#4ade80',e:'📋'},
-      {k:'designing',l:'Design',c:'#8b5cf6',e:'🎨'},{k:'printing',l:'Printing',c:'#ef4444',e:'🖨️'},
-      {k:'fabrication',l:'Fabrication',c:'#dc2626',e:'🔧'},{k:'installation',l:'Installation',c:'#059669',e:'🔩'},
-      {k:'delivered',l:'Dispatch',c:'#10b981',e:'🚚'},{k:'billing_pending',l:'Billing Pending',c:'#06b6d4',e:'📑'},
-      {k:'given_for_billing',l:'Given for Billing',c:'#06b6d4',e:'📤'},{k:'billing_done',l:'Billed',c:'#4ade80',e:'✅'},
-      {k:'cash_received',l:'Cash Received',c:'#4ade80',e:'💰'}
+      {k:'quotation_sent',l:'Quote',c:'#3b82f6',e:'📝'},{k:'po_pending',l:'PO Pending',c:'#f47067',e:'⏳'},
+      {k:'recee',l:'Recee',c:'#f59e0b',e:'🔍'},
+      {k:'designing_in_house',l:'Design-IH',c:'#8b5cf6',e:'🎨'},{k:'designing_outsource',l:'Design-OS',c:'#c084fc',e:'🎨'},
+      {k:'printing_in_house',l:'Print-IH',c:'#06b6d4',e:'🖨️'},{k:'printing_outsource',l:'Print-OS',c:'#f97316',e:'🖨️'},
+      {k:'fabrication_in_house',l:'Fab-IH',c:'#dc2626',e:'🔧'},{k:'fabrication_outsource',l:'Fab-OS',c:'#ea580c',e:'🔧'},
+      {k:'delivered',l:'Delivered',c:'#3b82f6',e:'🚚'},{k:'installation_wip',l:'Install WIP',c:'#059669',e:'🔩'},
+      {k:'billing_pending',l:'Bill Pending',c:'#06b6d4',e:'📑'},
+      {k:'given_for_billing',l:'Given for Billing',c:'#06b6d4',e:'📤'},
+      {k:'dc_pending',l:'DC Pending',c:'#f59e0b',e:'📋'},
+      {k:'billing_done',l:'Billed',c:'#4ade80',e:'✅'},
+      {k:'cash_received',l:'Cash Received',c:'#4ade80',e:'💰'},
+      // Legacy keys — render for old jobs with pre-migration status_dates
+      {k:'designing',l:'Design',c:'#8b5cf6',e:'🎨'},{k:'printing',l:'Print',c:'#06b6d4',e:'🖨️'},
+      {k:'fabrication',l:'Fab',c:'#dc2626',e:'🔧'}
     ];const hasAny=steps.some(s=>sd[s.k]);
     return hasAny?<div style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:"6px 10px",overflowX:"auto"}}>
       <p style={{fontSize:8,color:"#64748b",fontWeight:600,marginBottom:6}}>📅 WORKFLOW TIMELINE</p>
@@ -2398,7 +2417,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       {canSeeRates&&<button className="b" onClick={()=>{setPdfMode('estimate');const sel={};(j.batches||[]).forEach(b=>{if((b.items||[]).length>0)sel[b.id]=true;});setPdfBatches(sel);}} style={{gap:4}}>📄 Estimate PDF</button>}
       {canSeeRates&&<button className="b" onClick={()=>{
         const allItems=(j.batches||[]).flatMap(b=>(b.items||[]));const totAmt=allItems.reduce((s,it)=>s+(+it.amount||0),0);
-        const clientEmail=jf.client_email||j.client_email||'';const isRevised=j.status!=='Quotation Sent'&&j.status!=='Draft'&&j.status!=='Active';
+        const clientEmail=jf.client_email||j.client_email||'';const isRevised=j.status!=='Quotation Sent'&&j.status!=='Draft';
         const subj=`${isRevised?'Revised Estimate':'Estimate'} ${j.id} - ${j.project||''} | ${fm.short_name||''}`;
         const itemLines=allItems.map((it,i)=>`${i+1}. ${it.internal_name||it.client_name||'Item'} — Qty:${it.qty} — ₹${(+it.amount||0).toFixed(2)}`).join('\n');
         const body=`Dear ${j.contact_person||'Sir/Madam'},\n\nEstimate for:\nJob#: ${j.id}\nProject: ${j.project||''}\n\n${itemLines}\n\nTotal: ₹${totAmt.toFixed(2)} (incl GST)\n\nRegards,\nRUCHITA - Backend Operations\n${fm.name||'iPrint'}\nestimation@juxtapose.co.in`;
@@ -3362,7 +3381,7 @@ function FabPage({logs,materials,team,stock,addLog,jobs,sm,updateJobStatus}){
 function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStatus,osItems,setOsItems,sp}){
   const [showQ,setShowQ]=useState(true);
   const [showLegacy,setShowLegacy]=useState(false);
-  const queue=(jobs||[]).filter(j=>['Printing','Fabrication','Installation'].includes(j.status));
+  const queue=(jobs||[]).filter(j=>['Printing · In-House','Printing · Outsource','Fabrication · In-House','Fabrication · Outsource','Installation WIP'].includes(j.status));
   const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   // Analytics on NEW outsource_items (per-line-item flow)
   const allOs=osItems||[];
@@ -7094,9 +7113,9 @@ function ClientPortal({code}){
   },[code,dept]);
 
   const full=jobs.map(j=>({...j,batches:batches.filter(b=>b.job_id===j.id).map(b=>({...b,items:items.filter(i=>i.batch_id===b.id).sort((a,b)=>(a.id||'').localeCompare(b.id||''))}))}));
-  const sc={'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b','PO Pending':'#f47067','Recce Pending':'#f59e0b'};
-  const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing',l:'Design',e:'🎨'},{k:'printing',l:'Print',e:'🖨️'},{k:'fabrication',l:'Fab',e:'🔧'},{k:'installation',l:'Install',e:'🔩'},{k:'delivered',l:'Done',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
-  const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Active':0,'Recce Pending':0,'Designing':1,'Printing':2,'Fabrication':3,'Installation':4,'Delivered':5,'Billing Pending':5,'Given for Billing':5,'Billing Done':6,'Cash Received':6}[st]??-1);
+  const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
+  const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing_in_house',l:'Design',e:'🎨'},{k:'printing_in_house',l:'Print',e:'🖨️'},{k:'fabrication_in_house',l:'Fab',e:'🔧'},{k:'installation_wip',l:'Install',e:'🔩'},{k:'delivered',l:'Delivered',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
+  const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Recee':0,'Designing - In House':1,'Designing - Outsource':1,'Printing · In-House':2,'Printing · Outsource':2,'Fabrication · In-House':3,'Fabrication · Outsource':3,'Delivered':4,'Installation WIP':4,'Billing Pending':5,'Given for Billing':5,'Cash Pending':5,'IC Pending':5,'DC Pending':5,'Billing Done':6,'Cash Received':6}[st]??-1);
   const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null}];
   const curTab=deptTabs.find(t=>t.id===tab)||deptTabs[0];
   const filtered=(()=>{let f=curTab?.st?full.filter(j=>curTab.st.includes(j.status)):full;if(portalSearch){const q=portalSearch.toLowerCase();f=f.filter(j=>j.id?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.delivery_address?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q));}return f;})();
@@ -7161,7 +7180,7 @@ function ClientPortal({code}){
       const jobData={id:jid,firm:'JXT',client_name:clientMatch,project:cjf.project,delivery_address:cjf.delivery_address,
         contact_person:cjf.contact_person,contact_no:cjf.contact_no,client_email:cjf.email,
         made_by:'CLIENT PORTAL',po_number:cjf.po_number,billing_name:clientMatch,client_gst:'',
-        payment_terms:'',status:'Active',remark:fullRemark,
+        payment_terms:'',status:'Quotation Sent',remark:fullRemark,
         design_ref_urls:artworkUrls};
       await sb.from('jobs').insert(jobData);
 
@@ -7375,7 +7394,7 @@ function ClientPortal({code}){
       const jobData={id:jid,firm:'JXT',client_name:clientMatch,project:boqForm.project,delivery_address:boqForm.delivery_address,
         contact_person:boqForm.contact_person,contact_no:boqForm.contact_no,
         made_by:'CLIENT PORTAL (Purchase)',po_number:boqForm.po_number,billing_name:clientMatch,client_gst:'',
-        payment_terms:'',status:'Active',remark,po_file_url:poUrl?[poUrl]:[],design_ref_urls:[]};
+        payment_terms:'',status:'Quotation Sent',remark,po_file_url:poUrl?[poUrl]:[],design_ref_urls:[]};
       await sb.from('jobs').insert(jobData);
 
       const batchId='B'+Date.now()+Math.random().toString(36).slice(2,5);
