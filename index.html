@@ -89,42 +89,48 @@ const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669",
 // Legacy values (Active, Printing, Fabrication, Installation, Delivered) are still present for
 // backwards-compat — existing jobs keep them until naturally updated. Dropdowns show all values.
 const ALL_ST_NEW = [
-  // Pre-production
-  'Draft','Quotation Sent','PO Pending','PO Received','Recce Pending',
-  // Production — granular (NEW)
-  'Designing',
+  // Pre-production (ESTIMATE bucket)
+  'Draft','Quotation Sent','PO Pending','Recee',
+  // Production — granular
+  'Designing - In House','Designing - Outsource',
   'Printing · In-House','Printing · Outsource',
   'Fabrication · In-House','Fabrication · Outsource',
-  'Dispatch',
   // Post-production
-  'Installed',
-  'Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending',
+  'Delivered',
+  'Installation WIP',
+  // Accounts
+  'Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending',
   'Billing Done','Cash Received',
   // Terminal
-  'No Bill','Cancelled',
-  // Legacy — still valid for old rows, will retire as data migrates
-  'Active','Printing','Fabrication','Installation','Delivered'
+  'No Bill','Cancelled'
 ];
 // Status → leading-edge dept bucket (for Banking CRM fallback + Dept Tracker rollup).
-// Returns one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed', or null.
+// Returns one of: 'design','printIn','printOut','fabIn','fabOut','delivered','installation', or null.
+// Post-22Apr26 overhaul: 'dispatch' bucket renamed to 'delivered', 'installed' renamed to 'installation'.
+// Legacy statuses removed from DB 22 Apr 26 (migrated to new statuses, see jobs_backup_before_status_overhaul_20260422).
 const STATUS_TO_LEADING = (status) => {
   if (!status) return null;
   const s = String(status).trim();
-  if (['Draft','Quotation Sent','PO Pending','PO Received','Recce Pending','Cancelled','No Bill'].includes(s)) return null;
-  if (s === 'Designing' || s === 'Active') return 'design';
+  if (['Draft','Quotation Sent','PO Pending','Recee','Cancelled','No Bill'].includes(s)) return null;
+  if (s === 'Designing - In House' || s === 'Designing - Outsource') return 'design';
   if (s === 'Printing · In-House') return 'printIn';
   if (s === 'Printing · Outsource') return 'printOut';
-  if (s === 'Printing') return 'printIn'; // legacy default to in-house
   if (s === 'Fabrication · In-House') return 'fabIn';
   if (s === 'Fabrication · Outsource') return 'fabOut';
-  if (s === 'Fabrication') return 'fabIn'; // legacy default to in-house
-  if (s === 'Dispatch' || s === 'Delivered' || s === 'Installation') return 'dispatch';
-  if (['Installed','Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'].includes(s)) return 'installed';
+  if (s === 'Delivered') return 'delivered';
+  if (s === 'Installation WIP') return 'installation';
+  if (['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending','Billing Done','Cash Received'].includes(s)) return 'installation';
+  // Fallback for any legacy status that might resurface (defensive)
+  if (s === 'Designing' || s === 'Active') return 'design';
+  if (s === 'Printing') return 'printIn';
+  if (s === 'Fabrication') return 'fabIn';
+  if (s === 'Dispatch' || s === 'Installation') return 'delivered';
+  if (s === 'Installed' || s === 'PO Received' || s === 'Recce Pending' || s === 'Proforma Invoice') return null;
   return null;
 };
 
 // ─── STATUS_CARDS: single source of truth for status cards across ERP ────────
-// Added 18 Apr 26 to unify Dashboard, Dept Tracker, and Banking CRM cards.
+// Updated 22 Apr 26 for non-banking job status overhaul per team sheet.
 // 12 cards in lifecycle order. Same labels, same colors, same order everywhere.
 // Each entry:
 //   key       — internal id (also used as Dept Tracker tab id and leading-edge bucket)
@@ -133,40 +139,54 @@ const STATUS_TO_LEADING = (status) => {
 //   color     — hex color
 //   isLeading — true if this card maps to a STATUS_TO_LEADING bucket (used by site-level rollup)
 const STATUS_CARDS = [
-  { key:'estimate',  label:'ESTIMATE',       statuses:['Quotation Sent','PO Pending','PO Received','Recce Pending'],                                                       color:'#3b82f6', isLeading:false },
-  { key:'draft',     label:'DRAFT',          statuses:['Draft'],                                                                                                            color:'#64748b', isLeading:false },
-  { key:'design',    label:'DESIGN',         statuses:['Designing'],                                                                                                        color:'#8b5cf6', isLeading:true  },
-  { key:'printIn',   label:'PRINT-IN-HOUSE', statuses:['Printing · In-House'],                                                                                              color:'#06b6d4', isLeading:true  },
-  { key:'printOut',  label:'PRINT-OUT',      statuses:['Printing · Outsource'],                                                                                             color:'#f97316', isLeading:true  },
-  { key:'fabIn',     label:'FAB-IN-HOUSE',   statuses:['Fabrication · In-House'],                                                                                           color:'#dc2626', isLeading:true  },
-  { key:'fabOut',    label:'FAB-OUT',        statuses:['Fabrication · Outsource'],                                                                                          color:'#ea580c', isLeading:true  },
-  { key:'dispatch',  label:'DISPATCH',       statuses:['Dispatch'],                                                                                                         color:'#3b82f6', isLeading:true  },
-  { key:'installed', label:'INSTALLED',      statuses:['Installed'],                                                                                                        color:'#059669', isLeading:true  },
-  { key:'accounts',  label:'ACCOUNTS',       statuses:['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending','Billing Done','Cash Received'], color:'#06b6d4', isLeading:false },
-  { key:'nobill',    label:'NO BILL',        statuses:['No Bill'],                                                                                                          color:'#64748b', isLeading:false },
-  { key:'cancelled', label:'CANCELLED',      statuses:['Cancelled'],                                                                                                        color:'#475569', isLeading:false },
+  { key:'estimate',     label:'ESTIMATE',       statuses:['Quotation Sent','PO Pending','Recee'],                                                                              color:'#3b82f6', isLeading:false },
+  { key:'draft',        label:'DRAFT',          statuses:['Draft'],                                                                                                            color:'#64748b', isLeading:false },
+  { key:'design',       label:'DESIGN',         statuses:['Designing - In House','Designing - Outsource'],                                                                     color:'#8b5cf6', isLeading:true  },
+  { key:'printIn',      label:'PRINT-IN-HOUSE', statuses:['Printing · In-House'],                                                                                              color:'#06b6d4', isLeading:true  },
+  { key:'printOut',     label:'PRINT-OUT',      statuses:['Printing · Outsource'],                                                                                             color:'#f97316', isLeading:true  },
+  { key:'fabIn',        label:'FAB-IN-HOUSE',   statuses:['Fabrication · In-House'],                                                                                           color:'#dc2626', isLeading:true  },
+  { key:'fabOut',       label:'FAB-OUT',        statuses:['Fabrication · Outsource'],                                                                                          color:'#ea580c', isLeading:true  },
+  { key:'delivered',    label:'DELIVERED',      statuses:['Delivered'],                                                                                                        color:'#3b82f6', isLeading:true  },
+  { key:'installation', label:'INSTALLATION',   statuses:['Installation WIP'],                                                                                                 color:'#059669', isLeading:true  },
+  { key:'accounts',     label:'ACCOUNTS',       statuses:['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending','Billing Done','Cash Received'],      color:'#06b6d4', isLeading:false },
+  { key:'nobill',       label:'NO BILL',        statuses:['No Bill'],                                                                                                          color:'#64748b', isLeading:false },
+  { key:'cancelled',    label:'CANCELLED',      statuses:['Cancelled'],                                                                                                        color:'#475569', isLeading:false },
 ];
 // Quick lookup helpers
 const STATUS_CARD_BY_KEY = Object.fromEntries(STATUS_CARDS.map(c => [c.key, c]));
 // Count jobs in a card bucket. Semantics mirror Dept Tracker's tabs[].match (line ~2705):
-// - isLeading cards: use STATUS_TO_LEADING rollup so legacy statuses ('Active'→design,
-//   'Installation'→dispatch, 'Printing'→printIn etc.) land in the right bucket.
-// - 'installed' card: additionally excludes any job whose status has moved on to
+// - isLeading cards: use STATUS_TO_LEADING rollup so all statuses land in the right bucket.
+// - 'installation' card: additionally excludes any job whose status has moved on to
 //   accounts/nobill/cancelled, so lifecycle buckets stay mutually exclusive.
 // - Non-leading cards: strict status match.
 const countJobsByCard = (jobs, cardKey) => {
   const card = STATUS_CARD_BY_KEY[cardKey];
   if (!card) return 0;
   if (card.isLeading) {
-    if (cardKey === 'installed') {
+    if (cardKey === 'installation') {
       const accountsSt = STATUS_CARD_BY_KEY.accounts.statuses;
-      return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === 'installed'
+      return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === 'installation'
         && !accountsSt.includes(j.status)
         && !['No Bill','Cancelled'].includes(j.status)).length;
     }
     return (jobs||[]).filter(j => STATUS_TO_LEADING(j.status) === cardKey).length;
   }
   return (jobs||[]).filter(j => card.statuses.includes(j.status)).length;
+};
+
+// renderStatusOptions: returns grouped <optgroup> options for any status dropdown.
+// Statuses are organized under their STATUS_CARDS bucket label so users always see
+// the bridge between cards and status names. Pass currentStatus to exclude it from
+// the choices (since you can't change to your current status).
+// Added 22 Apr 26 as part of non-banking job status overhaul.
+const renderStatusOptions = (currentStatus) => {
+  return STATUS_CARDS.map(card => {
+    const opts = card.statuses.filter(st => st !== currentStatus);
+    if (opts.length === 0) return null;
+    return React.createElement('optgroup', { key: card.key, label: card.label },
+      opts.map(st => React.createElement('option', { key: st, value: st }, st))
+    );
+  });
 };
 
 // UNIT_MODES: single source of truth for billing unit
@@ -673,9 +693,13 @@ function MainApp({user,onLogout,masterData}){
     show("✅ Status → "+newStatus);
     
     // Dept flags — update React state instantly
-    const statusDepts={'Draft':[0,0,0,0,0,0,0,0],'Active':[1,0,0,0,0,0,0,0],'Quotation Sent':[1,0,0,0,0,0,0,0],'Designing':[1,1,0,0,0,0,0,0],'Recce Pending':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],'PO Received':[1,0,0,0,0,0,0,0],
-      'Printing':[1,1,1,1,0,0,0,0],'Fabrication':[1,1,1,1,1,0,0,0],'Installation':[1,1,1,1,1,1,1,0],
-      'Delivered':[1,1,1,1,1,1,1,0],'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
+    const statusDepts={'Draft':[0,0,0,0,0,0,0,0],'Quotation Sent':[1,0,0,0,0,0,0,0],'Recee':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],
+      'Designing - In House':[1,1,0,0,0,0,0,0],'Designing - Outsource':[1,1,0,0,0,0,0,0],
+      'Printing · In-House':[1,1,1,1,0,0,0,0],'Printing · Outsource':[1,1,1,1,0,0,0,0],
+      'Fabrication · In-House':[1,1,1,1,1,0,0,0],'Fabrication · Outsource':[1,1,1,1,1,0,0,0],
+      'Delivered':[1,1,1,1,1,1,0,0],'Installation WIP':[1,1,1,1,1,1,1,0],
+      'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
+      'Cash Pending':[1,1,1,1,1,1,1,0],'IC Pending':[1,1,1,1,1,1,1,0],'DC Pending':[1,1,1,1,1,1,1,0],
       'Billing Done':[1,1,1,1,1,1,1,1],'Cash Received':[1,1,1,1,1,1,1,1],'No Bill':[1,1,1,1,1,1,1,1],'Cancelled':[1,1,1,1,1,1,1,1]};
     const flags=statusDepts[newStatus];
     if(flags){
@@ -843,21 +867,21 @@ function MainApp({user,onLogout,masterData}){
       jobs:filteredJobs.length,
       active:filteredJobs.filter(j=>!['Billing Done','Cancelled','No Bill','Cash Received'].includes(j.status)).length,
       draft:sc('Draft'),
-      estimate:scm(['Quotation Sent','PO Pending','PO Received','Recce Pending','Active','Draft']),
-      design:sc('Designing'),
-      // NEW: split production buckets — each card counts legacy + new value together
-      printIn:scm(['Printing','Printing · In-House']),
+      estimate:scm(['Quotation Sent','PO Pending','Recee']),
+      design:scm(['Designing - In House','Designing - Outsource']),
+      // Post-22Apr26: split production buckets — statuses only, no legacy
+      printIn:sc('Printing · In-House'),
       printOut:sc('Printing · Outsource'),
-      fabIn:scm(['Fabrication','Fabrication · In-House']),
+      fabIn:sc('Fabrication · In-House'),
       fabOut:sc('Fabrication · Outsource'),
-      dispatch:scm(['Delivered','Dispatch','Installation']), // Installation is legacy = goods dispatched
-      installed:sc('Installed'),
+      dispatch:sc('Delivered'),  // card internally called 'dispatch' for compat; value is new 'Delivered'
+      installed:sc('Installation WIP'),  // card internally called 'installed' for compat; value is new 'Installation WIP'
       // Keep legacy keys too (unused by new cards but referenced elsewhere) for backward compat
-      printing:scm(['Printing','Printing · In-House','Printing · Outsource']),
-      fab:scm(['Fabrication','Fabrication · In-House','Fabrication · Outsource']),
-      install:scm(['Installation','Installed']),
-      delivered:scm(['Delivered','Dispatch']),
-      billPend:scm(['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending']),
+      printing:scm(['Printing · In-House','Printing · Outsource']),
+      fab:scm(['Fabrication · In-House','Fabrication · Outsource']),
+      install:sc('Installation WIP'),
+      delivered:sc('Delivered'),
+      billPend:scm(['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending']),
       billed:scm(['Billing Done','Cash Received']),
       poPend:filteredJobs.filter(j=>!j.po_number&&!['Billing Done','Cancelled','No Bill','Cash Received','Draft'].includes(j.status)).length,
       grn:grnData.length,os:osLogs.length,disp:dLogs.length,
@@ -1023,7 +1047,9 @@ function StatusTip({j,children}){
   const [show,setShow]=useState(false);
   const sd=j.status_dates||{};
   const entries=Object.entries(sd).filter(([k,v])=>v);
-  const labels={draft:'Draft',active:'Active',quotation_sent:'Quotation Sent',po_pending:'PO Pending',po_received:'PO Received',recce_pending:'Recce Pending',designing:'Designing',printing:'Printing',fabrication:'Fabrication',installation:'Installation',delivered:'Delivered',billing_pending:'Billing Pending',given_for_billing:'Given for Billing',cash_pending:'Cash Pending',proforma_invoice:'Proforma Invoice',ic_pending:'IC Pending',billing_done:'Billing Done',cash_received:'Cash Received',no_bill:'No Bill',cancelled:'Cancelled'};
+  const labels={draft:'Draft',quotation_sent:'Quotation Sent',po_pending:'PO Pending',recee:'Recee',designing_in_house:'Designing - In House',designing_outsource:'Designing - Outsource',printing_in_house:'Printing · In-House',printing_outsource:'Printing · Outsource',fabrication_in_house:'Fabrication · In-House',fabrication_outsource:'Fabrication · Outsource',delivered:'Delivered',installation_wip:'Installation WIP',billing_pending:'Billing Pending',given_for_billing:'Given for Billing',cash_pending:'Cash Pending',ic_pending:'IC Pending',dc_pending:'DC Pending',billing_done:'Billing Done',cash_received:'Cash Received',no_bill:'No Bill',cancelled:'Cancelled',
+    // Legacy keys — kept so historical status_dates still render on old jobs
+    active:'Active',po_received:'PO Received',recce_pending:'Recce Pending',designing:'Designing',printing:'Printing',fabrication:'Fabrication',installation:'Installation',proforma_invoice:'Proforma Invoice'};
   const curKey=j.status?.replace(/\s+/g,'_').toLowerCase();
   const lastEntry=entries.length>0?entries[entries.length-1]:null;
   return <div style={{position:"relative",display:"inline-block",cursor:"pointer"}} onMouseEnter={()=>setShow(true)} onMouseLeave={()=>setShow(false)}>
@@ -1058,21 +1084,21 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
   const bStats=(jl)=>({
     total:jl.length,
     active:jl.filter(j=>!activeStatuses.includes(j.status)).length,
-    estimate:jl.filter(j=>['Quotation Sent','PO Pending','PO Received','Recce Pending','Active','Draft'].includes(j.status)).length,
-    design:jl.filter(j=>j.status==='Designing').length,
-    // NEW granular split
-    printIn:jl.filter(j=>['Printing','Printing · In-House'].includes(j.status)).length,
+    estimate:jl.filter(j=>['Quotation Sent','PO Pending','Recee'].includes(j.status)).length,
+    design:jl.filter(j=>['Designing - In House','Designing - Outsource'].includes(j.status)).length,
+    // Post-22Apr26 status overhaul: only new statuses
+    printIn:jl.filter(j=>j.status==='Printing · In-House').length,
     printOut:jl.filter(j=>j.status==='Printing · Outsource').length,
-    fabIn:jl.filter(j=>['Fabrication','Fabrication · In-House'].includes(j.status)).length,
+    fabIn:jl.filter(j=>j.status==='Fabrication · In-House').length,
     fabOut:jl.filter(j=>j.status==='Fabrication · Outsource').length,
-    dispatch:jl.filter(j=>['Delivered','Dispatch','Installation'].includes(j.status)).length,
-    installed:jl.filter(j=>j.status==='Installed').length,
-    // Old keys still in use below (summed legacy+new)
-    printing:jl.filter(j=>['Printing','Printing · In-House','Printing · Outsource'].includes(j.status)).length,
-    fab:jl.filter(j=>['Fabrication','Fabrication · In-House','Fabrication · Outsource'].includes(j.status)).length,
-    install:jl.filter(j=>['Installation','Installed'].includes(j.status)).length,
-    delivered:jl.filter(j=>['Delivered','Dispatch'].includes(j.status)).length,
-    billPend:jl.filter(j=>['Billing Pending','Given for Billing','Cash Pending','Proforma Invoice','IC Pending'].includes(j.status)).length,
+    dispatch:jl.filter(j=>j.status==='Delivered').length,
+    installed:jl.filter(j=>j.status==='Installation WIP').length,
+    // Old aggregate keys kept for backward compat
+    printing:jl.filter(j=>['Printing · In-House','Printing · Outsource'].includes(j.status)).length,
+    fab:jl.filter(j=>['Fabrication · In-House','Fabrication · Outsource'].includes(j.status)).length,
+    install:jl.filter(j=>j.status==='Installation WIP').length,
+    delivered:jl.filter(j=>j.status==='Delivered').length,
+    billPend:jl.filter(j=>['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending'].includes(j.status)).length,
     billed:jl.filter(j=>['Billing Done','Cash Received'].includes(j.status)).length,
   });
   const bk=bStats(bankJobs);const nb=bStats(nonBankJobs);
@@ -1122,7 +1148,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       (j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q))
     ).slice(0,20);
   },[dq,jobs]);
-  const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
+  const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
   const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div className="c" style={{padding:10}}>
@@ -1203,7 +1229,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
       <div style={{display:"flex",gap:2}}><span style={{fontSize:10,color:"#64748b",alignSelf:"center"}}>{fl.length} jobs</span><button className="b bp bs" onClick={()=>sp("new")}>➕ New Job</button></div>
     </div>
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Batches</th><th>PO</th><th>By</th></tr></thead><tbody>
-      {fl.map(j=>{const sc={'Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Billing Done':'#4ade80','Cancelled':'#64748b','No Bill':'#64748b','Cash Received':'#4ade80','Recce Pending':'#f59e0b','PO Pending':'#f47067','Active':'#64748b'};
+      {fl.map(j=>{const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
         return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table>
     {/* 21 Apr: Empty-state hint — protects against double-FY-filter confusion (top-header FY vs this page's local FY). */}
     {fl.length===0 && <div style={{padding:"24px 16px",textAlign:"center",color:"#64748b",fontSize:11,lineHeight:1.6}}>
@@ -1446,9 +1472,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       <F l="Remark"><input className="in" value={jf.remark} onChange={e=>setJF('remark',e.target.value)} placeholder="Special instructions..." style={{fontSize:10}}/></F>
       <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span>
         <div style={{display:"flex",gap:2,alignItems:"center",marginTop:2}}>
-          <StatusTip j={j}><span className="bd" style={{background:(({'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b'})[j.status]||'#64748b')+'20',color:({'Draft':'#64748b','Active':'#64748b','Quotation Sent':'#3b82f6','Designing':'#8b5cf6','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Billing Done':'#4ade80','Cash Received':'#4ade80','Cancelled':'#64748b'})[j.status]||'#64748b',fontSize:10,padding:"3px 8px",cursor:"help"}}>{j.status}</span></StatusTip>
+          <StatusTip j={j}><span className="bd" style={{background:(({'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'})[j.status]||'#64748b')+'20',color:({'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'})[j.status]||'#64748b',fontSize:10,padding:"3px 8px",cursor:"help"}}>{j.status}</span></StatusTip>
           <select className="in" style={{fontSize:9,padding:"2px",width:100}} defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change status from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}}>
-            <option value="">Change →</option>{ALL_ST.filter(st=>st!==j.status).map(st=><option key={st} value={st}>{st}</option>)}
+            <option value="">Change →</option>{renderStatusOptions(j.status)}
           </select>
         </div>
       </div>
@@ -2749,6 +2775,14 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
 function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
   const ALL_ST = ALL_ST_NEW;
 
+  // ── Designing Bulk-Reassign modal state (22 Apr 26) ────────────────────
+  // Modal lets admin bulk-move "Designing - In House" jobs → "Designing - Outsource"
+  // Triggered from the DESIGN card's 🔀 icon (visible only when ad === 'design').
+  const [showReassignModal, setShowReassignModal] = React.useState(false);
+  const [reassignSelected, setReassignSelected] = React.useState({});  // {job_id: true}
+  const [reassignDirection, setReassignDirection] = React.useState('to-outsource'); // 'to-outsource' | 'to-inhouse'
+  const [reassignSaving, setReassignSaving] = React.useState(false);
+
   // Compute dept-status for every job using the SAME hybrid logic as Banking CRM.
   // This is a reduced version of BankCRMPage.jobDeptStatus — keyed by j.id directly
   // (no jobNoPrefix split needed for Dept Tracker since it works on jobs, not sites).
@@ -2785,8 +2819,8 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
         if (printOut && leading !== 'printOut') all.push('printOut');
         if (fabIn && leading !== 'fabIn') all.push('fabIn');
         if (fabOut && leading !== 'fabOut') all.push('fabOut');
-        if (dispA && leading !== 'dispatch') all.push('dispatch');
-        if (!installA && leading !== 'installed') all.push('installed');
+        if (dispA && leading !== 'delivered') all.push('delivered');
+        if (!installA && leading !== 'installation') all.push('installation');
       }
       map[j.id] = {leading, source: hasGranular && li.length > 0 ? 'granular' : 'status', all};
     });
@@ -2795,19 +2829,19 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
 
   // Tabs — 12 buckets, 1-for-1 with STATUS_CARDS. Same colors, same labels, same order.
   // Middle 7 (isLeading) match by jobLeading rollup. Rest match by j.status directly.
-  // Note: 'installed' tab additionally excludes terminal accounts/cancelled states so
-  // jobs that have moved on don't double-show in both Installed and Accounts.
+  // Note: 'installation' tab additionally excludes terminal accounts/cancelled states so
+  // jobs that have moved on don't double-show in both Installation and Accounts.
   const tabs = STATUS_CARDS.map(card => ({
     id: card.key,
     l: card.label,
     c: card.color,
     match: card.isLeading
-      ? (card.key === 'installed'
-          // 'installed' tab = only jobs still literally in the 'Installed' stage; any job
+      ? (card.key === 'installation'
+          // 'installation' tab = only jobs still literally at 'Installation WIP' stage; any job
           // that has moved on to any accounts status, no-bill, or cancelled belongs in
           // that later bucket instead. Keeps lifecycle stages mutually exclusive so a
           // job is counted in exactly one card/tab (matches Dashboard's count too).
-          ? (j) => jobLeading[j.id]?.leading === 'installed' && !STATUS_CARD_BY_KEY.accounts.statuses.includes(j.status) && !['No Bill','Cancelled'].includes(j.status)
+          ? (j) => jobLeading[j.id]?.leading === 'installation' && !STATUS_CARD_BY_KEY.accounts.statuses.includes(j.status) && !['No Bill','Cancelled'].includes(j.status)
           : (j) => jobLeading[j.id]?.leading === card.key)
       : (j) => card.statuses.includes(j.status)
   }));
@@ -2836,23 +2870,21 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     return c;
   }, [jobs, jobLeading, tabs]);
 
-  // Status pill colors — covers new + legacy values
+  // Status pill colors — covers all 22 new statuses post 22 Apr overhaul
   const sc = {
-    'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','PO Received':'#4ade80','Recce Pending':'#f59e0b',
-    'Designing':'#8b5cf6',
+    'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b',
+    'Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc',
     'Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316',
-    'Fabrication · In-House':'#06b6d4','Fabrication · Outsource':'#f97316',
-    'Dispatch':'#3b82f6',
-    'Installed':'#4ade80',
-    'Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f59e0b','Billing Done':'#10b981','Cash Received':'#10b981',
-    'No Bill':'#64748b','Cancelled':'#64748b',
-    // legacy
-    'Active':'#64748b','Printing':'#ef4444','Fabrication':'#dc2626','Installation':'#059669','Delivered':'#10b981'
+    'Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c',
+    'Delivered':'#3b82f6',
+    'Installation WIP':'#059669',
+    'Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80',
+    'No Bill':'#64748b','Cancelled':'#64748b'
   };
 
   // Pill color for stage keys (used in multi-pill Stage column)
-  const stageColor = (k) => ({design:'#8b5cf6',printIn:'#06b6d4',printOut:'#f97316',fabIn:'#06b6d4',fabOut:'#f97316',dispatch:'#3b82f6',installed:'#4ade80'}[k] || '#64748b');
-  const stageLabel = (k) => ({design:'Design',printIn:'P·In',printOut:'P·Out',fabIn:'F·In',fabOut:'F·Out',dispatch:'Dispatch',installed:'Done'}[k] || k);
+  const stageColor = (k) => ({design:'#8b5cf6',printIn:'#06b6d4',printOut:'#f97316',fabIn:'#06b6d4',fabOut:'#f97316',delivered:'#3b82f6',installation:'#4ade80'}[k] || '#64748b');
+  const stageLabel = (k) => ({design:'Design',printIn:'P·In',printOut:'P·Out',fabIn:'F·In',fabOut:'F·Out',delivered:'Delivered',installation:'Inst WIP'}[k] || k);
 
   const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
 
@@ -2861,9 +2893,16 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
 
       {/* Production Status cards row (NEW) — same 7 cards as Banking CRM */}
       <div style={{background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:'7px 10px'}}>
-        <p style={{fontSize:8,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600,margin:'0 0 5px'}}>
-          🏭 Production Status — click to filter
-        </p>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',margin:'0 0 5px'}}>
+          <p style={{fontSize:8,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600,margin:0}}>
+            🏭 Production Status — click to filter
+          </p>
+          {ad === 'design' && (
+            <button onClick={()=>setShowReassignModal(true)} style={{background:'#8b5cf620',border:'1px solid #8b5cf655',color:'#c084fc',borderRadius:4,padding:'3px 8px',fontSize:9,fontWeight:600,cursor:'pointer'}}>
+              🔀 Reassign In-House ↔ Outsource
+            </button>
+          )}
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:5}}>
           {cardDefs.map(d => {
             const active = ad === d.k;
@@ -2955,7 +2994,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
                         e.target.value = '';
                       }} style={{fontSize:9,padding:"2px 4px",width:130}}>
                         <option value="">Change →</option>
-                        {ALL_ST.filter(st => st !== j.status).map(st => <option key={st} value={st}>{st}</option>)}
+                        {renderStatusOptions(j.status)}
                       </select>
                     </td>
                   </tr>
@@ -2968,6 +3007,85 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
           </table>
         </div>
       </div>
+
+      {/* ── Designing Bulk-Reassign Modal (22 Apr 26) ───────────────────── */}
+      {showReassignModal && (()=>{
+        const srcStatus = reassignDirection === 'to-outsource' ? 'Designing - In House' : 'Designing - Outsource';
+        const tgtStatus = reassignDirection === 'to-outsource' ? 'Designing - Outsource' : 'Designing - In House';
+        const eligible = (jobs||[]).filter(j => j.status === srcStatus);
+        const selectedIds = Object.keys(reassignSelected).filter(id => reassignSelected[id]);
+        const toggleAll = () => {
+          if (selectedIds.length === eligible.length) {
+            setReassignSelected({});
+          } else {
+            const all = {};
+            eligible.forEach(j => { all[j.id] = true; });
+            setReassignSelected(all);
+          }
+        };
+        const toggle = (id) => setReassignSelected(p => ({...p, [id]: !p[id]}));
+        const doBulkMove = async () => {
+          if (selectedIds.length === 0) return;
+          if (!confirm(`Move ${selectedIds.length} job(s) from "${srcStatus}" to "${tgtStatus}"?\n\nThis updates the jobs directly in the database.`)) return;
+          setReassignSaving(true);
+          let ok = 0, fail = 0;
+          for (const id of selectedIds) {
+            const {error} = await sb.from('jobs').update({status: tgtStatus}).eq('id', id);
+            if (error) fail++; else { ok++; updateJobStatus(id, tgtStatus); }
+          }
+          setReassignSaving(false);
+          alert(`Done: ${ok} moved, ${fail} failed.`);
+          setReassignSelected({});
+          if (fail === 0) setShowReassignModal(false);
+        };
+        return (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:10}} onClick={()=>setShowReassignModal(false)}>
+            <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:10,width:'100%',maxWidth:720,maxHeight:'90vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
+              <div style={{padding:'12px 14px',borderBottom:'1px solid #1a2030',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <h3 style={{fontSize:13,fontWeight:700,color:'#e3a008',margin:0}}>🔀 Designing — Bulk Reassign</h3>
+                  <p style={{fontSize:9,color:'#64748b',margin:'2px 0 0'}}>Move Designing jobs between In-House and Outsource</p>
+                </div>
+                <button className="b bs" onClick={()=>setShowReassignModal(false)}>✕</button>
+              </div>
+              <div style={{padding:'10px 14px',borderBottom:'1px solid #1a2030',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <div style={{display:'flex',gap:4,background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:2}}>
+                  <button onClick={()=>{setReassignDirection('to-outsource');setReassignSelected({});}} style={{padding:'4px 10px',borderRadius:4,border:'none',cursor:'pointer',background:reassignDirection==='to-outsource'?'#8b5cf6':'transparent',color:reassignDirection==='to-outsource'?'white':'#94a3b8',fontSize:10,fontWeight:600}}>In-House → Outsource</button>
+                  <button onClick={()=>{setReassignDirection('to-inhouse');setReassignSelected({});}} style={{padding:'4px 10px',borderRadius:4,border:'none',cursor:'pointer',background:reassignDirection==='to-inhouse'?'#c084fc':'transparent',color:reassignDirection==='to-inhouse'?'white':'#94a3b8',fontSize:10,fontWeight:600}}>Outsource → In-House</button>
+                </div>
+                <span style={{fontSize:10,color:'#64748b'}}>{eligible.length} eligible · {selectedIds.length} selected</span>
+                <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+                  <button className="b bs" onClick={toggleAll} disabled={eligible.length===0}>{selectedIds.length===eligible.length&&eligible.length>0?'Clear all':'Select all'}</button>
+                  <button className="b bp" onClick={doBulkMove} disabled={selectedIds.length===0||reassignSaving}>{reassignSaving?'Saving...':`Move ${selectedIds.length||''} →`}</button>
+                </div>
+              </div>
+              <div style={{overflow:'auto',flex:1,padding:'0 14px 10px'}}>
+                {eligible.length===0 ? (
+                  <div style={{padding:30,textAlign:'center',color:'#64748b',fontSize:11}}>No jobs at "{srcStatus}" status.</div>
+                ) : (
+                  <table style={{width:'100%'}}>
+                    <thead style={{position:'sticky',top:0,background:'#0c1017'}}>
+                      <tr><th style={{width:30}}><input type="checkbox" checked={selectedIds.length===eligible.length&&eligible.length>0} onChange={toggleAll}/></th><th>Job#</th><th>Client</th><th>Project</th><th>Date</th></tr>
+                    </thead>
+                    <tbody>
+                      {eligible.map(j=>(
+                        <tr key={j.id} style={{cursor:'pointer',background:reassignSelected[j.id]?'#8b5cf615':''}} onClick={()=>toggle(j.id)}>
+                          <td><input type="checkbox" checked={!!reassignSelected[j.id]} onChange={()=>toggle(j.id)} onClick={e=>e.stopPropagation()}/></td>
+                          <td className="mn" style={{fontSize:10,color:'#e3a008',fontWeight:700}}>{j.id}</td>
+                          <td style={{fontSize:10}}>{j.client_name?.slice(0,28)}</td>
+                          <td style={{fontSize:10,color:'#64748b'}}>{j.project?.slice(0,35)}</td>
+                          <td style={{fontSize:9,color:'#64748b',whiteSpace:'nowrap'}}>{j.created_at?.slice(0,10)||'—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 }
@@ -3097,7 +3215,7 @@ function PrintPage({logs,machines,materials,team,stock,addLog,jobs,sm,updateJobS
         <span style={{fontSize:11,fontWeight:700,color:"#ef4444"}}>🖨️ Jobs in Printing Queue — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
       </div>
       {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Items</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
-        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td><td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:110}}><option value="">Change →</option>{ALL_ST.filter(st=>st!==j.status).map(st=><option key={st} value={st}>{st}</option>)}</select></td></tr>})}
+        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td><td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:110}}><option value="">Change →</option>{renderStatusOptions(j.status)}</select></td></tr>})}
         {queue.length===0&&<tr><td colSpan={6} style={{textAlign:"center",color:"#64748b",padding:12}}>No jobs in Printing</td></tr>}
       </tbody></table></div>}
     </div>
@@ -3193,7 +3311,7 @@ function FabPage({logs,materials,team,stock,addLog,jobs,sm,updateJobStatus}){
         <span style={{fontSize:11,fontWeight:700,color:"#dc2626"}}>🔧 Jobs in Fabrication Queue — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
       </div>
       {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Items</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
-        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td><td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:110}}><option value="">Change →</option>{ALL_ST.filter(st=>st!==j.status).map(st=><option key={st} value={st}>{st}</option>)}</select></td></tr>})}
+        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td><td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:110}}><option value="">Change →</option>{renderStatusOptions(j.status)}</select></td></tr>})}
         {queue.length===0&&<tr><td colSpan={6} style={{textAlign:"center",color:"#64748b",padding:12}}>No jobs in Fabrication</td></tr>}
       </tbody></table></div>}
     </div>
@@ -5068,8 +5186,8 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
   const [sq,setSq]=useState('');
   const [statusFilter,setStatusFilter]=useState('All');
   const tabs=[
-    {id:'pending',l:'All Pending',c:'#f59e0b',statuses:['Billing Pending','Given for Billing','Delivered','Cash Pending','Proforma Invoice','IC Pending']},
-    {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing','Delivered']},
+    {id:'pending',l:'All Pending',c:'#f59e0b',statuses:['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending']},
+    {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing']},
     {id:'done',l:'Billing Completed',c:'#4ade80',statuses:['Billing Done','Cash Received','No Bill']},
   ];
   const cur=tabs.find(t=>t.id===tab);
@@ -5083,7 +5201,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     if(sq){const q=sq.toLowerCase();return j.id?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q)||(j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q));}
     return true;
   });
-  const sc={'Billing Pending':'#f59e0b','Cash Pending':'#e3a008','Proforma Invoice':'#8b5cf6','IC Pending':'#f47067','Given for Billing':'#06b6d4','Delivered':'#10b981','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
+  const sc={'Billing Pending':'#f59e0b','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f47067','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b'};
   const addInvoice=async(j)=>{
     const inv=(invoices[j.id]||'').trim();
     if(!inv){alert("Enter invoice# first");return;}
@@ -6058,8 +6176,8 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         printOut:  leading === 'printOut',
         fabIn:     leading === 'fabIn',
         fabOut:    leading === 'fabOut',
-        dispatch:  leading === 'dispatch',
-        installed: leading === 'installed',
+        dispatch:  leading === 'delivered',     // Banking CRM still uses 'dispatch' key, but reads from new 'delivered' leading bucket
+        installed: leading === 'installation',  // Banking CRM still uses 'installed' key, but reads from new 'installation' leading bucket
         leading,
         status:    j.status,  // raw status — used for non-leading STATUS_CARDS buckets
         source: (hasGranularSignal && lineItems.length > 0) ? 'granular' : 'status'
@@ -6941,10 +7059,10 @@ function ClientPortal({code}){
     'ANA':{name:'ANA Designs',match:['ANA DESIGNS'],
       logo:'https://idjeniwznjiaanaxcjvg.supabase.co/storage/v1/object/public/Uploads/logos/ana-logo.jpg',
       depts:[
-      {id:'design',name:'Design Team',icon:'🎨',st:['Designing','Recce Pending','Active','Quotation Sent','PO Pending'],seeAll:false},
-      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing','Fabrication','Installation','Delivered'],seeAll:false},
+      {id:'design',name:'Design Team',icon:'🎨',st:['Designing - In House','Designing - Outsource','Recee','Quotation Sent','PO Pending'],seeAll:false},
+      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing · In-House','Printing · Outsource','Fabrication · In-House','Fabrication · Outsource','Installation WIP','Delivered'],seeAll:false},
       {id:'purchase',name:'Purchase Team',icon:'📦',st:null,seeAll:true,canEditPO:true},
-      {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','Proforma Invoice'],seeAll:false},
+      {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','IC Pending','DC Pending'],seeAll:false},
     ]},
   };
   const config=portalConfigs[code.toUpperCase()];
