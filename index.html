@@ -7223,6 +7223,9 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
       monthRevenue:sumActual(monthActs),
       weekRevenue:sumActual(weekActs),
       monthEst:sumEst(monthActs),
+      // Firm-level counts (method B): unique distinct firms ever visited, and how many of those firms got >1 visit
+      uniqueFirms:(()=>{const s=new Set();activities.filter(a=>a.activity_type==='visit'&&a.firm_name&&a.firm_name.trim()).forEach(a=>s.add(a.firm_name.trim().toLowerCase()));return s.size;})(),
+      repeatFirms:(()=>{const m={};activities.filter(a=>a.activity_type==='visit'&&a.firm_name&&a.firm_name.trim()).forEach(a=>{const k=a.firm_name.trim().toLowerCase();m[k]=(m[k]||0)+1;});return Object.values(m).filter(c=>c>1).length;})(),
       withPO:activities.filter(a=>a.activity_type==='project'&&a.job_id&&a.job_id.trim()).sort((a,b)=>(b.date||'').localeCompare(a.date||'')),
       // Follow-up tracker: rows with outcome 'Asked to Visit Again', bucketed by follow_up_date vs today.
       // Auto-detect: any later visit logged for the same firm (case-insensitive) marks as Done.
@@ -7361,6 +7364,8 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WEEK ₹ (ACTUAL)</p><p style={{fontSize:22,fontWeight:800,color:"#34d399"}}>{lakh(stats.weekRevenue)}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>NEW CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{stats.newClients}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>REPEAT CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#06b6d4"}}>{stats.repeatClients}</p></div>
+        <div className="c a" style={{padding:10,borderColor:"#a855f744"}} title="Distinct firm names ever visited (case-insensitive)"><p style={{fontSize:8,color:"#64748b"}}>UNIQUE FIRMS VISITED</p><p style={{fontSize:22,fontWeight:800,color:"#a855f7"}}>{stats.uniqueFirms}</p></div>
+        <div className="c a" style={{padding:10,borderColor:"#ec489944"}} title="Firms that received more than one visit"><p style={{fontSize:8,color:"#64748b"}}>REPEAT-VISITED FIRMS</p><p style={{fontSize:22,fontWeight:800,color:"#ec4899"}}>{stats.repeatFirms}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>PIPELINE</p><p style={{fontSize:22,fontWeight:800,color:"#f59e0b"}}>{stats.activePipeline}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WON</p><p style={{fontSize:22,fontWeight:800,color:"#4ade80"}}>{stats.won}</p></div>
       </div>
