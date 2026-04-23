@@ -7195,6 +7195,34 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   const visits=filtered.filter(a=>a.activity_type==='visit');
   const pipeline=filtered.filter(a=>a.activity_type==='project');
 
+  // Tag-mismatch detector. Computes the first-visit-id per firm across ALL activities (not just filtered),
+  // then `tagMismatch(a)` returns:
+  //   null              — no mismatch
+  //   'should_be_old'   — tagged 'New Client' but firm visited before this row
+  //   'should_be_new'   — tagged 'Old Client' but this is the firm's first visit in the system
+  // Note: 'should_be_new' may be a legitimate pre-CRM relationship — the badge is informational, not coercive.
+  const firmFirstSeen=useMemo(()=>{
+    const m={};
+    activities.filter(a=>a.activity_type==='visit'&&a.firm_name&&a.firm_name.trim())
+      .slice().sort((a,b)=>{
+        const d=(a.date||'').localeCompare(b.date||'');
+        return d!==0?d:(a.created_at||'').localeCompare(b.created_at||'');
+      })
+      .forEach(a=>{
+        const k=a.firm_name.trim().toLowerCase();
+        if(!(k in m))m[k]=a.id;
+      });
+    return m;
+  },[activities]);
+  const tagMismatch=(a)=>{
+    if(a.activity_type!=='visit'||!a.firm_name||!a.firm_name.trim())return null;
+    const k=a.firm_name.trim().toLowerCase();
+    const isFirst=firmFirstSeen[k]===a.id;
+    if(a.client_type==='New Client'&&!isFirst)return 'should_be_old';
+    if(a.client_type==='Old Client'&&isFirst)return 'should_be_new';
+    return null;
+  };
+
   // Stats
   const stats=useMemo(()=>{
     const thisMonth=td().slice(0,7);
@@ -7431,7 +7459,18 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
       <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th style={{minWidth:110}}>Date</th><th>New/Old</th><th style={{minWidth:130}}>Firm</th><th style={{minWidth:140}}>Industry</th><th style={{minWidth:110}}>Contact</th><th style={{minWidth:100}}>Phone</th><th style={{minWidth:130}}>Feedback</th><th style={{minWidth:130}}>Product</th><th style={{minWidth:150}}>Response</th><th style={{minWidth:110}}>Action</th><th style={{minWidth:110}}>Pipeline</th><th style={{minWidth:110}}>Re-visit</th><th style={{minWidth:80}}>Est ₹</th><th style={{minWidth:80}}>Actual ₹</th><th>Rep</th><th></th></tr></thead><tbody>
         {visits.map(a=><tr key={a.id}>
           <td><EditCell a={a} field="date" type="date" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="client_type" type="select" opts={['New Client','Old Client']} updateAct={updateAct}/></td>
+          <td>
+            <div style={{display:"flex",alignItems:"center",gap:3}}>
+              <div style={{flex:1}}><EditCell a={a} field="client_type" type="select" opts={['New Client','Old Client']} updateAct={updateAct}/></div>
+              {(()=>{const m=tagMismatch(a);if(!m)return null;
+                const flipTo=m==='should_be_old'?'Old Client':'New Client';
+                const tip=m==='should_be_old'
+                  ?`Tagged 'New Client' but firm "${a.firm_name}" was visited before. Click to flip to 'Old Client'.`
+                  :`Tagged 'Old Client' but this is the first visit to "${a.firm_name}" in the system. Click to flip to 'New Client' — OR ignore if this is a real pre-CRM relationship.`;
+                return <button title={tip} onClick={()=>{if(confirm(`Flip client_type to "${flipTo}"?\n\n${tip}`))updateAct(a.id,'client_type',flipTo);}} style={{background:"#f59e0b22",border:"1px solid #f59e0b",color:"#f59e0b",fontSize:9,fontWeight:700,padding:"1px 4px",borderRadius:3,cursor:"pointer",lineHeight:1}}>⚠</button>;
+              })()}
+            </div>
+          </td>
           <td><EditCell a={a} field="firm_name" updateAct={updateAct} onAfter={(v)=>updateAct(a.id,'client_name',v)}/></td>
           <td><EditCell a={a} field="industry" type="select" opts={INDUSTRIES} updateAct={updateAct}/></td>
           <td><EditCell a={a} field="contact_person" updateAct={updateAct}/></td>
