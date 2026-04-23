@@ -7160,6 +7160,8 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   const [dateFrom,setDateFrom]=useState('');
   const [dateTo,setDateTo]=useState('');
   const [repFilter,setRepFilter]=useState('All');
+  // Drill-down filter — set by clicking month tile, response chip, or product chip on Reports/Dashboard
+  const [drillFilter,setDrillFilter]=useState(null); // {type:'month'|'response'|'product'|'followup', value:string, label:string}
   const INDUSTRIES=['Architecture Firm','Interior Design Firm','Interior and Architecture Design Firm','Contractor','PMC','Tech Company','Finance Company','Design Agency','Developers/Building contractors','Other'];
   const PRODUCTS=['Vinyl','Glass Film','Signage','BENIF','Canvas','Frames','Wallpaper','3D Graphics','Acoustic','Suncontrol Film','PPF Film','Environmental Branding','Other'];
   const FEEDBACKS=['Yes','No','They will contact Us','Called Again Later','Followup Required','Referred to other team'];
@@ -7177,8 +7179,18 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     if(repFilter!=='All')f=f.filter(a=>a.rep_name===repFilter);
     if(dateFrom)f=f.filter(a=>a.date>=dateFrom);
     if(dateTo)f=f.filter(a=>a.date<=dateTo);
+    if(drillFilter){
+      const v=(drillFilter.value||'').toLowerCase();
+      if(drillFilter.type==='month')f=f.filter(a=>a.date?.startsWith(drillFilter.value));
+      else if(drillFilter.type==='response')f=f.filter(a=>(a.outcome||'').toLowerCase()===v);
+      else if(drillFilter.type==='product')f=f.filter(a=>(a.product_pitched||'').toLowerCase().split(',').map(x=>x.trim()).includes(v)||(a.pipeline_product||'').toLowerCase().split(',').map(x=>x.trim()).includes(v));
+      else if(drillFilter.type==='followup'){
+        const ids=new Set((drillFilter.ids||[]));
+        f=f.filter(a=>ids.has(a.id));
+      }
+    }
     return f.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  },[activities,sq,repFilter,dateFrom,dateTo]);
+  },[activities,sq,repFilter,dateFrom,dateTo,drillFilter]);
 
   const visits=filtered.filter(a=>a.activity_type==='visit');
   const pipeline=filtered.filter(a=>a.activity_type==='project');
@@ -7212,6 +7224,43 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
       weekRevenue:sumActual(weekActs),
       monthEst:sumEst(monthActs),
       withPO:activities.filter(a=>a.activity_type==='project'&&a.job_id&&a.job_id.trim()).sort((a,b)=>(b.date||'').localeCompare(a.date||'')),
+      // Follow-up tracker: rows with outcome 'Asked to Visit Again', bucketed by follow_up_date vs today.
+      // Auto-detect: any later visit logged for the same firm (case-insensitive) marks as Done.
+      // Manual override (followup_override jsonb) wins over auto-detect.
+      followups:(()=>{
+        const today=td();
+        const wkAhead=new Date(new Date().getTime()+7*86400000).toISOString().slice(0,10);
+        const visitsByFirm={};
+        activities.filter(a=>a.activity_type==='visit'&&a.firm_name).forEach(a=>{
+          const k=(a.firm_name||'').trim().toLowerCase();
+          if(!visitsByFirm[k])visitsByFirm[k]=[];
+          visitsByFirm[k].push(a);
+        });
+        const candidates=activities.filter(a=>a.activity_type==='visit'&&(a.outcome||'').toLowerCase().includes('asked to visit again'));
+        const enriched=candidates.map(a=>{
+          const ov=a.followup_override;
+          const k=(a.firm_name||'').trim().toLowerCase();
+          const laterVisit=visitsByFirm[k]?.find(x=>x.id!==a.id&&(x.date||'')>(a.date||''));
+          let status='pending';
+          let reason='auto';
+          if(ov&&ov.status){status=ov.status;reason='manual';}
+          else if(laterVisit){status='done';reason='auto';}
+          // bucket
+          let bucket='no_date';
+          if(status==='done')bucket='done';
+          else if(!a.follow_up_date)bucket='no_date';
+          else if(a.follow_up_date<today)bucket='overdue';
+          else if(a.follow_up_date<=wkAhead)bucket='due_week';
+          else bucket='later';
+          return {...a,_fStatus:status,_fReason:reason,_fBucket:bucket,_fLater:laterVisit};
+        });
+        return {
+          all:enriched,
+          overdue:enriched.filter(x=>x._fBucket==='overdue'),
+          dueWeek:enriched.filter(x=>x._fBucket==='due_week'),
+          done:enriched.filter(x=>x._fBucket==='done'),
+        };
+      })(),
       products:{},
     };
   },[activities]);
@@ -7243,6 +7292,15 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   const updateAct=async(id,field,value)=>{
     await sb.from('sales_activities').update({[field]:value}).eq('id',id);
     setActivities(p=>p.map(a=>a.id===id?{...a,[field]:value}:a));
+  };
+
+  // Manual override for follow-up status. Stores who & when in followup_override jsonb.
+  // Pass desiredStatus='done' or 'pending' or null (to clear override and revert to auto).
+  const toggleFollowupOverride=async(id,desiredStatus)=>{
+    const ov=desiredStatus==null?null:{status:desiredStatus,by:user?.name||'unknown',at:new Date().toISOString()};
+    await sb.from('sales_activities').update({followup_override:ov}).eq('id',id);
+    setActivities(p=>p.map(a=>a.id===id?{...a,followup_override:ov}:a));
+    show(desiredStatus==='done'?'Marked done':desiredStatus==='pending'?'Marked pending':'Override cleared');
   };
 
   const ins={className:"in",style:{fontSize:10,padding:'4px 6px'}};
@@ -7325,6 +7383,41 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
           {stats.withPO.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:20}}>No pipeline projects linked to a Job# yet — set Job# on a project row in the Pipeline tab</td></tr>}
         </tbody></table></div>
       </div>
+
+      {/* FOLLOW-UPS TRACKER — auto-detected from "Asked to Visit Again" responses */}
+      <div className="c" style={{padding:0,marginTop:8}}>
+        <div style={{padding:"6px 8px",borderBottom:"2px solid #f59e0b",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:10,fontWeight:700,color:"#f59e0b"}}>🔄 Follow-ups (Asked to Visit Again) — {stats.followups.all.length} total</span>
+          <span style={{fontSize:8,color:"#64748b"}}>auto-marks Done if a later visit is logged for the same firm · tap to override</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,padding:8}}>
+          <div className="c a" style={{padding:8,borderColor:"#f4706744"}}><p style={{fontSize:8,color:"#64748b"}}>OVERDUE</p><p style={{fontSize:22,fontWeight:800,color:"#f47067"}}>{stats.followups.overdue.length}</p></div>
+          <div className="c a" style={{padding:8,borderColor:"#e3a00844"}}><p style={{fontSize:8,color:"#64748b"}}>DUE THIS WEEK</p><p style={{fontSize:22,fontWeight:800,color:"#e3a008"}}>{stats.followups.dueWeek.length}</p></div>
+          <div className="c a" style={{padding:8,borderColor:"#10b98144"}}><p style={{fontSize:8,color:"#64748b"}}>DONE</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{stats.followups.done.length}</p></div>
+        </div>
+        <div style={{overflowX:"auto",maxHeight:400}}><table><thead><tr><th>Status</th><th>Visit</th><th>Firm</th><th>Contact</th><th>Phone</th><th>Re-visit Due</th><th>Last Action</th><th>Action</th></tr></thead><tbody>
+          {[...stats.followups.overdue,...stats.followups.dueWeek,...stats.followups.done.slice(0,30)].map(a=>{
+            const colour=a._fBucket==='overdue'?'#f47067':a._fBucket==='due_week'?'#e3a008':'#10b981';
+            const label=a._fBucket==='overdue'?'OVERDUE':a._fBucket==='due_week'?'DUE THIS WK':'DONE';
+            return <tr key={a.id}>
+              <td><span className="bd" style={{background:colour+'20',color:colour,fontSize:8,fontWeight:700}}>{label}</span>{a._fReason==='manual'&&<span style={{fontSize:7,color:"#64748b",marginLeft:4}} title={`Manually overridden by ${a.followup_override?.by||'?'}`}>✱</span>}</td>
+              <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
+              <td style={{fontSize:10,fontWeight:600}} title={a.firm_name}>{a.firm_name?.slice(0,28)}</td>
+              <td style={{fontSize:9}}>{a.contact_person?.slice(0,18)}</td>
+              <td style={{fontSize:9,color:"#64748b"}}>{a.mobile}</td>
+              <td style={{fontSize:9,color:colour,fontWeight:600,whiteSpace:"nowrap"}}>{a.follow_up_date||'—'}</td>
+              <td style={{fontSize:8,color:"#64748b"}} title={a._fLater?`Later visit ${a._fLater.date}`:''}>{a._fLater?`✓ Re-visited ${a._fLater.date}`:'—'}</td>
+              <td style={{whiteSpace:"nowrap"}}>{a._fBucket==='done'
+                ? <button className="b bs" style={{fontSize:8,padding:'2px 6px'}} onClick={()=>toggleFollowupOverride(a.id,'pending')} title="Mark as still pending">↶ Reopen</button>
+                : <button className="b bs" style={{fontSize:8,padding:'2px 6px',color:"#10b981",borderColor:"#10b98144"}} onClick={()=>toggleFollowupOverride(a.id,'done')} title="Mark as done manually">✓ Mark Done</button>
+              }
+              {a.followup_override&&<button className="b bs" style={{fontSize:8,padding:'2px 6px',marginLeft:3,color:"#64748b"}} onClick={()=>toggleFollowupOverride(a.id,null)} title="Clear manual override and revert to auto-detect">↺</button>}
+              </td>
+            </tr>;
+          })}
+          {stats.followups.all.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:20}}>No "Asked to Visit Again" responses yet</td></tr>}
+        </tbody></table></div>
+      </div>
     </div>}
 
     {/* VISITS TAB — inline-editable; created_at audit-locked */}
@@ -7377,10 +7470,10 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     {/* REPORTS TAB */}
     {tab==='reports'&&<div style={{display:"grid",gap:8}}>
       <div className="c" style={{padding:10}}>
-        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 Visit Frequency by Month</p>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 Visit Frequency by Month <span style={{fontSize:9,color:"#64748b",fontWeight:400}}>(click any month to drill down)</span></p>
         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(()=>{
           const months={};activities.filter(a=>a.activity_type==='visit').forEach(a=>{const m=a.date?.slice(0,7);if(m)months[m]=(months[m]||0)+1;});
-          return Object.entries(months).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,c])=><div key={m} className="c a" style={{padding:"6px 10px",minWidth:80,textAlign:"center"}}><p style={{fontSize:8,color:"#64748b"}}>{m}</p><p style={{fontSize:16,fontWeight:800,color:"#3b82f6"}}>{c}</p></div>);
+          return Object.entries(months).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,c])=><div key={m} className="c a" style={{padding:"6px 10px",minWidth:80,textAlign:"center",cursor:"pointer",borderColor:drillFilter?.type==='month'&&drillFilter?.value===m?'#3b82f6':undefined}} onClick={()=>setDrillFilter({type:'month',value:m,label:`Month ${m}`})} title={`Click to see ${c} visits in ${m}`}><p style={{fontSize:8,color:"#64748b"}}>{m}</p><p style={{fontSize:16,fontWeight:800,color:"#3b82f6"}}>{c}</p></div>);
         })()}</div>
       </div>
       <div className="c" style={{padding:10}}>
@@ -7391,14 +7484,14 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
         </div>
       </div>
       <div className="c" style={{padding:10}}>
-        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Top Products Pitched</p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:4}}>{productStats.slice(0,12).map(([p,c])=><div key={p} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}>{p}</span><span style={{fontWeight:800,color:"#8b5cf6",fontSize:12}}>{c}</span></div>)}</div>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Top Products Pitched <span style={{fontSize:9,color:"#64748b",fontWeight:400}}>(click any product to drill down)</span></p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:4}}>{productStats.slice(0,12).map(([p,c])=><div key={p} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between",cursor:"pointer",borderColor:drillFilter?.type==='product'&&drillFilter?.value===p?'#8b5cf6':undefined}} onClick={()=>setDrillFilter({type:'product',value:p,label:`Product: ${p}`})} title={`Click to see ${c} visits where ${p} was pitched`}><span style={{fontSize:10}}>{p}</span><span style={{fontWeight:800,color:"#8b5cf6",fontSize:12}}>{c}</span></div>)}</div>
       </div>
       <div className="c" style={{padding:10}}>
-        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📋 Response Breakdown</p>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📋 Response Breakdown <span style={{fontSize:9,color:"#64748b",fontWeight:400}}>(click any response to drill down)</span></p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:4}}>{(()=>{
           const r={};activities.forEach(a=>{const o=a.outcome;if(o&&!o.includes('No Data'))r[o]=(r[o]||0)+1;});
-          return Object.entries(r).sort((a,b)=>b[1]-a[1]).map(([k,v])=><div key={k} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,color:k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'}}>{k.slice(0,30)}</span><span style={{fontWeight:800,fontSize:11}}>{v}</span></div>);
+          return Object.entries(r).sort((a,b)=>b[1]-a[1]).map(([k,v])=><div key={k} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between",cursor:"pointer",borderColor:drillFilter?.type==='response'&&drillFilter?.value===k?(k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'):undefined}} onClick={()=>setDrillFilter({type:'response',value:k,label:`Response: ${k}`})} title={`Click to see ${v} visits with this response`}><span style={{fontSize:9,color:k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'}}>{k.slice(0,30)}</span><span style={{fontWeight:800,fontSize:11}}>{v}</span></div>);
         })()}</div>
       </div>
       <button className="b" onClick={()=>{
@@ -7406,6 +7499,27 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
         const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sales Data');
         XLSX.writeFile(wb,'Sales_CRM_Export_'+td()+'.xlsx');show('Excel exported!');
       }} style={{fontSize:11}}>📥 Export to Excel</button>
+
+      {/* Drill-down inline visits table — appears when a tile/chip is clicked */}
+      {drillFilter&&<div className="c" style={{padding:0,marginTop:4}}>
+        <div style={{padding:"8px 10px",borderBottom:"2px solid #e3a008",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:11,fontWeight:700,color:"#e3a008"}}>🔎 {drillFilter.label} — {visits.length} visits</span>
+          <button className="b bs" style={{fontSize:9,padding:'3px 8px'}} onClick={()=>setDrillFilter(null)}>✕ Clear filter</button>
+        </div>
+        <div style={{overflowX:"auto",maxHeight:400}}><table><thead><tr><th>Date</th><th>Firm</th><th>Contact</th><th>Phone</th><th>Product</th><th>Response</th><th>Re-visit</th><th>Rep</th></tr></thead><tbody>
+          {visits.map(a=><tr key={a.id}>
+            <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
+            <td style={{fontSize:10,fontWeight:600}} title={a.firm_name}>{a.firm_name?.slice(0,30)}</td>
+            <td style={{fontSize:9}}>{a.contact_person?.slice(0,20)}</td>
+            <td style={{fontSize:9,color:"#64748b"}}>{a.mobile}</td>
+            <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,20)}</td>
+            <td style={{fontSize:9,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,30)}</td>
+            <td style={{fontSize:9}}>{a.follow_up_date||'—'}</td>
+            <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,12)}</td>
+          </tr>)}
+          {visits.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:20}}>No matching visits</td></tr>}
+        </tbody></table></div>
+      </div>}
     </div>}
 
     {/* ADD VISIT MODAL */}
