@@ -180,15 +180,24 @@ const countJobsByCard = (jobs, cardKey) => {
 
 // renderStatusOptions: returns grouped <optgroup> options for any status dropdown.
 // Statuses are organized under their STATUS_CARDS bucket label so users always see
-// the bridge between cards and status names. Pass currentStatus to exclude it from
-// the choices (since you can't change to your current status).
+// the bridge between cards and status names. The current status is shown but
+// disabled (greyed out) so users can see it in context and understand which
+// bucket their job is currently in — without being able to re-select it as a no-op.
 // Added 22 Apr 26 as part of non-banking job status overhaul.
+// Updated 23 Apr 26: show current status as disabled rather than hiding it.
 const renderStatusOptions = (currentStatus) => {
   return STATUS_CARDS.map(card => {
-    const opts = card.statuses.filter(st => st !== currentStatus);
-    if (opts.length === 0) return null;
+    if (card.statuses.length === 0) return null;
     return React.createElement('optgroup', { key: card.key, label: card.label },
-      opts.map(st => React.createElement('option', { key: st, value: st }, st))
+      card.statuses.map(st => {
+        const isCurrent = st === currentStatus;
+        return React.createElement('option', {
+          key: st,
+          value: st,
+          disabled: isCurrent,
+          style: isCurrent ? { color: '#64748b', fontStyle: 'italic' } : undefined
+        }, isCurrent ? (st + ' (current)') : st);
+      })
     );
   });
 };
@@ -2068,7 +2077,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 <th style={{fontSize:8,width:70}}>Width</th>
                 <th style={{fontSize:8,width:70}}>Height</th>
                 <th style={{fontSize:8,width:110}}>Unit Mode</th>
-                <th style={{fontSize:8,width:45}}>Qty</th>
+                <th style={{fontSize:8,width:60}}>Qty</th>
                 <th style={{fontSize:8,width:70}}>Rate ₹</th>
                 <th style={{fontSize:8,width:55}}>GST %</th>
                 <th style={{fontSize:8,width:90}}>Amount</th>
@@ -2118,7 +2127,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                   <td><select className="in" value={x.unit_mode||'NOS'} onChange={e=>onModeChange(e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%"}}>
                     {UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}
                   </select></td>
-                  <td><input className="in mn" type="number" min="0" value={x.qty} onChange={e=>onDimChange('qty',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  <td><input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={x.qty} onChange={e=>{const v=e.target.value;if(v===''||/^\d*\.?\d*$/.test(v))onDimChange('qty',v);}} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><input className="in mn" type="number" min="0" value={x.rate} onChange={e=>updItem(xi,'rate',e.target.value)} style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
                   <td><select className="in" value={x.gst_pct} onChange={e=>updItem(xi,'gst_pct',+e.target.value)} style={{fontSize:8,padding:"2px 3px",width:"100%",color:x.gst_pct===0?'#64748b':'inherit'}}>{PR_GST.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
                   <td style={{fontSize:9,color:"#e3a008",fontWeight:700,textAlign:"right",paddingRight:4}}>
@@ -6222,6 +6231,13 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     jobs.forEach(j => {
       const jobNoPrefix = (j.id||'').split('-')[0];
       if (!jobNoPrefix) return;
+      // FY collision guard (23 Apr 26): when a site's job number exists in multiple
+      // FYs (e.g. 1073-2526 AND 1073-2627), both share the same jobNoPrefix '1073'.
+      // Without this guard, the forEach iteration order silently decides which status
+      // the site gets classified by. Rule: the newer FY (lexicographically-greater
+      // job id) represents the more current state of work on that site and wins.
+      const existing = map[jobNoPrefix];
+      if (existing && existing._jobId && existing._jobId >= j.id) return;
       const lineItems = itemsByJob[j.id] || [];
       const osList = osByJob[j.id] || [];
       // OPTION B (17 Apr 26): STATUS WINS. `leading` always comes from jobs.status.
@@ -6246,7 +6262,8 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         installed: leading === 'installation',  // Banking CRM still uses 'installed' key, but reads from new 'installation' leading bucket
         leading,
         status:    j.status,  // raw status — used for non-leading STATUS_CARDS buckets
-        source: (hasGranularSignal && lineItems.length > 0) ? 'granular' : 'status'
+        source: (hasGranularSignal && lineItems.length > 0) ? 'granular' : 'status',
+        _jobId:    j.id  // used by FY collision guard — keep the newer FY's classification
       };
     });
     return map;
