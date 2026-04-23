@@ -7187,20 +7187,31 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   const stats=useMemo(()=>{
     const thisMonth=td().slice(0,7);
     const today=td();
+    // Week = last 7 days inclusive of today (rolling). Simpler than ISO week and matches Indian biz reporting.
+    const d=new Date();const sevenAgo=new Date(d.getTime()-6*86400000).toISOString().slice(0,10);
     const monthActs=activities.filter(a=>a.date?.startsWith(thisMonth));
+    const weekActs=activities.filter(a=>a.date&&a.date>=sevenAgo&&a.date<=today);
     const todayActs=activities.filter(a=>a.date===today);
     const newClients=activities.filter(a=>a.client_type==='New Client');
     const pipelineActs=activities.filter(a=>a.activity_type==='project');
     const wonActs=pipelineActs.filter(a=>a.status==='Won'||a.status==='Completed');
+    const num=v=>{const n=Number(v);return isNaN(n)?0:n;};
+    const sumActual=arr=>arr.reduce((s,a)=>s+num(a.actual_value),0);
+    const sumEst=arr=>arr.reduce((s,a)=>s+num(a.estimated_value),0);
     return {
       totalVisits:activities.filter(a=>a.activity_type==='visit').length,
       monthVisits:monthActs.filter(a=>a.activity_type==='visit').length,
+      weekVisits:weekActs.filter(a=>a.activity_type==='visit').length,
       todayVisits:todayActs.filter(a=>a.activity_type==='visit').length,
       newClients:newClients.length,
       repeatClients:activities.filter(a=>a.client_type==='Old Client').length,
       totalPipeline:pipelineActs.length,
       activePipeline:pipelineActs.filter(a=>!['Won','Lost','Completed'].includes(a.status)).length,
       won:wonActs.length,
+      monthRevenue:sumActual(monthActs),
+      weekRevenue:sumActual(weekActs),
+      monthEst:sumEst(monthActs),
+      withPO:activities.filter(a=>a.activity_type==='visit'&&a.job_id&&a.job_id.trim()).sort((a,b)=>(b.date||'').localeCompare(a.date||'')),
       products:{},
     };
   },[activities]);
@@ -7236,6 +7247,36 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
 
   const ins={className:"in",style:{fontSize:10,padding:'4px 6px'}};
 
+  // ₹ in lakhs format. 125000 → ₹1.25L, 99000 → ₹99,000, 12500000 → ₹1.25Cr
+  const lakh=(v)=>{const n=Number(v)||0;if(n===0)return'₹0';if(n>=10000000)return'₹'+(n/10000000).toFixed(2)+'Cr';if(n>=100000)return'₹'+(n/100000).toFixed(2)+'L';return'₹'+n.toLocaleString('en-IN');};
+
+  // Inline-editable cell. Audit-locked fields handled by simply not wiring EditCell to them.
+  // Saves on blur (text/number/date) or change (select). Optional onAfter callback for derived writes.
+  function EditCell({a,field,type,opts,updateAct,onAfter}){
+    const [v,setV]=useState(a[field]??'');
+    useEffect(()=>{setV(a[field]??'');},[a.id,a[field]]);
+    const commit=async()=>{
+      const orig=a[field]??'';
+      let nv=v;
+      if(type==='number'){nv=v===''||v===null?0:Number(v);if(isNaN(nv))nv=0;}
+      if(String(nv)===String(orig))return;
+      await updateAct(a.id,field,nv);
+      if(onAfter)await onAfter(nv);
+    };
+    if(type==='select'){
+      return <select className="in" value={v||''} onChange={e=>{setV(e.target.value);}} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:80,background:'#0a0f1a',color:'#e2e8f0',border:'1px solid #1e293b'}}>
+        {(opts||[]).map((o,i)=><option key={i} value={o}>{o||'—'}</option>)}
+      </select>;
+    }
+    if(type==='date'){
+      return <input className="in" type="date" value={v||''} onChange={e=>setV(e.target.value)} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:100}}/>;
+    }
+    if(type==='number'){
+      return <input className="in" type="number" min="0" step="1" value={v??0} onChange={e=>setV(e.target.value)} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:70,textAlign:'right'}}/>;
+    }
+    return <input className="in" type="text" value={v||''} onChange={e=>setV(e.target.value)} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:80}} title={v||''}/>;
+  }
+
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {/* Tabs + Actions */}
     <div style={{display:"flex",justifyContent:"space-between",gap:4,flexWrap:"wrap",alignItems:"center"}}>
@@ -7256,39 +7297,59 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:7,marginBottom:12}}>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>TOTAL VISITS</p><p style={{fontSize:22,fontWeight:800,color:"#3b82f6"}}>{stats.totalVisits}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>THIS MONTH</p><p style={{fontSize:22,fontWeight:800,color:"#8b5cf6"}}>{stats.monthVisits}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>THIS WEEK</p><p style={{fontSize:22,fontWeight:800,color:"#a855f7"}}>{stats.weekVisits}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>TODAY</p><p style={{fontSize:22,fontWeight:800,color:"#e3a008"}}>{stats.todayVisits}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>MONTH ₹ (ACTUAL)</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{lakh(stats.monthRevenue)}</p></div>
+        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WEEK ₹ (ACTUAL)</p><p style={{fontSize:22,fontWeight:800,color:"#34d399"}}>{lakh(stats.weekRevenue)}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>NEW CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{stats.newClients}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>REPEAT CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#06b6d4"}}>{stats.repeatClients}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>PIPELINE</p><p style={{fontSize:22,fontWeight:800,color:"#f59e0b"}}>{stats.activePipeline}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WON</p><p style={{fontSize:22,fontWeight:800,color:"#4ade80"}}>{stats.won}</p></div>
       </div>
-      <div className="c" style={{padding:10}}>
+      <div className="c" style={{padding:10,marginBottom:12}}>
         <p style={{fontSize:11,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Products Pitched (Frequency)</p>
         <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{productStats.map(([p,c])=><span key={p} className="bd" style={{background:"#3b82f620",color:"#3b82f6",fontSize:10,padding:"3px 8px"}}>{p} <b>{c}</b></span>)}</div>
       </div>
+      <div className="c" style={{padding:0}}>
+        <div style={{padding:"6px 8px",borderBottom:"2px solid #10b981",background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:"#10b981"}}>🔗 Visits with PO / Job linked — {stats.withPO.length} records</span></div>
+        <div style={{overflowX:"auto",maxHeight:300}}><table><thead><tr><th>Date</th><th>Firm</th><th>Job#</th><th>Product</th><th style={{textAlign:'right'}}>Est ₹</th><th style={{textAlign:'right'}}>Actual ₹</th><th>Rep</th></tr></thead><tbody>
+          {stats.withPO.map(a=><tr key={a.id}>
+            <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
+            <td style={{fontSize:10,fontWeight:600}} title={a.firm_name}>{a.firm_name?.slice(0,28)}</td>
+            <td style={{fontSize:10,color:"#e3a008",fontWeight:700,whiteSpace:"nowrap"}}>{a.job_id}</td>
+            <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,18)||'—'}</td>
+            <td style={{fontSize:9,textAlign:'right',color:"#64748b"}}>{Number(a.estimated_value)>0?lakh(a.estimated_value):'—'}</td>
+            <td style={{fontSize:10,textAlign:'right',color:"#10b981",fontWeight:700}}>{Number(a.actual_value)>0?lakh(a.actual_value):'—'}</td>
+            <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
+          </tr>)}
+          {stats.withPO.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits linked to a PO/Job yet — set Job# on a visit row in the Pipeline tab</td></tr>}
+        </tbody></table></div>
+      </div>
     </div>}
 
-    {/* VISITS TAB */}
+    {/* VISITS TAB — inline-editable; created_at audit-locked */}
     {tab==='visits'&&<div className="c" style={{padding:0}}>
-      <div style={{padding:"6px 8px",borderBottom:"2px solid #3b82f6",background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>🚶 Site Visits — {visits.length} records{sq?` matching "${sq}"`:''}</span></div>
-      <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>New/Old</th><th>Firm</th><th>Industry</th><th>Contact</th><th>Phone</th><th>Feedback</th><th>Product</th><th>Response</th><th>Action</th><th>Pipeline</th><th>Re-visit</th><th>Rep</th><th></th></tr></thead><tbody>
+      <div style={{padding:"6px 8px",borderBottom:"2px solid #3b82f6",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>🚶 Site Visits — {visits.length} records{sq?` matching "${sq}"`:''}</span><span style={{fontSize:8,color:"#64748b"}}>✏️ click any cell to edit · saves on blur</span></div>
+      <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th style={{minWidth:110}}>Date</th><th>New/Old</th><th style={{minWidth:130}}>Firm</th><th style={{minWidth:140}}>Industry</th><th style={{minWidth:110}}>Contact</th><th style={{minWidth:100}}>Phone</th><th style={{minWidth:130}}>Feedback</th><th style={{minWidth:130}}>Product</th><th style={{minWidth:150}}>Response</th><th style={{minWidth:110}}>Action</th><th style={{minWidth:110}}>Pipeline</th><th style={{minWidth:110}}>Re-visit</th><th style={{minWidth:80}}>Est ₹</th><th style={{minWidth:80}}>Actual ₹</th><th>Rep</th><th></th></tr></thead><tbody>
         {visits.map(a=><tr key={a.id}>
-          <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
-          <td><span className="bd" style={{background:a.client_type==='New Client'?'#10b98120':'#06b6d420',color:a.client_type==='New Client'?'#10b981':'#06b6d4',fontSize:8}}>{a.client_type==='New Client'?'NEW':'OLD'}</span></td>
-          <td style={{fontSize:10,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.firm_name}>{a.firm_name}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.industry?.slice(0,15)}</td>
-          <td style={{fontSize:9}} title={a.designation}>{a.contact_person?.slice(0,15)}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.mobile?.slice(0,12)}</td>
-          <td style={{fontSize:8}}>{a.description?.slice(0,18)}</td>
-          <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,15)}</td>
-          <td style={{fontSize:8,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,20)}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.follow_up_notes?.slice(0,15)}</td>
-          <td style={{fontSize:8,color:"#f59e0b"}}>{a.pipeline_project?.slice(0,15)}</td>
-          <td style={{fontSize:8}}>{a.follow_up_date||'—'}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
-          <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)}>✕</button></td>
+          <td><EditCell a={a} field="date" type="date" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="client_type" type="select" opts={['New Client','Old Client']} updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="firm_name" updateAct={updateAct} onAfter={(v)=>updateAct(a.id,'client_name',v)}/></td>
+          <td><EditCell a={a} field="industry" type="select" opts={INDUSTRIES} updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="contact_person" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="mobile" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="description" type="select" opts={['',...FEEDBACKS]} updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="product_pitched" type="select" opts={['',...PRODUCTS]} updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="outcome" type="select" opts={['',...RESPONSES]} updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="follow_up_notes" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="pipeline_project" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="follow_up_date" type="date" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="estimated_value" type="number" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="actual_value" type="number" updateAct={updateAct}/></td>
+          <td><EditCell a={a} field="rep_name" type="select" opts={salesReps} updateAct={updateAct}/></td>
+          <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)} title="Delete">✕</button></td>
         </tr>)}
-        {visits.length===0&&<tr><td colSpan={14} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits found</td></tr>}
+        {visits.length===0&&<tr><td colSpan={16} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits found</td></tr>}
       </tbody></table></div>
     </div>}
 
