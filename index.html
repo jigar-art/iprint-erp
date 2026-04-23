@@ -1023,7 +1023,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
           {pg==="jobnotes"&&<JobNotesPage jobs={fullJobs} user={user} show={show}/>}
           {pg==="appr"&&<ApprovalsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
-          {pg==="myprs"&&<MyPRsPage prs={prs} jobs={fullJobs} user={user} show={show} firms={firms} sm={setModal}/>}
+          {pg==="myprs"&&<MyPRsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms} sm={setModal}/>}
           {pg==="po"&&<POPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
           {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
         </div>
@@ -2170,7 +2170,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
           <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
             <span style={{fontSize:10}}><strong style={{color:"#e3a008"}}>Batch {bi+1}</strong> · {b.date} · {b.note}</span>
-            {b.po_number&&<span className="mn" style={{fontSize:8,color:"#06b6d4"}}>PO:{b.po_number}</span>}
+            {b.client_po_number&&<span className="mn" style={{fontSize:8,color:"#3b82f6"}}>C-PO:{b.client_po_number}</span>}
+            {b.po_number&&<span className="mn" style={{fontSize:8,color:"#06b6d4"}}>V-PO:{b.po_number}</span>}
             <button style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Edit batch note" onClick={()=>{const nn=prompt('Edit batch note:',b.note);if(nn!==null)updateBatchNote(b.id,nn);}}>✏️</button>
             <button style={{background:"none",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:9,padding:"1px 3px"}} title="Copy/Duplicate this batch" onClick={()=>{
               setCopyBatch({batchId:b.id,bi:bi+1,items:(b.items||[]).map(it=>({...it,selected:true}))});
@@ -2190,7 +2191,9 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           <input className="in mn" value={b.site_unique_id||''} placeholder="Enter Site UID..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,site_unique_id:v}:x));}} onBlur={e=>updateBatchField(b.id,'site_unique_id',e.target.value)} style={{width:130,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030",color:"#06b6d4"}}/>
         </div>
         <div style={{display:"flex",gap:4,marginTop:3,alignItems:"center",flexWrap:"wrap"}}>
-          <span style={{fontSize:8,color:"#64748b"}}>PO#:</span>
+          <span style={{fontSize:8,color:"#64748b"}}>Client PO#:</span>
+          <input className="in mn" value={b.client_po_number||''} placeholder="Client PO#" onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,client_po_number:v}:x));}} onBlur={e=>updateBatchField(b.id,'client_po_number',e.target.value)} style={{width:120,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030",color:"#3b82f6"}}/>
+          <span style={{fontSize:8,color:"#64748b",marginLeft:4}}>Vendor PO#:</span>
           <input className="in mn" value={b.po_number||''} placeholder="Vendor PO#" onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,po_number:v}:x));}} onBlur={e=>updateBatchField(b.id,'po_number',e.target.value)} style={{width:120,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030",color:"#e3a008"}}/>
           <span style={{fontSize:8,color:"#64748b",marginLeft:4}}>Billing Addr:</span>
           <input className="in" value={b.billing_address||''} placeholder="Billing address for this batch..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,billing_address:v}:x));}} onBlur={e=>updateBatchField(b.id,'billing_address',e.target.value)} style={{flex:1,minWidth:150,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030"}}/>
@@ -2326,7 +2329,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         <button className="b" onClick={()=>setCopyBatch(null)}>Cancel</button>
       </div>
     </div>}
-    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,billing_address:billVal,delivery_address:delVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
+    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Client PO#" id="_newBatchClientPO" style={{width:120}}/><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const clientPoVal=document.getElementById('_newBatchClientPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,client_po_number:clientPoVal,billing_address:billVal,delivery_address:delVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
         <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
           const file=e.target.files[0];if(!file)return;
@@ -4474,6 +4477,51 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     else { navigator.clipboard?.writeText(msg); show('📋 Message copied — no vendor phone on file'); }
   };
 
+  // Cancel PO (Item 5 — 23 Apr 26)
+  // Jigar-only. Reverts PR from 'PO Generated' / 'PO Sent' back to 'Approved' state,
+  // clears the po_no + po_generated_by + po_generated_at + po_sent_at, and records
+  // cancellation audit (who, when, why). Blocked if goods were already received.
+  const [cancelPr, setCancelPr] = React.useState(null); // {pr, reason}
+  const [cancelling, setCancelling] = React.useState(false);
+  const canCancelPO = (pr) => {
+    const isJigar = (user?.name||'').toUpperCase() === 'JIGAR';
+    if (!isJigar) return false;
+    if (!['PO Generated','PO Sent'].includes(pr.status)) return false;
+    if (pr.received_at) return false; // goods already received — cannot cancel
+    return true;
+  };
+  const submitCancelPO = async () => {
+    if (!cancelPr || cancelling) return;
+    const { pr, reason } = cancelPr;
+    if (!reason || !reason.trim()) {
+      show && show('Cancellation reason is required', false); return;
+    }
+    setCancelling(true);
+    const nowIso = new Date().toISOString();
+    const updates = {
+      status: 'Approved',
+      po_no: null,
+      po_generated_by: null,
+      po_generated_at: null,
+      po_sent_at: null,
+      po_cancelled_by: user?.name || 'Unknown',
+      po_cancelled_at: nowIso,
+      po_cancellation_reason: reason.trim(),
+      last_status_change_at: nowIso
+    };
+    try {
+      const { error } = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
+      if (error) { show && show('Cancel failed: ' + error.message, false); setCancelling(false); return; }
+      setPrs(p => p.map(x => x.id === pr.id ? { ...x, ...updates } : x));
+      setCancelPr(null);
+      setCancelling(false);
+      show && show('❌ PO cancelled — PR returned to Approved state');
+    } catch (e) {
+      show && show('Error: ' + (e.message || 'unknown'), false);
+      setCancelling(false);
+    }
+  };
+
   return (
     <div style={{padding:12, overflowY:'auto', height:'100%'}}>
       {/* Header */}
@@ -4568,6 +4616,16 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
                     style={{fontSize:10, padding:'5px 14px', background:'#06b6d4', borderColor:'#06b6d4', color:'#000', fontWeight:700}}>
                     {generating===pr.id ? '⏳ Generating...' : pr.po_no ? '📄 View / Print PO' : '📄 Generate PO'}
                   </button>
+                  {canCancelPO(pr) && (
+                    <button
+                      className="b bs"
+                      onClick={() => setCancelPr({pr, reason: ''})}
+                      title="Cancel PO and revert PR to Approved (Jigar only)"
+                      style={{fontSize:9, padding:'4px 10px', borderColor:'#f47067', color:'#f47067'}}
+                    >
+                      ❌ Cancel PO
+                    </button>
+                  )}
                 </div>
               </div>
               {/* Items summary */}
@@ -4577,10 +4635,65 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
                 {pr.expected_delivery && <span style={{color:'#06b6d4'}}>· By {pr.expected_delivery}</span>}
               </div>
               {pr.po_generated_by && <div style={{marginTop:4, fontSize:8, color:'#64748b'}}>PO generated by {pr.po_generated_by} · {pr.po_generated_at ? new Date(pr.po_generated_at).toLocaleDateString('en-IN') : ''}</div>}
+              {pr.po_cancelled_at && (
+                <div style={{marginTop:4, padding:'3px 6px', background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, fontSize:8, color:'#f47067'}}>
+                  ❌ Previous PO cancelled by {pr.po_cancelled_by||'—'} on {new Date(pr.po_cancelled_at).toLocaleDateString('en-IN')}
+                  {pr.po_cancellation_reason && <span style={{color:'#e6edf3', marginLeft:4}}>— {pr.po_cancellation_reason}</span>}
+                </div>
+              )}
             </div>
           );
         })}
       </div>
+
+      {/* Cancel PO Confirmation Modal (Item 5 — 23 Apr 26) */}
+      {cancelPr && (
+        <div
+          style={{position:'fixed', inset:0, background:'rgba(0,0,0,.65)', zIndex:100, display:'flex', alignItems:'flex-start', justifyContent:'center', padding:10, overflowY:'auto'}}
+          onClick={() => !cancelling && setCancelPr(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{background:'#0c1017', border:'1px solid #f4706733', borderRadius:12, width:'100%', maxWidth:520, padding:16, margin:'10px 0', animation:'fi .2s'}}
+          >
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+              <h3 style={{fontSize:13, fontWeight:700, color:'#f47067'}}>❌ Cancel PO</h3>
+              <button className="b bs" onClick={() => !cancelling && setCancelPr(null)}>✕</button>
+            </div>
+            <div style={{fontSize:10, color:'#e6edf3', marginBottom:10, lineHeight:1.5}}>
+              This will cancel PO <strong className="mn" style={{color:'#06b6d4'}}>{cancelPr.pr.po_no}</strong> for PR <strong className="mn" style={{color:'#f59e0b'}}>{cancelPr.pr.pr_no}</strong>.
+              <br/>
+              Vendor: <strong>{cancelPr.pr.vendor_name}</strong> · Amount: ₹{(+cancelPr.pr.total||0).toLocaleString('en-IN')}
+            </div>
+            <div style={{fontSize:9, color:'#f47067', marginBottom:10, padding:'6px 8px', background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, lineHeight:1.4}}>
+              ⚠️ <strong>Effect:</strong> PR returns to <strong>Approved</strong> status. PO number, generated-by, generated-at and sent-at will be cleared. You (or Shreya) can then generate a fresh PO with corrected details.
+              <br/>
+              Cancellation will be logged permanently in the audit trail.
+            </div>
+            <div style={{marginBottom:10}}>
+              <label style={{fontSize:8, color:'#e3a008', fontWeight:700}}>REASON FOR CANCELLATION * (required)</label>
+              <textarea
+                className="in"
+                value={cancelPr.reason}
+                onChange={e => setCancelPr(p => ({...p, reason: e.target.value}))}
+                placeholder="e.g. Vendor quoted wrong rate; switching to alternate vendor"
+                style={{fontSize:9, padding:'4px 6px', width:'100%', minHeight:50, fontFamily:'inherit', marginTop:2}}
+              />
+            </div>
+            <div style={{display:'flex', gap:6, justifyContent:'flex-end'}}>
+              <button className="b bs" onClick={() => !cancelling && setCancelPr(null)} disabled={cancelling} style={{fontSize:10}}>Keep PO</button>
+              <button
+                className="b"
+                onClick={submitCancelPO}
+                disabled={cancelling}
+                style={{fontSize:10, fontWeight:700, background:'#f47067', borderColor:'#f47067', color:'#000'}}
+              >
+                {cancelling ? '⏳ Cancelling...' : '❌ Confirm Cancel PO'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4588,7 +4701,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 // ══════════════════════════════════════════════════════════
 // MY PRs PAGE — per-user PR/PO status view
 // ══════════════════════════════════════════════════════════
-function MyPRsPage({prs, jobs, user, show, firms, sm}) {
+function MyPRsPage({prs, setPrs, jobs, user, show, firms, sm}) {
   const uname = (user?.name||'').toUpperCase();
   // Resolve current user to a PR_REQUESTORS-style key (proper case) and dept tag
   const myStaffKey = React.useMemo(() => {
@@ -4596,6 +4709,21 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
     return Object.keys(STAFF_DEPTS).find(k => k.toUpperCase() === uname || uname.includes(k.toUpperCase())) || null;
   }, [uname]);
   const myDeptTag = myStaffKey ? STAFF_DEPTS[myStaffKey] : null;
+
+  // Edit-and-resubmit modal state (Item 6 — 23 Apr 26)
+  // Only the PR creator or Jigar can edit & resubmit a rejected PR.
+  // Modal lets them fix line items, notes, transport, expected delivery, then
+  // resubmit with a mandatory revision note. On save: PATCH the existing row back
+  // to 'Pending Approval', clear rejection fields, increment revision_count, and
+  // append an entry to revision_history jsonb.
+  const [editPr, setEditPr] = React.useState(null); // {pr, items, notes, transport, expected_delivery, revisionNote}
+  const [resubmitting, setResubmitting] = React.useState(false);
+  const canEditResubmit = (pr) => {
+    if (pr.status !== 'Rejected') return false;
+    const isOwner = pr.created_by && pr.created_by.toUpperCase() === uname;
+    const isJigar = uname === 'JIGAR';
+    return isOwner || isJigar;
+  };
 
   const [scope, setScope] = React.useState('mine'); // 'mine' | 'dept' | 'all'
   const [statusFilter, setStatusFilter] = React.useState('Active'); // 'Active' | 'All' | specific status
@@ -4699,6 +4827,71 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
     if (!jobId) return '—';
     const j = (jobs||[]).find(x => x.id === jobId);
     return j && j.project ? jobId + ' (' + j.project + ')' : jobId;
+  };
+
+  // Submit a revised PR — PATCH existing row back to Pending Approval
+  const submitResubmit = async () => {
+    if (!editPr || resubmitting) return;
+    const { pr, items, notes, transport, expected_delivery, revisionNote } = editPr;
+    if (!revisionNote || !revisionNote.trim()) {
+      show && show('Please add a revision note explaining the changes', false); return;
+    }
+    if (!items || items.length === 0) {
+      show && show('Cannot resubmit — line items cannot be empty', false); return;
+    }
+    // Recompute totals from edited items
+    const newSubtotal = items.reduce((s, it) => {
+      const amt = (+it.qty||0) * (+it.rate||0);
+      return s + amt;
+    }, 0);
+    const newGstTotal = items.reduce((s, it) => {
+      const amt = (+it.qty||0) * (+it.rate||0);
+      return s + (amt * (+it.gst_pct||0) / 100);
+    }, 0);
+    const transportAmt = +transport || 0;
+    const transportGst = transportAmt * (+pr.transport_gst_pct||0) / 100;
+    const newTotal = newSubtotal + newGstTotal + transportAmt + transportGst;
+    // Build revision history entry
+    const prevHistory = Array.isArray(pr.revision_history) ? pr.revision_history : [];
+    const revEntry = {
+      rev: (prevHistory.length || 0) + 1,
+      at: new Date().toISOString(),
+      by: user?.name || 'Unknown',
+      note: revisionNote.trim(),
+      prev_rejection_reason: pr.rejection_reason || '',
+      prev_rejected_by: pr.rejected_by || '',
+      prev_total: pr.total,
+      prev_items_count: Array.isArray(pr.items) ? pr.items.length : 0
+    };
+    const updates = {
+      items: items,
+      subtotal: newSubtotal,
+      gst_total: newGstTotal,
+      transport: transportAmt,
+      total: newTotal,
+      notes: notes || '',
+      expected_delivery: expected_delivery || null,
+      status: 'Pending Approval',
+      rejection_reason: null,
+      rejected_by: null,
+      rejected_at: null,
+      revision_count: ((+pr.revision_count) || 0) + 1,
+      revision_history: [...prevHistory, revEntry],
+      revision_notes: revisionNote.trim(),
+      last_status_change_at: new Date().toISOString()
+    };
+    setResubmitting(true);
+    try {
+      const { error } = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
+      if (error) { show && show('Resubmit failed: ' + error.message, false); setResubmitting(false); return; }
+      setPrs && setPrs(p => p.map(x => x.id === pr.id ? { ...x, ...updates } : x));
+      setEditPr(null);
+      setResubmitting(false);
+      show && show('✅ PR resubmitted for approval');
+    } catch (e) {
+      show && show('Error: ' + (e.message || 'unknown'), false);
+      setResubmitting(false);
+    }
   };
 
   return (
@@ -4851,9 +5044,28 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
 
                 {/* Rejection reason or notes row */}
                 {pr.status === 'Rejected' && pr.rejection_reason && (
-                  <div style={{marginTop:6, padding:'4px 8px', background:'#f4706715', border:'1px solid #f4706733', borderRadius:4}}>
-                    <span style={{fontSize:8, color:'#f47067', fontWeight:700}}>REJECTION REASON: </span>
-                    <span style={{fontSize:9, color:'#e6edf3'}}>{pr.rejection_reason}</span>
+                  <div style={{marginTop:6, padding:'4px 8px', background:'#f4706715', border:'1px solid #f4706733', borderRadius:4, display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+                    <div style={{flex:1, minWidth:200}}>
+                      <span style={{fontSize:8, color:'#f47067', fontWeight:700}}>REJECTION REASON: </span>
+                      <span style={{fontSize:9, color:'#e6edf3'}}>{pr.rejection_reason}</span>
+                      {pr.revision_count > 0 && <span style={{fontSize:8, color:'#e3a008', marginLeft:6}}>(prior revisions: {pr.revision_count})</span>}
+                    </div>
+                    {canEditResubmit(pr) && (
+                      <button
+                        className="b bp"
+                        style={{fontSize:8, padding:'3px 8px', flexShrink:0}}
+                        onClick={() => setEditPr({
+                          pr,
+                          items: Array.isArray(pr.items) ? JSON.parse(JSON.stringify(pr.items)) : [],
+                          notes: pr.notes || '',
+                          transport: +pr.transport || 0,
+                          expected_delivery: pr.expected_delivery || '',
+                          revisionNote: ''
+                        })}
+                      >
+                        ✏️ Edit & Resubmit
+                      </button>
+                    )}
                   </div>
                 )}
                 {pr.status === 'Completed' && pr.received_at && (
@@ -4870,6 +5082,103 @@ function MyPRsPage({prs, jobs, user, show, firms, sm}) {
       <p style={{fontSize:8, color:'#475569', textAlign:'center', marginTop:16}}>
         💡 Yellow dot = status changed since you last viewed this page · Click job # to open job detail
       </p>
+
+      {/* Edit & Resubmit Modal (Item 6 — 23 Apr 26) */}
+      {editPr && (
+        <div
+          style={{position:'fixed', inset:0, background:'rgba(0,0,0,.65)', zIndex:100, display:'flex', alignItems:'flex-start', justifyContent:'center', padding:10, overflowY:'auto'}}
+          onClick={() => !resubmitting && setEditPr(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{background:'#0c1017', border:'1px solid #1a2030', borderRadius:12, width:'100%', maxWidth:900, padding:16, margin:'10px 0', maxHeight:'calc(100vh - 20px)', overflowY:'auto', animation:'fi .2s'}}
+          >
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, position:'sticky', top:-16, background:'#0c1017', zIndex:2, padding:'8px 0', marginTop:-8}}>
+              <h3 style={{fontSize:13, fontWeight:700, color:'#f59e0b'}}>✏️ Edit &amp; Resubmit PR — {editPr.pr.pr_no}</h3>
+              <button className="b bs" onClick={() => !resubmitting && setEditPr(null)}>✕</button>
+            </div>
+
+            <div style={{background:'#f4706710', border:'1px solid #f4706733', borderRadius:4, padding:'6px 8px', marginBottom:10, fontSize:9}}>
+              <span style={{color:'#f47067', fontWeight:700}}>Previous rejection:</span>{' '}
+              <span style={{color:'#e6edf3'}}>{editPr.pr.rejection_reason}</span>{' '}
+              <span style={{color:'#64748b'}}>— by {editPr.pr.rejected_by||'—'}</span>
+            </div>
+
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:10, fontSize:9}}>
+              <div><span style={{color:'#64748b'}}>Firm:</span> <strong>{editPr.pr.firm_code}</strong></div>
+              <div><span style={{color:'#64748b'}}>Vendor:</span> <strong>{editPr.pr.vendor_name}</strong></div>
+              <div><span style={{color:'#64748b'}}>Job:</span> <strong>{editPr.pr.job_id||'—'}</strong></div>
+            </div>
+
+            {/* Line items */}
+            <p style={{fontSize:8, color:'#f59e0b', fontWeight:700, marginBottom:4}}>LINE ITEMS</p>
+            <div style={{overflowX:'auto', marginBottom:8}}>
+              <table style={{minWidth:680}}>
+                <thead><tr>
+                  <th style={{fontSize:8, minWidth:150}}>Product</th>
+                  <th style={{fontSize:8, width:70}}>Qty</th>
+                  <th style={{fontSize:8, width:80}}>Rate ₹</th>
+                  <th style={{fontSize:8, width:70}}>GST %</th>
+                  <th style={{fontSize:8, width:90}}>Amount</th>
+                  <th style={{width:18}}></th>
+                </tr></thead>
+                <tbody>
+                  {editPr.items.map((it, i) => {
+                    const amt = (+it.qty||0) * (+it.rate||0);
+                    const gst = amt * (+it.gst_pct||0) / 100;
+                    const updIt = (k, v) => setEditPr(p => ({...p, items: p.items.map((x, xi) => xi===i ? {...x, [k]:v} : x)}));
+                    return (
+                      <tr key={i}>
+                        <td><input className="in" value={it.product||''} onChange={e=>updIt('product', e.target.value)} style={{fontSize:9, padding:'2px 4px', width:'100%'}}/></td>
+                        <td><input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={it.qty} onChange={e=>{const v=e.target.value;if(v===''||/^\d*\.?\d*$/.test(v))updIt('qty', v);}} style={{fontSize:9, padding:'2px 4px', width:'100%'}}/></td>
+                        <td><input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={it.rate} onChange={e=>{const v=e.target.value;if(v===''||/^\d*\.?\d*$/.test(v))updIt('rate', v);}} style={{fontSize:9, padding:'2px 4px', width:'100%'}}/></td>
+                        <td><select className="in" value={it.gst_pct||0} onChange={e=>updIt('gst_pct', +e.target.value)} style={{fontSize:9, padding:'2px 4px', width:'100%'}}>
+                          {[0,5,12,18,28].map(g => <option key={g} value={g}>{g}%</option>)}
+                        </select></td>
+                        <td className="mn" style={{fontSize:9, textAlign:'right'}}>₹{(amt+gst).toLocaleString('en-IN', {maximumFractionDigits:2})}</td>
+                        <td>
+                          {editPr.items.length > 1 && (
+                            <button className="b bs" style={{fontSize:7, padding:'1px 4px', color:'#f47067', borderColor:'#f4706733'}} onClick={() => setEditPr(p => ({...p, items: p.items.filter((_, xi) => xi !== i)}))}>✕</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <button className="b bs" style={{fontSize:8, padding:'3px 8px', marginBottom:10}} onClick={() => setEditPr(p => ({...p, items: [...p.items, {product:'', qty:1, rate:0, gst_pct:18, per:'Sheet'}]}))}>➕ Add Line</button>
+
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10}}>
+              <div>
+                <label style={{fontSize:8, color:'#64748b'}}>Expected Delivery</label>
+                <input className="in" type="date" value={editPr.expected_delivery||''} onChange={e => setEditPr(p => ({...p, expected_delivery: e.target.value}))} style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+              </div>
+              <div>
+                <label style={{fontSize:8, color:'#64748b'}}>Transport ₹</label>
+                <input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={editPr.transport} onChange={e => {const v = e.target.value; if(v===''||/^\d*\.?\d*$/.test(v)) setEditPr(p => ({...p, transport: v}));}} style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+              </div>
+            </div>
+
+            <div style={{marginBottom:10}}>
+              <label style={{fontSize:8, color:'#64748b'}}>Notes / Remarks</label>
+              <textarea className="in" value={editPr.notes} onChange={e => setEditPr(p => ({...p, notes: e.target.value}))} style={{fontSize:9, padding:'4px 6px', width:'100%', minHeight:40, fontFamily:'inherit'}}/>
+            </div>
+
+            <div style={{marginBottom:10, padding:'6px 8px', background:'#e3a00810', border:'1px solid #e3a00833', borderRadius:4}}>
+              <label style={{fontSize:8, color:'#e3a008', fontWeight:700}}>REVISION NOTE * (required — explain what you changed)</label>
+              <textarea className="in" value={editPr.revisionNote} onChange={e => setEditPr(p => ({...p, revisionNote: e.target.value}))} placeholder="e.g. Corrected qty per Jigar's feedback; rate matched to latest quote" style={{fontSize:9, padding:'4px 6px', width:'100%', minHeight:36, fontFamily:'inherit', marginTop:2}}/>
+            </div>
+
+            <div style={{display:'flex', gap:6, justifyContent:'flex-end'}}>
+              <button className="b bs" onClick={() => !resubmitting && setEditPr(null)} disabled={resubmitting} style={{fontSize:10}}>Cancel</button>
+              <button className="b bp" onClick={submitResubmit} disabled={resubmitting} style={{fontSize:10, fontWeight:700}}>
+                {resubmitting ? '⏳ Resubmitting...' : '✅ Resubmit for Approval'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -6565,7 +6874,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Name</label><input className="in" value={newSite.vendor_name} onChange={e=>setNewSite(s=>({...s,vendor_name:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Vendor Contact</label><input className="in" value={newSite.vendor_contact} onChange={e=>setNewSite(s=>({...s,vendor_contact:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Installation</label><select className="in" value={newSite.installation_status} onChange={e=>setNewSite(s=>({...s,installation_status:e.target.value}))} style={{fontSize:10}}>
-          <option value="Pending">Pending</option><option value="Completed">Completed</option><option value="In Progress">In Progress</option>
+          <option value="Pending">Pending</option><option value="Completed">Completed</option><option value="In Progress">Work In Progress</option>
         </select></div>
       </div>
       <div style={{display:'flex',gap:6,marginTop:8}}>
@@ -6659,7 +6968,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     </div>}
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
-        <th style={{width:30}}>#</th><th>Job#</th><th style={{minWidth:90}}>Stage</th><th>Date</th><th>ATM ID</th><th style={{color:'#0891b2',fontWeight:800,background:'#ecfeff'}}>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
+        <th style={{width:30}}>#</th><th>Job#</th><th style={{minWidth:90}}>Stage</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
         <th>Vendor</th><th>V.Contact</th><th>Client PO#</th><th>Vendor PO#</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th><th style={{minWidth:90,color:'#3b82f6',fontWeight:800,background:'#eff6ff'}}>DC</th><th style={{minWidth:90,color:'#d97706',fontWeight:800,background:'#fffbeb'}}>PPT</th><th style={{minWidth:90,color:'#16a34a',fontWeight:800,background:'#f0fdf4'}}>Site Photos</th><th style={{minWidth:140}}>Invoices</th><th style={{width:60,textAlign:'center'}}>Action</th>
       </tr></thead><tbody>
       {paged.map((s,i)=>{
@@ -6686,7 +6995,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
           })()}</td>
           <td style={{fontSize:8,color:'#64748b',whiteSpace:'nowrap'}}>{(()=>{const d=s.created_at?new Date(s.created_at):null;return d?d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}):'—';})()}</td>
           <td style={{fontSize:9,color:isDup?'#f59e0b':'#8b5cf6',maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isDup?700:400}} title={s.atm_id}>{s.atm_id||'—'}{isDup&&<span title="Duplicate detected" style={{marginLeft:3,fontSize:8}}>⚠️</span>}</td>
-          <td style={{fontSize:10,color:'#0891b2',fontWeight:700,maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',background:'#ecfeff',padding:'2px 4px'}} title={s.site_unique_id}>{s.site_unique_id||'—'}</td>
+          <td style={{fontSize:9,maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_unique_id}>{s.site_unique_id||'—'}</td>
           <td style={{fontSize:9,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={s.site_address}>{s.site_address?.slice(0,50)||'—'}</td>
           <td style={{fontSize:9}}>{s.city||s.district||'—'}</td>
           <td style={{fontSize:9,color:'#64748b'}}>{s.state?.slice(0,12)||'—'}</td>
@@ -6695,7 +7004,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
           <td><input className="in mn" value={s.po_number||''} onChange={e=>{const v=e.target.value;setSites(p=>p.map(x=>x.id===s.id?{...x,po_number:v}:x));}} onBlur={e=>updateSiteWithJobSync(s.id,s.job_no,'po_number',e.target.value)} style={{fontSize:8,padding:'2px 3px',width:80,background:'#0c1017',border:'1px solid #1a2030',color:'#e3a008'}} placeholder="+ Client PO#"/></td>
           <td><input className="in mn" value={s.vendor_po||''} onChange={e=>{const v=e.target.value;setSites(p=>p.map(x=>x.id===s.id?{...x,vendor_po:v}:x));}} onBlur={e=>updateSite(s.id,'vendor_po',e.target.value)} style={{fontSize:8,padding:'2px 3px',width:80,background:'#0c1017',border:'1px solid #1a2030',color:'#06b6d4'}} placeholder="+ Vendor PO#"/></td>
           <td><select className="in" value={s.installation_status||''} onChange={e=>updateSite(s.id,'installation_status',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:70,color:s.installation_status==='Completed'?'#4ade80':s.installation_status==='Duplicate'?'#64748b':'#f59e0b'}}>
-            <option value="">—</option><option value="Completed">Completed</option><option value="Pending">Pending</option><option value="Duplicate">Duplicate</option><option value="In Progress">In Progress</option>
+            <option value="">—</option><option value="Completed">Completed</option><option value="Pending">Pending</option><option value="Duplicate">Duplicate</option><option value="In Progress">Work In Progress</option>
           </select></td>
           <td><select className="in" value={s.photo_status||''} onChange={e=>updateSite(s.id,'photo_status',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:75,color:s.photo_status?.includes('Received')?'#4ade80':'#f59e0b'}}>
             <option value="">—</option><option value="Photo Received">Received</option><option value="Photo Pending">Pending</option><option value="Duplicate">Duplicate</option>
