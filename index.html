@@ -1320,6 +1320,61 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
   const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
   const OS_TASKS=['Installation Charges','Coating Works','Router Cutting','Laser Cutting','Printing Charges','Frames','Signages (Internal)','Signages (External)'];
+  const [jobPos,setJobPos]=useState([]);
+  const [jobPosLoading,setJobPosLoading]=useState(true);
+  const [showAddPo,setShowAddPo]=useState(false);
+  const [newPo,setNewPo]=useState({po_number:'',po_date:'',po_amount:'',po_file_url:''});
+  const [editingPoId,setEditingPoId]=useState(null);
+  const [poUploading,setPoUploading]=useState(false);
+  React.useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setJobPosLoading(true);
+      const {data,error}=await sb.from('job_pos').select('*').eq('job_id',j.id).order('created_at',{ascending:true});
+      if(alive){
+        if(!error&&data)setJobPos(data);
+        setJobPosLoading(false);
+      }
+    })();
+    return ()=>{alive=false;};
+  },[j.id]);
+  const addJobPo=async()=>{
+    if(!newPo.po_number.trim()){show('PO Number required',false);return;}
+    const rec={job_id:j.id,po_number:newPo.po_number.trim(),
+      po_date:newPo.po_date||null,
+      po_amount:newPo.po_amount?+newPo.po_amount:null,
+      po_file_url:newPo.po_file_url||null,
+      added_by:user?.name||''};
+    const {data,error}=await sb.from('job_pos').insert(rec).select().single();
+    if(error){show('⚠️ Add PO failed: '+error.message,false);return;}
+    setJobPos(p=>[...p,data]);
+    setNewPo({po_number:'',po_date:'',po_amount:'',po_file_url:''});
+    setShowAddPo(false);
+    show('✅ PO added');
+  };
+  const updateJobPo=async(id,updates)=>{
+    const {data,error}=await sb.from('job_pos').update(updates).eq('id',id).select().single();
+    if(error){show('⚠️ Update failed: '+error.message,false);return;}
+    setJobPos(p=>p.map(po=>po.id===id?data:po));
+    setEditingPoId(null);
+    show('✅ PO updated');
+  };
+  const deleteJobPo=async(id,poNum)=>{
+    if(!confirm('Delete PO "'+poNum+'"? This cannot be undone.'))return;
+    const {error}=await sb.from('job_pos').delete().eq('id',id);
+    if(error){show('⚠️ Delete failed: '+error.message,false);return;}
+    setJobPos(p=>p.filter(po=>po.id!==id));
+    show('🗑️ PO deleted');
+  };
+  const uploadJobPoFile=async(file,setUrlFn)=>{
+    if(!file)return;
+    setPoUploading(true);
+    try{
+      const url=await uploadFile(file,'po');
+      if(url)setUrlFn(url);
+    }catch(e){show('Upload failed: '+e.message,false);}
+    setPoUploading(false);
+  };
   const jobOsItems=(osItems||[]).filter(o=>o.job_id===j.id);
   const saveOsItem=async(lineItem)=>{
     if(!osForm.task_type){show('Select a task type',false);return;}
@@ -1545,6 +1600,49 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600,fontSize:10}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BY</span><p style={{fontWeight:600,fontSize:10}}>{j.made_by||'—'}</p></div>
       {jfDirty&&<div style={{gridColumn:"span 3"}}><button className="b bg" onClick={saveJF} style={{width:"100%",justifyContent:"center",padding:6}}>💾 Save Changes</button></div>}
+    </div>
+    {/* ─── Multi-PO Section (job-level client POs) ─────────────────────────── */}
+    <div style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <span style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>📋 CLIENT POs ({jobPos.length}){jobPos.length===0&&jf.po_number&&<span style={{color:"#64748b",fontWeight:400,marginLeft:6}}>· legacy: {jf.po_number}</span>}</span>
+        {!showAddPo&&<button className="b bs" onClick={()=>setShowAddPo(true)} style={{fontSize:9,padding:"2px 8px",borderColor:"#3b82f6",color:"#3b82f6"}}>+ Add PO</button>}
+      </div>
+      {jobPosLoading&&<p style={{fontSize:9,color:"#64748b"}}>Loading POs…</p>}
+      {!jobPosLoading&&jobPos.length===0&&!showAddPo&&<p style={{fontSize:9,color:"#475569"}}>No client POs added yet. {jf.po_number?'Legacy PO# is shown above.':'Click + Add PO to record one.'}</p>}
+      {jobPos.length>0&&<div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:showAddPo?8:0}}>
+        {jobPos.map(po=>{
+          const isEditing=editingPoId===po.id;
+          if(isEditing){
+            const e={...po};
+            return <div key={po.id} style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap",background:"#0c1017",border:"1px solid #f59e0b44",borderRadius:4,padding:"4px 6px"}}>
+              <input className="in mn" defaultValue={e.po_number} onChange={ev=>{e.po_number=ev.target.value;}} placeholder="PO Number" style={{width:170,fontSize:9,padding:"2px 4px",color:"#3b82f6"}}/>
+              <input className="in" type="date" defaultValue={e.po_date||''} onChange={ev=>{e.po_date=ev.target.value;}} style={{width:120,fontSize:9,padding:"2px 4px"}}/>
+              <input className="in mn" type="number" defaultValue={e.po_amount||''} onChange={ev=>{e.po_amount=ev.target.value;}} placeholder="Amount" style={{width:90,fontSize:9,padding:"2px 4px"}}/>
+              <button className="b bg" onClick={()=>updateJobPo(po.id,{po_number:e.po_number.trim(),po_date:e.po_date||null,po_amount:e.po_amount?+e.po_amount:null})} style={{fontSize:9,padding:"2px 8px"}}>Save</button>
+              <button className="b bs" onClick={()=>setEditingPoId(null)} style={{fontSize:9,padding:"2px 8px"}}>Cancel</button>
+            </div>;
+          }
+          return <div key={po.id} style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",background:"#0c1017",border:"1px solid #1a2030",borderRadius:4,padding:"4px 8px"}}>
+            <span className="mn" style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>{po.po_number}</span>
+            {po.po_date&&<span className="mn" style={{fontSize:8,color:"#94a3b8"}}>📅 {po.po_date}</span>}
+            {po.po_amount&&<span className="mn" style={{fontSize:9,color:"#e3a008",fontWeight:600}}>₹{(+po.po_amount).toLocaleString('en-IN')}</span>}
+            {po.po_file_url?<a href={po.po_file_url} target="_blank" rel="noopener noreferrer" style={{fontSize:9,color:"#06b6d4",textDecoration:"none"}}>📎 file</a>
+              :<label style={{cursor:"pointer",fontSize:8,color:"#06b6d4",border:"1px dashed #06b6d466",padding:"1px 5px",borderRadius:3}}>+📎<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" style={{display:"none"}} onChange={async e=>{const f=e.target.files[0];if(f){setPoUploading(true);const url=await uploadFile(f,'po');setPoUploading(false);if(url)await updateJobPo(po.id,{po_file_url:url});}}}/></label>}
+            <span style={{fontSize:7,color:"#64748b",marginLeft:"auto"}}>by {po.added_by||'?'}</span>
+            <button className="b bs" onClick={()=>setEditingPoId(po.id)} style={{fontSize:8,padding:"1px 6px"}}>✏️</button>
+            <button onClick={()=>deleteJobPo(po.id,po.po_number)} style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:11,padding:"1px 3px"}}>🗑️</button>
+          </div>;
+        })}
+      </div>}
+      {showAddPo&&<div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap",background:"#0c1017",border:"1px solid #4ade8044",borderRadius:4,padding:"4px 6px"}}>
+        <input className="in mn" value={newPo.po_number} onChange={e=>setNewPo(p=>({...p,po_number:e.target.value}))} placeholder="PO Number *" style={{width:170,fontSize:9,padding:"2px 4px",color:"#3b82f6"}} autoFocus/>
+        <input className="in" type="date" value={newPo.po_date} onChange={e=>setNewPo(p=>({...p,po_date:e.target.value}))} style={{width:120,fontSize:9,padding:"2px 4px"}}/>
+        <input className="in mn" type="number" value={newPo.po_amount} onChange={e=>setNewPo(p=>({...p,po_amount:e.target.value}))} placeholder="Amount" style={{width:90,fontSize:9,padding:"2px 4px"}}/>
+        {newPo.po_file_url?<span style={{fontSize:8,color:"#06b6d4"}}>📎 ready</span>
+          :<label style={{cursor:"pointer",fontSize:8,color:"#06b6d4",border:"1px dashed #06b6d466",padding:"1px 5px",borderRadius:3}}>{poUploading?'…':'+📎 file'}<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" style={{display:"none"}} onChange={async e=>{const f=e.target.files[0];if(f)await uploadJobPoFile(f,url=>setNewPo(p=>({...p,po_file_url:url})));}}/></label>}
+        <button className="b bg" onClick={addJobPo} style={{fontSize:9,padding:"2px 10px"}}>Add</button>
+        <button className="b bs" onClick={()=>{setShowAddPo(false);setNewPo({po_number:'',po_date:'',po_amount:'',po_file_url:''});}} style={{fontSize:9,padding:"2px 8px"}}>Cancel</button>
+      </div>}
     </div>
     {(()=>{const sd=j.status_dates||{};const steps=[
       {k:'quotation_sent',l:'Quote',c:'#3b82f6',e:'📝'},{k:'po_pending',l:'PO Pending',c:'#f47067',e:'⏳'},
@@ -5246,6 +5344,30 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const [rejReason, setRejReason] = React.useState('');
   const [processing, setProcessing] = React.useState(null); // pr id being processed
   const [waButtons, setWaButtons] = React.useState({}); // {prId: true} = show WA buttons
+  // ─── Billing requests (New-#1) ─────────────────────────────────────────
+  const [billingRequests, setBillingRequests] = React.useState([]);
+  const [billingSitesMap, setBillingSitesMap] = React.useState({}); // site_id → {job_no, atm_id, address}
+  const [decidingBR, setDecidingBR] = React.useState(null); // {req, action: 'approve'|'reject', note}
+  const [processingBR, setProcessingBR] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      const {data: reqs} = await sb.from('billing_requests')
+        .select('*').order('created_at', {ascending: false});
+      if (!alive || !reqs) return;
+      setBillingRequests(reqs);
+      const siteIds = [...new Set(reqs.map(r => r.site_id))];
+      if (siteIds.length === 0) return;
+      const {data: sites} = await sb.from('banking_sites')
+        .select('id,job_no,atm_id,site_address,site_unique_id,payment_status')
+        .in('id', siteIds);
+      if (!alive || !sites) return;
+      const map = {};
+      for (const s of sites) map[s.id] = s;
+      setBillingSitesMap(map);
+    })();
+    return () => {alive = false;};
+  }, []);
 
   const STATUS_FILTERS = ['Pending Approval','Approved','Rejected','All'];
   const stCol = {
@@ -5333,6 +5455,60 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const job = (jobId) => (jobs||[]).find(j => j.id === jobId);
   const firmColor = (code) => ({JPP:'#e3a008',JXT:'#3b82f6',VHD:'#8b5cf6'}[code]||'#64748b');
 
+  const approveBillingRequest = async (req, note) => {
+    setProcessingBR(req.id);
+    const nowIso = new Date().toISOString();
+    const reqUpdates = {status: 'Approved', decided_by: user?.name || 'Jigar', decided_at: nowIso, decision_note: note || null};
+    const {error: e1} = await sb.from('billing_requests').update(reqUpdates).eq('id', req.id);
+    if (e1) { show('⚠️ Approve failed: ' + e1.message, false); setProcessingBR(null); return; }
+    const site = billingSitesMap[req.site_id];
+    const oldPmt = site?.payment_status || 'Not Started';
+    if (oldPmt !== 'Invoice Raised') {
+      const histEntry = {at: nowIso, by: user?.name || 'Jigar', from: oldPmt, to: 'Invoice Raised', via: 'billing_request_' + req.id};
+      if (note) histEntry.note = note;
+      const {data: cur} = await sb.from('banking_sites').select('payment_history').eq('id', req.site_id).single();
+      const curHist = Array.isArray(cur?.payment_history) ? cur.payment_history : [];
+      const siteUpdates = {
+        payment_status: 'Invoice Raised',
+        payment_status_changed_by: user?.name || 'Jigar',
+        payment_status_changed_at: nowIso,
+        payment_history: [...curHist, histEntry]
+      };
+      await sb.from('banking_sites').update(siteUpdates).eq('id', req.site_id);
+      setBillingSitesMap(p => ({...p, [req.site_id]: {...(p[req.site_id]||{}), payment_status: 'Invoice Raised'}}));
+    }
+    setBillingRequests(p => p.map(r => r.id === req.id ? {...r, ...reqUpdates} : r));
+    setProcessingBR(null);
+    setDecidingBR(null);
+    show('✅ Billing request approved');
+    const reqPhone = WA_NUMBERS[req.requested_by];
+    if (reqPhone && site) {
+      const msg = '✅ *Billing Approved — ' + (site.job_no || '?') + '*\n\nATM: ' + (site.atm_id || '—') + '\nApproved by: ' + (user?.name || 'Jigar') + (note ? '\n\nNote: ' + note : '') + '\n\nYou can now raise the invoice.';
+      sendWhatsApp(reqPhone, msg, 'iprint_billing_approved');
+    }
+  };
+
+  const rejectBillingRequest = async (req, reason) => {
+    if (!reason || !reason.trim()) { show('Reason required for rejection', false); return; }
+    setProcessingBR(req.id);
+    const nowIso = new Date().toISOString();
+    const reqUpdates = {status: 'Rejected', decided_by: user?.name || 'Jigar', decided_at: nowIso, decision_note: reason.trim()};
+    const {error} = await sb.from('billing_requests').update(reqUpdates).eq('id', req.id);
+    if (error) { show('⚠️ Reject failed: ' + error.message, false); setProcessingBR(null); return; }
+    setBillingRequests(p => p.map(r => r.id === req.id ? {...r, ...reqUpdates} : r));
+    setProcessingBR(null);
+    setDecidingBR(null);
+    show('Billing request rejected');
+    const reqPhone = WA_NUMBERS[req.requested_by];
+    const site = billingSitesMap[req.site_id];
+    if (reqPhone && site) {
+      const msg = '❌ *Billing Request Rejected — ' + (site.job_no || '?') + '*\n\nATM: ' + (site.atm_id || '—') + '\nReviewed by: ' + (user?.name || 'Jigar') + '\n\n*Reason:* ' + reason.trim();
+      sendWhatsApp(reqPhone, msg, 'iprint_billing_rejected');
+    }
+  };
+
+  const pendingBillingCount = billingRequests.filter(r => r.status === 'Pending Approval').length;
+
   return (
     <div style={{padding:12, overflowY:'auto', height:'100%'}}>
       {/* Header */}
@@ -5356,6 +5532,64 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
           ))}
         </div>
       </div>
+
+      {/* ─── Pending Billing Approvals (New-#1) ───────────────────── */}
+      {pendingBillingCount > 0 && <div style={{background:'#8b5cf610', border:'1px solid #8b5cf644', borderRadius:8, padding:10, marginBottom:12}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8}}>
+          <h3 style={{fontSize:12, fontWeight:800, color:'#8b5cf6', margin:0}}>💰 Pending Billing Approvals ({pendingBillingCount})</h3>
+          <span style={{fontSize:9, color:'#94a3b8'}}>Vidya/Aparna requesting Jigar's go-ahead to raise invoice</span>
+        </div>
+        <div style={{display:'flex', flexDirection:'column', gap:6}}>
+          {billingRequests.filter(r => r.status === 'Pending Approval').map(r => {
+            const site = billingSitesMap[r.site_id] || {};
+            const ageMins = Math.round((Date.now() - new Date(r.created_at).getTime()) / 60000);
+            const ageStr = ageMins < 60 ? ageMins + 'm' : ageMins < 1440 ? Math.round(ageMins/60) + 'h' : Math.round(ageMins/1440) + 'd';
+            return <div key={r.id} style={{background:'#0a0f1a', border:'1px solid #8b5cf633', borderRadius:6, padding:8}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, flexWrap:'wrap'}}>
+                <div style={{flex:1, minWidth:200}}>
+                  <div style={{fontSize:10, color:'#e3a008', fontWeight:700}}>
+                    Job <span className="mn">{site.job_no || '?'}</span>
+                    {site.atm_id && <span style={{color:'#8b5cf6', marginLeft:8}}>ATM: {site.atm_id}</span>}
+                    {site.site_unique_id && <span className="mn" style={{color:'#06b6d4', marginLeft:8, fontSize:9}}>UID: {site.site_unique_id}</span>}
+                  </div>
+                  {site.site_address && <div style={{fontSize:9, color:'#94a3b8', marginTop:2}}>{site.site_address.slice(0, 100)}</div>}
+                  <div style={{fontSize:9, color:'#64748b', marginTop:3}}>
+                    Requested by <strong style={{color:'#c084fc'}}>{r.requested_by}</strong> · {ageStr} ago
+                  </div>
+                  {r.request_note && <div style={{fontSize:9, color:'#e6edf3', marginTop:4, padding:'4px 8px', background:'#0c1017', borderLeft:'2px solid #8b5cf6', borderRadius:'0 4px 4px 0'}}>📝 {r.request_note}</div>}
+                </div>
+                <div style={{display:'flex', gap:4, alignSelf:'center'}}>
+                  <button className="b bg" disabled={processingBR===r.id} onClick={() => setDecidingBR({req:r, action:'approve', note:''})} style={{fontSize:10, padding:'4px 12px', background:'#4ade80', borderColor:'#4ade80', color:'#000', fontWeight:700}}>✓ Approve</button>
+                  <button className="b" disabled={processingBR===r.id} onClick={() => setDecidingBR({req:r, action:'reject', note:''})} style={{fontSize:10, padding:'4px 12px', background:'#f4706720', borderColor:'#f47067', color:'#f47067', fontWeight:700}}>✕ Reject</button>
+                </div>
+              </div>
+            </div>;
+          })}
+        </div>
+      </div>}
+
+      {/* Decision modal for billing request */}
+      {decidingBR && <div onClick={() => !processingBR && setDecidingBR(null)} style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center', padding:20}}>
+        <div onClick={e => e.stopPropagation()} style={{background:'#0a0f1a', border:'1px solid ' + (decidingBR.action==='approve'?'#4ade8066':'#f4706766'), borderRadius:8, padding:20, maxWidth:480, width:'100%'}}>
+          <div style={{fontWeight:800, fontSize:14, color: decidingBR.action==='approve'?'#4ade80':'#f47067', marginBottom:8}}>
+            {decidingBR.action==='approve' ? '✓ Approve Billing Request' : '✕ Reject Billing Request'}
+          </div>
+          <div style={{fontSize:10, color:'#94a3b8', marginBottom:12}}>
+            {(billingSitesMap[decidingBR.req.site_id]?.job_no) || '?'} · ATM {(billingSitesMap[decidingBR.req.site_id]?.atm_id) || '—'}<br/>
+            Requested by <strong>{decidingBR.req.requested_by}</strong>
+          </div>
+          <label style={{fontSize:9, color:'#64748b', display:'block', marginBottom:4}}>
+            {decidingBR.action==='approve' ? 'NOTE (optional)' : 'REASON (required)'}
+          </label>
+          <textarea className="in" value={decidingBR.note} onChange={e => setDecidingBR(p => ({...p, note: e.target.value}))} placeholder={decidingBR.action==='approve' ? 'e.g. OK to invoice as J-2900/25-26' : 'e.g. Photos missing, please re-upload'} style={{fontSize:11, padding:'6px 8px', width:'100%', minHeight:60, resize:'vertical'}} autoFocus/>
+          <div style={{display:'flex', gap:8, justifyContent:'flex-end', marginTop:12}}>
+            <button className="b bs" disabled={!!processingBR} onClick={() => setDecidingBR(null)} style={{fontSize:11}}>Cancel</button>
+            <button className="b bp" disabled={!!processingBR || (decidingBR.action==='reject' && !decidingBR.note.trim())} onClick={() => decidingBR.action==='approve' ? approveBillingRequest(decidingBR.req, decidingBR.note) : rejectBillingRequest(decidingBR.req, decidingBR.note)} style={{fontSize:11, background: decidingBR.action==='approve'?'#4ade80':'#f47067', borderColor: decidingBR.action==='approve'?'#4ade80':'#f47067', color: decidingBR.action==='approve'?'#000':'#fff', fontWeight:700}}>
+              {processingBR===decidingBR.req.id ? '...' : (decidingBR.action==='approve' ? '✓ Approve & Notify' : '✕ Reject & Notify')}
+            </button>
+          </div>
+        </div>
+      </div>}
 
       {/* WhatsApp status notice */}
       <div style={{background:'#25d36610', border:'1px solid #25d36633', borderRadius:6, padding:'6px 10px', marginBottom:10, fontSize:9, color:'#25d366'}}>
@@ -6506,6 +6740,25 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [editRemarks,setEditRemarks]=useState(null); // {site, remarks, install_pending_remarks, in_progress_remarks}
   // Item #16 — edit invoice number modal (Vidya + tier-1)
   const [editInvoice,setEditInvoice]=useState(null); // {invoice_row, newNo}
+  // ─── Payment status (money track) — single binary toggle (Not Started ⇄ Invoice Raised) ─
+  const [editPmt,setEditPmt]=useState(null); // {site, newStatus, note}
+  // ─── Billing request submission (Vidya/Aparna) ──────────────────────────
+  const [billingReq,setBillingReq]=useState(null); // {site, note}
+  const [billingReqs,setBillingReqs]=useState({}); // {site_id: {id, status, requested_by, created_at}}
+  const canTogglePmt=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','VIDYA','APARNA','PRIYANKA','AMOL','CHANDNI','RUCHITA'].some(u=>uN.includes(u));})();
+  const canRequestBilling=(()=>{const uN=(user?.name||'').toUpperCase();return ['VIDYA','APARNA'].some(u=>uN.includes(u));})();
+  React.useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      const {data,error}=await sb.from('billing_requests').select('*').eq('status','Pending Approval').order('created_at',{ascending:false});
+      if(alive&&!error&&data){
+        const map={};
+        for(const r of data){if(!map[r.site_id])map[r.site_id]=r;}
+        setBillingReqs(map);
+      }
+    })();
+    return ()=>{alive=false;};
+  },[]);
   // ── Dept-status filter (NEW) ───────────────────────────────
   // null = no dept filter active. Otherwise one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed'
   const [deptFilter,setDeptFilter]=useState(null);
@@ -6540,6 +6793,38 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [showAddInvoice,setShowAddInvoice]=useState(null); // site object or null
   const [newInvoiceNo,setNewInvoiceNo]=useState('');
   const canAddInvoice=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','AMOL','CHANDNI','RUCHITA','APARNA','VIDYA'].some(u=>uN.includes(u));})();
+  const togglePmtStatus=async(site,newStatus,note='')=>{
+    const oldStatus=site.payment_status||'Not Started';
+    if(oldStatus===newStatus){setEditPmt(null);return;}
+    const nowIso=new Date().toISOString();
+    const histEntry={at:nowIso,by:user?.name||'?',from:oldStatus,to:newStatus};
+    if(note)histEntry.note=note;
+    const newHistory=[...(Array.isArray(site.payment_history)?site.payment_history:[]),histEntry];
+    const updates={
+      payment_status:newStatus,
+      payment_status_changed_by:user?.name||'?',
+      payment_status_changed_at:nowIso,
+      payment_history:newHistory
+    };
+    const {error}=await sb.from('banking_sites').update(updates).eq('id',site.id);
+    if(error){show('⚠️ Update failed: '+error.message,false);return;}
+    setSites(p=>p.map(x=>x.id===site.id?{...x,...updates}:x));
+    setEditPmt(null);
+    show('💰 Payment status → '+newStatus);
+  };
+  const submitBillingRequest=async(site,note)=>{
+    const rec={site_id:site.id,requested_by:user?.name||'?',request_note:note||null,status:'Pending Approval'};
+    const {data,error}=await sb.from('billing_requests').insert(rec).select().single();
+    if(error){show('⚠️ Request failed: '+error.message,false);return;}
+    setBillingReqs(p=>({...p,[site.id]:data}));
+    setBillingReq(null);
+    show('📤 Billing request sent for approval');
+    const jigarPhone=WA_NUMBERS['Jigar'];
+    if(jigarPhone){
+      const msg='💰 *Billing Request — '+site.job_no+'*\n\nFrom: '+(user?.name||'?')+'\nATM: '+(site.atm_id||'—')+'\nSite: '+(site.site_address?.slice(0,80)||'—')+(note?'\n\nNote: '+note:'')+'\n\nReview in Approvals tab.';
+      sendWhatsApp(jigarPhone,msg,'iprint_billing_request');
+    }
+  };
   useEffect(()=>{
     (async()=>{
       let all=[],from=0,sz=1000;
@@ -7085,6 +7370,41 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       </div>
     </div>}
 
+    {/* Payment status toggle modal */}
+    {editPmt&&<div onClick={()=>setEditPmt(null)} style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#0a0f1a',border:'1px solid #f59e0b66',borderRadius:8,padding:20,maxWidth:440,width:'100%'}}>
+        <div style={{fontWeight:800,fontSize:14,color:'#f59e0b',marginBottom:6}}>💰 Change Payment Status</div>
+        <div style={{fontSize:10,color:'#94a3b8',marginBottom:12}}>
+          {editPmt.site.job_no} · {editPmt.site.atm_id||'—'}<br/>
+          <span style={{color:'#64748b'}}>From:</span> {editPmt.site.payment_status||'Not Started'} <span style={{color:'#64748b'}}>→</span> <strong style={{color:'#f59e0b'}}>{editPmt.newStatus}</strong>
+        </div>
+        <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:4}}>NOTE (optional)</label>
+        <textarea className="in" value={editPmt.note} onChange={e=>setEditPmt(p=>({...p,note:e.target.value}))} placeholder="e.g. Invoice J-2780/25-26 raised today" style={{fontSize:11,padding:'6px 8px',width:'100%',minHeight:50,resize:'vertical'}}/>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:12}}>
+          <button className="b bs" onClick={()=>setEditPmt(null)} style={{fontSize:11}}>Cancel</button>
+          <button className="b bp" onClick={()=>togglePmtStatus(editPmt.site,editPmt.newStatus,editPmt.note)} style={{fontSize:11,background:'#f59e0b',borderColor:'#f59e0b',color:'#000',fontWeight:700}}>Confirm</button>
+        </div>
+      </div>
+    </div>}
+
+    {/* Request Billing modal (Vidya/Aparna) */}
+    {billingReq&&<div onClick={()=>setBillingReq(null)} style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#0a0f1a',border:'1px solid #8b5cf666',borderRadius:8,padding:20,maxWidth:480,width:'100%'}}>
+        <div style={{fontWeight:800,fontSize:14,color:'#8b5cf6',marginBottom:6}}>📤 Request Billing Approval</div>
+        <div style={{fontSize:10,color:'#94a3b8',marginBottom:12}}>
+          Job: <strong>{billingReq.site.job_no}</strong> · ATM: <strong>{billingReq.site.atm_id||'—'}</strong><br/>
+          <span style={{fontSize:9}}>{billingReq.site.site_address?.slice(0,90)||'—'}</span>
+        </div>
+        <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:4}}>NOTE TO JIGAR (optional)</label>
+        <textarea className="in" value={billingReq.note} onChange={e=>setBillingReq(p=>({...p,note:e.target.value}))} placeholder="e.g. Work complete, photos uploaded, ready to invoice" style={{fontSize:11,padding:'6px 8px',width:'100%',minHeight:60,resize:'vertical'}} autoFocus/>
+        <p style={{fontSize:8,color:'#64748b',marginTop:6}}>WhatsApp will be sent to Jigar for approval.</p>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:12}}>
+          <button className="b bs" onClick={()=>setBillingReq(null)} style={{fontSize:11}}>Cancel</button>
+          <button className="b bp" onClick={()=>submitBillingRequest(billingReq.site,billingReq.note)} style={{fontSize:11,background:'#8b5cf6',borderColor:'#8b5cf6',color:'#fff',fontWeight:700}}>📤 Submit</button>
+        </div>
+      </div>
+    </div>}
+
     {/* Sites Table */}
     {dupIds.size>0&&<div style={{margin:'0 0 6px',padding:'6px 12px',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.35)',borderRadius:7,fontSize:11,color:'#fcd34d',display:'flex',alignItems:'center',gap:8}}>
       <span>⚠️</span>
@@ -7093,7 +7413,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
         <th style={{width:30}}>#</th><th>Job#</th><th style={{minWidth:90}}>Stage</th><th>Date</th><th>ATM ID</th><th>Site UID</th><th style={{minWidth:150}}>Address</th><th>City</th><th>State</th>
-        <th>Vendor</th><th>V.Contact</th><th>Client PO#</th><th>Vendor PO#</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th><th style={{minWidth:90,color:'#3b82f6',fontWeight:800,background:'#eff6ff'}}>DC</th><th style={{minWidth:90,color:'#d97706',fontWeight:800,background:'#fffbeb'}}>PPT</th><th style={{minWidth:90,color:'#16a34a',fontWeight:800,background:'#f0fdf4'}}>Site Photos</th><th style={{minWidth:140}}>Invoices</th><th style={{width:60,textAlign:'center'}}>Action</th>
+        <th>Vendor</th><th>V.Contact</th><th>Client PO#</th><th>Vendor PO#</th><th>Install</th><th>Photos</th><th>Billing</th><th>Category</th><th>Work</th><th style={{minWidth:90,color:'#3b82f6',fontWeight:800,background:'#eff6ff'}}>DC</th><th style={{minWidth:90,color:'#d97706',fontWeight:800,background:'#fffbeb'}}>PPT</th><th style={{minWidth:90,color:'#16a34a',fontWeight:800,background:'#f0fdf4'}}>Site Photos</th><th style={{minWidth:140}}>Invoices</th><th style={{minWidth:80,color:'#e3a008',fontWeight:800,background:'#fef3c7'}}>Pmt</th><th style={{width:80,textAlign:'center'}}>Action</th>
       </tr></thead><tbody>
       {paged.map((s,i)=>{
         const billingColor=s.billing_category==='Invoiced'?'#4ade80':s.billing_category==='Given for Billing'?'#06b6d4':'#f59e0b';
@@ -7154,7 +7474,20 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
               {!canAddInvoice&&invs.length===0&&<span style={{fontSize:8,color:'#475569'}}>—</span>}
             </div>;})()}
           </td>
+          <td style={{padding:'2px 4px'}}>
+            {(()=>{const ps=s.payment_status||'Not Started';const isRaised=ps==='Invoice Raised';const pendingReq=billingReqs[s.id];
+              return <div style={{display:'flex',flexDirection:'column',gap:2,alignItems:'flex-start'}}>
+                <span onClick={canTogglePmt?()=>setEditPmt({site:s,newStatus:isRaised?'Not Started':'Invoice Raised',note:''}):undefined}
+                  title={canTogglePmt?(isRaised?'Click to revert to Not Started':'Click to mark as Invoice Raised'):'Read-only'}
+                  style={{display:'inline-block',background:isRaised?'#f59e0b22':'#1a2030',color:isRaised?'#f59e0b':'#64748b',border:'1px solid '+(isRaised?'#f59e0b66':'#33415544'),padding:'2px 6px',borderRadius:3,fontSize:8,fontWeight:600,cursor:canTogglePmt?'pointer':'default',whiteSpace:'nowrap'}}>
+                  {isRaised?'🟡 Invoice Raised':'⚪ Not Started'}
+                </span>
+                {pendingReq&&<span title={'Pending billing request from '+(pendingReq.requested_by||'?')+(pendingReq.request_note?' · '+pendingReq.request_note:'')} style={{fontSize:7,color:'#8b5cf6',fontWeight:700}}>🔔 req pending</span>}
+              </div>;
+            })()}
+          </td>
           <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+            {canRequestBilling&&!billingReqs[s.id]&&!(s.payment_status==='Invoice Raised')&&<span title="Request billing approval from Jigar" onClick={()=>setBillingReq({site:s,note:''})} style={{cursor:'pointer',fontSize:13,marginRight:4,opacity:0.8,color:'#f59e0b'}} className="site-action-btn">💰</span>}
             <span title="Edit remarks (status / installation-pending / in-progress)" onClick={()=>setEditRemarks({site:s,remarks:s.remarks||'',install_pending_remarks:s.install_pending_remarks||'',in_progress_remarks:s.in_progress_remarks||''})} style={{cursor:'pointer',fontSize:13,marginRight:4,opacity:0.7}} className="site-action-btn">📝</span>
             <span title="Move to another job" onClick={()=>{setSiteAction({type:'move',site:s});setMoveJobNo('');}} style={{cursor:'pointer',fontSize:13,marginRight:4,opacity:0.7}} className="site-action-btn">🔀</span>
             <span title="Delete this site" onClick={()=>setSiteAction({type:'delete',site:s})} style={{cursor:'pointer',fontSize:13,opacity:0.7}} className="site-action-btn">🗑️</span>
