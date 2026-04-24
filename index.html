@@ -1539,8 +1539,6 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           <select className="in" style={{fontSize:9,padding:"2px",width:100}} defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change status from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}}>
             <option value="">Change →</option>{renderStatusOptions(j.status)}
           </select>
-          {/* Item #11 — one-tap 'Given for Billing' */}
-          {!['Given for Billing','Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status)&&<button className="b bs" onClick={()=>{if(confirm('Mark "'+j.id+'" as Given for Billing?'))updateJobStatus(j.id,'Given for Billing');}} title="One-click mark as Given for Billing" style={{fontSize:10,padding:"3px 10px",background:'#06b6d4',borderColor:'#06b6d4',color:'#000',fontWeight:700,marginLeft:4}}>✓ Given for Billing</button>}
         </div>
       </div>
       <div><span style={{color:"#64748b",fontSize:8}}>FIRM</span><select className="in" value={jf.firm||j.firm} onChange={e=>setJF('firm',e.target.value)} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{firms.map(f=><option key={f.code} value={f.code}>{f.short_name} — {f.name}</option>)}</select></div>
