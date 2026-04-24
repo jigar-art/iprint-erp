@@ -917,7 +917,7 @@ function MainApp({user,onLogout,masterData}){
     // Dashboard — everyone
     {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
     // All Jobs — tier-1 + Aparna + Priyanka + Shreya (BATUL removed per revised matrix)
-    {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
+    {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","SHREYA"]},
     // New Job — admin role + PRIYANKA + ANKITA (sales role added so Priyanka passes role check)
     {id:"new",l:"New Job",e:"➕",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","PRIYANKA"]},
     // Import BOQ — admin + sales role; tier-1 + APARNA + PRIYANKA
@@ -1585,7 +1585,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
       const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
-      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,transport_gst_pct:0,notes:'',items:[{...blankItem}]};
+      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,transport_gst_pct:0,round_off:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
@@ -1753,6 +1753,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         const pr_no=await genPRNo(prf.firm_code);
         const fy=getFY();
         const {subtotal,gst_total,transport_gst,total}=calcTotals(prf.items,prf.transport,prf.transport_gst_pct);
+        const roundOff=+(+prf.round_off||0).toFixed(2);
+        const finalTotal=+(total+roundOff).toFixed(2);
         const rec={
           id:'PR'+Date.now(),
           pr_no,fy,
@@ -1770,8 +1772,9 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           payment_terms:prf.payment_terms||null,
           transport:+prf.transport||0,
           transport_gst_pct:+prf.transport_gst_pct||0,
+          round_off:roundOff,
           items:prf.items.filter(x=>x.product),
-          subtotal,gst_total,total,
+          subtotal,gst_total,total:finalTotal,
           notes:prf.notes||null,
           status:'Pending Approval',
           created_by:prf.requestor,
@@ -2158,7 +2161,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               <div style={{color:"#64748b"}}>GST: <strong style={{color:"#c9d1d9"}}>₹{totals.gst_total.toFixed(0)}</strong></div>
               {(+prf.transport>0)&&<div style={{color:"#64748b"}}>Transport: <strong style={{color:"#c9d1d9"}}>₹{(+prf.transport).toFixed(0)}</strong></div>}
               {(+totals.transport_gst>0)&&<div style={{color:"#64748b"}}>Transport GST: <strong style={{color:"#c9d1d9"}}>₹{totals.transport_gst.toFixed(0)}</strong></div>}
-              <div style={{fontSize:11,fontWeight:800,color:"#e3a008"}}>Total: ₹{totals.total.toFixed(0)}</div>
+              <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end",marginTop:2}}>
+                <span style={{fontSize:8,color:"#64748b"}}>Round Off ₹</span>
+                <input className="in mn" type="number" step="0.01" value={prf.round_off||0} onChange={e=>setPrf(p=>({...p,round_off:e.target.value}))} style={{fontSize:9,padding:"2px 4px",width:60,textAlign:"right"}}/>
+                <button className="b bs" type="button" title="Auto round total to nearest ₹1" onClick={()=>{const t=totals.total;const rounded=Math.round(t);setPrf(p=>({...p,round_off:+(rounded-t).toFixed(2)}));}} style={{fontSize:8,padding:"2px 5px"}}>↪ Round</button>
+              </div>
+              <div style={{fontSize:11,fontWeight:800,color:"#e3a008"}}>Total: ₹{(totals.total + (+prf.round_off||0)).toFixed(2)}</div>
             </div>
             <button className="b bp" onClick={savePR} disabled={saving} style={{fontSize:10,padding:"5px 16px",background:"#f59e0b",borderColor:"#f59e0b",color:"#000",fontWeight:700,alignSelf:"flex-end"}}>{saving?'Saving...':'📋 Submit PR'}</button>
           </div>
@@ -3670,7 +3678,8 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
   const transportGst = transport * transportGstPct / 100;
   const tdsPct = +pr.tds_pct || 0;
   const tdsAmount = +pr.tds_amount || (subtotal * tdsPct / 100);
-  const grandTotal = subtotal + gstTotal + transport + transportGst;
+  const roundOff = +pr.round_off || 0;
+  const grandTotal = subtotal + gstTotal + transport + transportGst + roundOff;
   const netPayable = grandTotal - tdsAmount;
   const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
   const gstGroups = {};
@@ -3725,6 +3734,8 @@ function buildPOHtml(pr, poNo, firm, jobsArr) {
     <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
   const transportGstRow = transportGst > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport GST @ ${transportGstPct}%</td>
     <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transportGst.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+  const roundOffRow = roundOff !== 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Round Off</td>
+    <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${roundOff.toLocaleString('en-IN',{minimumFractionDigits:2,signDisplay:'auto'})}</td></tr>` : '';
   const tdsRow = tdsAmount > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;color:#b91c1c;">Less: TDS @ ${tdsPct}% (on subtotal)</td>
     <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;color:#b91c1c;">(${tdsAmount.toLocaleString('en-IN',{minimumFractionDigits:2})})</td></tr>
     <tr><td colspan="7" style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:11px;font-weight:700;background:#f0fdf4;">Net Payable to Vendor</td>
@@ -3807,6 +3818,7 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
     ${gstRows}
     ${transportRow}
     ${transportGstRow}
+    ${roundOffRow}
     <tr style="background:#f9f9f9">
       <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
       <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
@@ -4233,7 +4245,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     const transportGst = transport * transportGstPct / 100;
     const tdsPct = +pr.tds_pct || 0;
     const tdsAmount = +pr.tds_amount || (subtotal * tdsPct / 100);
-    const grandTotal = subtotal + gstTotal + transport + transportGst;
+    const roundOff = +pr.round_off || 0;
+    const grandTotal = subtotal + gstTotal + transport + transportGst + roundOff;
     const netPayable = grandTotal - tdsAmount;
     const totalQty = items.reduce((s,x) => s + (+x.qty||0), 0);
 
@@ -4296,6 +4309,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
       <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
     const transportGstRow = transportGst > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport GST @ ${transportGstPct}%</td>
       <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transportGst.toLocaleString('en-IN',{minimumFractionDigits:2})}</td></tr>` : '';
+    const roundOffRow = roundOff !== 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Round Off</td>
+      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${roundOff.toLocaleString('en-IN',{minimumFractionDigits:2,signDisplay:'auto'})}</td></tr>` : '';
     const tdsRow = tdsAmount > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;color:#b91c1c;">Less: TDS @ ${tdsPct}% (on subtotal)</td>
       <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;color:#b91c1c;">(${tdsAmount.toLocaleString('en-IN',{minimumFractionDigits:2})})</td></tr>
       <tr><td colspan="7" style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:11px;font-weight:700;background:#f0fdf4;">Net Payable to Vendor</td>
@@ -4378,6 +4393,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
       ${gstRows}
       ${transportRow}
       ${transportGstRow}
+      ${roundOffRow}
       <tr style="background:#f9f9f9">
         <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
         <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
@@ -4850,7 +4866,8 @@ function MyPRsPage({prs, setPrs, jobs, user, show, firms, sm}) {
     }, 0);
     const transportAmt = +transport || 0;
     const transportGst = transportAmt * (+pr.transport_gst_pct||0) / 100;
-    const newTotal = newSubtotal + newGstTotal + transportAmt + transportGst;
+    const roundOffAmt = +(+pr.round_off||0).toFixed(2);
+    const newTotal = +(newSubtotal + newGstTotal + transportAmt + transportGst + roundOffAmt).toFixed(2);
     // Build revision history entry
     const prevHistory = Array.isArray(pr.revision_history) ? pr.revision_history : [];
     const revEntry = {
@@ -5059,6 +5076,7 @@ function MyPRsPage({prs, setPrs, jobs, user, show, firms, sm}) {
                           items: Array.isArray(pr.items) ? JSON.parse(JSON.stringify(pr.items)) : [],
                           notes: pr.notes || '',
                           transport: +pr.transport || 0,
+                          round_off: +pr.round_off || 0,
                           expected_delivery: pr.expected_delivery || '',
                           revisionNote: ''
                         })}
@@ -6445,6 +6463,10 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [newSite,setNewSite]=useState({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_unique_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',remarks:'',install_pending_remarks:'',in_progress_remarks:''});
   const [siteAction,setSiteAction]=useState(null); // {type:'delete'|'move'|null, site}
   const [moveJobNo,setMoveJobNo]=useState('');
+  // Item #4 — remarks editor modal (editable on existing rows)
+  const [editRemarks,setEditRemarks]=useState(null); // {site, remarks, install_pending_remarks, in_progress_remarks}
+  // Item #16 — edit invoice number modal (Vidya + tier-1)
+  const [editInvoice,setEditInvoice]=useState(null); // {invoice_row, newNo}
   // ── Dept-status filter (NEW) ───────────────────────────────
   // null = no dept filter active. Otherwise one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed'
   const [deptFilter,setDeptFilter]=useState(null);
@@ -6857,7 +6879,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         <div><label style={{fontSize:8,color:'#64748b'}}>Client{customProject?' *':''}</label><input className="in" value={newSite.client} readOnly={!customProject} onChange={e=>setNewSite(s=>({...s,client:e.target.value}))} placeholder={customProject?"Enter client name":""} style={{fontSize:10,color:customProject?'#e6edf3':'#64748b'}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Bank{customProject?' *':''}</label><input className="in" value={newSite.bank} readOnly={!customProject} onChange={e=>setNewSite(s=>({...s,bank:e.target.value}))} placeholder={customProject?"Enter bank name":""} style={{fontSize:10,color:customProject?'#e6edf3':'#64748b'}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Job #</label><input className="in" value={newSite.job_no} onChange={e=>setNewSite(s=>({...s,job_no:e.target.value}))} placeholder="e.g. 0921" style={{fontSize:10}}/></div>
-        <div><label style={{fontSize:8,color:'#64748b'}}>PO #</label><input className="in" value={newSite.po_number} onChange={e=>setNewSite(s=>({...s,po_number:e.target.value}))} style={{fontSize:10}}/></div>
+        <div><label style={{fontSize:8,color:'#64748b'}}>Client PO #</label><input className="in" value={newSite.po_number} onChange={e=>setNewSite(s=>({...s,po_number:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>ATM ID</label><input className="in" value={newSite.atm_id} onChange={e=>setNewSite(s=>({...s,atm_id:e.target.value}))} style={{fontSize:10}}/></div>
         <div><label style={{fontSize:8,color:'#64748b'}}>Site Unique ID</label><input className="in" value={newSite.site_unique_id} onChange={e=>setNewSite(s=>({...s,site_unique_id:e.target.value}))} style={{fontSize:10}}/></div>
         <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Site Address</label><input className="in" value={newSite.site_address} onChange={e=>setNewSite(s=>({...s,site_address:e.target.value}))} style={{fontSize:10}}/></div>
@@ -6880,6 +6902,69 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       <div style={{display:'flex',gap:6,marginTop:8}}>
         <button className="b bp" onClick={addSite} style={{fontSize:11}}>💾 Save Site</button>
         <button className="b bs" onClick={()=>{setShowAddSite(false);setCustomProject(false);}} style={{fontSize:11}}>Cancel</button>
+      </div>
+    </div>}
+
+    {/* ── Remarks Edit Modal (Item #4) ───────────────────── */}
+    {editRemarks&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:10,padding:20,width:'100%',maxWidth:520}}>
+        <div style={{marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:14,color:'#e6edf3'}}>📝 Edit Remarks</div>
+          <div style={{fontSize:10,color:'#64748b',marginTop:3}}>Job #{editRemarks.site.job_no||'—'} · {editRemarks.site.atm_id||editRemarks.site.site_address?.slice(0,40)||'site'}</div>
+        </div>
+        <div style={{marginBottom:10}}>
+          <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:3}}>Site Status Remarks</label>
+          <textarea className="in" value={editRemarks.remarks} onChange={e=>setEditRemarks(p=>({...p,remarks:e.target.value}))} style={{fontSize:11,padding:'6px 8px',width:'100%',minHeight:50,resize:'vertical'}} placeholder="e.g. Completed, confirmed by vendor"/>
+        </div>
+        <div style={{marginBottom:10}}>
+          <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:3}}>Installation Pending Remarks</label>
+          <textarea className="in" value={editRemarks.install_pending_remarks} onChange={e=>setEditRemarks(p=>({...p,install_pending_remarks:e.target.value}))} style={{fontSize:11,padding:'6px 8px',width:'100%',minHeight:50,resize:'vertical'}} placeholder="e.g. Waiting for landlord approval"/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:3}}>In-Progress Remarks</label>
+          <textarea className="in" value={editRemarks.in_progress_remarks} onChange={e=>setEditRemarks(p=>({...p,in_progress_remarks:e.target.value}))} style={{fontSize:11,padding:'6px 8px',width:'100%',minHeight:50,resize:'vertical'}} placeholder="e.g. Material dispatched on 15-Apr"/>
+        </div>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="b bs" onClick={()=>setEditRemarks(null)} style={{fontSize:11}}>Cancel</button>
+          <button className="b bp" onClick={async()=>{
+            const {error}=await sb.from('banking_sites').update({remarks:editRemarks.remarks,install_pending_remarks:editRemarks.install_pending_remarks,in_progress_remarks:editRemarks.in_progress_remarks}).eq('id',editRemarks.site.id);
+            if(error){show('Error: '+error.message,false);return;}
+            setSites(p=>p.map(x=>x.id===editRemarks.site.id?{...x,remarks:editRemarks.remarks,install_pending_remarks:editRemarks.install_pending_remarks,in_progress_remarks:editRemarks.in_progress_remarks}:x));
+            show('Remarks updated!');
+            setEditRemarks(null);
+          }} style={{fontSize:11,background:'#4ade80',borderColor:'#4ade80',color:'#000',fontWeight:700}}>💾 Save Remarks</button>
+        </div>
+      </div>
+    </div>}
+
+    {/* ── Invoice Edit Modal (Item #16) ─────────────────── */}
+    {editInvoice&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:10,padding:20,width:'100%',maxWidth:440}}>
+        <div style={{marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:14,color:'#e6edf3'}}>✏️ Edit Invoice Number</div>
+          <div style={{fontSize:10,color:'#64748b',marginTop:3}}>Currently: <span style={{color:'#4ade80',fontWeight:700}}>{editInvoice.invoice_row.invoice_no}</span> · Added by {editInvoice.invoice_row.added_by||'—'}</div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:4}}>New Invoice Number</label>
+          <input className="in" value={editInvoice.newNo} onChange={e=>setEditInvoice(p=>({...p,newNo:e.target.value}))} placeholder="J-9999/25-26" autoFocus style={{fontSize:13,padding:'6px 10px',width:'100%',letterSpacing:1}}/>
+          <div style={{fontSize:9,color:'#64748b',marginTop:4}}>Format: J-NNN/YY-YY</div>
+        </div>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="b bs" onClick={()=>setEditInvoice(null)} style={{fontSize:11}}>Cancel</button>
+          <button className="b bp" onClick={async()=>{
+            const v=editInvoice.newNo.trim();
+            if(!v){show('Enter invoice number',false);return;}
+            if(v===editInvoice.invoice_row.invoice_no){setEditInvoice(null);return;}
+            const {error}=await sb.from('site_invoices').update({invoice_no:v}).eq('id',editInvoice.invoice_row.id);
+            if(error){
+              if(error.code==='23505'){show('Invoice '+v+' already exists for this site',false);return;}
+              show('Error: '+error.message,false);return;
+            }
+            setInvoicesBySite(p=>{const np={...p};Object.keys(np).forEach(sid=>{np[sid]=np[sid].map(iv=>iv.id===editInvoice.invoice_row.id?{...iv,invoice_no:v}:iv);});return np;});
+            show('Invoice updated!');
+            setEditInvoice(null);
+          }} style={{fontSize:11,background:'#4ade80',borderColor:'#4ade80',color:'#000',fontWeight:700}}>💾 Save</button>
+        </div>
       </div>
     </div>}
 
@@ -7025,12 +7110,13 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
           </td>;});})()}
           <td style={{padding:'2px 4px'}}>
             {(()=>{const invs=invoicesBySite[s.id]||[];return <div style={{display:'flex',flexWrap:'wrap',gap:2,alignItems:'center'}}>
-              {invs.map(iv=><span key={iv.id||iv.invoice_no} title={'Added by '+(iv.added_by||'?')+' on '+(iv.created_at?new Date(iv.created_at).toLocaleDateString('en-IN'):'?')} style={{display:'inline-block',background:'#4ade8020',color:'#4ade80',border:'1px solid #4ade8044',padding:'1px 5px',borderRadius:3,fontSize:8,fontWeight:600}}>{iv.invoice_no}</span>)}
+              {invs.map(iv=><span key={iv.id||iv.invoice_no} title={(canAddInvoice?'Click to edit · ':'')+'Added by '+(iv.added_by||'?')+' on '+(iv.created_at?new Date(iv.created_at).toLocaleDateString('en-IN'):'?')} onClick={canAddInvoice?()=>setEditInvoice({invoice_row:iv,newNo:iv.invoice_no}):undefined} style={{display:'inline-block',background:'#4ade8020',color:'#4ade80',border:'1px solid #4ade8044',padding:'1px 5px',borderRadius:3,fontSize:8,fontWeight:600,cursor:canAddInvoice?'pointer':'default'}}>{iv.invoice_no}</span>)}
               {canAddInvoice&&<button onClick={()=>{setShowAddInvoice(s);setNewInvoiceNo('');}} style={{background:'none',border:'1px dashed #06b6d466',color:'#06b6d4',cursor:'pointer',fontSize:8,padding:'1px 5px',borderRadius:3}}>+ Invoice</button>}
               {!canAddInvoice&&invs.length===0&&<span style={{fontSize:8,color:'#475569'}}>—</span>}
             </div>;})()}
           </td>
           <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+            <span title="Edit remarks (status / installation-pending / in-progress)" onClick={()=>setEditRemarks({site:s,remarks:s.remarks||'',install_pending_remarks:s.install_pending_remarks||'',in_progress_remarks:s.in_progress_remarks||''})} style={{cursor:'pointer',fontSize:13,marginRight:4,opacity:0.7}} className="site-action-btn">📝</span>
             <span title="Move to another job" onClick={()=>{setSiteAction({type:'move',site:s});setMoveJobNo('');}} style={{cursor:'pointer',fontSize:13,marginRight:4,opacity:0.7}} className="site-action-btn">🔀</span>
             <span title="Delete this site" onClick={()=>setSiteAction({type:'delete',site:s})} style={{cursor:'pointer',fontSize:13,opacity:0.7}} className="site-action-btn">🗑️</span>
           </td>
@@ -7160,8 +7246,6 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   const [dateFrom,setDateFrom]=useState('');
   const [dateTo,setDateTo]=useState('');
   const [repFilter,setRepFilter]=useState('All');
-  // Drill-down filter — set by clicking month tile, response chip, or product chip on Reports/Dashboard
-  const [drillFilter,setDrillFilter]=useState(null); // {type:'month'|'response'|'product'|'followup', value:string, label:string}
   const INDUSTRIES=['Architecture Firm','Interior Design Firm','Interior and Architecture Design Firm','Contractor','PMC','Tech Company','Finance Company','Design Agency','Developers/Building contractors','Other'];
   const PRODUCTS=['Vinyl','Glass Film','Signage','BENIF','Canvas','Frames','Wallpaper','3D Graphics','Acoustic','Suncontrol Film','PPF Film','Environmental Branding','Other'];
   const FEEDBACKS=['Yes','No','They will contact Us','Called Again Later','Followup Required','Referred to other team'];
@@ -7179,119 +7263,30 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     if(repFilter!=='All')f=f.filter(a=>a.rep_name===repFilter);
     if(dateFrom)f=f.filter(a=>a.date>=dateFrom);
     if(dateTo)f=f.filter(a=>a.date<=dateTo);
-    if(drillFilter){
-      const v=(drillFilter.value||'').toLowerCase();
-      if(drillFilter.type==='month')f=f.filter(a=>a.date?.startsWith(drillFilter.value));
-      else if(drillFilter.type==='response')f=f.filter(a=>(a.outcome||'').toLowerCase()===v);
-      else if(drillFilter.type==='product')f=f.filter(a=>(a.product_pitched||'').toLowerCase().split(',').map(x=>x.trim()).includes(v)||(a.pipeline_product||'').toLowerCase().split(',').map(x=>x.trim()).includes(v));
-      else if(drillFilter.type==='followup'){
-        const ids=new Set((drillFilter.ids||[]));
-        f=f.filter(a=>ids.has(a.id));
-      }
-    }
     return f.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  },[activities,sq,repFilter,dateFrom,dateTo,drillFilter]);
+  },[activities,sq,repFilter,dateFrom,dateTo]);
 
   const visits=filtered.filter(a=>a.activity_type==='visit');
   const pipeline=filtered.filter(a=>a.activity_type==='project');
-
-  // Tag-mismatch detector. Computes the first-visit-id per firm across ALL activities (not just filtered),
-  // then `tagMismatch(a)` returns:
-  //   null              — no mismatch
-  //   'should_be_old'   — tagged 'New Client' but firm visited before this row
-  //   'should_be_new'   — tagged 'Old Client' but this is the firm's first visit in the system
-  // Note: 'should_be_new' may be a legitimate pre-CRM relationship — the badge is informational, not coercive.
-  const firmFirstSeen=useMemo(()=>{
-    const m={};
-    activities.filter(a=>a.activity_type==='visit'&&a.firm_name&&a.firm_name.trim())
-      .slice().sort((a,b)=>{
-        const d=(a.date||'').localeCompare(b.date||'');
-        return d!==0?d:(a.created_at||'').localeCompare(b.created_at||'');
-      })
-      .forEach(a=>{
-        const k=a.firm_name.trim().toLowerCase();
-        if(!(k in m))m[k]=a.id;
-      });
-    return m;
-  },[activities]);
-  const tagMismatch=(a)=>{
-    if(a.activity_type!=='visit'||!a.firm_name||!a.firm_name.trim())return null;
-    const k=a.firm_name.trim().toLowerCase();
-    const isFirst=firmFirstSeen[k]===a.id;
-    if(a.client_type==='New Client'&&!isFirst)return 'should_be_old';
-    if(a.client_type==='Old Client'&&isFirst)return 'should_be_new';
-    return null;
-  };
 
   // Stats
   const stats=useMemo(()=>{
     const thisMonth=td().slice(0,7);
     const today=td();
-    // Week = last 7 days inclusive of today (rolling). Simpler than ISO week and matches Indian biz reporting.
-    const d=new Date();const sevenAgo=new Date(d.getTime()-6*86400000).toISOString().slice(0,10);
     const monthActs=activities.filter(a=>a.date?.startsWith(thisMonth));
-    const weekActs=activities.filter(a=>a.date&&a.date>=sevenAgo&&a.date<=today);
     const todayActs=activities.filter(a=>a.date===today);
     const newClients=activities.filter(a=>a.client_type==='New Client');
     const pipelineActs=activities.filter(a=>a.activity_type==='project');
     const wonActs=pipelineActs.filter(a=>a.status==='Won'||a.status==='Completed');
-    const num=v=>{const n=Number(v);return isNaN(n)?0:n;};
-    const sumActual=arr=>arr.reduce((s,a)=>s+num(a.actual_value),0);
-    const sumEst=arr=>arr.reduce((s,a)=>s+num(a.estimated_value),0);
     return {
       totalVisits:activities.filter(a=>a.activity_type==='visit').length,
       monthVisits:monthActs.filter(a=>a.activity_type==='visit').length,
-      weekVisits:weekActs.filter(a=>a.activity_type==='visit').length,
       todayVisits:todayActs.filter(a=>a.activity_type==='visit').length,
       newClients:newClients.length,
       repeatClients:activities.filter(a=>a.client_type==='Old Client').length,
       totalPipeline:pipelineActs.length,
       activePipeline:pipelineActs.filter(a=>!['Won','Lost','Completed'].includes(a.status)).length,
       won:wonActs.length,
-      monthRevenue:sumActual(monthActs),
-      weekRevenue:sumActual(weekActs),
-      monthEst:sumEst(monthActs),
-      // Firm-level counts (method B): unique distinct firms ever visited, and how many of those firms got >1 visit
-      uniqueFirms:(()=>{const s=new Set();activities.filter(a=>a.activity_type==='visit'&&a.firm_name&&a.firm_name.trim()).forEach(a=>s.add(a.firm_name.trim().toLowerCase()));return s.size;})(),
-      repeatFirms:(()=>{const m={};activities.filter(a=>a.activity_type==='visit'&&a.firm_name&&a.firm_name.trim()).forEach(a=>{const k=a.firm_name.trim().toLowerCase();m[k]=(m[k]||0)+1;});return Object.values(m).filter(c=>c>1).length;})(),
-      withPO:activities.filter(a=>a.activity_type==='project'&&a.job_id&&a.job_id.trim()).sort((a,b)=>(b.date||'').localeCompare(a.date||'')),
-      // Follow-up tracker: rows with outcome 'Asked to Visit Again', bucketed by follow_up_date vs today.
-      // Auto-detect: any later visit logged for the same firm (case-insensitive) marks as Done.
-      // Manual override (followup_override jsonb) wins over auto-detect.
-      followups:(()=>{
-        const today=td();
-        const wkAhead=new Date(new Date().getTime()+7*86400000).toISOString().slice(0,10);
-        const visitsByFirm={};
-        activities.filter(a=>a.activity_type==='visit'&&a.firm_name).forEach(a=>{
-          const k=(a.firm_name||'').trim().toLowerCase();
-          if(!visitsByFirm[k])visitsByFirm[k]=[];
-          visitsByFirm[k].push(a);
-        });
-        const candidates=activities.filter(a=>a.activity_type==='visit'&&(a.outcome||'').toLowerCase().includes('asked to visit again'));
-        const enriched=candidates.map(a=>{
-          const ov=a.followup_override;
-          const k=(a.firm_name||'').trim().toLowerCase();
-          const laterVisit=visitsByFirm[k]?.find(x=>x.id!==a.id&&(x.date||'')>(a.date||''));
-          let status='pending';
-          let reason='auto';
-          if(ov&&ov.status){status=ov.status;reason='manual';}
-          else if(laterVisit){status='done';reason='auto';}
-          // bucket
-          let bucket='no_date';
-          if(status==='done')bucket='done';
-          else if(!a.follow_up_date)bucket='no_date';
-          else if(a.follow_up_date<today)bucket='overdue';
-          else if(a.follow_up_date<=wkAhead)bucket='due_week';
-          else bucket='later';
-          return {...a,_fStatus:status,_fReason:reason,_fBucket:bucket,_fLater:laterVisit};
-        });
-        return {
-          all:enriched,
-          overdue:enriched.filter(x=>x._fBucket==='overdue'),
-          dueWeek:enriched.filter(x=>x._fBucket==='due_week'),
-          done:enriched.filter(x=>x._fBucket==='done'),
-        };
-      })(),
       products:{},
     };
   },[activities]);
@@ -7325,46 +7320,7 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     setActivities(p=>p.map(a=>a.id===id?{...a,[field]:value}:a));
   };
 
-  // Manual override for follow-up status. Stores who & when in followup_override jsonb.
-  // Pass desiredStatus='done' or 'pending' or null (to clear override and revert to auto).
-  const toggleFollowupOverride=async(id,desiredStatus)=>{
-    const ov=desiredStatus==null?null:{status:desiredStatus,by:user?.name||'unknown',at:new Date().toISOString()};
-    await sb.from('sales_activities').update({followup_override:ov}).eq('id',id);
-    setActivities(p=>p.map(a=>a.id===id?{...a,followup_override:ov}:a));
-    show(desiredStatus==='done'?'Marked done':desiredStatus==='pending'?'Marked pending':'Override cleared');
-  };
-
   const ins={className:"in",style:{fontSize:10,padding:'4px 6px'}};
-
-  // ₹ in lakhs format. 125000 → ₹1.25L, 99000 → ₹99,000, 12500000 → ₹1.25Cr
-  const lakh=(v)=>{const n=Number(v)||0;if(n===0)return'₹0';if(n>=10000000)return'₹'+(n/10000000).toFixed(2)+'Cr';if(n>=100000)return'₹'+(n/100000).toFixed(2)+'L';return'₹'+n.toLocaleString('en-IN');};
-
-  // Inline-editable cell. Audit-locked fields handled by simply not wiring EditCell to them.
-  // Saves on blur (text/number/date) or change (select). Optional onAfter callback for derived writes.
-  function EditCell({a,field,type,opts,updateAct,onAfter}){
-    const [v,setV]=useState(a[field]??'');
-    useEffect(()=>{setV(a[field]??'');},[a.id,a[field]]);
-    const commit=async()=>{
-      const orig=a[field]??'';
-      let nv=v;
-      if(type==='number'){nv=v===''||v===null?0:Number(v);if(isNaN(nv))nv=0;}
-      if(String(nv)===String(orig))return;
-      await updateAct(a.id,field,nv);
-      if(onAfter)await onAfter(nv);
-    };
-    if(type==='select'){
-      return <select className="in" value={v||''} onChange={e=>{setV(e.target.value);}} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:80,background:'#0a0f1a',color:'#e2e8f0',border:'1px solid #1e293b'}}>
-        {(opts||[]).map((o,i)=><option key={i} value={o}>{o||'—'}</option>)}
-      </select>;
-    }
-    if(type==='date'){
-      return <input className="in" type="date" value={v||''} onChange={e=>setV(e.target.value)} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:100}}/>;
-    }
-    if(type==='number'){
-      return <input className="in" type="number" min="0" step="1" value={v??0} onChange={e=>setV(e.target.value)} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:70,textAlign:'right'}}/>;
-    }
-    return <input className="in" type="text" value={v||''} onChange={e=>setV(e.target.value)} onBlur={commit} style={{fontSize:9,padding:'2px 3px',width:'100%',minWidth:80}} title={v||''}/>;
-  }
 
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {/* Tabs + Actions */}
@@ -7386,107 +7342,39 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:7,marginBottom:12}}>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>TOTAL VISITS</p><p style={{fontSize:22,fontWeight:800,color:"#3b82f6"}}>{stats.totalVisits}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>THIS MONTH</p><p style={{fontSize:22,fontWeight:800,color:"#8b5cf6"}}>{stats.monthVisits}</p></div>
-        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>THIS WEEK</p><p style={{fontSize:22,fontWeight:800,color:"#a855f7"}}>{stats.weekVisits}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>TODAY</p><p style={{fontSize:22,fontWeight:800,color:"#e3a008"}}>{stats.todayVisits}</p></div>
-        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>MONTH ₹ (ACTUAL)</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{lakh(stats.monthRevenue)}</p></div>
-        <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WEEK ₹ (ACTUAL)</p><p style={{fontSize:22,fontWeight:800,color:"#34d399"}}>{lakh(stats.weekRevenue)}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>NEW CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{stats.newClients}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>REPEAT CLIENTS</p><p style={{fontSize:22,fontWeight:800,color:"#06b6d4"}}>{stats.repeatClients}</p></div>
-        <div className="c a" style={{padding:10,borderColor:"#a855f744"}} title="Distinct firm names ever visited (case-insensitive)"><p style={{fontSize:8,color:"#64748b"}}>UNIQUE FIRMS VISITED</p><p style={{fontSize:22,fontWeight:800,color:"#a855f7"}}>{stats.uniqueFirms}</p></div>
-        <div className="c a" style={{padding:10,borderColor:"#ec489944"}} title="Firms that received more than one visit"><p style={{fontSize:8,color:"#64748b"}}>REPEAT-VISITED FIRMS</p><p style={{fontSize:22,fontWeight:800,color:"#ec4899"}}>{stats.repeatFirms}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>PIPELINE</p><p style={{fontSize:22,fontWeight:800,color:"#f59e0b"}}>{stats.activePipeline}</p></div>
         <div className="c a" style={{padding:10}}><p style={{fontSize:8,color:"#64748b"}}>WON</p><p style={{fontSize:22,fontWeight:800,color:"#4ade80"}}>{stats.won}</p></div>
       </div>
-      <div className="c" style={{padding:10,marginBottom:12}}>
+      <div className="c" style={{padding:10}}>
         <p style={{fontSize:11,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Products Pitched (Frequency)</p>
         <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{productStats.map(([p,c])=><span key={p} className="bd" style={{background:"#3b82f620",color:"#3b82f6",fontSize:10,padding:"3px 8px"}}>{p} <b>{c}</b></span>)}</div>
       </div>
-      <div className="c" style={{padding:0}}>
-        <div style={{padding:"6px 8px",borderBottom:"2px solid #10b981",background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:"#10b981"}}>🔗 Pipeline projects with Job# linked — {stats.withPO.length} records</span></div>
-        <div style={{overflowX:"auto",maxHeight:300}}><table><thead><tr><th>Date</th><th>Firm</th><th>Job#</th><th>Product</th><th style={{textAlign:'right'}}>Est ₹</th><th style={{textAlign:'right'}}>Actual ₹</th><th>Rep</th></tr></thead><tbody>
-          {stats.withPO.map(a=><tr key={a.id}>
-            <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
-            <td style={{fontSize:10,fontWeight:600}} title={a.firm_name}>{a.firm_name?.slice(0,28)}</td>
-            <td style={{fontSize:10,color:"#e3a008",fontWeight:700,whiteSpace:"nowrap"}}>{a.job_id}</td>
-            <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,18)||'—'}</td>
-            <td style={{fontSize:9,textAlign:'right',color:"#64748b"}}>{Number(a.estimated_value)>0?lakh(a.estimated_value):'—'}</td>
-            <td style={{fontSize:10,textAlign:'right',color:"#10b981",fontWeight:700}}>{Number(a.actual_value)>0?lakh(a.actual_value):'—'}</td>
-            <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
-          </tr>)}
-          {stats.withPO.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:20}}>No pipeline projects linked to a Job# yet — set Job# on a project row in the Pipeline tab</td></tr>}
-        </tbody></table></div>
-      </div>
-
-      {/* FOLLOW-UPS TRACKER — auto-detected from "Asked to Visit Again" responses */}
-      <div className="c" style={{padding:0,marginTop:8}}>
-        <div style={{padding:"6px 8px",borderBottom:"2px solid #f59e0b",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:10,fontWeight:700,color:"#f59e0b"}}>🔄 Follow-ups (Asked to Visit Again) — {stats.followups.all.length} total</span>
-          <span style={{fontSize:8,color:"#64748b"}}>auto-marks Done if a later visit is logged for the same firm · tap to override</span>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,padding:8}}>
-          <div className="c a" style={{padding:8,borderColor:"#f4706744"}}><p style={{fontSize:8,color:"#64748b"}}>OVERDUE</p><p style={{fontSize:22,fontWeight:800,color:"#f47067"}}>{stats.followups.overdue.length}</p></div>
-          <div className="c a" style={{padding:8,borderColor:"#e3a00844"}}><p style={{fontSize:8,color:"#64748b"}}>DUE THIS WEEK</p><p style={{fontSize:22,fontWeight:800,color:"#e3a008"}}>{stats.followups.dueWeek.length}</p></div>
-          <div className="c a" style={{padding:8,borderColor:"#10b98144"}}><p style={{fontSize:8,color:"#64748b"}}>DONE</p><p style={{fontSize:22,fontWeight:800,color:"#10b981"}}>{stats.followups.done.length}</p></div>
-        </div>
-        <div style={{overflowX:"auto",maxHeight:400}}><table><thead><tr><th>Status</th><th>Visit</th><th>Firm</th><th>Contact</th><th>Phone</th><th>Re-visit Due</th><th>Last Action</th><th>Action</th></tr></thead><tbody>
-          {[...stats.followups.overdue,...stats.followups.dueWeek,...stats.followups.done.slice(0,30)].map(a=>{
-            const colour=a._fBucket==='overdue'?'#f47067':a._fBucket==='due_week'?'#e3a008':'#10b981';
-            const label=a._fBucket==='overdue'?'OVERDUE':a._fBucket==='due_week'?'DUE THIS WK':'DONE';
-            return <tr key={a.id}>
-              <td><span className="bd" style={{background:colour+'20',color:colour,fontSize:8,fontWeight:700}}>{label}</span>{a._fReason==='manual'&&<span style={{fontSize:7,color:"#64748b",marginLeft:4}} title={`Manually overridden by ${a.followup_override?.by||'?'}`}>✱</span>}</td>
-              <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
-              <td style={{fontSize:10,fontWeight:600}} title={a.firm_name}>{a.firm_name?.slice(0,28)}</td>
-              <td style={{fontSize:9}}>{a.contact_person?.slice(0,18)}</td>
-              <td style={{fontSize:9,color:"#64748b"}}>{a.mobile}</td>
-              <td style={{fontSize:9,color:colour,fontWeight:600,whiteSpace:"nowrap"}}>{a.follow_up_date||'—'}</td>
-              <td style={{fontSize:8,color:"#64748b"}} title={a._fLater?`Later visit ${a._fLater.date}`:''}>{a._fLater?`✓ Re-visited ${a._fLater.date}`:'—'}</td>
-              <td style={{whiteSpace:"nowrap"}}>{a._fBucket==='done'
-                ? <button className="b bs" style={{fontSize:8,padding:'2px 6px'}} onClick={()=>toggleFollowupOverride(a.id,'pending')} title="Mark as still pending">↶ Reopen</button>
-                : <button className="b bs" style={{fontSize:8,padding:'2px 6px',color:"#10b981",borderColor:"#10b98144"}} onClick={()=>toggleFollowupOverride(a.id,'done')} title="Mark as done manually">✓ Mark Done</button>
-              }
-              {a.followup_override&&<button className="b bs" style={{fontSize:8,padding:'2px 6px',marginLeft:3,color:"#64748b"}} onClick={()=>toggleFollowupOverride(a.id,null)} title="Clear manual override and revert to auto-detect">↺</button>}
-              </td>
-            </tr>;
-          })}
-          {stats.followups.all.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:20}}>No "Asked to Visit Again" responses yet</td></tr>}
-        </tbody></table></div>
-      </div>
     </div>}
 
-    {/* VISITS TAB — inline-editable; created_at audit-locked */}
+    {/* VISITS TAB */}
     {tab==='visits'&&<div className="c" style={{padding:0}}>
-      <div style={{padding:"6px 8px",borderBottom:"2px solid #3b82f6",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>🚶 Site Visits — {visits.length} records{sq?` matching "${sq}"`:''}</span><span style={{fontSize:8,color:"#64748b"}}>✏️ click any cell to edit · saves on blur</span></div>
-      <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th style={{minWidth:110}}>Date</th><th>New/Old</th><th style={{minWidth:130}}>Firm</th><th style={{minWidth:140}}>Industry</th><th style={{minWidth:110}}>Contact</th><th style={{minWidth:100}}>Phone</th><th style={{minWidth:130}}>Feedback</th><th style={{minWidth:130}}>Product</th><th style={{minWidth:150}}>Response</th><th style={{minWidth:110}}>Action</th><th style={{minWidth:110}}>Pipeline</th><th style={{minWidth:110}}>Re-visit</th><th style={{minWidth:80}}>Est ₹</th><th style={{minWidth:80}}>Actual ₹</th><th>Rep</th><th></th></tr></thead><tbody>
+      <div style={{padding:"6px 8px",borderBottom:"2px solid #3b82f6",background:"#0a0f1a"}}><span style={{fontSize:10,fontWeight:700,color:"#3b82f6"}}>🚶 Site Visits — {visits.length} records{sq?` matching "${sq}"`:''}</span></div>
+      <div style={{overflowX:"auto",maxHeight:"calc(100vh-200px)"}}><table><thead><tr><th>Date</th><th>New/Old</th><th>Firm</th><th>Industry</th><th>Contact</th><th>Phone</th><th>Feedback</th><th>Product</th><th>Response</th><th>Action</th><th>Pipeline</th><th>Re-visit</th><th>Rep</th><th></th></tr></thead><tbody>
         {visits.map(a=><tr key={a.id}>
-          <td><EditCell a={a} field="date" type="date" updateAct={updateAct}/></td>
-          <td>
-            <div style={{display:"flex",alignItems:"center",gap:3}}>
-              <div style={{flex:1}}><EditCell a={a} field="client_type" type="select" opts={['New Client','Old Client']} updateAct={updateAct}/></div>
-              {(()=>{const m=tagMismatch(a);if(!m)return null;
-                const flipTo=m==='should_be_old'?'Old Client':'New Client';
-                const tip=m==='should_be_old'
-                  ?`Tagged 'New Client' but firm "${a.firm_name}" was visited before. Click to flip to 'Old Client'.`
-                  :`Tagged 'Old Client' but this is the first visit to "${a.firm_name}" in the system. Click to flip to 'New Client' — OR ignore if this is a real pre-CRM relationship.`;
-                return <button title={tip} onClick={()=>{if(confirm(`Flip client_type to "${flipTo}"?\n\n${tip}`))updateAct(a.id,'client_type',flipTo);}} style={{background:"#f59e0b22",border:"1px solid #f59e0b",color:"#f59e0b",fontSize:9,fontWeight:700,padding:"1px 4px",borderRadius:3,cursor:"pointer",lineHeight:1}}>⚠</button>;
-              })()}
-            </div>
-          </td>
-          <td><EditCell a={a} field="firm_name" updateAct={updateAct} onAfter={(v)=>updateAct(a.id,'client_name',v)}/></td>
-          <td><EditCell a={a} field="industry" type="select" opts={INDUSTRIES} updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="contact_person" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="mobile" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="description" type="select" opts={['',...FEEDBACKS]} updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="product_pitched" type="select" opts={['',...PRODUCTS]} updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="outcome" type="select" opts={['',...RESPONSES]} updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="follow_up_notes" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="pipeline_project" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="follow_up_date" type="date" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="estimated_value" type="number" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="actual_value" type="number" updateAct={updateAct}/></td>
-          <td><EditCell a={a} field="rep_name" type="select" opts={salesReps} updateAct={updateAct}/></td>
-          <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)} title="Delete">✕</button></td>
+          <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
+          <td><span className="bd" style={{background:a.client_type==='New Client'?'#10b98120':'#06b6d420',color:a.client_type==='New Client'?'#10b981':'#06b6d4',fontSize:8}}>{a.client_type==='New Client'?'NEW':'OLD'}</span></td>
+          <td style={{fontSize:10,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.firm_name}>{a.firm_name}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.industry?.slice(0,15)}</td>
+          <td style={{fontSize:9}} title={a.designation}>{a.contact_person?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.mobile?.slice(0,12)}</td>
+          <td style={{fontSize:8}}>{a.description?.slice(0,18)}</td>
+          <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,20)}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.follow_up_notes?.slice(0,15)}</td>
+          <td style={{fontSize:8,color:"#f59e0b"}}>{a.pipeline_project?.slice(0,15)}</td>
+          <td style={{fontSize:8}}>{a.follow_up_date||'—'}</td>
+          <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
+          <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)}>✕</button></td>
         </tr>)}
-        {visits.length===0&&<tr><td colSpan={16} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits found</td></tr>}
+        {visits.length===0&&<tr><td colSpan={14} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits found</td></tr>}
       </tbody></table></div>
     </div>}
 
@@ -7514,10 +7402,10 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     {/* REPORTS TAB */}
     {tab==='reports'&&<div style={{display:"grid",gap:8}}>
       <div className="c" style={{padding:10}}>
-        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 Visit Frequency by Month <span style={{fontSize:9,color:"#64748b",fontWeight:400}}>(click any month to drill down)</span></p>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📊 Visit Frequency by Month</p>
         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{(()=>{
           const months={};activities.filter(a=>a.activity_type==='visit').forEach(a=>{const m=a.date?.slice(0,7);if(m)months[m]=(months[m]||0)+1;});
-          return Object.entries(months).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,c])=><div key={m} className="c a" style={{padding:"6px 10px",minWidth:80,textAlign:"center",cursor:"pointer",borderColor:drillFilter?.type==='month'&&drillFilter?.value===m?'#3b82f6':undefined}} onClick={()=>setDrillFilter({type:'month',value:m,label:`Month ${m}`})} title={`Click to see ${c} visits in ${m}`}><p style={{fontSize:8,color:"#64748b"}}>{m}</p><p style={{fontSize:16,fontWeight:800,color:"#3b82f6"}}>{c}</p></div>);
+          return Object.entries(months).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,c])=><div key={m} className="c a" style={{padding:"6px 10px",minWidth:80,textAlign:"center"}}><p style={{fontSize:8,color:"#64748b"}}>{m}</p><p style={{fontSize:16,fontWeight:800,color:"#3b82f6"}}>{c}</p></div>);
         })()}</div>
       </div>
       <div className="c" style={{padding:10}}>
@@ -7528,14 +7416,14 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
         </div>
       </div>
       <div className="c" style={{padding:10}}>
-        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Top Products Pitched <span style={{fontSize:9,color:"#64748b",fontWeight:400}}>(click any product to drill down)</span></p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:4}}>{productStats.slice(0,12).map(([p,c])=><div key={p} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between",cursor:"pointer",borderColor:drillFilter?.type==='product'&&drillFilter?.value===p?'#8b5cf6':undefined}} onClick={()=>setDrillFilter({type:'product',value:p,label:`Product: ${p}`})} title={`Click to see ${c} visits where ${p} was pitched`}><span style={{fontSize:10}}>{p}</span><span style={{fontWeight:800,color:"#8b5cf6",fontSize:12}}>{c}</span></div>)}</div>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>🏷️ Top Products Pitched</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:4}}>{productStats.slice(0,12).map(([p,c])=><div key={p} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:10}}>{p}</span><span style={{fontWeight:800,color:"#8b5cf6",fontSize:12}}>{c}</span></div>)}</div>
       </div>
       <div className="c" style={{padding:10}}>
-        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📋 Response Breakdown <span style={{fontSize:9,color:"#64748b",fontWeight:400}}>(click any response to drill down)</span></p>
+        <p style={{fontSize:12,fontWeight:700,color:"#e3a008",marginBottom:8}}>📋 Response Breakdown</p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:4}}>{(()=>{
           const r={};activities.forEach(a=>{const o=a.outcome;if(o&&!o.includes('No Data'))r[o]=(r[o]||0)+1;});
-          return Object.entries(r).sort((a,b)=>b[1]-a[1]).map(([k,v])=><div key={k} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between",cursor:"pointer",borderColor:drillFilter?.type==='response'&&drillFilter?.value===k?(k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'):undefined}} onClick={()=>setDrillFilter({type:'response',value:k,label:`Response: ${k}`})} title={`Click to see ${v} visits with this response`}><span style={{fontSize:9,color:k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'}}>{k.slice(0,30)}</span><span style={{fontWeight:800,fontSize:11}}>{v}</span></div>);
+          return Object.entries(r).sort((a,b)=>b[1]-a[1]).map(([k,v])=><div key={k} className="c a" style={{padding:"6px 8px",display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,color:k.includes('Positive')?'#4ade80':k.includes('Negative')?'#f47067':'#e3a008'}}>{k.slice(0,30)}</span><span style={{fontWeight:800,fontSize:11}}>{v}</span></div>);
         })()}</div>
       </div>
       <button className="b" onClick={()=>{
@@ -7543,27 +7431,6 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
         const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Sales Data');
         XLSX.writeFile(wb,'Sales_CRM_Export_'+td()+'.xlsx');show('Excel exported!');
       }} style={{fontSize:11}}>📥 Export to Excel</button>
-
-      {/* Drill-down inline visits table — appears when a tile/chip is clicked */}
-      {drillFilter&&<div className="c" style={{padding:0,marginTop:4}}>
-        <div style={{padding:"8px 10px",borderBottom:"2px solid #e3a008",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:11,fontWeight:700,color:"#e3a008"}}>🔎 {drillFilter.label} — {visits.length} visits</span>
-          <button className="b bs" style={{fontSize:9,padding:'3px 8px'}} onClick={()=>setDrillFilter(null)}>✕ Clear filter</button>
-        </div>
-        <div style={{overflowX:"auto",maxHeight:400}}><table><thead><tr><th>Date</th><th>Firm</th><th>Contact</th><th>Phone</th><th>Product</th><th>Response</th><th>Re-visit</th><th>Rep</th></tr></thead><tbody>
-          {visits.map(a=><tr key={a.id}>
-            <td style={{fontSize:9,whiteSpace:"nowrap"}}>{a.date}</td>
-            <td style={{fontSize:10,fontWeight:600}} title={a.firm_name}>{a.firm_name?.slice(0,30)}</td>
-            <td style={{fontSize:9}}>{a.contact_person?.slice(0,20)}</td>
-            <td style={{fontSize:9,color:"#64748b"}}>{a.mobile}</td>
-            <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,20)}</td>
-            <td style={{fontSize:9,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,30)}</td>
-            <td style={{fontSize:9}}>{a.follow_up_date||'—'}</td>
-            <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,12)}</td>
-          </tr>)}
-          {visits.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:20}}>No matching visits</td></tr>}
-        </tbody></table></div>
-      </div>}
     </div>}
 
     {/* ADD VISIT MODAL */}
