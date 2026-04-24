@@ -2353,6 +2353,10 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           <span style={{fontSize:8,color:"#64748b"}}>Delivery:</span>
           <input className="in" value={b.delivery_address||''} placeholder="Delivery address for this batch..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,delivery_address:v}:x));}} onBlur={e=>updateBatchField(b.id,'delivery_address',e.target.value)} style={{flex:1,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030"}}/>
         </div>
+        <div style={{display:"flex",gap:4,marginTop:3,alignItems:"center",marginBottom:2}}>
+          <span style={{fontSize:8,color:"#64748b"}}>Remark:</span>
+          <input className="in" value={b.remark||''} placeholder="Remark for this batch (optional)..." onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,remark:v}:x));}} onBlur={e=>updateBatchField(b.id,'remark',e.target.value)} style={{flex:1,fontSize:9,padding:"3px 6px",background:"#0c1017",border:"1px solid #1a2030",color:"#94a3b8"}}/>
+        </div>
       </div>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Sr</th><th>{vm==="internal"?"Internal":"Client (DC)"}</th><th>📷</th><th>Material</th><th>Size</th><th>Qty</th><th>Unit</th><th>Area/Qty</th>{canSeeRates&&<><th>Rate</th><th>Amt (incl GST)</th></>}<th>Edit</th><th style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28,color:"#f97316"}}>OS</th>{DEPTS.map(d=><th key={d} style={{fontSize:7,textAlign:"center",padding:"2px 1px",minWidth:28}}>{d.slice(0,3)}</th>)}</tr></thead>
         <tbody>{(b.items||[]).length===0&&<tr><td colSpan={(canSeeRates?11:9)+DEPTS.length} style={{textAlign:"center",color:"#64748b",padding:10,fontSize:10}}>No items yet — click ➕ Add Item below</td></tr>}
@@ -2480,7 +2484,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         <button className="b" onClick={()=>setCopyBatch(null)}>Cancel</button>
       </div>
     </div>}
-    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Client PO#" id="_newBatchClientPO" style={{width:120}}/><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const clientPoVal=document.getElementById('_newBatchClientPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,client_po_number:clientPoVal,billing_address:billVal,delivery_address:delVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
+    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Client PO#" id="_newBatchClientPO" style={{width:120}}/><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in" placeholder="Remark (optional)..." id="_newBatchRemark" style={{flex:1,minWidth:200}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const clientPoVal=document.getElementById('_newBatchClientPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const remarkVal=document.getElementById('_newBatchRemark')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,client_po_number:clientPoVal,billing_address:billVal,delivery_address:delVal,remark:remarkVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
         <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
           const file=e.target.files[0];if(!file)return;
@@ -6730,6 +6734,17 @@ function RootApp(){
 // BANKING CRM PAGE
 // ═══════════════════════════════════════════════════════════
 function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
+  // Issue #3 fix — match banking_sites.job_no (e.g. "2627", "1281W") to jobs.id safely.
+  // OLD bug: jobs.find(j=>j.id.includes(job_no)) → "2627" matched "10000-2627" etc.
+  // NEW rule: exact match, or id starts with job_no+"-" / job_no+" -", or id contains "(job_no)".
+  const findJobForBankingSite=React.useCallback((jobNo)=>{
+    if(!jobNo||!jobs) return null;
+    const cands=jobs.filter(j=>j.id===jobNo||j.id?.startsWith(jobNo+'-')||j.id?.startsWith(jobNo+' -')||j.id?.includes('('+jobNo+')'));
+    if(cands.length===0) return null;
+    // Tiebreak: exact match first, then shortest id (parent job over sub-job reference)
+    cands.sort((a,b)=>a.id===jobNo?-1:b.id===jobNo?1:a.id.length-b.id.length);
+    return cands[0];
+  },[jobs]);
   const [sites,setSites]=useState([]);
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState('ALL');
@@ -7426,7 +7441,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         const isDup=dupIds.has(s.id);
         return <tr key={s.id} style={{background:isDup?'rgba(245,158,11,0.07)':''}}>
           <td className="mn" style={{fontSize:9}}>{page*pageSize+i+1}</td>
-          <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=jobs.find(j=>j.id?.includes(s.job_no));if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
+          <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=findJobForBankingSite(s.job_no);if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
           <td style={{whiteSpace:'nowrap',padding:'2px 4px'}}>{(()=>{
             const st=siteDeptStatus(s);
             const active=[
