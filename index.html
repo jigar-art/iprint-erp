@@ -1129,6 +1129,45 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
   const [indTab,setIndTab]=useState('all');
   const [cmpDays,setCmpDays]=useState(0); // 0=off, 7=week, 30=month
 
+  // Item #6 — Site counts per status card (banking sites rolled up via parent-job status)
+  const [sitesByJobNo,setSitesByJobNo]=useState(null); // Map<job_no, site_count_with_uid>
+  useEffect(()=>{
+    (async()=>{
+      // Pull just job_no + site_unique_id — minimal columns for speed
+      let all=[],from=0,sz=1000;
+      while(true){
+        const {data,error}=await sb.from('banking_sites').select('job_no,site_unique_id').range(from,from+sz-1);
+        if(error||!data||!data.length)break;
+        all=all.concat(data);
+        if(data.length<sz)break;
+        from+=sz;
+      }
+      // Only count sites that have a site_unique_id populated
+      const map={};
+      for(const s of all){
+        if(!s.job_no||!s.site_unique_id||!String(s.site_unique_id).trim())continue;
+        map[s.job_no]=(map[s.job_no]||0)+1;
+      }
+      setSitesByJobNo(map);
+    })();
+  },[]);
+  const sitesPerCard=useMemo(()=>{
+    if(!sitesByJobNo)return null;
+    const out={};
+    for(const card of STATUS_CARDS)out[card.key]=0;
+    for(const j of jobs||[]){
+      // Extract leading number (e.g. '9793-2627' → '9793') to match banking_sites.job_no convention
+      const jobNum=String(j.id||'').split('-')[0];
+      const cnt=sitesByJobNo[jobNum]||0;
+      if(!cnt)continue;
+      // Find which card this job falls into
+      for(const card of STATUS_CARDS){
+        if(card.statuses.includes(j.status)){out[card.key]+=cnt;break;}
+      }
+    }
+    return out;
+  },[sitesByJobNo,jobs]);
+
   // Calculate deltas: how many jobs were created in the comparison period
   const deltas=useMemo(()=>{
     if(!cmpDays) return {};
@@ -1190,7 +1229,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
       <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/>
-      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15}/>)}
+      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15} s={sitesPerCard?`${sitesPerCard[card.key]||0} sites`:undefined}/>)}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
@@ -1500,6 +1539,8 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
           <select className="in" style={{fontSize:9,padding:"2px",width:100}} defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change status from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}}>
             <option value="">Change →</option>{renderStatusOptions(j.status)}
           </select>
+          {/* Item #11 — one-tap 'Given for Billing' */}
+          {!['Given for Billing','Billing Done','Cash Received','No Bill','Cancelled'].includes(j.status)&&<button className="b bs" onClick={()=>{if(confirm('Mark "'+j.id+'" as Given for Billing?'))updateJobStatus(j.id,'Given for Billing');}} title="One-click mark as Given for Billing" style={{fontSize:10,padding:"3px 10px",background:'#06b6d4',borderColor:'#06b6d4',color:'#000',fontWeight:700,marginLeft:4}}>✓ Given for Billing</button>}
         </div>
       </div>
       <div><span style={{color:"#64748b",fontSize:8}}>FIRM</span><select className="in" value={jf.firm||j.firm} onChange={e=>setJF('firm',e.target.value)} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{firms.map(f=><option key={f.code} value={f.code}>{f.short_name} — {f.name}</option>)}</select></div>
@@ -1537,7 +1578,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       </div>
     </div>:null;})()}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-      {[{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"}].map(sec=>{
+      {[{l:"📊 PPT",field:"ppt_urls",folder:"job-ppt",icon:"📊"},{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"}].map(sec=>{
         const raw=j[sec.field];const jobUrls=Array.isArray(raw)?raw:raw?[raw]:[];
         // DC section: aggregate job-level + all batch-level DCs so everyone sees everything
         const isDC=sec.field==='dc_file_url';
