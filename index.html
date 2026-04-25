@@ -353,15 +353,26 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
     setHi(0);
   },[computePos]);
   // Re-compute on scroll/resize while open so the fixed panel tracks the input.
+  // Also poll via requestAnimationFrame for ~30 frames (~500ms) after open so the
+  // panel position settles correctly during CSS entrance animations on ancestor
+  // cards (the items table card has `animation:'fi .2s'` which causes the picker's
+  // bounding rect to shift during the first 200ms after click).
   useEffect(()=>{
     if(!open) return;
-    // Schedule a recompute right after open to capture final layout
-    const tid=setTimeout(()=>{ const p=computePos(); if(p) setPanelPos(p); },0);
+    let frame=0;
+    let rafId=null;
+    const tick=()=>{
+      const p=computePos();
+      if(p) setPanelPos(prev=>(prev.top===p.top && prev.left===p.left && prev.width===p.width ? prev : p));
+      frame++;
+      if(frame<30) rafId=requestAnimationFrame(tick);
+    };
+    rafId=requestAnimationFrame(tick);
     const onScroll=()=>{ const p=computePos(); if(p) setPanelPos(p); };
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
     return ()=>{
-      clearTimeout(tid);
+      if(rafId) cancelAnimationFrame(rafId);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
     };
@@ -418,7 +429,7 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
         placeholder={placeholder||'Search material...'}
         style={{fontSize:9,padding:'2px 4px',width:'100%',boxSizing:'border-box'}}
       />
-      {open && (
+      {open && ReactDOM.createPortal(
         <div data-mp-panel="1" style={{position:'fixed',top:panelPos.top,left:panelPos.left,zIndex:9999,background:'#0c1017',border:'1px solid #e3a008',borderRadius:6,width:panelPos.width,maxHeight:240,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,.5)'}}>
           <div style={{padding:'4px 8px',fontSize:8,color:'#64748b',borderBottom:'1px solid #1a2030',background:'#0c1017'}}>
             {ql ? `${matches.length} of ${(products||[]).length} match` : `${(products||[]).length} materials`}
@@ -442,7 +453,8 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
               ➕ Add as new material: "{q.trim()}"
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
