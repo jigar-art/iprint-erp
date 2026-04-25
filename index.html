@@ -879,7 +879,14 @@ function MainApp({user,onLogout,masterData}){
     let newDates={};
     const now=new Date();
     const timeStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
-    const userName=window.__currentUser?.name||'Unknown';
+    // 26 Apr 26: was window.__currentUser?.name which only got populated on Login
+    // submit click — page refresh restored React `user` from localStorage but never
+    // re-set the global, so every status change after a refresh got stamped 'by Unknown'.
+    // Read from the React prop (which is restored on boot, line 6957) with localStorage
+    // fallback in case React state is ever stale.
+    let userName=user?.name;
+    if(!userName){try{const s=localStorage.getItem('erp_user');if(s)userName=JSON.parse(s)?.name;}catch(e){}}
+    if(!userName)userName='Unknown';
     
     setJobs(prev=>{
       const job=prev.find(j=>j.id===jobId);
@@ -1889,13 +1896,13 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       </div>
     </div>:null;})()}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-      {[{l:"📊 PPT",field:"ppt_urls",folder:"job-ppt",icon:"📊"},{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"}].map(sec=>{
+      {[{l:"📊 PPT",field:"ppt_urls",folder:"job-ppt",icon:"📊"},{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄",batchField:"dc_urls"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"},{l:"📑 INVOICE DOCS",field:"invoice_docs_urls",folder:"invoice-docs",icon:"📑",batchField:"invoice_docs_urls"}].map(sec=>{
         const raw=j[sec.field];const jobUrls=Array.isArray(raw)?raw:raw?[raw]:[];
-        // DC section: aggregate job-level + all batch-level DCs so everyone sees everything
-        const isDC=sec.field==='dc_file_url';
-        const allEntries=isDC
+        // 26 Apr 26: generalized DC-only aggregation to any section with batchField.
+        // DC and INVOICE DOCS roll up job-level + per-batch entries so everyone sees everything.
+        const allEntries=sec.batchField
           ?[...jobUrls.map(u=>({url:u,source:'job',batchId:null,batchIdx:null})),
-             ...(j.batches||[]).flatMap((b,bi)=>(Array.isArray(b.dc_urls)?b.dc_urls:[]).map(u=>({url:u,source:'batch',batchId:b.id,batchIdx:bi+1})))]
+             ...(j.batches||[]).flatMap((b,bi)=>(Array.isArray(b[sec.batchField])?b[sec.batchField]:[]).map(u=>({url:u,source:'batch',batchId:b.id,batchIdx:bi+1})))]
           :jobUrls.map(u=>({url:u,source:'job',batchId:null,batchIdx:null}));
         return <div key={sec.field} style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:6}}>
           <span style={{color:"#64748b",fontSize:8,fontWeight:600,display:"block",marginBottom:3}}>{sec.l} ({allEntries.length})</span>
@@ -1905,12 +1912,12 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
             <button style={{background:"#f4706720",border:"1px solid #f4706744",borderRadius:3,color:"#f47067",cursor:"pointer",fontSize:10,padding:"0 5px",lineHeight:"16px",fontWeight:700}} onClick={async()=>{
               if(!confirm('Remove this file?'))return;
               if(e.source==='batch'){
-                // Delete from batch's dc_urls
+                // Delete from batch's per-batch field (dc_urls or invoice_docs_urls)
                 const b=(j.batches||[]).find(x=>x.id===e.batchId);if(!b)return;
-                const nw=(Array.isArray(b.dc_urls)?b.dc_urls:[]).filter(u=>u!==e.url);
-                await sb.from('batches').update({dc_urls:nw}).eq('id',e.batchId);
-                if(setBatches)setBatches(p=>p.map(x=>x.id===e.batchId?{...x,dc_urls:nw}:x));
-                show('DC removed');
+                const nw=(Array.isArray(b[sec.batchField])?b[sec.batchField]:[]).filter(u=>u!==e.url);
+                await sb.from('batches').update({[sec.batchField]:nw}).eq('id',e.batchId);
+                if(setBatches)setBatches(p=>p.map(x=>x.id===e.batchId?{...x,[sec.batchField]:nw}:x));
+                show('File removed');
               } else {
                 removeJobFile(j.id,sec.field,e.url);
               }
@@ -2650,6 +2657,15 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={async()=>{if(!confirm('Remove DC?'))return;const nw=dcs.filter((_,i)=>i!==di);await sb.from('batches').update({dc_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:nw}:x));show('DC removed');}}>✕</button>
             </span>)}
             <label style={{cursor:"pointer",fontSize:8,color:"#06b6d4",border:"1px dashed #06b6d433",padding:"2px 6px",borderRadius:4}}>+DC<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-dc');if(urls.length){const nw=[...dcs,...urls];await sb.from('batches').update({dc_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:nw}:x));show('📄 '+urls.length+' DC(s) uploaded!');}}}/></label>
+          </>;})()}
+          {/* 26 Apr 26: per-batch Invoice Docs (signed quotes, GST docs, e-way bills, customer-acknowledged copies) */}
+          {(()=>{const ivds=Array.isArray(b.invoice_docs_urls)?b.invoice_docs_urls:[];return <>
+            <span style={{fontSize:8,color:"#64748b",marginLeft:6}}>📑 Invoice Docs ({ivds.length})</span>
+            {ivds.map((u,di)=><span key={di} style={{display:"inline-flex",alignItems:"center",gap:2,background:"#f59e0b10",border:"1px solid #f59e0b33",padding:"2px 6px",borderRadius:4}}>
+              <a href={smartOpenUrl(u)} target="_blank" rel="noopener noreferrer" style={{color:"#f59e0b",fontSize:8,textDecoration:"none"}}>📑{di+1}</a>
+              <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={async()=>{if(!confirm('Remove Invoice Doc?'))return;const nw=ivds.filter((_,i)=>i!==di);await sb.from('batches').update({invoice_docs_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,invoice_docs_urls:nw}:x));show('Invoice doc removed');}}>✕</button>
+            </span>)}
+            <label style={{cursor:"pointer",fontSize:8,color:"#f59e0b",border:"1px dashed #f59e0b33",padding:"2px 6px",borderRadius:4}}>+IVD<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-invoice-docs');if(urls.length){const nw=[...ivds,...urls];await sb.from('batches').update({invoice_docs_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,invoice_docs_urls:nw}:x));show('📑 '+urls.length+' invoice doc(s) uploaded!');}}}/></label>
           </>;})()}
         </div>
       </div>}
@@ -7812,11 +7828,14 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       </tbody></table>
     </div>
 
-    {/* Pagination */}
-    {totalPages>1&&<div style={{display:'flex',justifyContent:'center',gap:4,alignItems:'center'}}>
+    {/* Pagination — 26 Apr 26: numbered + Go-to (Banking CRM has 100+ pages) */}
+    {totalPages>1&&<div style={{display:'flex',justifyContent:'center',gap:4,alignItems:'center',flexWrap:'wrap'}}>
       <button className="b bs" disabled={page===0} onClick={()=>setPage(p=>p-1)}>← Prev</button>
-      <span className="mn" style={{fontSize:10,color:'#64748b'}}>Page {page+1} of {totalPages}</span>
+      {(()=>{const cur=page+1,last=totalPages,nums=[];const add=n=>nums.push(n);add(1);let s=Math.max(2,cur-2),e=Math.min(last-1,cur+2);if(s>2)nums.push('…');for(let i=s;i<=e;i++)add(i);if(e<last-1)nums.push('…');if(last>1)add(last);return nums.map((n,i)=>n==='…'?<span key={'e'+i} className="mn" style={{fontSize:10,color:'#64748b',padding:'0 2px'}}>…</span>:<button key={n} className={n===cur?"b bp":"b bs"} style={{minWidth:24,padding:'2px 6px',fontSize:10}} onClick={()=>setPage(n-1)}>{n}</button>);})()}
       <button className="b bs" disabled={page>=totalPages-1} onClick={()=>setPage(p=>p+1)}>Next →</button>
+      <span className="mn" style={{fontSize:10,color:'#64748b',marginLeft:8}}>Go to:</span>
+      <input className="in mn" type="number" min={1} max={totalPages} placeholder={String(page+1)} style={{width:54,fontSize:10,padding:'2px 4px',textAlign:'center'}} onKeyDown={e=>{if(e.key==='Enter'){const v=parseInt(e.target.value,10);if(v>=1&&v<=totalPages){setPage(v-1);e.target.value='';}}}} onBlur={e=>{const v=parseInt(e.target.value,10);if(v>=1&&v<=totalPages){setPage(v-1);e.target.value='';}}}/>
+      <span className="mn" style={{fontSize:10,color:'#64748b'}}>/ {totalPages}</span>
     </div>}
   </div>;
 }
