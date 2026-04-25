@@ -327,14 +327,48 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
   const [open,setOpen]=useState(false);
   const [q,setQ]=useState(value||'');
   const [hi,setHi]=useState(0);
+  const [panelPos,setPanelPos]=useState(null); // {top,left,width,placeAbove}
   const wrapRef=useRef(null);
   const inputRef=useRef(null);
   // Sync external value changes (e.g. when a new row is added)
   useEffect(()=>{ if(!open) setQ(value||''); },[value,open]);
-  // Close on outside click
+  // Compute panel position when opened. Re-compute on scroll/resize while open
+  // so the fixed-positioned panel tracks the input. This is what frees us from
+  // overflow:auto clipping inside the items table.
   useEffect(()=>{
     if(!open) return;
-    const onDoc=(e)=>{ if(wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const compute=()=>{
+      const el=inputRef.current; if(!el) return;
+      const r=el.getBoundingClientRect();
+      const panelW=Math.max(r.width, 220);
+      const panelMaxH=240;
+      const margin=8;
+      const spaceBelow=window.innerHeight - r.bottom;
+      const spaceAbove=r.top;
+      const placeAbove=spaceBelow < (panelMaxH+margin) && spaceAbove > spaceBelow;
+      const top=placeAbove ? Math.max(margin, r.top - panelMaxH - 4) : (r.bottom + 4);
+      const left=Math.min(Math.max(margin, r.left), window.innerWidth - panelW - margin);
+      setPanelPos({top, left, width:panelW, placeAbove});
+    };
+    compute();
+    const onScroll=()=>compute();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return ()=>{
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  },[open]);
+  // Close on outside click — must check both wrapper and panel since panel
+  // is now portaled out via position:fixed and is not a descendant of wrapRef.
+  useEffect(()=>{
+    if(!open) return;
+    const onDoc=(e)=>{
+      if(wrapRef.current && wrapRef.current.contains(e.target)) return;
+      // Allow clicks inside the panel itself
+      if(e.target.closest && e.target.closest('[data-mp-panel="1"]')) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown',onDoc);
     return ()=>document.removeEventListener('mousedown',onDoc);
   },[open]);
@@ -383,9 +417,9 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
         placeholder={placeholder||'Search material...'}
         style={{fontSize:9,padding:'2px 4px',width:'100%',boxSizing:'border-box'}}
       />
-      {open && (
-        <div style={{position:'absolute',top:'100%',left:0,zIndex:50,background:'#0c1017',border:'1px solid #e3a008',borderRadius:6,marginTop:2,width:Math.max(w,200),maxHeight:240,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,.5)'}}>
-          <div style={{padding:'4px 8px',fontSize:8,color:'#64748b',borderBottom:'1px solid #1a2030'}}>
+      {open && panelPos && (
+        <div data-mp-panel="1" style={{position:'fixed',top:panelPos.top,left:panelPos.left,zIndex:9999,background:'#0c1017',border:'1px solid #e3a008',borderRadius:6,width:panelPos.width,maxHeight:240,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,.5)'}}>
+          <div style={{padding:'4px 8px',fontSize:8,color:'#64748b',borderBottom:'1px solid #1a2030',position:'sticky',top:0,background:'#0c1017'}}>
             {ql ? `${matches.length} of ${(products||[]).length} match` : `${(products||[]).length} materials`}
           </div>
           {matches.length===0 && !showAddNew && (
@@ -403,7 +437,7 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
             <div
               onMouseDown={(e)=>{e.preventDefault();onAddNew(q.trim());setQ(q.trim());setOpen(false);}}
               onMouseEnter={()=>setHi(matches.length)}
-              style={{padding:'6px 8px',fontSize:10,cursor:'pointer',background:hi===matches.length?'#1f2937':'#0a0f1a',color:'#4ade80',borderTop:'1px solid #1a2030',fontWeight:700}}>
+              style={{padding:'6px 8px',fontSize:10,cursor:'pointer',background:hi===matches.length?'#1f2937':'#0a0f1a',color:'#4ade80',borderTop:'1px solid #1a2030',fontWeight:700,position:'sticky',bottom:0}}>
               ➕ Add as new material: "{q.trim()}"
             </div>
           )}
