@@ -327,24 +327,23 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
   const [open,setOpen]=useState(false);
   const [q,setQ]=useState(value||'');
   const [hi,setHi]=useState(0);
-  const [panelPos,setPanelPos]=useState(null); // {top,left,width,placeAbove}
+  const [panelPos,setPanelPos]=useState({top:0,left:0,width:220,placeAbove:false});
   const wrapRef=useRef(null);
   const inputRef=useRef(null);
   // Sync external value changes (e.g. when a new row is added)
   useEffect(()=>{ if(!open) setQ(value||''); },[value,open]);
-  // Compute panel position from input's bounding rect. Used both at open time
-  // and on scroll/resize to keep the position-fixed panel tracking the input.
+  // Compute panel position from input's bounding rect.
   const computePos=useCallback(()=>{
     const el=inputRef.current; if(!el) return null;
     const r=el.getBoundingClientRect();
-    const panelW=Math.max(r.width, 220);
+    const panelW=Math.max(r.width||0, 220);
     const panelMaxH=240;
     const margin=8;
     const spaceBelow=window.innerHeight - r.bottom;
     const spaceAbove=r.top;
     const placeAbove=spaceBelow < (panelMaxH+margin) && spaceAbove > spaceBelow;
     const top=placeAbove ? Math.max(margin, r.top - panelMaxH - 4) : (r.bottom + 4);
-    const left=Math.min(Math.max(margin, r.left), window.innerWidth - panelW - margin);
+    const left=Math.min(Math.max(margin, r.left), Math.max(margin, window.innerWidth - panelW - margin));
     return {top, left, width:panelW, placeAbove};
   },[]);
   const openPanel=useCallback(()=>{
@@ -356,10 +355,13 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
   // Re-compute on scroll/resize while open so the fixed panel tracks the input.
   useEffect(()=>{
     if(!open) return;
+    // Schedule a recompute right after open to capture final layout
+    const tid=setTimeout(()=>{ const p=computePos(); if(p) setPanelPos(p); },0);
     const onScroll=()=>{ const p=computePos(); if(p) setPanelPos(p); };
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
     return ()=>{
+      clearTimeout(tid);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
     };
@@ -399,14 +401,9 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
     }
     else if(e.key==='Escape'){setOpen(false);}
   };
-  const onBlur=()=>{
-    // After a brief tick, if panel closed and current text differs from value, push as free text
-    setTimeout(()=>{
-      if(!open && q.trim() && q.trim()!==(value||'').trim()){
-        onPick({internal_name:q.trim(), client_name:q.trim(), isFreeText:true});
-      }
-    },150);
-  };
+  // Select all text on focus so user can immediately type a replacement
+  // instead of appending to the prefilled value.
+  const onFocus=(e)=>{ openPanel(); try{ e.target.select(); }catch(_){} };
   const w = compact ? 110 : 180;
   return (
     <div ref={wrapRef} style={{position:'relative',display:'inline-block',width:w}}>
@@ -415,16 +412,15 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
         className="in"
         value={q}
         onChange={e=>{setQ(e.target.value);if(!open)openPanel();else setHi(0);}}
-        onFocus={openPanel}
+        onFocus={onFocus}
         onClick={openPanel}
         onKeyDown={onKey}
-        onBlur={onBlur}
         placeholder={placeholder||'Search material...'}
         style={{fontSize:9,padding:'2px 4px',width:'100%',boxSizing:'border-box'}}
       />
-      {open && panelPos && (
+      {open && (
         <div data-mp-panel="1" style={{position:'fixed',top:panelPos.top,left:panelPos.left,zIndex:9999,background:'#0c1017',border:'1px solid #e3a008',borderRadius:6,width:panelPos.width,maxHeight:240,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,.5)'}}>
-          <div style={{padding:'4px 8px',fontSize:8,color:'#64748b',borderBottom:'1px solid #1a2030',position:'sticky',top:0,background:'#0c1017'}}>
+          <div style={{padding:'4px 8px',fontSize:8,color:'#64748b',borderBottom:'1px solid #1a2030',background:'#0c1017'}}>
             {ql ? `${matches.length} of ${(products||[]).length} match` : `${(products||[]).length} materials`}
           </div>
           {matches.length===0 && !showAddNew && (
@@ -442,7 +438,7 @@ function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact
             <div
               onMouseDown={(e)=>{e.preventDefault();onAddNew(q.trim());setQ(q.trim());setOpen(false);}}
               onMouseEnter={()=>setHi(matches.length)}
-              style={{padding:'6px 8px',fontSize:10,cursor:'pointer',background:hi===matches.length?'#1f2937':'#0a0f1a',color:'#4ade80',borderTop:'1px solid #1a2030',fontWeight:700,position:'sticky',bottom:0}}>
+              style={{padding:'6px 8px',fontSize:10,cursor:'pointer',background:hi===matches.length?'#1f2937':'#0a0f1a',color:'#4ade80',borderTop:'1px solid #1a2030',fontWeight:700}}>
               ➕ Add as new material: "{q.trim()}"
             </div>
           )}
