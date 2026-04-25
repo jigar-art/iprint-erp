@@ -53,7 +53,7 @@ tr:hover td{background:#0a0f1a}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useCallback,useMemo,useEffect} = React;
+const {useState,useCallback,useMemo,useEffect,useRef} = React;
 
 // ─── SUPABASE CONNECTION ────────────────────────────────────
 const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
@@ -308,6 +308,110 @@ const SIZES=["MM","INCH","FOOT"];
 const RATES=["SQFT","SQMTR","UNIT","RFT","NOS","SET","LOT"];
 const MUNITS=["roll","nos","sheet","pcs","sqft","mtr","kg","box","set","lot"];
 const FAB_P=["Laser Cutting","Router Cutting","CNC Cutting","Bending","Welding","PU Coating","Painting","Polishing","Assembly","Carpentry","3D Cutting"];
+
+// ─── MATERIAL PICKER (searchable combobox) ─────────────────
+// Replaces plain <select>+text input for material selection.
+// - Click input → panel opens; type to filter (case-insensitive)
+// - Pick existing → onPick({internal_name, client_name})
+// - Type a brand-new name + click ➕ Add → onAddNew(typedName)
+// - Free-text typing without click-Add still flows back via onPick
+//   with isFreeText=true so caller can store on line item only.
+// Props:
+//   value         current selected internal_name (string)
+//   products      array of {internal_name, client_name, ...}
+//   onPick(obj)   called with {internal_name, client_name, isFreeText?}
+//   onAddNew(s)   called with typed name to promote into products
+//   placeholder   optional input placeholder
+//   compact       boolean, smaller width for table cells
+function MaterialPicker({value, products, onPick, onAddNew, placeholder, compact}){
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState(value||'');
+  const [hi,setHi]=useState(0);
+  const wrapRef=useRef(null);
+  const inputRef=useRef(null);
+  // Sync external value changes (e.g. when a new row is added)
+  useEffect(()=>{ if(!open) setQ(value||''); },[value,open]);
+  // Close on outside click
+  useEffect(()=>{
+    if(!open) return;
+    const onDoc=(e)=>{ if(wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown',onDoc);
+    return ()=>document.removeEventListener('mousedown',onDoc);
+  },[open]);
+  const ql=String(q||'').trim().toLowerCase();
+  const matches=useMemo(()=>{
+    if(!ql) return (products||[]).slice(0,200);
+    return (products||[]).filter(p => String(p.internal_name||'').toLowerCase().includes(ql)).slice(0,200);
+  },[ql,products]);
+  const exactHit=useMemo(()=>{
+    if(!ql) return null;
+    return (products||[]).find(p => String(p.internal_name||'').trim().toLowerCase()===ql) || null;
+  },[ql,products]);
+  const showAddNew = ql && !exactHit && typeof onAddNew==='function';
+  const totalRows = matches.length + (showAddNew?1:0);
+  const onKey=(e)=>{
+    if(e.key==='ArrowDown'){e.preventDefault();setHi(h=>Math.min(totalRows-1,h+1));}
+    else if(e.key==='ArrowUp'){e.preventDefault();setHi(h=>Math.max(0,h-1));}
+    else if(e.key==='Enter'){
+      e.preventDefault();
+      if(showAddNew && hi===matches.length){onAddNew(q.trim());setOpen(false);return;}
+      const pick=matches[hi];
+      if(pick){onPick({internal_name:pick.internal_name, client_name:pick.client_name||pick.internal_name});setQ(pick.internal_name);setOpen(false);}
+      else if(q.trim()){onPick({internal_name:q.trim(), client_name:q.trim(), isFreeText:true});setOpen(false);}
+    }
+    else if(e.key==='Escape'){setOpen(false);}
+  };
+  const onBlur=()=>{
+    // After a brief tick, if panel closed and current text differs from value, push as free text
+    setTimeout(()=>{
+      if(!open && q.trim() && q.trim()!==(value||'').trim()){
+        onPick({internal_name:q.trim(), client_name:q.trim(), isFreeText:true});
+      }
+    },150);
+  };
+  const w = compact ? 110 : 180;
+  return (
+    <div ref={wrapRef} style={{position:'relative',display:'inline-block',width:w}}>
+      <input
+        ref={inputRef}
+        className="in"
+        value={q}
+        onChange={e=>{setQ(e.target.value);setOpen(true);setHi(0);}}
+        onFocus={()=>{setOpen(true);setHi(0);}}
+        onKeyDown={onKey}
+        onBlur={onBlur}
+        placeholder={placeholder||'Search material...'}
+        style={{fontSize:9,padding:'2px 4px',width:'100%',boxSizing:'border-box'}}
+      />
+      {open && (
+        <div style={{position:'absolute',top:'100%',left:0,zIndex:50,background:'#0c1017',border:'1px solid #e3a008',borderRadius:6,marginTop:2,width:Math.max(w,200),maxHeight:240,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,.5)'}}>
+          <div style={{padding:'4px 8px',fontSize:8,color:'#64748b',borderBottom:'1px solid #1a2030'}}>
+            {ql ? `${matches.length} of ${(products||[]).length} match` : `${(products||[]).length} materials`}
+          </div>
+          {matches.length===0 && !showAddNew && (
+            <div style={{padding:'8px',fontSize:10,color:'#64748b',fontStyle:'italic'}}>No matches</div>
+          )}
+          {matches.map((p,i)=>(
+            <div key={p.id||i}
+              onMouseDown={(e)=>{e.preventDefault();onPick({internal_name:p.internal_name, client_name:p.client_name||p.internal_name});setQ(p.internal_name);setOpen(false);}}
+              onMouseEnter={()=>setHi(i)}
+              style={{padding:'5px 8px',fontSize:10,cursor:'pointer',background:i===hi?'#1f2937':'transparent',color:'#c9d1d9',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+              {p.internal_name}
+            </div>
+          ))}
+          {showAddNew && (
+            <div
+              onMouseDown={(e)=>{e.preventDefault();onAddNew(q.trim());setQ(q.trim());setOpen(false);}}
+              onMouseEnter={()=>setHi(matches.length)}
+              style={{padding:'6px 8px',fontSize:10,cursor:'pointer',background:hi===matches.length?'#1f2937':'#0a0f1a',color:'#4ade80',borderTop:'1px solid #1a2030',fontWeight:700}}>
+              ➕ Add as new material: "{q.trim()}"
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const fmt=n=>"₹"+Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:0});
 const fmtK=n=>n>=1e5?"₹"+(n/1e5).toFixed(1)+"L":n>=1e3?"₹"+(n/1e3).toFixed(0)+"K":fmt(n);
@@ -874,6 +978,27 @@ function MainApp({user,onLogout,masterData}){
     return {id,name};
   },[show]);
 
+  // ─── ADD NEW PRODUCT (material) ────────────────────────────
+  // Case-insensitive de-dup against existing products. Returns the
+  // canonical product row (existing OR newly inserted) so callers can
+  // use the canonical internal_name on their line items, and push the
+  // returned row into their local `products` array (consistent with
+  // addNewClient/addNewMaterial pattern). Returns null on hard failure.
+  const addNewProduct = useCallback(async (rawName, rawClientName, productsList) => {
+    const name = String(rawName||'').trim();
+    if(!name) return null;
+    const cliName = String(rawClientName||'').trim() || name;
+    const list = Array.isArray(productsList) ? productsList : (masterData?.products||[]);
+    const hit = list.find(p => String(p.internal_name||'').trim().toLowerCase() === name.toLowerCase());
+    if(hit) return {row:hit, isNew:false};
+    const id = 'P'+uid();
+    const row = {id, internal_name:name, client_name:cliName, code:'', active:true};
+    const {error} = await sb.from('products').insert(row);
+    if(error){show("Add material failed: "+error.message,false);return null;}
+    show("Material '"+name+"' added!");
+    return {row, isNew:true};
+  },[show, masterData]);
+
   // Stock calc
   const stock=useMemo(()=>{
     const s={};
@@ -1032,7 +1157,7 @@ function MainApp({user,onLogout,masterData}){
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
           {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="jobs"&&<JobsPage jobs={filteredJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
-          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} sp={setPg} jobs={fullJobs} user={user}/>}
+          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal} items={items} osItems={osItems}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
@@ -1056,7 +1181,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct}/>:modal.x}</div></div>}
       {portalAlert&&portalAlert.length>0&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:250,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
         <div style={{background:"#0c1017",border:"2px solid #e3a008",borderRadius:14,width:"100%",maxWidth:550,padding:24,animation:"fi .3s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
@@ -1335,7 +1460,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs,setBatches,setItems}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs,setBatches,setItems,products,addNewProduct}){
   const ALL_ST = ALL_ST_NEW;
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
@@ -1588,8 +1713,24 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const sqft=um3.areaFn(w,h,q);
     const total=um3.totalFn(sqft,q,r);
     const gst=Math.round(total*(gp/100)*100)/100;
+    // Auto-add fallback: if user typed a brand-new material name and didn't
+    // explicitly click "➕ Add as new", silently promote it to products on save
+    // (case-insensitive de-dup). This catches the common case where the user
+    // types and tabs out without confirming.
+    let canonicalName=ni.internal_name;
+    let canonicalCli=ni.client_name||ni.internal_name;
+    if(typeof addNewProduct==='function' && Array.isArray(products)){
+      try{
+        const r2=await addNewProduct(ni.internal_name, ni.client_name||ni.internal_name, products);
+        if(r2&&r2.row){
+          if(r2.isNew)products.push(r2.row);
+          canonicalName=r2.row.internal_name;
+          canonicalCli=ni.client_name||r2.row.client_name||r2.row.internal_name;
+        }
+      }catch(e){/* non-fatal — proceed with typed name */}
+    }
     const itemData={id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:1,product_id:"",
-      internal_name:ni.internal_name,client_name:ni.client_name||ni.internal_name,media:ni.media,
+      internal_name:canonicalName,client_name:canonicalCli,media:ni.media,
       width:ni.width,height:ni.height,size_unit:ni.size_unit,qty:q,rate_mode:ni.rate_mode,rate:r,
       sqft,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100,area:"In-house",
       dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
@@ -2425,7 +2566,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
         <div className="fg f4" style={{gap:4}}>
-          <F l="Internal Name *"><input className="in" value={ni.internal_name} onChange={e=>setNi(p=>({...p,internal_name:e.target.value}))} placeholder="Product name"/></F>
+          <F l="Internal Name *"><MaterialPicker value={ni.internal_name} products={products||[]} placeholder="Search material..." onPick={(picked)=>{setNi(p=>({...p,internal_name:picked.internal_name,client_name:p.client_name||picked.client_name||picked.internal_name}));}} onAddNew={async(name)=>{if(typeof addNewProduct!=='function'){setNi(p=>({...p,internal_name:name,client_name:p.client_name||name}));return;}const r=await addNewProduct(name,name,products||[]);if(r&&r.row){if(r.isNew&&Array.isArray(products))products.push(r.row);setNi(p=>({...p,internal_name:r.row.internal_name,client_name:p.client_name||r.row.client_name||r.row.internal_name}));}}}/></F>
           <F l="Client/DC Name"><input className="in" value={ni.client_name} onChange={e=>setNi(p=>({...p,client_name:e.target.value}))} placeholder="Same as internal if blank"/></F>
           <F l="Material/Spec"><input className="in" value={ni.media} onChange={e=>setNi(p=>({...p,media:e.target.value}))} placeholder="Material details"/></F>
           <F l="Size Unit"><select className="in" value={ni.size_unit} onChange={e=>setNi(p=>({...p,size_unit:e.target.value}))}>{SIZES.map(u=><option key={u}>{u}</option>)}</select></F>
@@ -2799,7 +2940,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
 // ═══════════════════════════════════════════════════════════
 // NEW JOB
 // ═══════════════════════════════════════════════════════════
-function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,sp,jobs,user}){
+function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,addNewProduct,sp,jobs,user}){
   const [fm,sfm]=useState("JXT");
   const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",ba:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:"",cgst:"",bname:""});
   const [su,sSu]=useState("INCH");
@@ -2857,6 +2998,24 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
     const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+    // Auto-add fallback: any typed-in material name that's not in products
+    // (case-insensitive) gets promoted to the products master list, so future
+    // jobs see it in the dropdown. Canonicalizes line item internal_name to
+    // existing casing if a case-mismatch hit is found.
+    if(typeof addNewProduct==='function' && Array.isArray(products)){
+      for(const li of lineItems){
+        const nm=String(li.internal_name||'').trim();
+        if(!nm) continue;
+        try{
+          const r3=await addNewProduct(nm, li.client_name||nm, products);
+          if(r3&&r3.row){
+            if(r3.isNew)products.push(r3.row);
+            // Canonicalize casing on the line item
+            li.internal_name=r3.row.internal_name;
+          }
+        }catch(e){/* non-fatal */}
+      }
+    }
     await createJob(jobData,batchData,lineItems);
     // Sync to Banking CRM if enabled
     if(syncBankingNJ&&bankProjectNJ){
@@ -2903,7 +3062,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       <div style={{display:"flex",justifyContent:"space-between",padding:"6px 10px",borderBottom:"1px solid #1a2030"}}><span style={{fontSize:9,color:"#64748b",fontWeight:600}}>ITEMS ({its.length})</span><button className="b bp bs" onClick={aI}>➕</button></div>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>#</th><th>Internal</th><th>📷</th><th>Client(DC)</th><th>Material</th><th>Unit</th><th style={{minWidth:50,fontSize:8,color:"#94a3b8"}}>W</th><th style={{minWidth:50,fontSize:8,color:"#94a3b8"}}>H</th><th>Qty</th><th>Area/Qty</th><th>Rate ₹</th><th>Total</th><th>GST%</th><th>GST</th><th>Amt</th><th>Machine/Out</th><th></th></tr></thead>
         <tbody>{its.map((it,i)=><tr key={it.id}><td className="mn" style={{fontSize:9}}>{it.sr}</td>
-          <td><select className="in" value={it.pi} onChange={e=>{const v=+e.target.value;if(v===-1){sIts(p=>{const n=[...p];n[i]={...n[i],pi:-1,int:"",cli:""};return n;});}else{selP(i,v);}}} style={{fontSize:9,padding:"2px",minWidth:90}}><option value={-1}>— New Material —</option>{products.map((p,pi)=><option key={pi} value={pi}>{p.internal_name}</option>)}</select>{(it.pi===-1||it.pi==="-1")&&<input className="in" value={it.int} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],int:e.target.value};return n;})} placeholder="Type name..." autoFocus style={{fontSize:9,padding:"2px 3px",marginTop:2}}/>}</td>
+          <td><MaterialPicker value={it.int} products={products} compact={true} placeholder="Search material..." onPick={(picked)=>{sIts(p=>{const n=[...p];n[i]={...n[i],pi:-1,int:picked.internal_name,cli:n[i].cli||picked.client_name||picked.internal_name};return n;});}} onAddNew={async(name)=>{if(typeof addNewProduct!=='function'){sIts(p=>{const n=[...p];n[i]={...n[i],pi:-1,int:name,cli:n[i].cli||name};return n;});return;}const r=await addNewProduct(name,name,products);if(r&&r.row){if(r.isNew)products.push(r.row);sIts(p=>{const n=[...p];n[i]={...n[i],pi:-1,int:r.row.internal_name,cli:n[i].cli||r.row.client_name||r.row.internal_name};return n;});}}}/></td>
           <td style={{padding:"2px",minWidth:40}}>{it.imgUrl?<a href={it.imgUrl} target="_blank"><img src={it.imgUrl} style={{width:30,height:30,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:30,height:30,borderRadius:3,border:"1px dashed #3b82f6",color:"#3b82f6",fontSize:11}}>+<input type="file" accept=".jpg,.png,.jpeg,.pdf" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url)sIts(p=>{const n=[...p];n[i]={...n[i],imgUrl:url};return n;});}}}/></label>}</td>
           <td><input className="in" value={it.cli} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],cli:e.target.value};return n;})} style={{fontSize:10,padding:"3px",color:"#06b6d4"}}/></td>
           <td><input className="in" value={it.m} onChange={e=>sIts(p=>{const n=[...p];n[i]={...n[i],m:e.target.value};return n;})} placeholder="Material/spec..." style={{fontSize:10,padding:"3px"}}/></td>
