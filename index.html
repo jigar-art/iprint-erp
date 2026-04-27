@@ -112,6 +112,35 @@ const checkJobsForBankingJobNo = async (jobNo) => {
   return data[0].id;
 };
 
+// ─── BANKING JOB GROUPS HELPER (added 27 Apr 26) ──────────────
+// Banking-only job_nos (e.g. '1281BB', '1281W' — 55 NCR groupings, ~1,500
+// sites total) have no corresponding `jobs` table row. The `banking_job_groups`
+// table holds group-level metadata (client/bank/project) and a multi-file
+// `job_sheet_urls` array (PO + specs + reference images, all in one bucket).
+// Lazily created on first read or write — no migration needed for backfill.
+//
+// Returns the row from banking_job_groups for the given jobNo. If no row
+// exists yet, creates one using firstSite to populate client/bank/project,
+// then returns it. Returns null on error (caller should fall back gracefully).
+const ensureBankingJobGroup = async (jobNo, firstSite) => {
+  if(!jobNo) return null;
+  const {data:existing, error:selErr} = await sb.from('banking_job_groups').select('*').eq('id', jobNo).limit(1);
+  if(selErr) return null;
+  if(existing && existing.length > 0) return existing[0];
+  // Lazy create — pull client/bank/project from the first site we know about
+  const seed = {
+    id: jobNo,
+    client:  firstSite?.client  || null,
+    bank:    firstSite?.bank    || null,
+    project: firstSite?.project || null,
+    job_sheet_urls: [],
+    notes: null
+  };
+  const {data:inserted, error:insErr} = await sb.from('banking_job_groups').insert(seed).select().single();
+  if(insErr) return null;
+  return inserted;
+};
+
 // ─── CONSTANTS ──────────────────────────────────────────────
 const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
 const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
@@ -7134,8 +7163,194 @@ function RootApp(){
   return <MainApp user={user} onLogout={handleLogout} masterData={masterData}/>;
 }
 
+
 // ═══════════════════════════════════════════════════════════
-// BACKUP — One-click database export
+// BANKING JOB GROUP MODAL (added 27 Apr 26)
+// Opens when a banking site's job_no pill is clicked AND no `jobs` row
+// exists for that job_no (i.e. banking-only job#s like 1281BB, 1281W).
+// Shows: group-level files (multi-upload to job_sheet_urls), notes,
+// and a searchable list of all sites in the group with their per-site
+// DC/PPT/Photo affordances inline.
+// ═══════════════════════════════════════════════════════════
+function BankingJobGroupModal({jobNo, sitesInGroup, user, onClose, onSiteFilesUpdate, show}){
+  const [group, setGroup] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [search, setSearch] = useState('');
+  const canUpload = (()=>{
+    const uN=(user?.name||'').toUpperCase();
+    return ['JIGAR','AMOL','CHANDNI','RUCHITA','PRIYANKA','APARNA'].some(u=>uN.includes(u));
+  })();
+
+  useEffect(()=>{
+    let alive = true;
+    (async()=>{
+      const g = await ensureBankingJobGroup(jobNo, sitesInGroup?.[0]);
+      if(alive){
+        setGroup(g);
+        setNotesDraft(g?.notes || '');
+        setLoading(false);
+      }
+    })();
+    return ()=>{alive=false;};
+  },[jobNo]);
+
+  const updateGroupField = async (field, value) => {
+    const updates = {[field]: value, updated_at: new Date().toISOString()};
+    const {error} = await sb.from('banking_job_groups').update(updates).eq('id', jobNo);
+    if(error){show && show('⚠️ Update failed: '+error.message, false); return false;}
+    setGroup(p => ({...p, ...updates}));
+    return true;
+  };
+
+  const onSheetUpload = async (files) => {
+    if(!files || !files.length) return;
+    const newUrls = await uploadMultiple([...files], 'banking-job-sheet');
+    if(!newUrls || !newUrls.length) return;
+    const existing = Array.isArray(group?.job_sheet_urls) ? group.job_sheet_urls : [];
+    const merged = [...existing, ...newUrls];
+    if(await updateGroupField('job_sheet_urls', merged)){
+      show && show('📋 '+newUrls.length+' file(s) uploaded to '+jobNo);
+    }
+  };
+
+  const onSheetRemove = async (url) => {
+    if(!confirm('Remove this file from the group?')) return;
+    const existing = Array.isArray(group?.job_sheet_urls) ? group.job_sheet_urls : [];
+    const filtered = existing.filter(u => u !== url);
+    if(await updateGroupField('job_sheet_urls', filtered)){
+      show && show('📋 File removed');
+    }
+  };
+
+  const saveNotes = async () => {
+    if(notesDraft === (group?.notes || '')) return;
+    setSavingNotes(true);
+    await updateGroupField('notes', notesDraft);
+    setSavingNotes(false);
+    show && show('📝 Notes saved');
+  };
+
+  const sheetUrls = Array.isArray(group?.job_sheet_urls) ? group.job_sheet_urls : [];
+  const filteredSites = !search ? sitesInGroup :
+    sitesInGroup.filter(s => {
+      const q = search.toLowerCase();
+      return (s.atm_id||'').toLowerCase().includes(q)
+          || (s.site_unique_id||'').toLowerCase().includes(q)
+          || (s.site_address||'').toLowerCase().includes(q)
+          || (s.city||'').toLowerCase().includes(q)
+          || (s.state||'').toLowerCase().includes(q);
+    });
+
+  const firstSite = sitesInGroup?.[0] || {};
+
+  return (
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:9999,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:10,overflowY:'auto'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:12,width:'100%',maxWidth:1100,padding:14,margin:'10px 0',maxHeight:'calc(100vh - 20px)',overflowY:'auto',animation:'fi .2s'}}>
+        {/* Header */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8,marginBottom:10,position:'sticky',top:-14,background:'#0c1017',zIndex:2,padding:'8px 0',marginTop:-8}}>
+          <div>
+            <p style={{fontSize:8,color:'#64748b',letterSpacing:'.05em',fontWeight:600}}>BANKING JOB# GROUP</p>
+            <p className="mn" style={{fontSize:18,fontWeight:800,color:'#e3a008'}}>{jobNo}</p>
+            <p style={{fontSize:10,color:'#94a3b8',marginTop:2}}>
+              {firstSite.project||'—'} · {firstSite.client||'—'}/{firstSite.bank||'—'} · {sitesInGroup?.length||0} site{sitesInGroup?.length===1?'':'s'}
+            </p>
+          </div>
+          <button className="b bs" onClick={onClose} style={{fontSize:11}}>✕</button>
+        </div>
+
+        {loading ? (
+          <div style={{padding:30,textAlign:'center',color:'#64748b'}}>Loading group…</div>
+        ) : (
+          <>
+            {/* Group-level files */}
+            <div style={{background:'#060810',border:'1px solid #e3a00833',borderRadius:8,padding:12,marginBottom:10}}>
+              <p style={{fontSize:10,fontWeight:700,color:'#e3a008',marginBottom:6}}>📋 GROUP JOB SHEET / PO / SPECS</p>
+              <p style={{fontSize:9,color:'#64748b',marginBottom:8}}>Files here apply to all {sitesInGroup?.length||0} sites in this group.</p>
+              {sheetUrls.length>0 && (
+                <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:8}}>
+                  {sheetUrls.map((u,i)=>(
+                    <span key={i} style={{display:'inline-flex',alignItems:'center',gap:4,background:'#e3a00815',border:'1px solid #e3a00833',padding:'3px 8px',borderRadius:5}}>
+                      <a href={smartOpenUrl(u)} target="_blank" rel="noreferrer" style={{color:'#e3a008',fontSize:10,fontWeight:600,textDecoration:'none'}}>📄 File {i+1}</a>
+                      {canUpload && (
+                        <button onClick={()=>onSheetRemove(u)} style={{background:'#f4706720',border:'1px solid #f4706744',borderRadius:3,color:'#f47067',cursor:'pointer',fontSize:9,padding:'0 4px',lineHeight:'14px',fontWeight:700}}>✕</button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {canUpload ? (
+                <label style={{cursor:'pointer',display:'inline-block',fontSize:10,color:'#e3a008',border:'1px dashed #e3a00866',padding:'4px 10px',borderRadius:5}}>
+                  + Upload PDF/Image
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png,image/*" multiple style={{display:'none'}} onChange={e=>onSheetUpload(e.target.files)}/>
+                </label>
+              ) : (
+                sheetUrls.length===0 && <p style={{fontSize:9,color:'#475569'}}>No files uploaded yet.</p>
+              )}
+              {/* Notes */}
+              <div style={{marginTop:10}}>
+                <label style={{fontSize:8.5,color:'#64748b',fontWeight:600,textTransform:'uppercase',display:'block',marginBottom:3}}>Notes (optional)</label>
+                <textarea className="in" value={notesDraft} onChange={e=>setNotesDraft(e.target.value)} onBlur={saveNotes}
+                  placeholder={canUpload ? "e.g. 'PO awaited from SBI, expected by 30 Apr'" : "(read-only)"}
+                  disabled={!canUpload}
+                  style={{fontSize:10,padding:'6px 8px',width:'100%',minHeight:50,resize:'vertical'}}/>
+                {savingNotes && <p style={{fontSize:8,color:'#64748b',marginTop:2}}>Saving…</p>}
+              </div>
+            </div>
+
+            {/* Sites table */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+              <p style={{fontSize:10,fontWeight:700,color:'#94a3b8'}}>SITES IN THIS GROUP ({filteredSites.length}{search?` of ${sitesInGroup.length}`:''})</p>
+              <input className="in" value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 ATM ID, UID, address, city…" style={{fontSize:10,padding:'4px 8px',maxWidth:240}}/>
+            </div>
+            <div style={{overflowX:'auto',maxHeight:400,border:'1px solid #1a2030',borderRadius:6}}>
+              <table style={{fontSize:9,width:'100%'}}>
+                <thead style={{position:'sticky',top:0,background:'#0a0f1a',zIndex:1}}>
+                  <tr>
+                    <th style={{textAlign:'left',padding:'6px 8px'}}>#</th>
+                    <th style={{textAlign:'left'}}>ATM ID</th>
+                    <th style={{textAlign:'left'}}>Site UID</th>
+                    <th style={{textAlign:'left'}}>Location</th>
+                    <th style={{textAlign:'left'}}>Status</th>
+                    <th style={{textAlign:'center'}}>Files</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSites.map((s,i)=>{
+                    const dcCount = Array.isArray(s.dc_urls)?s.dc_urls.length:0;
+                    const pptCount = Array.isArray(s.ppt_urls)?s.ppt_urls.length:0;
+                    const photoCount = Array.isArray(s.photo_urls)?s.photo_urls.length:0;
+                    return (
+                      <tr key={s.id}>
+                        <td className="mn" style={{padding:'4px 8px',color:'#64748b'}}>{i+1}</td>
+                        <td className="mn" style={{fontWeight:600,color:'#94a3b8'}}>{s.atm_id||'—'}</td>
+                        <td className="mn" style={{fontSize:8,color:'#64748b'}}>{s.site_unique_id||'—'}</td>
+                        <td style={{fontSize:9,color:'#94a3b8',maxWidth:280,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={s.site_address||''}>{(s.site_address||'').slice(0,60)||'—'}</td>
+                        <td style={{fontSize:8}}><span className="bd" style={{background:'#06b6d420',color:'#06b6d4',padding:'2px 5px',borderRadius:3}}>{s.installation_status||'—'}</span></td>
+                        <td style={{textAlign:'center',fontSize:8,color:'#64748b'}}>
+                          {dcCount>0 && <span title="DC" style={{margin:'0 2px',color:'#3b82f6'}}>📄{dcCount}</span>}
+                          {pptCount>0 && <span title="PPT" style={{margin:'0 2px',color:'#f59e0b'}}>📊{pptCount}</span>}
+                          {photoCount>0 && <span title="Photos" style={{margin:'0 2px',color:'#4ade80'}}>📸{photoCount}</span>}
+                          {dcCount+pptCount+photoCount===0 && <span style={{color:'#475569'}}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredSites.length===0 && (
+                    <tr><td colSpan={6} style={{textAlign:'center',color:'#64748b',padding:16}}>No sites match your search.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p style={{fontSize:8,color:'#64748b',marginTop:6}}>Per-site DC, PPT and Photo uploads are managed from the main Banking CRM table — close this panel to upload site-specific files.</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 // BANKING CRM PAGE
 // ═══════════════════════════════════════════════════════════
@@ -7178,6 +7393,29 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   // ── Dept-status filter (NEW) ───────────────────────────────
   // null = no dept filter active. Otherwise one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed'
   const [deptFilter,setDeptFilter]=useState(null);
+  // ── Banking Job# Group modal (added 27 Apr 26) ─────────────
+  // When a banking site's job_no pill is clicked AND no `jobs` row exists for
+  // that job_no, this opens BankingJobGroupModal showing all sites in the
+  // group and a shared job_sheet_urls multi-file slot. State holds {jobNo,sites}.
+  const [groupModal,setGroupModal]=useState(null);
+  // Group-level files map: {jobNo: {has_sheet: bool, count: int}} — used to
+  // show a small badge on each site row indicating the group has a job sheet.
+  const [groupFilesMap,setGroupFilesMap]=useState({});
+  React.useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      const {data,error}=await sb.from('banking_job_groups').select('id,job_sheet_urls');
+      if(alive && !error && Array.isArray(data)){
+        const m={};
+        for(const g of data){
+          const cnt=Array.isArray(g.job_sheet_urls)?g.job_sheet_urls.length:0;
+          if(cnt>0) m[g.id]={has_sheet:true,count:cnt};
+        }
+        setGroupFilesMap(m);
+      }
+    })();
+    return ()=>{alive=false;};
+  },[]);
   // Refresh tick — increments every 60s while page is open. Forces dept useMemo to recompute even
   // if items/osItems references haven't changed (e.g. another user edited remotely).
   const [refreshTick,setRefreshTick]=useState(0);
@@ -7853,6 +8091,23 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       </div>
     </div>}
 
+    {/* Banking Job# Group modal (added 27 Apr 26) */}
+    {groupModal && <BankingJobGroupModal jobNo={groupModal.jobNo} sitesInGroup={groupModal.sites} user={user} show={show} onClose={()=>{
+      // Refresh group files map so the badge updates without page reload
+      (async()=>{
+        const {data,error}=await sb.from('banking_job_groups').select('id,job_sheet_urls');
+        if(!error && Array.isArray(data)){
+          const m={};
+          for(const g of data){
+            const cnt=Array.isArray(g.job_sheet_urls)?g.job_sheet_urls.length:0;
+            if(cnt>0) m[g.id]={has_sheet:true,count:cnt};
+          }
+          setGroupFilesMap(m);
+        }
+      })();
+      setGroupModal(null);
+    }}/>}
+
     {/* Sites Table */}
     {dupIds.size>0&&<div style={{margin:'0 0 6px',padding:'6px 12px',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.35)',borderRadius:7,fontSize:11,color:'#fcd34d',display:'flex',alignItems:'center',gap:8}}>
       <span>⚠️</span>
@@ -7868,7 +8123,15 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
         const isDup=dupIds.has(s.id);
         return <tr key={s.id} style={{background:isDup?'rgba(245,158,11,0.07)':''}}>
           <td className="mn" style={{fontSize:9}}>{page*pageSize+i+1}</td>
-          <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{if(s.job_no){const j=jobs.find(j=>j.id?.includes(s.job_no));if(j)sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});}}}>{s.job_no||'—'}</td>
+          <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{
+            if(!s.job_no) return;
+            // Try to open Non-Banking JobDetail first (existing behavior)
+            const j=jobs.find(j=>j.id?.includes(s.job_no));
+            if(j){sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});return;}
+            // Banking-only job# (no jobs row) — open group modal (added 27 Apr 26)
+            const sitesInGroup=sites.filter(x=>x.job_no===s.job_no);
+            setGroupModal({jobNo:s.job_no,sites:sitesInGroup});
+          }}>{s.job_no||'—'}{groupFilesMap[s.job_no]?.has_sheet && <span title={`Group has ${groupFilesMap[s.job_no].count} job-sheet file(s)`} style={{marginLeft:3,fontSize:8,color:'#4ade80'}}>📋</span>}</td>
           <td style={{whiteSpace:'nowrap',padding:'2px 4px'}}>{(()=>{
             const st=siteDeptStatus(s);
             const active=[
