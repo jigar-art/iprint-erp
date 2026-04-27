@@ -499,7 +499,7 @@ document.addEventListener('click',function(e){
     const h=Math.round((+d.querySelector('#_eH').value||0)*100)/100;
     const q=+d.querySelector('#_eQ').value||1;const r=+d.querySelector('#_eR').value||0;
     const rm=d.querySelector('#_eRM').value||'UNIT';const su=d.querySelector('#_eSU').value||'MM';
-    const gp=+d.querySelector('#_eGST').value||18;
+    const _gpRaw=d.querySelector('#_eGST').value;const gp=(_gpRaw===''||_gpRaw==null)?18:+_gpRaw;
     const um2=getUnitMode(rm);
     const sq=um2.areaFn(w,h,q);
     const total=um2.totalFn(sq,q,r);
@@ -1235,7 +1235,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>setModal(null)}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>setModal(null)}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct}/>:modal.x}</div></div>}
       {portalAlert&&portalAlert.length>0&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:250,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
         <div style={{background:"#0c1017",border:"2px solid #e3a008",borderRadius:14,width:"100%",maxWidth:550,padding:24,animation:"fi .3s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
@@ -1732,6 +1732,16 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [jf,setJf]=useState({client_name:j.client_name||'',contact_person:j.contact_person||'',contact_no:j.contact_no||'',po_number:j.po_number||'',delivery_address:j.delivery_address||'',billing_address:j.billing_address||'',client_gst:j.client_gst||'',billing_name:j.billing_name||'',payment_terms:j.payment_terms||'',project:j.project||'',client_email:j.client_email||'',remark:j.remark||'',firm:j.firm||''});
   const [jfDirty,setJfDirty]=useState(false);
   const setJF=(k,v)=>{setJf(p=>({...p,[k]:v}));setJfDirty(true);};
+  // Bundle 3A: expose dirty state globally for modal-close guard + register beforeunload listener
+  React.useEffect(()=>{
+    window._jfDirty=jfDirty;
+    if(jfDirty){
+      const onBu=(e)=>{e.preventDefault();e.returnValue='';return '';};
+      window.addEventListener('beforeunload',onBu);
+      return ()=>{window.removeEventListener('beforeunload',onBu);window._jfDirty=false;};
+    }
+    return ()=>{window._jfDirty=false;};
+  },[jfDirty]);
   const saveJF=async()=>{
     if(!updateJobFields)return;
     // Check if delivery address changed — require confirmation + audit
@@ -1762,7 +1772,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const ab=async()=>{const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New"};await addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);};
   const saveNewItem=async(batchId)=>{
     if(!ni.internal_name){show("Enter item name",false);return;}
-    const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=+ni.gstPct||18;
+    const w=+ni.width||0,h=+ni.height||0,q=+ni.qty||1,r=+ni.rate||0,gp=(ni.gstPct===''||ni.gstPct==null)?18:+ni.gstPct;
     const um3=getUnitMode(ni.rate_mode);
     const sqft=um3.areaFn(w,h,q);
     const total=um3.totalFn(sqft,q,r);
@@ -2701,7 +2711,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             const {error:bErr}=await sb.from('batches').insert(bd);
             if(bErr){show('⚠️ Failed: '+bErr.message,false);return;}
             setBatches(p=>[bd,...p]);
-            const newItems=selItems.map((it,i)=>({id:'LI'+uid(),batch_id:newBid,job_id:j.id,sr:i+1,product_id:'',internal_name:it.internal_name,client_name:it.client_name,media:it.media,width:it.width,height:it.height,size_unit:it.size_unit,qty:it.qty,rate_mode:it.rate_mode,rate:it.rate||0,sqft:it.sqft||0,total:it.total||0,gst:it.gst||0,gstPct:it.gstPct||18,amount:it.amount||0,area:it.area||'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.img_url||''}));
+            const newItems=selItems.map((it,i)=>({id:'LI'+uid(),batch_id:newBid,job_id:j.id,sr:i+1,product_id:'',internal_name:it.internal_name,client_name:it.client_name,media:it.media,width:it.width,height:it.height,size_unit:it.size_unit,qty:it.qty,rate_mode:it.rate_mode,rate:it.rate||0,sqft:it.sqft||0,total:it.total||0,gst:it.gst||0,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amount||0,area:it.area||'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.img_url||''}));
             const {error:iErr}=await sb.from('line_items').insert(newItems);
             if(iErr){show('⚠️ Batch created but items failed: '+iErr.message,false);return;}
             setItems(p=>[...p,...newItems]);
@@ -2720,38 +2730,56 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             const buf=await file.arrayBuffer();
             const wb=XLSX.read(buf,{type:'array'});
             const batchesWithItems=[];
-            let skipped=0;
+            const skipReasons=[];
+            // Helper: is this cell "empty" for our purposes? Treats #REF!/#N/A/#VALUE! as empty
+            const isErrCell=(v)=>{const s=String(v||'').trim();return /^#(REF|N\/A|VALUE|NAME|DIV|NULL|NUM)/i.test(s);};
+            const cleanCell=(v)=>isErrCell(v)?'':v;
             for(const sName of wb.SheetNames){
               const ws=wb.Sheets[sName];
-              const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-              if(!data||data.length<3){skipped++;continue;}
-              // Find header row — scan for row with Sr No + Description/Job Description
+              const rawData=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+              if(!rawData||rawData.length<2){skipReasons.push(sName+': sheet too short');continue;}
+              // Strip #REF!/#N/A/etc. errors throughout — they'll otherwise pollute Sr-column scans
+              const data=rawData.map(row=>row.map(cleanCell));
+              // Find header row — accept many synonyms
+              const SR_RE=/(^|\s)(sr\.?\s*no|sl\.?\s*no|s\.?\s*no|s\.?\s*r)\b/;
+              const DESC_RE=/(description|particular|job\s*desc|item\s*\/?\s*internal|item\s*name|^item$|^internal$|^name$|client\s*name|^client$)/;
+              const SIZE_RE=/(^w$|^h$|width|height|size|sqft|sq\.?\s*ft|qty|quantit|rate)/;
               let hRow=-1;
               for(let i=0;i<Math.min(25,data.length);i++){
-                const txt=data[i].map(c=>String(c||'').toLowerCase()).join(' ');
-                if(/(sr\.?\s*no|sl\.?\s*no)/.test(txt)&&/(description|particular|job desc)/.test(txt)){hRow=i;break;}
-                if(/(description|particular)/.test(txt)&&/(qty|quantity|unit|sqft|rate)/.test(txt)){hRow=i;break;}
+                const cells=data[i].map(c=>String(c||'').toLowerCase().trim());
+                const txt=' '+cells.join(' | ')+' ';
+                const hasSr=SR_RE.test(txt)||cells.some(c=>/^(sr\.?\s*no|sl\.?\s*no|s\.?\s*no)$/.test(c));
+                const hasDesc=DESC_RE.test(txt);
+                const hasSize=SIZE_RE.test(txt);
+                if(hasSr&&hasDesc){hRow=i;break;}
+                if(hasDesc&&hasSize){hRow=i;break;}
               }
-              if(hRow<0){skipped++;continue;}
+              if(hRow<0){skipReasons.push(sName+': no header row found (need Sr No + Description, or Description + Qty/Size)');continue;}
               const headers=data[hRow].map(c=>String(c||'').toLowerCase().trim());
-              // Also check sub-header row (row after header may have W/H)
+              // Sub-header row may have W / H labels
               const subRow=hRow+1<data.length?data[hRow+1].map(c=>String(c||'').toLowerCase().trim()):[];
               const hasSubHeader=subRow.some(c=>/^[wh]$/.test(c))&&!subRow.some(c=>/^\d+$/.test(c));
               const dataStart=hasSubHeader?hRow+2:hRow+1;
               
               const findCol=(patterns)=>{for(const p of patterns){const idx=headers.findIndex(c=>p.test(c));if(idx>=0)return idx;}return -1;};
-              const cDesc=findCol([/job desc|description|particular/]);
-              const cQty=findCol([/^qty|quantit/]);
-              const cRate=findCol([/rate\s*sqft|supply.*rate|^rate$/]);
-              const cTotal=findCol([/^total$|total\s*amount|^total amount$/]);
-              const cGst=findCol([/gst/]);
+              // Description: try strong matches first, then fall back to item/internal/name aliases
+              let cDesc=findCol([/job\s*desc|description|particular/]);
+              if(cDesc<0)cDesc=findCol([/item\s*\/?\s*internal|item\s*name|^item$|^internal$|client\s*name|^client$|^name$/]);
+              const cQty=findCol([/^qty$|^qty\s|quantit/]);
+              const cRate=findCol([/rate\s*sqft|supply.*rate|^rate$|rate\s*\(/]);
+              const cTotal=findCol([/^total$|total\s*amount|^total amount$|^amount$/]);
+              const cGst=findCol([/gst\s*amt|gst\s*amount|^gst$/]);
               const cMedia=findCol([/media|material|spec/]);
-              const cSqft=findCol([/^sqft$/]);
-              // W/H: check sub-header first, then main header, then "size in foot" pattern
+              const cSqft=findCol([/^sqft$|sq\.?\s*ft/]);
+              // W/H detection: sub-header → header → "size in foot/inch" combo column
               let cW=subRow.indexOf('w');if(cW<0)cW=findCol([/^w$/,/width/]);
               let cH=subRow.indexOf('h');if(cH<0)cH=findCol([/^h$/,/height/]);
-              // If SIZE IN FOOT found and no W/H, assume W is that col and H is next
-              if(cW<0){const sizeCol=findCol([/size.*foot|size.*in/]);if(sizeCol>=0){cW=sizeCol;cH=sizeCol+1;}}
+              if(cW<0){const sizeCol=findCol([/size.*foot|size.*inch|size.*mm|size.*in/]);if(sizeCol>=0){cW=sizeCol;cH=sizeCol+1;}}
+              // Detect dim unit from header text: default INCH (most BOQs use inches), override on FT/MM hints
+              let dimUnit='INCH';
+              const hdrTxt=headers.join(' ')+' '+subRow.join(' ');
+              if(/\bft\b|foot|feet/.test(hdrTxt))dimUnit='FOOT';
+              else if(/\bmm\b|millim/.test(hdrTxt))dimUnit='MM';
               
               // Extract metadata from rows above header
               let poNum='',delivAddr='';
@@ -2768,35 +2796,44 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 const row=data[r];
                 const srVal=String(row[0]||'').trim();
                 // Skip total/summary/terms rows
-                if(/^(total|sub\s*total|gst|terms|note|nan|basic|eastimate|general)/i.test(srVal))continue;
-                if(!srVal)continue;
+                if(/^(total|sub\s*total|gst|terms|note|nan|basic|eastimate|estimate|general|grand)/i.test(srVal))continue;
                 
-                const desc=cDesc>=0?String(row[cDesc]||''):'';
-                // Must have a numeric sr# with a description, or at least a description
+                const desc=cDesc>=0?String(row[cDesc]||'').trim():'';
+                // Need either a numeric sr# OR a non-empty description; skip otherwise
                 const isNumSr=/^\d+$/.test(srVal);
                 if(!desc&&!isNumSr)continue;
+                if(!desc&&!srVal)continue;
                 
                 const qty=cQty>=0?(+row[cQty]||0):1;
-                if(qty<=0)continue;
+                // Allow qty=0 rows? No — BOQ items always have qty. But default to 1 if column missing.
+                const effectiveQty=cQty>=0?qty:1;
+                if(cQty>=0&&qty<=0)continue;
                 const rate=cRate>=0?(+row[cRate]||0):0;
                 const total=cTotal>=0?(+row[cTotal]||0):0;
                 const gst=cGst>=0?(+row[cGst]||0):0;
                 const sqftVal=cSqft>=0?(+row[cSqft]||0):0;
-                const w=cW>=0?String(row[cW]||''):'';
-                const h=cH>=0?String(row[cH]||''):'';
+                const w=cW>=0?String(row[cW]||'').trim():'';
+                const h=cH>=0?String(row[cH]||'').trim():'';
                 const media=cMedia>=0?String(row[cMedia]||'').slice(0,150):'';
-                const calcSqft=sqftVal||(+w||0)*(+h||0)*qty;
+                // SqFt calc respects dim unit: if INCH, divide by 144; if MM, divide by 92903.04; if FOOT, multiply directly
+                const wn=+w||0,hn=+h||0;
+                let calcSqft=sqftVal;
+                if(!calcSqft&&wn&&hn){
+                  if(dimUnit==='INCH')calcSqft=(wn*hn*effectiveQty)/144;
+                  else if(dimUnit==='MM')calcSqft=(wn*hn*effectiveQty)/92903.04;
+                  else calcSqft=wn*hn*effectiveQty; // FOOT
+                }
                 
                 lineItems.push({id:"LI"+uid(),batch_id:batchId,job_id:j.id,sr:lineItems.length+1,product_id:"",
                   internal_name:(desc||srVal).slice(0,150),client_name:(desc||srVal).slice(0,150),media,
-                  width:w,height:h,size_unit:'FOOT',qty,rate_mode:calcSqft?'SqFt (INCH)':'UNIT',rate,
+                  width:w,height:h,size_unit:dimUnit,qty:effectiveQty,rate_mode:calcSqft?'SqFt (INCH)':'UNIT',rate,
                   sqft:Math.round(calcSqft*100)/100,
-                  total:total||Math.round(calcSqft*rate*100)/100,gst,
+                  total:total||Math.round(calcSqft*rate*100)/100,gst,gstPct:18,
                   amount:total&&gst?Math.round((total+gst)*100)/100:Math.round((total||calcSqft*rate)*1.18*100)/100||0,
                   area:'In-house',dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
                   dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false});
               }
-              if(lineItems.length===0){skipped++;continue;}
+              if(lineItems.length===0){skipReasons.push(sName+': header found but no valid item rows below it');continue;}
               batchesWithItems.push({
                 batch:{id:batchId,job_id:j.id,date:td(),note:sName+(poNum?' | PO:'+poNum:'')+(delivAddr?' | '+delivAddr.slice(0,50):''),bill_no:"",status:"New"},
                 items:lineItems
@@ -2804,9 +2841,13 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             }
             if(batchesWithItems.length>0){
               const imported=await importBatches(batchesWithItems);
-              show(imported+" batch(es) imported with items! Close & reopen to see.");
+              const totItems=batchesWithItems.reduce((s,b)=>s+b.items.length,0);
+              const skipMsg=skipReasons.length>0?' ('+skipReasons.length+' sheet(s) skipped)':'';
+              show("✅ "+imported+" batch(es), "+totItems+" items imported"+skipMsg+". Close & reopen to see.",true);
+              if(skipReasons.length>0)console.log('[BOQ Import] Skipped sheets:',skipReasons);
             } else {
-              show("No valid sheets found ("+skipped+" skipped). Check that sheets have Sr No + Description columns.",false);
+              const detail=skipReasons.length>0?' Reasons: '+skipReasons.join(' • '):' Check that sheets have Sr No + Description columns.';
+              show("⚠️ No valid sheets found."+detail,false);
             }
           }catch(ex){show("Import error: "+ex.message,false);}
         }}/>
@@ -3030,7 +3071,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email,cgst:nc.gst||'',bname:nc.billing_name||nc.name.trim()}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
   const GST_OPTS=[0,5,12,18,28];
-  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=+(it.gstPct||18);const um=getUnitMode(it.rm);it.sqft=um.areaFn(w,h,q);it.tot=um.totalFn(it.sqft,q,r);it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
+  const uI=(i,k,v)=>{sIts(p=>{const n=[...p];const it={...n[i],[k]:v};const w=+it.w||0,h=+it.h||0,q=+it.qty||1,r=+it.rate||0;const gp=(it.gstPct===''||it.gstPct==null)?18:+it.gstPct;const um=getUnitMode(it.rm);it.sqft=um.areaFn(w,h,q);it.tot=um.totalFn(it.sqft,q,r);it.gst=Math.round(it.tot*(gp/100)*100)/100;it.amt=Math.round((it.tot+it.gst)*100)/100;n[i]=it;return n;});};
   const aI=()=>sIts(p=>{const lastRm=p[p.length-1]?.rm||"SqFt (INCH)";return [...p,{id:uid(),sr:p.length+1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:lastRm,rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}];});
   const rI=i=>sIts(p=>p.filter((_,x)=>x!==i).map((it,x)=>({...it,sr:x+1})));
   const tot=useMemo(()=>{const s=Math.round(its.reduce((a,x)=>a+x.tot,0)*100)/100,g=Math.round(its.reduce((a,x)=>a+x.gst,0)*100)/100,tq=its.reduce((a,x)=>a+(+x.qty||0),0),tsq=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;return {s,g,t:Math.round((s+g)*100)/100,tq,tsq};},[its]);
@@ -3067,7 +3108,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,billing_address:f.ba,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
-    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+    const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
     // Auto-add fallback: any typed-in material name that's not in products
     // (case-insensitive) gets promoted to the products master list, so future
     // jobs see it in the dropdown. Canonicalizes line item internal_name to
@@ -3143,7 +3184,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
           <td className="mn" style={{fontSize:10,color:"#06b6d4",fontWeight:600}}>{getUnitMode(it.rm).displayFn(it.sqft)}</td>
           <td><input className="in mn" value={it.rate} onChange={e=>uI(i,"rate",e.target.value)} style={{fontSize:10,padding:"3px",width:44}}/></td>
           <td className="mn" style={{fontSize:10}}>{it.tot?fmt(it.tot):"—"}</td>
-          <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:9,padding:"2px",width:42}}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
+          <td><select className="in mn" value={it.gstPct==null?18:it.gstPct} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:9,padding:"2px",width:42}}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
           <td className="mn" style={{fontSize:10,color:"#64748b"}}>{it.gst?fmt(it.gst):"—"}</td>
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
           <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:9,padding:"2px 3px",width:90}}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
@@ -3156,7 +3197,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       const totQty=its.reduce((a,x)=>a+(+x.qty||0),0);const totSqft=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;
       const hasImages=its.some(it=>it.imgUrl);
       const uomHeader=resolveUomHeader(its);
-      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:60px;max-height:60px;border-radius:3px}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}.refs{margin-top:16px;page-break-before:auto}.refs img{max-width:200px;max-height:200px;border:1px solid #ccc;border-radius:4px;margin:4px}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div><b>Email:</b> ${f.cemail||'—'}</div><div><b>Delivery:</b> ${f.da||''}</div>${f.ba?'<div><b>Billing Address:</b> '+f.ba+'</div>':''}${f.cgst&&f.cgst!=='27XXXXX'?'<div><b>Client GST:</b> '+f.cgst+'</div>':''}</div><table><thead><tr><th>#</th><th>Description</th>${hasImages?'<th>Image</th>':''}<th>Material/Spec</th><th>Size (W×H)</th><th>Qty</th><th>${uomHeader}</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>{const u=getUomLabel(it.rm);const dimU=getUnitMode(it.rm).dimUnit||'';const hasWH=(+it.w>0)&&(+it.h>0);const sizeTxt=hasWH?(it.w+'×'+it.h+(dimU?' '+dimU:'')):'—';const sqftTxt=it.sqft?(it.sqft.toFixed(2)+u.suffix):'—';return '<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td>'+(hasImages?'<td>'+(it.imgUrl?'<img src="'+it.imgUrl+'"/>':'—')+'</td>':'')+'<td>'+(it.m||'')+'</td><td class="r">'+sizeTxt+'</td><td class="r">'+it.qty+'</td><td class="r">'+sqftTxt+'</td><td class="r">₹'+(+it.rate).toFixed(2)+'</td><td class="r">₹'+it.tot.toFixed(2)+'</td><td class="r">'+(it.gstPct||18)+'%</td><td class="r">₹'+it.gst.toFixed(2)+'</td><td class="r"><b>₹'+it.amt.toFixed(2)+'</b></td></tr>';}).join('')}<tr class="total"><td colspan="${hasImages?5:4}" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${tot.s.toFixed(2)}</b></td><td></td><td class="r"><b>₹${tot.g.toFixed(2)}</b></td><td class="r"><b>₹${tot.t.toFixed(2)}</b></td></tr></tbody></table>${its.some(it=>it.imgUrl)?'<div class="refs"><h3 style="font-size:12px;margin-bottom:6px">Design References</h3><div style="display:flex;flex-wrap:wrap;gap:8px">'+its.filter(it=>it.imgUrl).map((it,i)=>'<div style="text-align:center"><img src="'+it.imgUrl+'"/><p style="font-size:8px;color:#666">'+(it.cli||'Item '+(i+1))+'</p></div>').join('')+'</div></div>':''}<div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p>${f.remark?'<p style="margin-top:4px"><b>Remark:</b> '+f.remark+'</p>':''}<p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
+      const estHtml=`<html><head><title>Estimate ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:60px;max-height:60px;border-radius:3px}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}.refs{margin-top:16px;page-break-before:auto}.refs img{max-width:200px;max-height:200px;border:1px solid #ccc;border-radius:4px;margin:4px}@media print{body{padding:10px}}</style></head><body><div class="hdr"><div><h1>${firmData.short_name||''}</h1><p style="font-size:10px;color:#666">${firmData.address||''}</p><p style="font-size:10px;color:#666">GST: ${firmData.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div><div class="info"><div><b>Client:</b> ${f.cn||''}</div><div><b>Contact:</b> ${f.cp||''} ${f.cph||''}</div><div><b>Project:</b> ${f.pr||''}</div><div><b>PO #:</b> ${f.po||'—'}</div><div><b>Email:</b> ${f.cemail||'—'}</div><div><b>Delivery:</b> ${f.da||''}</div>${f.ba?'<div><b>Billing Address:</b> '+f.ba+'</div>':''}${f.cgst&&f.cgst!=='27XXXXX'?'<div><b>Client GST:</b> '+f.cgst+'</div>':''}</div><table><thead><tr><th>#</th><th>Description</th>${hasImages?'<th>Image</th>':''}<th>Material/Spec</th><th>Size (W×H)</th><th>Qty</th><th>${uomHeader}</th><th>Rate</th><th>Total</th><th>GST%</th><th>GST</th><th>Amount</th></tr></thead><tbody>${its.map((it,i)=>{const u=getUomLabel(it.rm);const dimU=getUnitMode(it.rm).dimUnit||'';const hasWH=(+it.w>0)&&(+it.h>0);const sizeTxt=hasWH?(it.w+'×'+it.h+(dimU?' '+dimU:'')):'—';const sqftTxt=it.sqft?(it.sqft.toFixed(2)+u.suffix):'—';return '<tr><td>'+(i+1)+'</td><td>'+it.cli+'</td>'+(hasImages?'<td>'+(it.imgUrl?'<img src="'+it.imgUrl+'"/>':'—')+'</td>':'')+'<td>'+(it.m||'')+'</td><td class="r">'+sizeTxt+'</td><td class="r">'+it.qty+'</td><td class="r">'+sqftTxt+'</td><td class="r">₹'+(+it.rate).toFixed(2)+'</td><td class="r">₹'+it.tot.toFixed(2)+'</td><td class="r">'+(it.gstPct==null?18:it.gstPct)+'%</td><td class="r">₹'+it.gst.toFixed(2)+'</td><td class="r"><b>₹'+it.amt.toFixed(2)+'</b></td></tr>';}).join('')}<tr class="total"><td colspan="${hasImages?5:4}" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${tot.s.toFixed(2)}</b></td><td></td><td class="r"><b>₹${tot.g.toFixed(2)}</b></td><td class="r"><b>₹${tot.t.toFixed(2)}</b></td></tr></tbody></table>${its.some(it=>it.imgUrl)?'<div class="refs"><h3 style="font-size:12px;margin-bottom:6px">Design References</h3><div style="display:flex;flex-wrap:wrap;gap:8px">'+its.filter(it=>it.imgUrl).map((it,i)=>'<div style="text-align:center"><img src="'+it.imgUrl+'"/><p style="font-size:8px;color:#666">'+(it.cli||'Item '+(i+1))+'</p></div>').join('')+'</div></div>':''}<div class="terms"><p><b>Terms & Conditions:</b></p><p>${f.pt||''}</p>${f.remark?'<p style="margin-top:4px"><b>Remark:</b> '+f.remark+'</p>':''}<p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${firmData.name||''}</p></div></body></html>`;
       const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
     }} style={{gap:6}}>📄 Estimate PDF</button>{user?.name?.includes('RUCHITA')&&<button className="b" onClick={()=>{
       const firmData=firms.find(x=>x.code===fm)||{};
@@ -6473,7 +6514,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   };
 
   const uI=(i,k,v)=>{setIts(p=>{const n=[...p];const it={...n[i],[k]:v};
-    const w=+it.w||0,h=+it.h||0,q=+it.qty||1;const gp=+(it.gstPct||18);
+    const w=+it.w||0,h=+it.h||0,q=+it.qty||1;const gp=(it.gstPct===''||it.gstPct==null)?18:+it.gstPct;
     const sr=+it.supplyRate||0;const ir=+it.installRate||0;const combinedRate=sr+ir;
     it.rate=combinedRate||+it.rate||0;
     it.sqft=cSq(w,h,q,su);
@@ -6543,7 +6584,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         const jobData={id:newJid,firm:fm,client_id:f.cl,client_name:f.cn,project:it.int||f.pr,delivery_address:it.siteAddr||f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
         const batchId="B"+uid();
         const batchData={id:batchId,job_id:newJid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
-        const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
+        const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
         await createJob(jobData,batchData,lineItems);
         // Sync to Banking CRM if enabled
         if(syncBanking&&bankProject){
@@ -6562,7 +6603,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
       const batchId="B"+uid();
       const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
-      const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:+(it.gstPct||18),amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
+      const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
       await createJob(jobData,batchData,lineItems);
       // Sync to Banking CRM if enabled (one-job mode)
       if(syncBanking&&bankProject){
@@ -6847,7 +6888,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
             <td><input className="in mn" value={it.supplyRate} onChange={e=>uI(i,"supplyRate",e.target.value)} style={{width:55,fontSize:10,padding:"3px",borderColor:!it.supplyRate&&!it.rate?"#f4706744":"#1a2030"}} placeholder="₹" onClick={e=>e.stopPropagation()}/></td>
             <td><input className="in mn" value={it.installRate} onChange={e=>uI(i,"installRate",e.target.value)} style={{width:55,fontSize:10,padding:"3px"}} placeholder="₹" onClick={e=>e.stopPropagation()}/></td>
             <td className="mn" style={{fontSize:10,fontWeight:600}}>{it.tot?fmt(it.tot):"—"}</td>
-            <td><select className="in mn" value={it.gstPct||18} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:8,padding:"1px",width:36}} onClick={e=>e.stopPropagation()}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
+            <td><select className="in mn" value={it.gstPct==null?18:it.gstPct} onChange={e=>uI(i,"gstPct",e.target.value)} style={{fontSize:8,padding:"1px",width:36}} onClick={e=>e.stopPropagation()}>{GST_OPTS.map(g=><option key={g} value={g}>{g}%</option>)}</select></td>
             <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{it.amt?fmt(it.amt):"—"}</td>
             <td><select className="in" value={it.mach||"In-house"} onChange={e=>uI(i,"mach",e.target.value)} style={{fontSize:8,padding:"1px",width:70}} onClick={e=>e.stopPropagation()}>{MACH_OPT.map(m=><option key={m}>{m}</option>)}</select></td>
             <td>{its.length>1&&<button className="b bs" onClick={(e)=>{e.stopPropagation();rI(i);}} style={{color:"#f47067",padding:"1px 3px"}}>✕</button>}</td>
