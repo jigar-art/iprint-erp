@@ -141,6 +141,46 @@ const ensureBankingJobGroup = async (jobNo, firstSite) => {
   return inserted;
 };
 
+// ─── RACE-SAFE JSONB ARRAY MUTATIONS (added 27 Apr 26) ─────────
+// Background: previously, file-upload helpers like appendJobFiles read the
+// existing array from local React state, appended new URLs, and wrote the
+// merged array back. With multiple users editing the same job concurrently,
+// stale local state caused last-write-wins clobbers — Aparna's upload would
+// silently overwrite Murli's. Symptom: "files uploaded by one user disappear
+// for everyone else." See investigation in 27 Apr session notes.
+//
+// Fix: read the canonical array from DB immediately before merge. This adds
+// one extra round-trip per upload (~50ms) and shrinks the race window from
+// "indefinite while local state is stale" to "milliseconds between SELECT and
+// UPDATE." For true atomicity we'd need a Postgres function, but the
+// read-then-write pattern is sufficient for the actual usage pattern (humans
+// uploading files, not automated bursts).
+//
+// Returns the merged array on success, null on error. Caller is responsible
+// for updating local React state with the returned merged array.
+const appendToJsonArray = async (table, id, field, newItems) => {
+  if(!table || !id || !field || !Array.isArray(newItems) || !newItems.length) return null;
+  const {data:fresh, error:selErr} = await sb.from(table).select(field).eq('id', id).single();
+  if(selErr) return null;
+  const existing = Array.isArray(fresh?.[field]) ? fresh[field] : (fresh?.[field] ? [fresh[field]] : []);
+  const merged = [...existing, ...newItems];
+  const {error:updErr} = await sb.from(table).update({[field]: merged}).eq('id', id);
+  if(updErr) return null;
+  return merged;
+};
+// Same idea for removal: read fresh array, filter out the target, write back.
+// Returns the new array on success, null on error.
+const removeFromJsonArray = async (table, id, field, itemToRemove) => {
+  if(!table || !id || !field) return null;
+  const {data:fresh, error:selErr} = await sb.from(table).select(field).eq('id', id).single();
+  if(selErr) return null;
+  const existing = Array.isArray(fresh?.[field]) ? fresh[field] : (fresh?.[field] ? [fresh[field]] : []);
+  const filtered = existing.filter(u => u !== itemToRemove);
+  const {error:updErr} = await sb.from(table).update({[field]: filtered}).eq('id', id);
+  if(updErr) return null;
+  return filtered;
+};
+
 // ─── CONSTANTS ──────────────────────────────────────────────
 const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
 const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
@@ -1051,29 +1091,22 @@ function MainApp({user,onLogout,masterData}){
   },[show]);
 
   // ─── APPEND FILES TO JOB (multi-upload for PO, DC, IC) ────
+  // Refactored 27 Apr 26 to use appendToJsonArray helper — fixes the
+  // "files disappear for other users" bug caused by stale local-state
+  // reads clobbering concurrent uploads. See helper docs above.
   const appendJobFiles = useCallback(async (jobId, field, newUrls) => {
-    // Use functional updater to get latest state — avoids stale closure
-    let merged=[];
-    setJobs(p=>{
-      const job=p.find(j=>j.id===jobId);
-      const existing=Array.isArray(job?.[field])?job[field]:job?.[field]?[job[field]]:[];
-      merged=[...existing,...newUrls];
-      return p.map(j=>j.id===jobId?{...j,[field]:merged}:j);
-    });
-    await sb.from('jobs').update({[field]:merged}).eq('id',jobId);
+    const merged = await appendToJsonArray('jobs', jobId, field, newUrls);
+    if(merged === null){show('⚠️ Upload save failed — please retry', false); return;}
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,[field]:merged}:j));
     show(newUrls.length+" file(s) uploaded!");
   },[show]);
 
   // ─── REMOVE A FILE FROM JOB ARRAY ─────────────────────────
+  // Refactored 27 Apr 26 to use removeFromJsonArray helper.
   const removeJobFile = useCallback(async (jobId, field, urlToRemove) => {
-    let updated=[];
-    setJobs(p=>{
-      const job=p.find(j=>j.id===jobId);
-      const existing=Array.isArray(job?.[field])?job[field]:job?.[field]?[job[field]]:[];
-      updated=existing.filter(u=>u!==urlToRemove);
-      return p.map(j=>j.id===jobId?{...j,[field]:updated}:j);
-    });
-    await sb.from('jobs').update({[field]:updated}).eq('id',jobId);
+    const updated = await removeFromJsonArray('jobs', jobId, field, urlToRemove);
+    if(updated === null){show('⚠️ Remove failed — please retry', false); return;}
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,[field]:updated}:j));
     show("File removed");
   },[show]);
 
@@ -2725,7 +2758,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               <a href={u} target="_blank" rel="noopener noreferrer" style={{color:"#3b82f6",fontSize:8,textDecoration:"none"}}>📸{pi+1}</a>
               <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={async()=>{if(!confirm('Remove photo?'))return;const nw=photos.filter((_,i)=>i!==pi);await sb.from('batches').update({photo_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,photo_urls:nw}:x));show('Photo removed');}}>✕</button>
             </span>)}
-            <label style={{cursor:"pointer",fontSize:8,color:"#3b82f6",border:"1px dashed #3b82f633",padding:"2px 6px",borderRadius:4}}>+Photo<input type="file" accept=".jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-photos');if(urls.length){const nw=[...photos,...urls];await sb.from('batches').update({photo_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,photo_urls:nw}:x));show('📸 '+urls.length+' photo(s) uploaded!');}}}/></label>
+            <label style={{cursor:"pointer",fontSize:8,color:"#3b82f6",border:"1px dashed #3b82f633",padding:"2px 6px",borderRadius:4}}>+Photo<input type="file" accept=".jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-photos');if(urls.length){const merged=await appendToJsonArray('batches',b.id,'photo_urls',urls);if(merged){setBatches(p=>p.map(x=>x.id===b.id?{...x,photo_urls:merged}:x));show('📸 '+urls.length+' photo(s) uploaded!');}else show('⚠️ Photo save failed — please retry',false);}}}/></label>
           </>;})()}
           {(()=>{const dcs=Array.isArray(b.dc_urls)?b.dc_urls:[];return <>
             <span style={{fontSize:8,color:"#64748b",marginLeft:6}}>📄 DC ({dcs.length})</span>
@@ -2733,7 +2766,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               <a href={smartOpenUrl(u)} target="_blank" rel="noopener noreferrer" style={{color:"#06b6d4",fontSize:8,textDecoration:"none"}}>📄{di+1}</a>
               <button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:8,padding:0}} onClick={async()=>{if(!confirm('Remove DC?'))return;const nw=dcs.filter((_,i)=>i!==di);await sb.from('batches').update({dc_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:nw}:x));show('DC removed');}}>✕</button>
             </span>)}
-            <label style={{cursor:"pointer",fontSize:8,color:"#06b6d4",border:"1px dashed #06b6d433",padding:"2px 6px",borderRadius:4}}>+DC<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-dc');if(urls.length){const nw=[...dcs,...urls];await sb.from('batches').update({dc_urls:nw}).eq('id',b.id);setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:nw}:x));show('📄 '+urls.length+' DC(s) uploaded!');}}}/></label>
+            <label style={{cursor:"pointer",fontSize:8,color:"#06b6d4",border:"1px dashed #06b6d433",padding:"2px 6px",borderRadius:4}}>+DC<input type="file" accept=".pdf,.jpg,.png,.jpeg,image/*" multiple style={{display:"none"}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const urls=await uploadMultiple(files,'batch-dc');if(urls.length){const merged=await appendToJsonArray('batches',b.id,'dc_urls',urls);if(merged){setBatches(p=>p.map(x=>x.id===b.id?{...x,dc_urls:merged}:x));show('📄 '+urls.length+' DC(s) uploaded!');}else show('⚠️ DC save failed — please retry',false);}}}/></label>
           </>;})()}
           {/* 26 Apr 26: per-batch Invoice Docs (signed quotes, GST docs, e-way bills, customer-acknowledged copies) */}
           {(()=>{const ivds=Array.isArray(b.invoice_docs_urls)?b.invoice_docs_urls:[];return <>
@@ -7208,20 +7241,21 @@ function BankingJobGroupModal({jobNo, sitesInGroup, user, onClose, onSiteFilesUp
     if(!files || !files.length) return;
     const newUrls = await uploadMultiple([...files], 'banking-job-sheet');
     if(!newUrls || !newUrls.length) return;
-    const existing = Array.isArray(group?.job_sheet_urls) ? group.job_sheet_urls : [];
-    const merged = [...existing, ...newUrls];
-    if(await updateGroupField('job_sheet_urls', merged)){
-      show && show('📋 '+newUrls.length+' file(s) uploaded to '+jobNo);
-    }
+    // Race-safe: read DB before merge (added 27 Apr 26 — see appendToJsonArray docs)
+    // Make sure the group row exists first (lazy create)
+    await ensureBankingJobGroup(jobNo, sitesInGroup?.[0]);
+    const merged = await appendToJsonArray('banking_job_groups', jobNo, 'job_sheet_urls', newUrls);
+    if(merged === null){show && show('⚠️ Upload save failed — please retry', false); return;}
+    setGroup(p => ({...p, job_sheet_urls: merged}));
+    show && show('📋 '+newUrls.length+' file(s) uploaded to '+jobNo);
   };
 
   const onSheetRemove = async (url) => {
     if(!confirm('Remove this file from the group?')) return;
-    const existing = Array.isArray(group?.job_sheet_urls) ? group.job_sheet_urls : [];
-    const filtered = existing.filter(u => u !== url);
-    if(await updateGroupField('job_sheet_urls', filtered)){
-      show && show('📋 File removed');
-    }
+    const filtered = await removeFromJsonArray('banking_job_groups', jobNo, 'job_sheet_urls', url);
+    if(filtered === null){show && show('⚠️ Remove failed — please retry', false); return;}
+    setGroup(p => ({...p, job_sheet_urls: filtered}));
+    show && show('📋 File removed');
   };
 
   const saveNotes = async () => {
@@ -8173,10 +8207,10 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
             {urls.length>0&&<div style={{display:'flex',flexWrap:'wrap',gap:2,marginBottom:2}}>
               {urls.map((u,i)=><span key={i} style={{display:'inline-flex',alignItems:'center',gap:2,background:sec.color+'15',border:'1px solid '+sec.color+'33',padding:'1px 4px',borderRadius:3}}>
                 <a href={smartOpenUrl(u)} target="_blank" rel="noopener noreferrer" style={{color:sec.color,fontSize:8,textDecoration:'none'}}>{sec.icon}{i+1}</a>
-                {canUploadFiles&&<button style={{background:'none',border:'none',color:'#f47067',cursor:'pointer',fontSize:9,padding:0,lineHeight:1,fontWeight:700}} onClick={async()=>{if(!confirm('Remove this file?'))return;const nw=urls.filter(x=>x!==u);await updateSiteArr(s.id,sec.field,nw);show(sec.icon+' Removed');}}>✕</button>}
+                {canUploadFiles&&<button style={{background:'none',border:'none',color:'#f47067',cursor:'pointer',fontSize:9,padding:0,lineHeight:1,fontWeight:700}} onClick={async()=>{if(!confirm('Remove this file?'))return;const updated=await removeFromJsonArray('banking_sites',s.id,sec.field,u);if(updated){setSites(p=>p.map(x=>x.id===s.id?{...x,[sec.field]:updated}:x));show(sec.icon+' Removed');}else show('⚠️ Remove failed — please retry',false);}}>✕</button>}
               </span>)}
             </div>}
-            {canUploadFiles?<label style={{cursor:'pointer',fontSize:8,color:sec.color,border:'1px dashed '+sec.color+'66',padding:'1px 5px',borderRadius:3,display:'inline-block'}}>+{sec.icon}<input type="file" accept={sec.accept} multiple style={{display:'none'}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const newUrls=await uploadMultiple(files,sec.folder);if(newUrls.length){const nw=[...urls,...newUrls];if(await updateSiteArr(s.id,sec.field,nw))show(sec.icon+' '+newUrls.length+' uploaded!');}}}/></label>:(urls.length===0&&<span style={{fontSize:8,color:'#475569'}}>—</span>)}
+            {canUploadFiles?<label style={{cursor:'pointer',fontSize:8,color:sec.color,border:'1px dashed '+sec.color+'66',padding:'1px 5px',borderRadius:3,display:'inline-block'}}>+{sec.icon}<input type="file" accept={sec.accept} multiple style={{display:'none'}} onChange={async e=>{const files=[...e.target.files];if(!files.length)return;const newUrls=await uploadMultiple(files,sec.folder);if(newUrls.length){const merged=await appendToJsonArray('banking_sites',s.id,sec.field,newUrls);if(merged){setSites(p=>p.map(x=>x.id===s.id?{...x,[sec.field]:merged}:x));show(sec.icon+' '+newUrls.length+' uploaded!');}else show('⚠️ Upload save failed — please retry',false);}}}/></label>:(urls.length===0&&<span style={{fontSize:8,color:'#475569'}}>—</span>)}
           </td>;});})()}
           <td style={{padding:'2px 4px'}}>
             {(()=>{const invs=invoicesBySite[s.id]||[];return <div style={{display:'flex',flexWrap:'wrap',gap:2,alignItems:'center'}}>
