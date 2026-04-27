@@ -83,6 +83,35 @@ const uploadMultiple = async (files, folder='general') => {
 const isOfficeFile = (url) => /\.(pptx?|docx?|xlsx?)(\?|#|$)/i.test(url || '');
 const smartOpenUrl = (url) => isOfficeFile(url) ? ('https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(url)) : url;
 
+// ─── JOB# / BANKING_SITES COLLISION GUARDS (added 27 Apr 26) ─────────────
+// Background: the same job_no can exist in BOTH `jobs` (non-banking) and
+// `banking_sites` and silently drift apart, since each CRM view reads from
+// its own table. Confirmed live case: 9797-2627 had divergent client/
+// project/status across the two views. Resolved by renaming bs.job_no →
+// '9797-2627-BB' and adding these two guards to prevent recurrence.
+//
+// `checkBankingSiteForJobId(jobId)` — used by createJob (Guard 1, hard block).
+// Returns the colliding banking_sites.job_no string if any banking_site
+// already uses this exact jobs.id OR its FY-stripped prefix; else null.
+const checkBankingSiteForJobId = async (jobId) => {
+  if(!jobId) return null;
+  const prefix = String(jobId).split('-')[0];
+  const candidates = prefix && prefix !== jobId ? [jobId, prefix] : [jobId];
+  const {data, error} = await sb.from('banking_sites').select('job_no').in('job_no', candidates).limit(1);
+  if(error || !data || !data.length) return null;
+  return data[0].job_no;
+};
+// `checkJobsForBankingJobNo(jobNo)` — used by banking_sites inserts (Guard 2,
+// warn-and-confirm). Returns the matching jobs.id string when banking job_no
+// exactly equals some jobs.id; else null. Exact-match only (per analysis,
+// loose match would fire ~424 times against existing data, mostly benign).
+const checkJobsForBankingJobNo = async (jobNo) => {
+  if(!jobNo) return null;
+  const {data, error} = await sb.from('jobs').select('id').eq('id', String(jobNo)).limit(1);
+  if(error || !data || !data.length) return null;
+  return data[0].id;
+};
+
 // ─── CONSTANTS ──────────────────────────────────────────────
 const DEPTS=["Estimate","Design","Production","Printing","Fabrication","Dispatch","Installation","Accounts"];
 const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669","#06b6d4"];
@@ -659,6 +688,15 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── CREATE JOB ───────────────────────────────────────────
   const createJob = useCallback(async (jobData, batchData, lineItemsData) => {
+    // Guard 1 (added 27 Apr 26): hard-block if banking_sites already uses
+    // this exact jobs.id OR its FY-stripped prefix. Prevents the 9797-2627-
+    // class collision where the same job_no string lives in both tables and
+    // the two CRM views drift apart silently. See checkBankingSiteForJobId.
+    const bsHit = await checkBankingSiteForJobId(jobData.id);
+    if(bsHit){
+      show("⚠️ Cannot create Job "+jobData.id+" — Banking CRM already uses job_no '"+bsHit+"'. Pick a different number or update Banking CRM first.", false);
+      return;
+    }
     // Retry with incremented ID if duplicate key
     let attempts=0;
     let finalJobData={...jobData};
@@ -2894,6 +2932,15 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         const bankProj=JD_BANK_PROJECTS[idx];
         const bm=JD_BANK_MAP[bankProj]||['',''];
         const jobNum=j.id?.split('-')[0]||'';
+        // Guard 2 (added 27 Apr 26): warn-and-confirm if this banking job_no
+        // would exactly match an existing jobs.id (full-form). Prevents the
+        // 9797-2627-class collision. See checkJobsForBankingJobNo. Note: this
+        // path uses FY-stripped jobNum so will ~never trigger; kept for
+        // symmetry with manual Add Site path.
+        const jobsHit2905=await checkJobsForBankingJobNo(jobNum);
+        if(jobsHit2905){
+          if(!confirm('⚠️ Banking job_no "'+jobNum+'" already matches Job '+jobsHit2905+' in Non-Banking CRM. Continuing will create two records with the same job_no in different tables. Proceed?'))return;
+        }
         // Check if already synced
         const {data:existing}=await sb.from('banking_sites').select('id').eq('job_no',jobNum).limit(1);
         if(existing&&existing.length>0){
@@ -3132,7 +3179,13 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     if(syncBankingNJ&&bankProjectNJ){
       const bm=NJ_BANK_MAP[bankProjectNJ]||['',''];
       const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
-      await sb.from('banking_sites').insert({id:siteId,project:bankProjectNJ,client:bm[0],bank:bm[1],job_no:jid.split('-')[0],po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
+      const bsJobNoNJ=jid.split('-')[0];
+      // Guard 2 (added 27 Apr 26): see checkJobsForBankingJobNo
+      const jobsHitNJ=await checkJobsForBankingJobNo(bsJobNoNJ);
+      if(jobsHitNJ){
+        if(!confirm('⚠️ Banking job_no "'+bsJobNoNJ+'" already matches Job '+jobsHitNJ+' in Non-Banking CRM. Proceed with banking sync?')){setSubmitting(false);return;}
+      }
+      await sb.from('banking_sites').insert({id:siteId,project:bankProjectNJ,client:bm[0],bank:bm[1],job_no:bsJobNoNJ,po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
     }
     setSubmitting(false);
   };
@@ -6591,7 +6644,13 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
           const bm=BANK_MAP[bankProject]||['',''];
           const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5)+i;
           const siteCode=it.int?.split(' — ')[0]||it.int?.split('—')[0]||'';
-          await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:String(lastNum).padStart(4,'0'),po_number:f.po||'',atm_id:siteCode.trim(),site_unique_id:'',site_address:it.siteAddr||it.m||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
+          const bsJobNoBOQ=String(lastNum).padStart(4,'0');
+          // Guard 2 (added 27 Apr 26): see checkJobsForBankingJobNo
+          const jobsHitBOQ=await checkJobsForBankingJobNo(bsJobNoBOQ);
+          if(jobsHitBOQ){
+            if(!confirm('⚠️ Banking job_no "'+bsJobNoBOQ+'" already matches Job '+jobsHitBOQ+' in Non-Banking CRM. Proceed with banking sync for this row?'))continue;
+          }
+          await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:bsJobNoBOQ,po_number:f.po||'',atm_id:siteCode.trim(),site_unique_id:'',site_address:it.siteAddr||it.m||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
         }
       }
       await persistTemplate();
@@ -6609,7 +6668,13 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       if(syncBanking&&bankProject){
         const bm=BANK_MAP[bankProject]||['',''];
         const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
-        await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:jid.split('-')[0],po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
+        const bsJobNoBOQ1=jid.split('-')[0];
+        // Guard 2 (added 27 Apr 26): see checkJobsForBankingJobNo
+        const jobsHitBOQ1=await checkJobsForBankingJobNo(bsJobNoBOQ1);
+        if(jobsHitBOQ1){
+          if(!confirm('⚠️ Banking job_no "'+bsJobNoBOQ1+'" already matches Job '+jobsHitBOQ1+' in Non-Banking CRM. Proceed with banking sync?')){await persistTemplate();setSubmitting(false);return;}
+        }
+        await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:bsJobNoBOQ1,po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
       }
       await persistTemplate();
       setSubmitting(false);
@@ -7445,6 +7510,16 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     if(!newSite.project||!newSite.client||!newSite.bank){show('Fill Project, Client & Bank',false);return;}
     const id='BS-'+Date.now()+Math.random().toString(36).slice(2,5);
     const rec={...newSite,id};
+    // Guard 2 (added 27 Apr 26): warn-and-confirm if user-typed banking job_no
+    // exactly matches an existing jobs.id. This is the path where the
+    // 9797-2627 collision originally entered the system. See
+    // checkJobsForBankingJobNo for rationale (exact-match only, low noise).
+    if(rec.job_no){
+      const jobsHitAdd=await checkJobsForBankingJobNo(rec.job_no);
+      if(jobsHitAdd){
+        if(!confirm('⚠️ Banking job_no "'+rec.job_no+'" already matches Job '+jobsHitAdd+' in Non-Banking CRM.\n\nThis is exactly the pattern that caused the 9797-2627 data-mismatch issue. Both views will show different data for the same job_no.\n\nProceed anyway?'))return;
+      }
+    }
     const {error}=await sb.from('banking_sites').insert(rec);
     if(!error){setSites(p=>[rec,...p]);setShowAddSite(false);setCustomProject(false);setNewSite({project:'',client:'',bank:'',job_no:'',po_number:'',atm_id:'',site_unique_id:'',site_address:'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',remarks:'',install_pending_remarks:'',in_progress_remarks:''});show('Site added!');}
     else show('Error: '+error.message,false);
