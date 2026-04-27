@@ -8023,8 +8023,12 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   };
 
   const updateAct=async(id,field,value)=>{
-    await sb.from('sales_activities').update({[field]:value}).eq('id',id);
+    // 26 Apr 26 — added visible error toast. Was failing silently, masking write issues
+    // (see Bundle 2A debug: ₹ inline edits weren't persisting and there was no way to see why).
+    const {error}=await sb.from('sales_activities').update({[field]:value}).eq('id',id);
+    if(error){show('⚠️ Save failed: '+(error.message||'unknown error'),false);console.error('updateAct failed',{id,field,value,error});return;}
     setActivities(p=>p.map(a=>a.id===id?{...a,[field]:value}:a));
+    if(field==='estimated_value'||field==='actual_value')show('💰 ₹ saved');
   };
 
   const ins={className:"in",style:{fontSize:10,padding:'4px 6px'}};
@@ -8077,8 +8081,8 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
           <td style={{fontSize:8,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,20)}</td>
           <td style={{fontSize:8,color:"#64748b"}}>{a.follow_up_notes?.slice(0,15)}</td>
           <td style={{fontSize:8,color:"#f59e0b"}}>{a.pipeline_project?.slice(0,15)}</td>
-          <td><input type="number" min="0" step="0.01" defaultValue={a.estimated_value||''} placeholder="—" onBlur={e=>{const v=e.target.value===''?null:+e.target.value;if(v!==(a.estimated_value??null))updateAct(a.id,'estimated_value',v);}} style={{width:70,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#10b981',textAlign:'right'}}/></td>
-          <td><input type="number" min="0" step="0.01" defaultValue={a.actual_value||''} placeholder="—" onBlur={e=>{const v=e.target.value===''?null:+e.target.value;if(v!==(a.actual_value??null))updateAct(a.id,'actual_value',v);}} style={{width:70,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#4ade80',textAlign:'right'}}/></td>
+          <td><input type="number" min="0" step="0.01" defaultValue={a.estimated_value||''} placeholder="—" onBlur={e=>{const raw=e.target.value;const v=raw===''?null:+raw;const cur=a.estimated_value==null||a.estimated_value===''?null:+a.estimated_value;if(v!==cur)updateAct(a.id,'estimated_value',v);}} style={{width:70,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#10b981',textAlign:'right'}}/></td>
+          <td><input type="number" min="0" step="0.01" defaultValue={a.actual_value||''} placeholder="—" onBlur={e=>{const raw=e.target.value;const v=raw===''?null:+raw;const cur=a.actual_value==null||a.actual_value===''?null:+a.actual_value;if(v!==cur)updateAct(a.id,'actual_value',v);}} style={{width:70,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#4ade80',textAlign:'right'}}/></td>
           <td style={{fontSize:8}}>{a.follow_up_date||'—'}</td>
           <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
           <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)}>✕</button></td>
@@ -8098,8 +8102,8 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
           <td style={{fontSize:9}}>{a.contact_person?.slice(0,15)}</td>
           <td style={{fontSize:8,color:"#64748b"}}>{a.location?.slice(0,15)}</td>
           <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,18)}</td>
-          <td><input type="number" min="0" step="0.01" defaultValue={a.estimated_value||''} placeholder="—" onBlur={e=>{const v=e.target.value===''?null:+e.target.value;if(v!==(a.estimated_value??null))updateAct(a.id,'estimated_value',v);}} style={{width:80,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#10b981',textAlign:'right'}}/></td>
-          <td><input type="number" min="0" step="0.01" defaultValue={a.actual_value||''} placeholder="—" onBlur={e=>{const v=e.target.value===''?null:+e.target.value;if(v!==(a.actual_value??null))updateAct(a.id,'actual_value',v);}} style={{width:80,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#4ade80',textAlign:'right'}}/></td>
+          <td><input type="number" min="0" step="0.01" defaultValue={a.estimated_value||''} placeholder="—" onBlur={e=>{const raw=e.target.value;const v=raw===''?null:+raw;const cur=a.estimated_value==null||a.estimated_value===''?null:+a.estimated_value;if(v!==cur)updateAct(a.id,'estimated_value',v);}} style={{width:80,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#10b981',textAlign:'right'}}/></td>
+          <td><input type="number" min="0" step="0.01" defaultValue={a.actual_value||''} placeholder="—" onBlur={e=>{const raw=e.target.value;const v=raw===''?null:+raw;const cur=a.actual_value==null||a.actual_value===''?null:+a.actual_value;if(v!==cur)updateAct(a.id,'actual_value',v);}} style={{width:80,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#4ade80',textAlign:'right'}}/></td>
           <td><select className="in" value={a.status||'Open'} onChange={e=>updateAct(a.id,'status',e.target.value)} style={{fontSize:8,padding:"2px",width:90}}>{PROJ_STATUSES.map(s=><option key={s}>{s}</option>)}</select></td>
           <td style={{fontSize:8,color:"#64748b"}}>{a.outcome?.slice(0,20)}</td>
           <td style={{fontSize:8,color:"#64748b",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.remarks}>{a.remarks?.slice(0,25)}</td>
