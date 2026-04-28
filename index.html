@@ -5876,20 +5876,35 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
     if (e1) { show('⚠️ Approve failed: ' + e1.message, false); setProcessingBR(null); return; }
     const site = billingSitesMap[req.site_id];
     const oldPmt = site?.payment_status || 'Not Started';
+    // ── Always flip billing_status + billing_category to "Given for Billing" on
+    // approval (added 28 Apr 26 — Item #4 fix). Previously only payment_status
+    // was updated, leaving Aparna's CRM view stuck at the old status. payment_status
+    // continues to flip to "Invoice Raised" only if it isn't already there.
+    const histEntry = {at: nowIso, by: user?.name || 'Jigar', from: oldPmt, to: 'Invoice Raised', via: 'billing_request_' + req.id};
+    if (note) histEntry.note = note;
+    const {data: cur} = await sb.from('banking_sites').select('payment_history').eq('id', req.site_id).single();
+    const curHist = Array.isArray(cur?.payment_history) ? cur.payment_history : [];
+    const siteUpdates = {
+      billing_status: 'Given for Billing',
+      billing_category: 'Given for Billing'
+    };
     if (oldPmt !== 'Invoice Raised') {
-      const histEntry = {at: nowIso, by: user?.name || 'Jigar', from: oldPmt, to: 'Invoice Raised', via: 'billing_request_' + req.id};
-      if (note) histEntry.note = note;
-      const {data: cur} = await sb.from('banking_sites').select('payment_history').eq('id', req.site_id).single();
-      const curHist = Array.isArray(cur?.payment_history) ? cur.payment_history : [];
-      const siteUpdates = {
-        payment_status: 'Invoice Raised',
-        payment_status_changed_by: user?.name || 'Jigar',
-        payment_status_changed_at: nowIso,
-        payment_history: [...curHist, histEntry]
-      };
-      await sb.from('banking_sites').update(siteUpdates).eq('id', req.site_id);
-      setBillingSitesMap(p => ({...p, [req.site_id]: {...(p[req.site_id]||{}), payment_status: 'Invoice Raised'}}));
+      siteUpdates.payment_status = 'Invoice Raised';
+      siteUpdates.payment_status_changed_by = user?.name || 'Jigar';
+      siteUpdates.payment_status_changed_at = nowIso;
+      siteUpdates.payment_history = [...curHist, histEntry];
     }
+    const {error: e2} = await sb.from('banking_sites').update(siteUpdates).eq('id', req.site_id);
+    if (e2) { show('⚠️ Site update failed: ' + e2.message, false); setProcessingBR(null); return; }
+    setBillingSitesMap(p => ({
+      ...p,
+      [req.site_id]: {
+        ...(p[req.site_id]||{}),
+        billing_status: 'Given for Billing',
+        billing_category: 'Given for Billing',
+        ...(oldPmt !== 'Invoice Raised' ? {payment_status: 'Invoice Raised'} : {})
+      }
+    }));
     setBillingRequests(p => p.map(r => r.id === req.id ? {...r, ...reqUpdates} : r));
     setProcessingBR(null);
     setDecidingBR(null);
