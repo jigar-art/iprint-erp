@@ -1622,6 +1622,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [copyBatch,setCopyBatch]=useState(null); // {batchId, bi, items:[{...item, selected:bool}]}
   const [pdfMode,setPdfMode]=useState(null); // 'estimate'|'production'|null
   const [pdfBatches,setPdfBatches]=useState({}); // {batchId: true/false}
+  // Bundle 3 (02 May 26): Estimate PDF print presets — controls which columns appear.
+  // 'internal'=full+internal_name, 'customer'=full+client_name (hide media), 'billing'=minimal, 'custom'=user toggles.
+  const [pdfPreset,setPdfPreset]=useState('internal');
+  const [pdfCols,setPdfCols]=useState({sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true});
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
   const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
   const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
@@ -2822,7 +2826,53 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         <button className="b" onClick={()=>setCopyBatch(null)}>Cancel</button>
       </div>
     </div>}
-    {sa?<div className="c" style={{padding:8}}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}><input className="in" placeholder="Batch note / Site name..." value={nn} onChange={e=>snn(e.target.value)} style={{flex:1,minWidth:120}}/><input className="in mn" placeholder="ATM ID" id="_newBatchAtm" style={{width:110}}/><input className="in mn" placeholder="Site UID" id="_newBatchSuid" style={{width:100}}/></div><div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}><input className="in mn" placeholder="Client PO#" id="_newBatchClientPO" style={{width:120}}/><input className="in mn" placeholder="Vendor PO#" id="_newBatchPO" style={{width:120}}/><input className="in" placeholder="Billing Address..." id="_newBatchBillAddr" style={{flex:1,minWidth:150}}/><input className="in" placeholder="Delivery Address..." id="_newBatchDelAddr" style={{flex:1,minWidth:150}}/></div><div style={{display:"flex",gap:4,marginTop:4}}><button className="b bp" onClick={()=>{const atmVal=document.getElementById('_newBatchAtm')?.value||'';const suidVal=document.getElementById('_newBatchSuid')?.value||'';const poVal=document.getElementById('_newBatchPO')?.value||'';const clientPoVal=document.getElementById('_newBatchClientPO')?.value||'';const billVal=document.getElementById('_newBatchBillAddr')?.value||'';const delVal=document.getElementById('_newBatchDelAddr')?.value||'';const bid="B"+uid();const bd={id:bid,job_id:j.id,date:td(),note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,client_po_number:clientPoVal,billing_address:billVal,delivery_address:delVal};addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);}}>Add Batch</button><button className="b" onClick={()=>ssa(false)}>✕</button></div></div>:<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
+    {sa?(()=>{
+      const _BANKING_CLIENTS=['DIEBOLD','CMS','OKI','NCR','NUVAMA','NUVAMA WEALTH','J M FINANCE','JM FINANCE','J.M. FINANCE','HITACHI','EDELWEISS','NIDO'];
+      const _isBnk=_BANKING_CLIENTS.some(b=>(j.client_name||'').toUpperCase().includes(b));
+      const _submit=()=>{
+        const atmVal=document.getElementById('_newBatchAtm')?.value||'';
+        const suidVal=document.getElementById('_newBatchSuid')?.value||'';
+        const poVal=document.getElementById('_newBatchPO')?.value||'';
+        const clientPoVal=document.getElementById('_newBatchClientPO')?.value||'';
+        const billVal=document.getElementById('_newBatchBillAddr')?.value||'';
+        const delVal=document.getElementById('_newBatchDelAddr')?.value||'';
+        const dateVal=document.getElementById('_newBatchDate')?.value||td();
+        if(_isBnk&&!atmVal.trim()&&!suidVal.trim()){
+          if(!confirm('⚠️ Banking job — both ATM ID and Site UID are blank. Add batch anyway?'))return;
+        }
+        const bid="B"+uid();
+        const bd={id:bid,job_id:j.id,date:dateVal,note:nn||"New",bill_no:"",status:"New",atm_id:atmVal,site_unique_id:suidVal,po_number:poVal,client_po_number:clientPoVal,billing_address:billVal,delivery_address:delVal};
+        addBatchToJob(bd);snn("");ssa(false);setAddingToBatch(bid);
+      };
+      return <div className="c" style={{padding:10,border:`1px solid ${_isBnk?'#06b6d455':'#e3a00855'}`,background:_isBnk?'#06b6d408':'#e3a00808'}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <p style={{fontSize:11,fontWeight:700,color:_isBnk?'#06b6d4':'#e3a008'}}>{_isBnk?'🏦 Add Batch (Banking)':'➕ Add Batch'} <span style={{fontSize:9,color:'#64748b',fontWeight:400,marginLeft:6}}>{j.client_name||'—'}</span></p>
+          <button className="b bs" onClick={()=>ssa(false)} style={{fontSize:9,padding:'2px 6px'}}>✕</button>
+        </div>
+        <div className="fg f3" style={{marginBottom:6}}>
+          <F l="Batch Date"><input id="_newBatchDate" type="date" className="in" defaultValue={td()} style={{fontSize:10}}/></F>
+          <F l={_isBnk?'Site Name / Note':'Batch Note'}><input className="in" placeholder={_isBnk?'Site name…':'Batch note…'} value={nn} onChange={e=>snn(e.target.value)} style={{fontSize:10}}/></F>
+          {_isBnk?<F l="ATM ID"><input id="_newBatchAtm" className="in mn" placeholder="ATM ID" style={{fontSize:10}}/></F>:<F l="Vendor PO #"><input id="_newBatchPO" className="in mn" placeholder="Vendor PO#" style={{fontSize:10}}/></F>}
+        </div>
+        {_isBnk&&<div className="fg f3" style={{marginBottom:6}}>
+          <F l="Site UID"><input id="_newBatchSuid" className="in mn" placeholder="Site UID" style={{fontSize:10}}/></F>
+          <F l="Vendor PO #"><input id="_newBatchPO" className="in mn" placeholder="Vendor PO#" style={{fontSize:10}}/></F>
+          <F l="Client PO #"><input id="_newBatchClientPO" className="in mn" placeholder="Client PO#" style={{fontSize:10}}/></F>
+        </div>}
+        {!_isBnk&&<div className="fg f3" style={{marginBottom:6}}>
+          <F l="Client PO #"><input id="_newBatchClientPO" className="in mn" placeholder="Client PO#" style={{fontSize:10}}/></F>
+          <span/><span/>
+        </div>}
+        <div className="fg f2" style={{marginBottom:8}}>
+          <F l={_isBnk?'Site Billing Address':'Billing Address (override)'}><input id="_newBatchBillAddr" className="in" placeholder={_isBnk?'Site billing address':'Override job billing'} style={{fontSize:10}}/></F>
+          <F l={_isBnk?'Site Delivery Address':'Delivery Address (override)'}><input id="_newBatchDelAddr" className="in" placeholder={_isBnk?'Site delivery address':'Override job delivery'} style={{fontSize:10}}/></F>
+        </div>
+        <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+          <button className="b" onClick={()=>ssa(false)} style={{fontSize:10}}>Cancel</button>
+          <button className="b bp" onClick={_submit} style={{fontSize:10,fontWeight:700}}>✓ Add Batch</button>
+        </div>
+      </div>;
+    })():<div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button className="b bp" onClick={()=>ssa(true)}>➕ Add Batch</button>
       <label className="b" style={{cursor:"pointer"}}>📂 Import Job Sheet (Excel)
         <input type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={async(e)=>{
           const file=e.target.files[0];if(!file)return;
@@ -3022,6 +3072,25 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         <p style={{fontSize:11,fontWeight:700,color:"#e3a008"}}>{pdfMode==='estimate'?'📄 Estimate PDF':'📋 Production Sheet'} — Select Batches</p>
         <button className="b bs" onClick={()=>setPdfMode(null)} style={{fontSize:9,padding:"2px 6px"}}>✕</button>
       </div>
+      {pdfMode==='estimate'&&(()=>{
+        const PRESETS=[
+          {k:'internal',n:'🔧 Internal',d:'Full detail (internal names + media)',cols:{sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true}},
+          {k:'customer',n:'👥 Customer',d:'Client-facing (client names, no media)',cols:{sr:true,desc:true,img:true,media:false,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true}},
+          {k:'billing',n:'🧾 Billing',d:'Minimal (qty + amounts only)',cols:{sr:true,desc:true,img:false,media:false,size:false,qty:true,uom:false,rate:true,total:true,gst:true,amt:true}},
+          {k:'custom',n:'⚙️ Custom',d:'Toggle each column individually',cols:null}
+        ];
+        const COL_DEFS=[{k:'sr',n:'#'},{k:'desc',n:'Description'},{k:'img',n:'Image'},{k:'media',n:'Material/Spec'},{k:'size',n:'Size'},{k:'qty',n:'Qty'},{k:'uom',n:'UOM'},{k:'rate',n:'Rate'},{k:'total',n:'Total'},{k:'gst',n:'GST'},{k:'amt',n:'Amount'}];
+        return <div style={{marginBottom:10,padding:8,background:"#0a0f1a",borderRadius:6,border:"1px solid #1a2030"}}>
+          <p style={{fontSize:9,color:"#64748b",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Print Preset</p>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+            {PRESETS.map(p=><button key={p.k} className="b bs" onClick={()=>{setPdfPreset(p.k);if(p.cols)setPdfCols(p.cols);}} style={{fontSize:9,padding:"4px 8px",border:`1px solid ${pdfPreset===p.k?'#e3a008':'#1a2030'}`,background:pdfPreset===p.k?'#e3a00820':'transparent',color:pdfPreset===p.k?'#e3a008':'#cbd5e1',fontWeight:pdfPreset===p.k?700:400}} title={p.d}>{p.n}</button>)}
+          </div>
+          <p style={{fontSize:8,color:"#64748b",marginBottom:6}}>{(PRESETS.find(p=>p.k===pdfPreset)||{}).d}</p>
+          {pdfPreset==='custom'&&<div style={{display:"flex",gap:3,flexWrap:"wrap",borderTop:"1px solid #1a2030",paddingTop:6}}>
+            {COL_DEFS.map(c=><label key={c.k} style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:9,padding:"2px 6px",borderRadius:3,background:pdfCols[c.k]?'#10b98120':'#1a2030',cursor:"pointer",color:pdfCols[c.k]?'#10b981':'#64748b'}}><input type="checkbox" checked={!!pdfCols[c.k]} onChange={()=>setPdfCols(p=>({...p,[c.k]:!p[c.k]}))} style={{margin:0}}/>{c.n}</label>)}
+          </div>}
+        </div>;
+      })()}
       <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:10}}>
         {(j.batches||[]).map((b,bi)=>{const bItems=(b.items||[]);const bAmt=bItems.reduce((s,it)=>s+(+it.amount||0),0);
           return <label key={b.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:6,border:"1px solid "+(pdfBatches[b.id]?"#e3a00855":"#1a2030"),background:pdfBatches[b.id]?"#e3a00810":"transparent",cursor:"pointer",fontSize:10}}>
@@ -3047,14 +3116,24 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           if(pdfMode==='estimate'){
             const totSub=selItems.reduce((s,it)=>s+(+it.total||0),0);const totGst=selItems.reduce((s,it)=>s+(+it.gst||0),0);const totAmt=selItems.reduce((s,it)=>s+(+it.amount||0),0);const totQty=selItems.reduce((s,it)=>s+(+it.qty||0),0);const totSqft=Math.round(selItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
             const hasImg=selItems.some(it=>it.img_url);
+            // Bundle 3 (02 May): apply print preset column filters
+            const _C=pdfCols||{sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true};
+            const _useInternalDesc=(pdfPreset==='internal')||(pdfPreset==='custom'&&vm==='internal');
+            const _showImg=_C.img&&hasImg;
+            // Left-side label columns (sr+desc+img+media+size) all collapse into the TOTAL colspan
+            const _leftCols=[_C.sr,_C.desc,_showImg,_C.media,_C.size].filter(Boolean).length;
+            // Build header dynamically
+            const _th=(on,label)=>on?'<th>'+label+'</th>':'';
+            const _td=(on,html,cls)=>on?'<td'+(cls?' class="'+cls+'"':'')+'>'+html+'</td>':'';
+            const _headerRow='<tr>'+_th(_C.sr,'#')+_th(_C.desc,'Description')+_th(_showImg,'Image')+_th(_C.media,'Material/Spec')+_th(_C.size,'Size (W×H)')+_th(_C.qty,'Qty')+_th(_C.uom,resolveUomHeader(selItems))+_th(_C.rate,'Rate')+_th(_C.total,'Total')+_th(_C.gst,'GST')+_th(_C.amt,'Amount')+'</tr>';
             const batchLabel=selBatches.length<(j.batches||[]).length?' (Batches: '+selBatches.map((_,i)=>i+1).join(', ')+')':'';
             const estHtml=`<html><head><title>Estimate ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:60px;max-height:60px;border-radius:3px}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}.refs{margin-top:16px}.refs img{max-width:200px;max-height:200px;border:1px solid #ccc;border-radius:4px;margin:4px}@media print{body{padding:10px}}</style></head><body>`+
-              `<div class="hdr"><div><h1>${fm.short_name||''}</h1><p style="font-size:10px;color:#666">${fm.address||''}</p><p style="font-size:10px;color:#666">GST: ${fm.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${j.id}${batchLabel}</p><p style="font-size:10px">Date: ${td()}</p></div></div>`+
+              `<div class="hdr"><div><h1>${fm.short_name||''}</h1><p style="font-size:10px;color:#666">${fm.address||''}</p><p style="font-size:10px;color:#666">GST: ${fm.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${j.id}${batchLabel}</p><p style="font-size:10px">Date: ${td()}</p><p style="font-size:9px;color:#888">${({internal:'Internal',customer:'Customer Copy',billing:'Billing Copy',custom:'Custom'}[pdfPreset]||'')}</p></div></div>`+
               `<div class="info"><div><b>Client:</b> ${j.client_name||''}</div><div><b>Contact:</b> ${j.contact_person||''} ${j.contact_no||''}</div><div><b>Project:</b> ${j.project||''}</div><div><b>PO #:</b> ${j.po_number||'—'}</div><div><b>Delivery:</b> ${j.delivery_address||''}</div>${j.billing_address?'<div><b>Billing Address:</b> '+j.billing_address+'</div>':''}<div><b>Firm:</b> ${fm.name||''}</div>${j.client_gst&&j.client_gst!=='27XXXXX'?'<div><b>Client GST:</b> '+j.client_gst+'</div>':''}${j.billing_name?'<div><b>Billing Name:</b> '+j.billing_name+'</div>':''}</div>`+
-              `<table><thead><tr><th>#</th><th>Description</th>${hasImg?'<th>Image</th>':''}<th>Material/Spec</th><th>Size (W×H)</th><th>Qty</th><th>${resolveUomHeader(selItems)}</th><th>Rate</th><th>Total</th><th>GST</th><th>Amount</th></tr></thead><tbody>`+
-              selItems.map((it,i)=>{const u=getUomLabel(it.rate_mode);const hasWH=(+it.width>0)&&(+it.height>0);const sizeTxt=hasWH?(it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:'')):'—';const sqftTxt=it.sqft?(it.sqft+u.suffix):'—';return `<tr><td>${i+1}</td><td>${vm==='internal'?(it.internal_name||''):(it.client_name||'')}</td>${hasImg?'<td>'+(it.img_url?'<img src="'+it.img_url+'"/>':'—')+'</td>':''}<td>${it.media||''}</td><td class="r">${sizeTxt}</td><td class="r">${it.qty}</td><td class="r">${sqftTxt}</td><td class="r">₹${(+it.rate||0).toFixed(2)}</td><td class="r">₹${(+it.total||0).toFixed(2)}</td><td class="r">₹${(+it.gst||0).toFixed(2)}</td><td class="r"><b>₹${(+it.amount||0).toFixed(2)}</b></td></tr>`;}).join('')+
-              `<tr class="total"><td colspan="${hasImg?5:4}" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td><td class="r"><b>₹${totSub.toFixed(2)}</b></td><td class="r"><b>₹${totGst.toFixed(2)}</b></td><td class="r"><b>₹${totAmt.toFixed(2)}</b></td></tr></tbody></table>`+
-              (selItems.some(it=>it.img_url)?'<div class="refs"><h3 style="font-size:12px;margin-bottom:6px">Design References</h3><div style="display:flex;flex-wrap:wrap;gap:8px">'+selItems.filter(it=>it.img_url).map((it,i)=>'<div style="text-align:center"><img src="'+it.img_url+'"/><p style="font-size:8px;color:#666">'+(it.internal_name||'Item '+(i+1))+'</p></div>').join('')+'</div></div>':'')+
+              `<table><thead>${_headerRow}</thead><tbody>`+
+              selItems.map((it,i)=>{const u=getUomLabel(it.rate_mode);const hasWH=(+it.width>0)&&(+it.height>0);const sizeTxt=hasWH?(it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:'')):'—';const sqftTxt=it.sqft?(it.sqft+u.suffix):'—';const _descTxt=_useInternalDesc?(it.internal_name||''):(it.client_name||it.internal_name||'');return '<tr>'+_td(_C.sr,String(i+1))+_td(_C.desc,_descTxt)+_td(_showImg,(it.img_url?'<img src="'+it.img_url+'"/>':'—'))+_td(_C.media,(it.media||''))+_td(_C.size,sizeTxt,'r')+_td(_C.qty,String(it.qty),'r')+_td(_C.uom,sqftTxt,'r')+_td(_C.rate,'₹'+(+it.rate||0).toFixed(2),'r')+_td(_C.total,'₹'+(+it.total||0).toFixed(2),'r')+_td(_C.gst,'₹'+(+it.gst||0).toFixed(2),'r')+_td(_C.amt,'<b>₹'+(+it.amount||0).toFixed(2)+'</b>','r')+'</tr>';}).join('')+
+              '<tr class="total">'+(_leftCols>0?'<td colspan="'+_leftCols+'" style="text-align:right"><b>TOTAL</b></td>':'')+_td(_C.qty,'<b>'+totQty+'</b>','r')+_td(_C.uom,'<b>'+totSqft+'</b>','r')+_td(_C.rate,'','r')+_td(_C.total,'<b>₹'+totSub.toFixed(2)+'</b>','r')+_td(_C.gst,'<b>₹'+totGst.toFixed(2)+'</b>','r')+_td(_C.amt,'<b>₹'+totAmt.toFixed(2)+'</b>','r')+'</tr></tbody></table>'+
+              (_showImg&&selItems.some(it=>it.img_url)?'<div class="refs"><h3 style="font-size:12px;margin-bottom:6px">Design References</h3><div style="display:flex;flex-wrap:wrap;gap:8px">'+selItems.filter(it=>it.img_url).map((it,i)=>'<div style="text-align:center"><img src="'+it.img_url+'"/><p style="font-size:8px;color:#666">'+(_useInternalDesc?(it.internal_name||'Item '+(i+1)):(it.client_name||it.internal_name||'Item '+(i+1)))+'</p></div>').join('')+'</div></div>':'')+
               `<div class="terms"><p><b>Terms & Conditions:</b></p><p>${j.payment_terms||'50% Advance. Rest within 30 days.'}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${fm.name||''}</p></div></body></html>`;
             const w=window.open('','_blank');w.document.write(estHtml);w.document.close();w.print();
           } else {
@@ -8777,19 +8856,19 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
               })()}
             </div>
           </td>
-          <td style={{fontSize:10,fontWeight:600,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={a.firm_name}>{a.firm_name}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.industry?.slice(0,15)}</td>
-          <td style={{fontSize:9}} title={a.designation}>{a.contact_person?.slice(0,15)}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.mobile?.slice(0,12)}</td>
-          <td style={{fontSize:8}}>{a.description?.slice(0,18)}</td>
-          <td style={{fontSize:9,color:"#8b5cf6"}}>{a.product_pitched?.slice(0,15)}</td>
-          <td style={{fontSize:8,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{a.outcome?.slice(0,20)}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.follow_up_notes?.slice(0,15)}</td>
-          <td style={{fontSize:8,color:"#f59e0b"}}>{a.pipeline_project?.slice(0,15)}</td>
+          <td><input defaultValue={a.firm_name||''} placeholder="Firm" onBlur={e=>{const v=e.target.value.trim();if(v!==(a.firm_name||''))updateAct(a.id,'firm_name',v);}} style={{width:120,fontSize:10,fontWeight:600,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#e3a008'}} title={a.firm_name}/></td>
+          <td><select className="in" defaultValue={a.industry||INDUSTRIES[0]} onChange={e=>updateAct(a.id,'industry',e.target.value)} style={{fontSize:8,padding:'2px',width:90}}>{INDUSTRIES.map(x=><option key={x}>{x}</option>)}</select></td>
+          <td><input defaultValue={a.contact_person||''} placeholder="—" onBlur={e=>{const v=e.target.value.trim();if(v!==(a.contact_person||''))updateAct(a.id,'contact_person',v);}} style={{width:90,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#cbd5e1'}} title={a.designation}/></td>
+          <td><input defaultValue={a.mobile||''} placeholder="—" onBlur={e=>{const v=e.target.value.trim();if(v!==(a.mobile||''))updateAct(a.id,'mobile',v);}} style={{width:90,fontSize:8,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#64748b'}}/></td>
+          <td><input defaultValue={a.description||''} placeholder="—" onBlur={e=>{const v=e.target.value.trim();if(v!==(a.description||''))updateAct(a.id,'description',v);}} style={{width:110,fontSize:8,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#cbd5e1'}} title={a.description}/></td>
+          <td><select className="in" defaultValue={a.product_pitched||PRODUCTS[0]} onChange={e=>updateAct(a.id,'product_pitched',e.target.value)} style={{fontSize:8,padding:'2px',width:95,color:'#8b5cf6'}}>{PRODUCTS.map(x=><option key={x}>{x}</option>)}</select></td>
+          <td><select className="in" defaultValue={a.outcome||RESPONSES[0]} onChange={e=>updateAct(a.id,'outcome',e.target.value)} style={{fontSize:8,padding:'2px',width:120,color:a.outcome?.includes('Positive')?'#4ade80':a.outcome?.includes('Negative')?'#f47067':'#e3a008'}}>{RESPONSES.map(x=><option key={x}>{x}</option>)}</select></td>
+          <td><input defaultValue={a.follow_up_notes||''} placeholder="—" onBlur={e=>{const v=e.target.value.trim();if(v!==(a.follow_up_notes||''))updateAct(a.id,'follow_up_notes',v);}} style={{width:100,fontSize:8,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#cbd5e1'}} title={a.follow_up_notes}/></td>
+          <td><input defaultValue={a.pipeline_project||''} placeholder="—" onBlur={e=>{const v=e.target.value.trim();if(v!==(a.pipeline_project||''))updateAct(a.id,'pipeline_project',v);}} style={{width:100,fontSize:8,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#f59e0b'}} title={a.pipeline_project}/></td>
           <td><input type="number" min="0" step="0.01" defaultValue={a.estimated_value||''} placeholder="—" onBlur={e=>{const raw=e.target.value;const v=raw===''?null:+raw;const cur=a.estimated_value==null||a.estimated_value===''?null:+a.estimated_value;if(v!==cur)updateAct(a.id,'estimated_value',v);}} style={{width:70,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#10b981',textAlign:'right'}}/></td>
           <td><input type="number" min="0" step="0.01" defaultValue={a.actual_value||''} placeholder="—" onBlur={e=>{const raw=e.target.value;const v=raw===''?null:+raw;const cur=a.actual_value==null||a.actual_value===''?null:+a.actual_value;if(v!==cur)updateAct(a.id,'actual_value',v);}} style={{width:70,fontSize:9,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#4ade80',textAlign:'right'}}/></td>
-          <td style={{fontSize:8}}>{a.follow_up_date||'—'}</td>
-          <td style={{fontSize:8,color:"#64748b"}}>{a.rep_name?.slice(0,10)}</td>
+          <td><input type="date" defaultValue={a.follow_up_date||''} onBlur={e=>{const v=e.target.value||null;if(v!==(a.follow_up_date||null))updateAct(a.id,'follow_up_date',v);}} style={{width:115,fontSize:8,padding:'2px 4px',background:'#0c1017',border:'1px solid #1a2030',color:'#cbd5e1'}}/></td>
+          <td><select className="in" defaultValue={a.rep_name||salesReps[0]||'BATUL A'} onChange={e=>updateAct(a.id,'rep_name',e.target.value)} style={{fontSize:8,padding:'2px',width:85,color:'#64748b'}}>{salesReps.map(x=><option key={x}>{x}</option>)}{!salesReps.length&&<option>BATUL A</option>}</select></td>
           <td><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9}} onClick={()=>deleteAct(a.id)}>✕</button></td>
         </tr>)}
         {visits.length===0&&<tr><td colSpan={16} style={{textAlign:"center",color:"#64748b",padding:20}}>No visits found</td></tr>}
