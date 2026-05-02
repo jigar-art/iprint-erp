@@ -7432,6 +7432,30 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [billingReqs,setBillingReqs]=useState({}); // {site_id: {id, status, requested_by, created_at}}
   const canTogglePmt=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','VIDYA','APARNA','PRIYANKA','AMOL','CHANDNI','RUCHITA'].some(u=>uN.includes(u));})();
   const canRequestBilling=(()=>{const uN=(user?.name||'').toUpperCase();return ['VIDYA','APARNA'].some(u=>uN.includes(u));})();
+  // ─── Status Cleanup Tab (Item #2 — billing_status freeform hygiene) ───
+  // Canonical billing_status values — anything else renders red and qualifies as "messy"
+  const CANONICAL_BILLING_STATUSES=['Invoiced','Given for Billing','PO Pending','Photo Pending','Work Pending','Site Cancelled','Site Not Ready','Pending'];
+  const isCanonicalStatus=(s)=>!s||s===''||CANONICAL_BILLING_STATUSES.includes(s);
+  const canCleanup=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','AMOL','CHANDNI','RUCHITA','APARNA','VIDYA'].some(u=>uN.includes(u));})();
+  const [bankMode,setBankMode]=useState('sites'); // 'sites' | 'cleanup'
+  const [cleanupShowMessyOnly,setCleanupShowMessyOnly]=useState(true);
+  const [cleanupEditId,setCleanupEditId]=useState(null); // site.id being edited
+  const [cleanupDraft,setCleanupDraft]=useState({status:'',note:''});
+  const [cleanupPage,setCleanupPage]=useState(0);
+  const [cleanupSearch,setCleanupSearch]=useState('');
+  const cleanupPageSize=50;
+  const saveCleanup=async(site)=>{
+    const newStatus=cleanupDraft.status;
+    const newNote=(cleanupDraft.note||'').trim();
+    if(!newStatus){show('⚠️ Pick a canonical status first',false);return;}
+    const updates={billing_status:newStatus,billing_status_note:newNote||null};
+    const {error}=await sb.from('banking_sites').update(updates).eq('id',site.id);
+    if(error){show('⚠️ Save failed: '+error.message,false);return;}
+    setSites(p=>p.map(x=>x.id===site.id?{...x,...updates}:x));
+    setCleanupEditId(null);
+    setCleanupDraft({status:'',note:''});
+    show('✅ Updated '+(site.site_unique_id||site.id));
+  };
   React.useEffect(()=>{
     let alive=true;
     (async()=>{
@@ -7827,7 +7851,97 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
   if(loading)return <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:40}}><div className="loader"></div><span style={{marginLeft:8,color:'#64748b'}}>Loading Banking CRM...</span></div>;
 
+  // ─── Mode toggle row — visible at top of both modes ──────────────────────
+  const messyCount=(sites||[]).filter(s=>!isCanonicalStatus(s.billing_status)).length;
+  const ModeToggleBar=()=> (
+    <div style={{display:'flex',gap:6,alignItems:'center',background:'#0f172a',padding:'6px 8px',borderRadius:6,border:'1px solid #1e293b'}}>
+      <button className={`b bs ${bankMode==='sites'?'bp':''}`} onClick={()=>setBankMode('sites')} style={{fontSize:10,padding:'4px 10px'}}>📋 Sites View</button>
+      {canCleanup && <button className={`b bs ${bankMode==='cleanup'?'bp':''}`} onClick={()=>{setBankMode('cleanup');setCleanupPage(0);}} style={{fontSize:10,padding:'4px 10px',...(bankMode==='cleanup'?{background:'#dc262620',borderColor:'#dc2626',color:'#dc2626'}:{})}}>🧹 Status Cleanup{messyCount>0?` (${messyCount})`:''}</button>}
+      {bankMode==='cleanup' && <span style={{fontSize:9,color:'#64748b',marginLeft:'auto'}}>Showing {cleanupShowMessyOnly?messyCount:sites.length} site{(cleanupShowMessyOnly?messyCount:sites.length)===1?'':'s'}</span>}
+    </div>
+  );
+
+  // ─── Cleanup mode early-return ──────────────────────────────────────────
+  if(bankMode==='cleanup' && canCleanup){
+    const q=cleanupSearch.trim().toLowerCase();
+    let cleanupRows=cleanupShowMessyOnly?(sites||[]).filter(s=>!isCanonicalStatus(s.billing_status)):(sites||[]);
+    if(q)cleanupRows=cleanupRows.filter(s=>(s.site_unique_id||'').toLowerCase().includes(q)||(s.job_no||'').toLowerCase().includes(q)||(s.atm_id||'').toLowerCase().includes(q)||(s.client||'').toLowerCase().includes(q)||(s.project||'').toLowerCase().includes(q)||(s.billing_status||'').toLowerCase().includes(q));
+    const cleanupTotal=cleanupRows.length;
+    const cleanupTotalPages=Math.max(1,Math.ceil(cleanupTotal/cleanupPageSize));
+    const cleanupPaged=cleanupRows.slice(cleanupPage*cleanupPageSize,(cleanupPage+1)*cleanupPageSize);
+    return <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      <ModeToggleBar/>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+        <label style={{display:'flex',alignItems:'center',gap:4,fontSize:10,color:'#94a3b8',cursor:'pointer'}}>
+          <input type="checkbox" checked={cleanupShowMessyOnly} onChange={e=>{setCleanupShowMessyOnly(e.target.checked);setCleanupPage(0);}}/>
+          Show messy only
+        </label>
+        <input className="i" placeholder="Search UID / Job# / ATM / client / project / status" value={cleanupSearch} onChange={e=>{setCleanupSearch(e.target.value);setCleanupPage(0);}} style={{flex:1,minWidth:200,fontSize:10,padding:'4px 8px'}}/>
+        <span style={{fontSize:9,color:'#64748b'}}>Canonical: {CANONICAL_BILLING_STATUSES.join(' · ')}</span>
+      </div>
+      <div style={{overflowX:'auto',background:'#0f172a',borderRadius:6,border:'1px solid #1e293b'}}>
+        <table style={{width:'100%',fontSize:10,borderCollapse:'collapse'}}>
+          <thead style={{background:'#1e293b',position:'sticky',top:0}}>
+            <tr>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8',whiteSpace:'nowrap'}}>Site UID</th>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8',whiteSpace:'nowrap'}}>Job#</th>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8',whiteSpace:'nowrap'}}>ATM ID</th>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8'}}>Client / Project</th>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8',minWidth:160}}>billing_status</th>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8',minWidth:140}}>Note</th>
+              <th style={{padding:'6px 8px',textAlign:'left',color:'#94a3b8',whiteSpace:'nowrap'}}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cleanupPaged.length===0 && <tr><td colSpan={7} style={{padding:30,textAlign:'center',color:'#64748b'}}>{cleanupShowMessyOnly?'🎉 No messy rows match.':'No sites match.'}</td></tr>}
+            {cleanupPaged.map(site=>{
+              const messy=!isCanonicalStatus(site.billing_status);
+              const isEditing=cleanupEditId===site.id;
+              return <tr key={site.id} style={{borderTop:'1px solid #1e293b'}}>
+                <td style={{padding:'6px 8px',color:'#cbd5e1',fontFamily:'monospace',whiteSpace:'nowrap'}}>{site.site_unique_id||'—'}</td>
+                <td style={{padding:'6px 8px',color:'#cbd5e1',fontFamily:'monospace',whiteSpace:'nowrap'}}>{site.job_no||'—'}</td>
+                <td style={{padding:'6px 8px',color:'#cbd5e1',fontFamily:'monospace',whiteSpace:'nowrap'}}>{site.atm_id||'—'}</td>
+                <td style={{padding:'6px 8px',color:'#cbd5e1',maxWidth:240,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={(site.client||'')+' / '+(site.project||'')}>{site.client||'—'}<br/><span style={{fontSize:9,color:'#64748b'}}>{site.project||'—'}</span></td>
+                <td style={{padding:'6px 8px'}}>
+                  {isEditing ? (
+                    <select className="i" value={cleanupDraft.status} onChange={e=>setCleanupDraft(d=>({...d,status:e.target.value}))} style={{fontSize:10,padding:'3px 6px',width:'100%'}}>
+                      <option value="">— pick canonical —</option>
+                      {CANONICAL_BILLING_STATUSES.map(c=><option key={c} value={c}>{c}</option>)}
+                    </select>
+                  ) : (
+                    <span style={{color:messy?'#f87171':'#4ade80',fontWeight:messy?700:400}} title={messy?'Non-canonical (messy)':'Canonical'}>{site.billing_status||<em style={{color:'#64748b'}}>(blank)</em>}</span>
+                  )}
+                </td>
+                <td style={{padding:'6px 8px',color:'#94a3b8',fontSize:9,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis'}} title={site.billing_status_note||''}>
+                  {isEditing ? (
+                    <input className="i" value={cleanupDraft.note} onChange={e=>setCleanupDraft(d=>({...d,note:e.target.value}))} placeholder="optional note" style={{fontSize:10,padding:'3px 6px',width:'100%'}}/>
+                  ) : (site.billing_status_note||<em style={{color:'#475569'}}>—</em>)}
+                </td>
+                <td style={{padding:'6px 8px',whiteSpace:'nowrap'}}>
+                  {isEditing ? (
+                    <span style={{display:'flex',gap:4}}>
+                      <button className="b bs bp" onClick={()=>saveCleanup(site)} style={{fontSize:10,padding:'3px 8px'}}>💾 Save</button>
+                      <button className="b bs" onClick={()=>{setCleanupEditId(null);setCleanupDraft({status:'',note:''});}} style={{fontSize:10,padding:'3px 8px'}}>✕</button>
+                    </span>
+                  ) : (
+                    <button className="b bs" onClick={()=>{setCleanupEditId(site.id);setCleanupDraft({status:isCanonicalStatus(site.billing_status)?(site.billing_status||''):'',note:messy?(site.billing_status||''):(site.billing_status_note||'')});}} style={{fontSize:10,padding:'3px 8px'}}>✏️ Edit</button>
+                  )}
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+      {cleanupTotalPages>1 && <div style={{display:'flex',gap:4,alignItems:'center',justifyContent:'center'}}>
+        <button className="b bs" disabled={cleanupPage===0} onClick={()=>setCleanupPage(p=>Math.max(0,p-1))} style={{fontSize:10}}>‹ Prev</button>
+        <span style={{fontSize:10,color:'#94a3b8'}}>Page {cleanupPage+1} / {cleanupTotalPages}</span>
+        <button className="b bs" disabled={cleanupPage>=cleanupTotalPages-1} onClick={()=>setCleanupPage(p=>Math.min(cleanupTotalPages-1,p+1))} style={{fontSize:10}}>Next ›</button>
+      </div>}
+    </div>;
+  }
+
   return <div style={{display:'flex',flexDirection:'column',gap:8}}>
+    <ModeToggleBar/>
     {/* Project Tabs */}
     <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
       <button className={`b bs ${tab==='ALL'?'bp':''}`} onClick={()=>{setTab('ALL');setPage(0);}}>All ({sites.length})</button>
