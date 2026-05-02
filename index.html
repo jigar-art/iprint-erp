@@ -587,6 +587,8 @@ document.addEventListener('click',function(e){
     '<div><label style="font-size:8px;color:#64748b;font-weight:600">UNIT (Billing)</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"'+(window._canSeeRates===false?' disabled':'')+(window._canSeeRates===false?' title="Not authorized"':'')+'>'+UNIT_MODES.map(u=>'<option value="'+u.value+'"'+(u.value===(it.rate_mode||'SqFt (INCH)')?' selected':'')+'>'+u.label+'</option>').join('')+'</select></div>'+
     (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="'+(it.rate||0)+'" style="width:100%;font-size:11px;box-sizing:border-box"/></div>':'<input id="_eR" type="hidden" value="'+(it.rate||0)+'"/>')+
     (window._canSeeRates!==false?'<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">'+[0,5,12,18,28].map(g=>'<option value="'+g+'"'+(g===(it.gstPct!=null?it.gstPct:18)?' selected':'')+'>'+g+'%</option>').join('')+'</select></div>':'<input id="_eGST" type="hidden" value="'+(it.gstPct!=null?it.gstPct:18)+'"/>')+
+    // Bundle 3 C2 (02 May 26): Remarks field — optional per-line-item note. NULL when blank.
+    '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">REMARKS (optional)</label><textarea id="_eRemarks" class="in" rows="2" placeholder="Internal note for this line item…" style="width:100%;font-size:10px;box-sizing:border-box;resize:vertical;font-family:inherit">'+esc(it.remarks||'')+'</textarea></div>'+
     '</div>'+
     '<div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>';
   document.body.appendChild(d);d.showModal();
@@ -598,13 +600,16 @@ document.addEventListener('click',function(e){
     const q=+d.querySelector('#_eQ').value||1;const r=+d.querySelector('#_eR').value||0;
     const rm=d.querySelector('#_eRM').value||'UNIT';const su=d.querySelector('#_eSU').value||'MM';
     const _gpRaw=d.querySelector('#_eGST').value;const gp=(_gpRaw===''||_gpRaw==null)?18:+_gpRaw;
+    // Bundle 3 C2: trim & normalize blank to null so the column stays truly empty per its NULL default.
+    const _remRaw=(d.querySelector('#_eRemarks')?.value||'').trim();
+    const _remarks=_remRaw===''?null:_remRaw;
     const um2=getUnitMode(rm);
     const sq=um2.areaFn(w,h,q);
     const total=um2.totalFn(sq,q,r);
     const gst=Math.round(total*(gp/100)*100)/100;
     const updates={internal_name:d.querySelector('#_eName').value,media:d.querySelector('#_eMedia').value,
       width:String(w||d.querySelector('#_eW').value),height:String(h||d.querySelector('#_eH').value),
-      qty:q,rate:r,rate_mode:rm,size_unit:su,sqft:sq,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100};
+      qty:q,rate:r,rate_mode:rm,size_unit:su,sqft:sq,total,gst,gstPct:gp,amount:Math.round((total+gst)*100)/100,remarks:_remarks};
     const saveBtn=d.querySelector('#_eSave');saveBtn.textContent='⏳ Saving...';saveBtn.disabled=true;
     try{const {error}=await window._sbRef.from('line_items').update(updates).eq('id',itemId);
       if(error){if(window._showToast)window._showToast("⚠️ SAVE FAILED: "+error.message,false);saveBtn.textContent='💾 Save Item';saveBtn.disabled=false;return;}
@@ -1625,7 +1630,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   // Bundle 3 (02 May 26): Estimate PDF print presets — controls which columns appear.
   // 'internal'=full+internal_name, 'customer'=full+client_name (hide media), 'billing'=minimal, 'custom'=user toggles.
   const [pdfPreset,setPdfPreset]=useState('internal');
-  const [pdfCols,setPdfCols]=useState({sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true});
+  const [pdfCols,setPdfCols]=useState({sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true,remarks:false});
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
   const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
   const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
@@ -3074,12 +3079,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       </div>
       {pdfMode==='estimate'&&(()=>{
         const PRESETS=[
-          {k:'internal',n:'🔧 Internal',d:'Full detail (internal names + media)',cols:{sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true}},
-          {k:'customer',n:'👥 Customer',d:'Client-facing (client names, no media)',cols:{sr:true,desc:true,img:true,media:false,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true}},
-          {k:'billing',n:'🧾 Billing',d:'Minimal (qty + amounts only)',cols:{sr:true,desc:true,img:false,media:false,size:false,qty:true,uom:false,rate:true,total:true,gst:true,amt:true}},
+          {k:'internal',n:'🔧 Internal',d:'Full detail (internal names + media + remarks)',cols:{sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true,remarks:true}},
+          {k:'customer',n:'👥 Customer',d:'Client-facing (client names, no media, no remarks)',cols:{sr:true,desc:true,img:true,media:false,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true,remarks:false}},
+          {k:'billing',n:'🧾 Billing',d:'Minimal (qty + amounts only)',cols:{sr:true,desc:true,img:false,media:false,size:false,qty:true,uom:false,rate:true,total:true,gst:true,amt:true,remarks:false}},
           {k:'custom',n:'⚙️ Custom',d:'Toggle each column individually',cols:null}
         ];
-        const COL_DEFS=[{k:'sr',n:'#'},{k:'desc',n:'Description'},{k:'img',n:'Image'},{k:'media',n:'Material/Spec'},{k:'size',n:'Size'},{k:'qty',n:'Qty'},{k:'uom',n:'UOM'},{k:'rate',n:'Rate'},{k:'total',n:'Total'},{k:'gst',n:'GST'},{k:'amt',n:'Amount'}];
+        const COL_DEFS=[{k:'sr',n:'#'},{k:'desc',n:'Description'},{k:'img',n:'Image'},{k:'media',n:'Material/Spec'},{k:'size',n:'Size'},{k:'qty',n:'Qty'},{k:'uom',n:'UOM'},{k:'rate',n:'Rate'},{k:'total',n:'Total'},{k:'gst',n:'GST'},{k:'amt',n:'Amount'},{k:'remarks',n:'Remarks'}];
         return <div style={{marginBottom:10,padding:8,background:"#0a0f1a",borderRadius:6,border:"1px solid #1a2030"}}>
           <p style={{fontSize:9,color:"#64748b",fontWeight:600,marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>Print Preset</p>
           <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
@@ -3117,21 +3122,21 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             const totSub=selItems.reduce((s,it)=>s+(+it.total||0),0);const totGst=selItems.reduce((s,it)=>s+(+it.gst||0),0);const totAmt=selItems.reduce((s,it)=>s+(+it.amount||0),0);const totQty=selItems.reduce((s,it)=>s+(+it.qty||0),0);const totSqft=Math.round(selItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
             const hasImg=selItems.some(it=>it.img_url);
             // Bundle 3 (02 May): apply print preset column filters
-            const _C=pdfCols||{sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true};
+            const _C=pdfCols||{sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true,remarks:false};
             const _useInternalDesc=(pdfPreset==='internal')||(pdfPreset==='custom'&&vm==='internal');
             const _showImg=_C.img&&hasImg;
             // Left-side label columns (sr+desc+img+media+size) all collapse into the TOTAL colspan
-            const _leftCols=[_C.sr,_C.desc,_showImg,_C.media,_C.size].filter(Boolean).length;
+            const _leftCols=[_C.sr,_C.desc,_showImg,_C.media,_C.remarks,_C.size].filter(Boolean).length;
             // Build header dynamically
             const _th=(on,label)=>on?'<th>'+label+'</th>':'';
             const _td=(on,html,cls)=>on?'<td'+(cls?' class="'+cls+'"':'')+'>'+html+'</td>':'';
-            const _headerRow='<tr>'+_th(_C.sr,'#')+_th(_C.desc,'Description')+_th(_showImg,'Image')+_th(_C.media,'Material/Spec')+_th(_C.size,'Size (W×H)')+_th(_C.qty,'Qty')+_th(_C.uom,resolveUomHeader(selItems))+_th(_C.rate,'Rate')+_th(_C.total,'Total')+_th(_C.gst,'GST')+_th(_C.amt,'Amount')+'</tr>';
+            const _headerRow='<tr>'+_th(_C.sr,'#')+_th(_C.desc,'Description')+_th(_showImg,'Image')+_th(_C.media,'Material/Spec')+_th(_C.remarks,'Remarks')+_th(_C.size,'Size (W×H)')+_th(_C.qty,'Qty')+_th(_C.uom,resolveUomHeader(selItems))+_th(_C.rate,'Rate')+_th(_C.total,'Total')+_th(_C.gst,'GST')+_th(_C.amt,'Amount')+'</tr>';
             const batchLabel=selBatches.length<(j.batches||[]).length?' (Batches: '+selBatches.map((_,i)=>i+1).join(', ')+')':'';
             const estHtml=`<html><head><title>Estimate ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px;color:#222;font-size:11px}h1{font-size:18px;margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ccc;padding:5px 6px;font-size:10px;text-align:left}th{background:#f5f5f5;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:60px;max-height:60px;border-radius:3px}.hdr{display:flex;justify-content:space-between;margin-bottom:20px}.info{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:16px}.info b{color:#555}.total{background:#fef3c7;font-weight:700}.terms{margin-top:16px;font-size:10px;color:#666}.refs{margin-top:16px}.refs img{max-width:200px;max-height:200px;border:1px solid #ccc;border-radius:4px;margin:4px}@media print{body{padding:10px}}</style></head><body>`+
               `<div class="hdr"><div><h1>${fm.short_name||''}</h1><p style="font-size:10px;color:#666">${fm.address||''}</p><p style="font-size:10px;color:#666">GST: ${fm.gst||''}</p></div><div style="text-align:right"><h2 style="font-size:16px;color:#c87d08">ESTIMATE</h2><p style="font-size:13px;font-weight:700">${j.id}${batchLabel}</p><p style="font-size:10px">Date: ${td()}</p><p style="font-size:9px;color:#888">${({internal:'Internal',customer:'Customer Copy',billing:'Billing Copy',custom:'Custom'}[pdfPreset]||'')}</p></div></div>`+
               `<div class="info"><div><b>Client:</b> ${j.client_name||''}</div><div><b>Contact:</b> ${j.contact_person||''} ${j.contact_no||''}</div><div><b>Project:</b> ${j.project||''}</div><div><b>PO #:</b> ${j.po_number||'—'}</div><div><b>Delivery:</b> ${j.delivery_address||''}</div>${j.billing_address?'<div><b>Billing Address:</b> '+j.billing_address+'</div>':''}<div><b>Firm:</b> ${fm.name||''}</div>${j.client_gst&&j.client_gst!=='27XXXXX'?'<div><b>Client GST:</b> '+j.client_gst+'</div>':''}${j.billing_name?'<div><b>Billing Name:</b> '+j.billing_name+'</div>':''}</div>`+
               `<table><thead>${_headerRow}</thead><tbody>`+
-              selItems.map((it,i)=>{const u=getUomLabel(it.rate_mode);const hasWH=(+it.width>0)&&(+it.height>0);const sizeTxt=hasWH?(it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:'')):'—';const sqftTxt=it.sqft?(it.sqft+u.suffix):'—';const _descTxt=_useInternalDesc?(it.internal_name||''):(it.client_name||it.internal_name||'');return '<tr>'+_td(_C.sr,String(i+1))+_td(_C.desc,_descTxt)+_td(_showImg,(it.img_url?'<img src="'+it.img_url+'"/>':'—'))+_td(_C.media,(it.media||''))+_td(_C.size,sizeTxt,'r')+_td(_C.qty,String(it.qty),'r')+_td(_C.uom,sqftTxt,'r')+_td(_C.rate,'₹'+(+it.rate||0).toFixed(2),'r')+_td(_C.total,'₹'+(+it.total||0).toFixed(2),'r')+_td(_C.gst,'₹'+(+it.gst||0).toFixed(2),'r')+_td(_C.amt,'<b>₹'+(+it.amount||0).toFixed(2)+'</b>','r')+'</tr>';}).join('')+
+              selItems.map((it,i)=>{const u=getUomLabel(it.rate_mode);const hasWH=(+it.width>0)&&(+it.height>0);const sizeTxt=hasWH?(it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:'')):'—';const sqftTxt=it.sqft?(it.sqft+u.suffix):'—';const _descTxt=_useInternalDesc?(it.internal_name||''):(it.client_name||it.internal_name||'');return '<tr>'+_td(_C.sr,String(i+1))+_td(_C.desc,_descTxt)+_td(_showImg,(it.img_url?'<img src="'+it.img_url+'"/>':'—'))+_td(_C.media,(it.media||''))+_td(_C.remarks,(it.remarks||'—'))+_td(_C.size,sizeTxt,'r')+_td(_C.qty,String(it.qty),'r')+_td(_C.uom,sqftTxt,'r')+_td(_C.rate,'₹'+(+it.rate||0).toFixed(2),'r')+_td(_C.total,'₹'+(+it.total||0).toFixed(2),'r')+_td(_C.gst,'₹'+(+it.gst||0).toFixed(2),'r')+_td(_C.amt,'<b>₹'+(+it.amount||0).toFixed(2)+'</b>','r')+'</tr>';}).join('')+
               '<tr class="total">'+(_leftCols>0?'<td colspan="'+_leftCols+'" style="text-align:right"><b>TOTAL</b></td>':'')+_td(_C.qty,'<b>'+totQty+'</b>','r')+_td(_C.uom,'<b>'+totSqft+'</b>','r')+_td(_C.rate,'','r')+_td(_C.total,'<b>₹'+totSub.toFixed(2)+'</b>','r')+_td(_C.gst,'<b>₹'+totGst.toFixed(2)+'</b>','r')+_td(_C.amt,'<b>₹'+totAmt.toFixed(2)+'</b>','r')+'</tr></tbody></table>'+
               (_showImg&&selItems.some(it=>it.img_url)?'<div class="refs"><h3 style="font-size:12px;margin-bottom:6px">Design References</h3><div style="display:flex;flex-wrap:wrap;gap:8px">'+selItems.filter(it=>it.img_url).map((it,i)=>'<div style="text-align:center"><img src="'+it.img_url+'"/><p style="font-size:8px;color:#666">'+(_useInternalDesc?(it.internal_name||'Item '+(i+1)):(it.client_name||it.internal_name||'Item '+(i+1)))+'</p></div>').join('')+'</div></div>':'')+
               `<div class="terms"><p><b>Terms & Conditions:</b></p><p>${j.payment_terms||'50% Advance. Rest within 30 days.'}</p><p style="margin-top:4px"><b>Purchase Order:</b> We would require a P.O on the name of ${fm.name||''}</p></div></body></html>`;
