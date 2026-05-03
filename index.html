@@ -7747,6 +7747,14 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       show('Error: '+error.message);return;
     }
     setInvoicesBySite(p=>({...p,[site.id]:[data,...(p[site.id]||[])]}));
+    // ── Mirror to banking_sites so Banking CRM "Invoiced" count moves (03 May 26 fix) ──
+    // Without this, site_invoices grows but billing_category stays 'Other'/'Given for Billing'
+    // and Vidya's "Invoiced" tile + the "Pending" filter never reflect her work. Payment status
+    // intentionally untouched — payments are tracked in Tally, not iPrint ERP.
+    const siteUpdates={invoice_number:v,billing_category:'Invoiced'};
+    const {error:siteErr}=await sb.from('banking_sites').update(siteUpdates).eq('id',site.id);
+    if(siteErr){show('⚠️ Invoice saved but site update failed: '+siteErr.message,false);}
+    else{setSites(p=>p.map(x=>x.id===site.id?{...x,...siteUpdates}:x));}
     setShowAddInvoice(null);setNewInvoiceNo('');setNewInvoiceDate('');
     show('Invoice added!');
   };
