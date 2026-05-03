@@ -1143,7 +1143,10 @@ function MainApp({user,onLogout,masterData}){
   // use the canonical internal_name on their line items, and push the
   // returned row into their local `products` array (consistent with
   // addNewClient/addNewMaterial pattern). Returns null on hard failure.
-  const addNewProduct = useCallback(async (rawName, rawClientName, productsList) => {
+  // 03 May 26: 4th param `extra` is optional. When called from PR form with
+  // {rate, gst_pct} we persist them on the new products row so future PR picks
+  // can prefill. Backward-compatible — existing 3-arg callers unchanged.
+  const addNewProduct = useCallback(async (rawName, rawClientName, productsList, extra) => {
     const name = String(rawName||'').trim();
     if(!name) return null;
     const cliName = String(rawClientName||'').trim() || name;
@@ -1152,6 +1155,12 @@ function MainApp({user,onLogout,masterData}){
     if(hit) return {row:hit, isNew:false};
     const id = 'P'+uid();
     const row = {id, internal_name:name, client_name:cliName, code:'', active:true};
+    if(extra && typeof extra === 'object'){
+      const r = +extra.rate;
+      if(Number.isFinite(r) && r > 0) row.rate = r;
+      const g = +extra.gst_pct;
+      if(Number.isFinite(g) && g >= 0) row.gst_pct = g;
+    }
     const {error} = await sb.from('products').insert(row);
     if(error){show("Add material failed: "+error.message,false);return null;}
     show("Material '"+name+"' added!");
@@ -2087,6 +2096,10 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       },[vendors,prf.request_type]);
 
       const updItem=(i,k,v)=>setPrf(p=>({...p,items:p.items.map((x,xi)=>xi===i?{...x,[k]:v}:x)}));
+      // 03 May 26: batch update multiple keys atomically (used by MaterialPicker
+      // to fill name + rate + gst in one render — avoids stale-state bugs with 3
+      // sequential setPrf calls).
+      const updItemMulti=(i,patch)=>setPrf(p=>({...p,items:p.items.map((x,xi)=>xi===i?{...x,...patch}:x)}));
       const addItem=()=>setPrf(p=>({...p,items:[...p.items,{...blankItem}]}));
       const delItem=(i)=>setPrf(p=>({...p,items:p.items.filter((_,xi)=>xi!==i)}));
 
@@ -2263,6 +2276,31 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         const {error}=await sb.from('purchase_requests').insert(rec);
         setSaving(false);
         if(error){show('⚠️ Save failed: '+error.message,false);return;}
+        // 03 May 26: PR writeback — for each line item that matches a known product,
+        // upsert rate/gst_pct on the products row. Rule: rate only overwrites if higher
+        // or currently NULL (protects standard rates from one-off discounts); gst_pct is
+        // last-write-wins. New products auto-added during the PR already carry these
+        // values via addNewProduct's `extra` param. Fire-and-forget; failures don't
+        // block the user-facing success toast.
+        (async ()=>{
+          try{
+            const list=products||[];
+            for(const it of (rec.items||[])){
+              const name=String(it.product||'').trim();
+              if(!name) continue;
+              const r=+it.rate; const g=+it.gst_pct;
+              if(!Number.isFinite(r)||r<=0) continue;
+              const hit=list.find(p=>String(p.internal_name||'').trim().toLowerCase()===name.toLowerCase());
+              if(!hit) continue;
+              const updates={};
+              if(hit.rate==null || +hit.rate < r) updates.rate=r;
+              if(Number.isFinite(g)) updates.gst_pct=g;
+              if(Object.keys(updates).length===0) continue;
+              const {error:uerr}=await sb.from('products').update(updates).eq('id',hit.id);
+              if(!uerr){ Object.assign(hit,updates); }
+            }
+          }catch(_){}
+        })();
         setPrs(p=>[...p,rec]);
         show('✅ '+pr_no+' submitted for Jigar\'s approval!');
         setPrf(blankForm);
@@ -2592,7 +2630,35 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                   })}));
                 };
                 return <tr key={xi}>
-                  <td><input className="in" value={x.product} onChange={e=>updItem(xi,'product',e.target.value)} placeholder="e.g. 2.5mm Clear Acrylic Sheet" style={{fontSize:9,padding:"2px 4px",width:"100%"}}/></td>
+                  {/* 03 May 26: MaterialPicker on PR row — autocomplete from products,
+                      prefills rate + gst_pct from the picked row, auto-adds new entries
+                      via addNewProduct. All fields stay editable inline (e.g. for discounts). */}
+                  <td><div style={{width:"100%"}}><MaterialPicker
+                    value={x.product}
+                    products={products||[]}
+                    placeholder="Search material or type new..."
+                    onPick={(picked)=>{
+                      const list=products||[];
+                      const hit=list.find(p=>String(p.internal_name||'').trim().toLowerCase()===String(picked.internal_name||'').trim().toLowerCase());
+                      const patch={product:picked.internal_name||''};
+                      if(hit){
+                        if(hit.rate!=null && Number.isFinite(+hit.rate) && +hit.rate>0) patch.rate=+hit.rate;
+                        if(hit.gst_pct!=null && Number.isFinite(+hit.gst_pct)) patch.gst_pct=+hit.gst_pct;
+                      }
+                      updItemMulti(xi,patch);
+                    }}
+                    onAddNew={async(name)=>{
+                      if(typeof addNewProduct!=='function'){updItem(xi,'product',name);return;}
+                      const r=await addNewProduct(name,name,products||[]);
+                      if(r&&r.row){
+                        if(r.isNew&&Array.isArray(products))products.push(r.row);
+                        const patch={product:r.row.internal_name};
+                        if(r.row.rate!=null && Number.isFinite(+r.row.rate) && +r.row.rate>0) patch.rate=+r.row.rate;
+                        if(r.row.gst_pct!=null && Number.isFinite(+r.row.gst_pct)) patch.gst_pct=+r.row.gst_pct;
+                        updItemMulti(xi,patch);
+                      }
+                    }}
+                  /></div></td>
                   <td>
                     <div style={{display:"flex",alignItems:"center",gap:2}}>
                       <input className="in mn" type="text" inputMode="decimal" pattern="[0-9.]*" value={x.width||''} disabled={whDisabled} onChange={e=>{const v=e.target.value;if(v===''||/^\d*\.?\d*$/.test(v))onDimChange('width',v);}} placeholder={whDisabled?'—':um.dimUnit} style={{fontSize:9,padding:"2px 4px",flex:1,minWidth:0,background:whDisabled?"#0a0f1a":"transparent",color:whDisabled?"#475569":"inherit"}}/>
