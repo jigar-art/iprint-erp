@@ -9187,12 +9187,21 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
   const TEAM_VIEWERS = ['JIGAR','CHANDNI'];
   const isTeamViewer = TEAM_VIEWERS.some(u => uname.includes(u));
 
-  // Tabs: 'me' for everyone; 'stalls' + 'output' for team viewers only
+  // Tabs: 'me' for everyone; 'stalls' + 'output' + 'standup' for team viewers only
   const [tab, setTab] = React.useState('me');
   const [period, setPeriod] = React.useState('today'); // today | week | month
   const [thresholds, setThresholds] = React.useState({pr_hours:48,billing_hours:48,job_days:14,banking_days:30});
   const [editThresh, setEditThresh] = React.useState(false);
   const [draftThresh, setDraftThresh] = React.useState(thresholds);
+
+  // Digest state (Deploy 3)
+  const DEFAULT_DIGEST = {enabled:false, recipients:['Jigar','Chandni'], sections:{stalls:true,output:true,standup:true,value:true}, schedule_label:'8:00 PM IST · Mon-Sat', last_run_at:null, last_run_status:null};
+  const [digestCfg, setDigestCfg] = React.useState(DEFAULT_DIGEST);
+  const [editDigest, setEditDigest] = React.useState(false);
+  const [draftDigest, setDraftDigest] = React.useState(DEFAULT_DIGEST);
+  const [savingDigest, setSavingDigest] = React.useState(false);
+  const [testingDigest, setTestingDigest] = React.useState(false);
+  const [digestPreview, setDigestPreview] = React.useState(null);
 
   // Live data (queried on mount + period/tab change)
   const [billingReqs, setBillingReqs] = React.useState([]);
@@ -9225,12 +9234,19 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
     return d === 0 || d === 6;
   }, []);
 
-  // Load thresholds
+  // Load thresholds + digest config
   React.useEffect(() => {
     sb.from('app_settings').select('value').eq('key','stall_thresholds').single().then(({data,error}) => {
       if (!error && data?.value) {
         setThresholds(data.value);
         setDraftThresh(data.value);
+      }
+    });
+    sb.from('app_settings').select('value').eq('key','digest_config').single().then(({data,error}) => {
+      if (!error && data?.value) {
+        const merged = {...DEFAULT_DIGEST, ...data.value, sections: {...DEFAULT_DIGEST.sections, ...(data.value.sections||{})}};
+        setDigestCfg(merged);
+        setDraftDigest(merged);
       }
     });
   }, []);
@@ -9385,6 +9401,51 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
     show?.('Thresholds saved');
   };
 
+  // ── DIGEST CONFIG SAVE ──────────────────────────────────
+  const saveDigest = async () => {
+    setSavingDigest(true);
+    const v = {
+      enabled: !!draftDigest.enabled,
+      recipients: Array.isArray(draftDigest.recipients) && draftDigest.recipients.length ? draftDigest.recipients.slice(0,8) : ['Jigar','Chandni'],
+      sections: {
+        stalls:  draftDigest.sections?.stalls  !== false,
+        output:  draftDigest.sections?.output  !== false,
+        standup: draftDigest.sections?.standup !== false,
+        value:   draftDigest.sections?.value   !== false,
+      },
+      schedule_label: digestCfg.schedule_label || '8:00 PM IST · Mon-Sat',
+      last_run_at:    digestCfg.last_run_at,
+      last_run_status: digestCfg.last_run_status,
+    };
+    const {error} = await sb.from('app_settings').update({value: v, updated_at: new Date().toISOString(), updated_by: uname}).eq('key','digest_config');
+    setSavingDigest(false);
+    if (error) { show?.('Failed to save: ' + error.message, false); return; }
+    setDigestCfg(v);
+    setEditDigest(false);
+    show?.(v.enabled ? 'Digest enabled · sends Mon-Sat 8 PM' : 'Digest config saved (currently disabled)');
+  };
+
+  // ── DIGEST TEST (manual trigger; respects enabled flag) ─
+  const testDigest = async () => {
+    setTestingDigest(true);
+    setDigestPreview(null);
+    try {
+      const res = await fetch('/api/cron/daily-digest?manual=1', {method:'GET'});
+      const data = await res.json().catch(()=>({}));
+      setDigestPreview(data);
+      if (data.ok && data.status === 'sent')               show?.('Digest test sent ✅');
+      else if (data.status === 'skipped_disabled')         show?.('Digest skipped (disabled). Preview shown below.');
+      else if (data.status === 'partial')                  show?.('Digest partial — see results below', false);
+      else if (data.status === 'failed')                   show?.('Digest failed — see results below', false);
+      else                                                 show?.('Digest test responded · status='+(data.status||'?'));
+    } catch (e) {
+      show?.('Test failed: '+e.message, false);
+      setDigestPreview({ok:false, error:e.message});
+    } finally {
+      setTestingDigest(false);
+    }
+  };
+
   // ── STANDUP POST/UPDATE (Deploy 2) ──────────────────────
   const myLogToday = React.useMemo(
     () => (todayLogs||[]).find(l => (l.user_name||'').toUpperCase() === uname) || null,
@@ -9487,6 +9548,12 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
           <button className="b bs" onClick={()=>{setDraftThresh(thresholds);setEditThresh(true);}}
             style={{fontSize:9,padding:'4px 8px'}}>⚙️ Thresholds</button>
         )}
+        {isTeamViewer && (tab === 'stalls' || tab === 'output') && (
+          <button className="b bs" onClick={()=>{setDraftDigest(digestCfg);setEditDigest(true);setDigestPreview(null);}}
+            style={{fontSize:9,padding:'4px 8px',background: digestCfg.enabled ? '#30b54a20' : undefined,borderColor: digestCfg.enabled ? '#30b54a' : undefined}}>
+            📨 Digest{digestCfg.enabled ? '' : ' · off'}
+          </button>
+        )}
       </div>
 
       {/* Sunday hint */}
@@ -9521,6 +9588,113 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
             <button className="b bp" onClick={saveThresholds} style={{flex:1,fontSize:11}}>Save</button>
             <button className="b" onClick={()=>setEditThresh(false)} style={{flex:1,fontSize:11}}>Cancel</button>
           </div>
+        </div>
+      </div>}
+
+      {/* Digest editor modal (Deploy 3) */}
+      {editDigest && <div onClick={()=>setEditDigest(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:10,overflow:'auto'}}>
+        <div onClick={e=>e.stopPropagation()} style={{background:'#0f1419',border:'1px solid #2a3548',borderRadius:10,padding:18,width:'100%',maxWidth:440,maxHeight:'92vh',overflow:'auto'}}>
+          <h3 style={{margin:0,fontSize:14,fontWeight:700,color:'#e3a008',marginBottom:6}}>📨 WhatsApp Digest</h3>
+          <p style={{fontSize:10,color:'#64748b',marginBottom:12}}>
+            Auto-sends a daily summary at <b>{digestCfg.schedule_label || '8:00 PM IST · Mon-Sat'}</b>.
+            Cron is registered with Vercel and runs on schedule; this toggle decides whether the WhatsApp message actually fires.
+            Until the Interakt template <code>iprint_daily_digest</code> is approved, leave this OFF.
+          </p>
+
+          {/* Master toggle */}
+          <div style={{...cardStyle, padding:'10px 12px', borderColor: draftDigest.enabled ? '#30b54a' : '#2a3548', background: draftDigest.enabled ? '#0f1a14' : '#0f1419'}}>
+            <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}>
+              <input type="checkbox" checked={!!draftDigest.enabled}
+                onChange={e => setDraftDigest(p => ({...p, enabled: e.target.checked}))}/>
+              <span style={{fontSize:12,fontWeight:700,color: draftDigest.enabled ? '#30b54a' : '#c9d1d9'}}>
+                {draftDigest.enabled ? '✅ Enabled — will send on schedule' : '⏸ Disabled — cron logs but no WA send'}
+              </span>
+            </label>
+          </div>
+
+          {/* Recipients */}
+          <div style={{marginTop:10}}>
+            <label style={{...labelStyle, display:'block',marginBottom:4}}>Recipients</label>
+            <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+              {(team||[]).map(t => {
+                const checked = (draftDigest.recipients||[]).includes(t.name);
+                return (
+                  <button key={t.name} className="b bs"
+                    onClick={() => setDraftDigest(p => {
+                      const r = new Set(p.recipients||[]);
+                      if (r.has(t.name)) r.delete(t.name); else r.add(t.name);
+                      return {...p, recipients:[...r]};
+                    })}
+                    style={{fontSize:9,padding:'4px 8px', background: checked ? '#0a84ff20' : '#161d2e', borderColor: checked ? '#0a84ff' : '#2a3548', color: checked ? '#0a84ff' : '#c9d1d9', fontWeight: checked ? 700 : 400}}>
+                    {checked ? '✓ ' : ''}{t.name}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{fontSize:9,color:'#64748b',marginTop:4}}>{(draftDigest.recipients||[]).length} selected</div>
+          </div>
+
+          {/* Sections */}
+          <div style={{marginTop:10}}>
+            <label style={{...labelStyle, display:'block',marginBottom:4}}>Sections to include</label>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4}}>
+              {[['stalls','🚨 Stalls'],['output','📈 Output'],['standup','📋 Standup'],['value','💰 Value']].map(([k,l]) => {
+                const on = draftDigest.sections?.[k] !== false;
+                return (
+                  <label key={k} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,cursor:'pointer',padding:'4px 6px',background:'#161d2e',borderRadius:4}}>
+                    <input type="checkbox" checked={on}
+                      onChange={e => setDraftDigest(p => ({...p, sections: {...p.sections, [k]: e.target.checked}}))}/>
+                    {l}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Last run status */}
+          <div style={{marginTop:10,padding:'6px 10px',background:'#161d2e',borderRadius:4,fontSize:10,color:'#64748b'}}>
+            <b>Last run:</b> {digestCfg.last_run_at
+              ? `${new Date(digestCfg.last_run_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})} · ${digestCfg.last_run_status || '?'}`
+              : 'never'}
+          </div>
+
+          {/* Actions */}
+          <div style={{display:'flex',gap:6,marginTop:12,flexWrap:'wrap'}}>
+            <button className="b bp" onClick={saveDigest} disabled={savingDigest} style={{flex:1,minWidth:90,fontSize:11,opacity:savingDigest?0.5:1}}>
+              {savingDigest ? 'Saving…' : 'Save'}
+            </button>
+            <button className="b" onClick={testDigest} disabled={testingDigest} style={{flex:1,minWidth:90,fontSize:11,opacity:testingDigest?0.5:1}}>
+              {testingDigest ? 'Testing…' : '🧪 Send test now'}
+            </button>
+            <button className="b" onClick={()=>setEditDigest(false)} style={{flex:1,minWidth:60,fontSize:11}}>Close</button>
+          </div>
+
+          {/* Test preview */}
+          {digestPreview && (
+            <div style={{marginTop:10,padding:10,background:'#161d2e',borderRadius:6,border:'1px solid #2a3548'}}>
+              <div style={{fontSize:10,fontWeight:700,color: digestPreview.status==='sent' ? '#30b54a' : digestPreview.status==='skipped_disabled' ? '#e3a008' : '#ff9500',marginBottom:6}}>
+                Status: {digestPreview.status || (digestPreview.ok ? 'ok' : 'error')}
+                {digestPreview.duration_ms != null ? ` · ${digestPreview.duration_ms}ms` : ''}
+              </div>
+              {digestPreview.preview?.text && (
+                <pre style={{fontSize:10,color:'#c9d1d9',whiteSpace:'pre-wrap',margin:0,fontFamily:'inherit',maxHeight:200,overflow:'auto'}}>{digestPreview.preview.text}</pre>
+              )}
+              {!digestPreview.preview?.text && digestPreview.preview?.traits && (
+                <pre style={{fontSize:9,color:'#8b949e',whiteSpace:'pre-wrap',margin:0,maxHeight:200,overflow:'auto'}}>{JSON.stringify(digestPreview.preview.traits, null, 2)}</pre>
+              )}
+              {Array.isArray(digestPreview.recipients) && digestPreview.recipients.length > 0 && (
+                <div style={{marginTop:6,fontSize:10,color:'#c9d1d9'}}>
+                  {digestPreview.recipients.map((r,i) => (
+                    <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'2px 0',borderBottom:'1px dashed #1a2030'}}>
+                      <span>{r.name}</span>
+                      <span style={{color: r.status==='sent' ? '#30b54a' : '#ff9500'}}>{r.status}{r.error?` · ${r.error}`:''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {digestPreview.error && <div style={{fontSize:10,color:'#ff3b30',marginTop:4}}>{digestPreview.error}</div>}
+            </div>
+          )}
         </div>
       </div>}
 
