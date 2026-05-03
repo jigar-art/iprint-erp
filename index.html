@@ -1348,7 +1348,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="myprs"&&<MyPRsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms} sm={setModal}/>}
           {pg==="po"&&<POPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
           {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
-          {pg==="reports"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} show={show}/>}
+          {pg==="reports"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} team={masterData.team} show={show}/>}
         </div>
       </main>
 
@@ -9182,7 +9182,7 @@ function JobNotesPage({jobs,user,show}){
 // Deploy 1 of 3 (04 May 26): Stalls + Output + My Report tabs.
 // Standup tab + WhatsApp Digest = Deploys 2 + 3.
 // ═══════════════════════════════════════════════════════════
-function ReportsPage({user, jobs, prs, salesActs, firms, show}){
+function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
   const uname = (user?.name||'').toUpperCase();
   const TEAM_VIEWERS = ['JIGAR','CHANDNI'];
   const isTeamViewer = TEAM_VIEWERS.some(u => uname.includes(u));
@@ -9200,6 +9200,15 @@ function ReportsPage({user, jobs, prs, salesActs, firms, show}){
   const [siteInvoices, setSiteInvoices] = React.useState([]);
   const [dcs, setDcs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+
+  // Standup state (Deploy 2)
+  const todayISO = React.useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }, []);
+  const [todayLogs, setTodayLogs] = React.useState([]);  // all logs for today (used by Standup feed)
+  const [draftBody, setDraftBody] = React.useState('');
+  const [posting, setPosting] = React.useState(false);
 
   // Period bounds in local time → ISO for query
   const periodBounds = React.useMemo(() => {
@@ -9235,13 +9244,18 @@ function ReportsPage({user, jobs, prs, salesActs, firms, show}){
       sb.from('banking_sites').select('site_unique_id,job_no,client,bank,project,installation_status,billing_status,payment_status,payment_status_changed_by,payment_status_changed_at,created_at').limit(6000),
       sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,invoice_date,added_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(2000),
       sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
+      sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at',{ascending:false}),
     ]).then(results => {
       if (!mounted) return;
-      const [br, bs, si, dc] = results;
+      const [br, bs, si, dc, dl] = results;
       setBillingReqs(br.data||[]);
       setBankSites(bs.data||[]);
       setSiteInvoices(si.data||[]);
       setDcs(dc.data||[]);
+      setTodayLogs(dl.data||[]);
+      // Hydrate the draft from my own log if I posted today
+      const mine = (dl.data||[]).find(l => (l.user_name||'').toUpperCase() === uname);
+      if (mine) setDraftBody(mine.body || '');
       setLoading(false);
     }).catch(e => {
       if (!mounted) return;
@@ -9371,6 +9385,75 @@ function ReportsPage({user, jobs, prs, salesActs, firms, show}){
     show?.('Thresholds saved');
   };
 
+  // ── STANDUP POST/UPDATE (Deploy 2) ──────────────────────
+  const myLogToday = React.useMemo(
+    () => (todayLogs||[]).find(l => (l.user_name||'').toUpperCase() === uname) || null,
+    [todayLogs, uname]
+  );
+  const postStandup = async () => {
+    const body = (draftBody||'').trim();
+    if (!body) { show?.('Write something first', false); return; }
+    setPosting(true);
+    const nowISO = new Date().toISOString();
+    const row = {user_name: uname, log_date: todayISO, body, updated_at: nowISO};
+    const {data, error} = await sb.from('daily_logs')
+      .upsert(row, {onConflict: 'user_name,log_date'})
+      .select('id,user_name,log_date,body,created_at,updated_at')
+      .single();
+    setPosting(false);
+    if (error) { show?.('Failed to post: ' + error.message, false); return; }
+    // Refresh today's feed in-place: replace mine if present, else prepend
+    setTodayLogs(prev => {
+      const others = (prev||[]).filter(l => (l.user_name||'').toUpperCase() !== uname);
+      return data ? [data, ...others] : others;
+    });
+    show?.(myLogToday ? 'Standup updated' : 'Standup posted');
+  };
+
+  // ── PER-USER ACTIVITY (for Standup auto-tagged badges) ──
+  // Re-uses the same period-bounded arrays as outputData / billingReqs / dcs.
+  // Returned shape: { JIGAR: {pr:7, appr:39, ...}, ... }
+  const perUserActivity = React.useMemo(() => {
+    const m = {};
+    const bump = (raw, key, n=1) => {
+      if (!raw) return;
+      const u = String(raw).toUpperCase().trim();
+      if (!u) return;
+      if (!m[u]) m[u] = {pr:0, appr:0, rej:0, po:0, recv:0, jobs:0, inv:0, dc:0, sales:0, bank:0, bill:0};
+      m[u][key] = (m[u][key]||0) + n;
+    };
+    outputData.prRaised.forEach(p => bump(p.created_by, 'pr'));
+    outputData.prApproved.forEach(p => bump(p.approved_by, 'appr'));
+    outputData.prRejected.forEach(p => bump(p.rejected_by, 'rej'));
+    outputData.poGenerated.forEach(p => bump(p.po_generated_by, 'po'));
+    outputData.poReceived.forEach(p => bump(p.received_by, 'recv'));
+    outputData.jobsCreated.forEach(j => bump(j.made_by, 'jobs'));
+    outputData.invoicesAdded.forEach(i => bump(i.added_by, 'inv'));
+    outputData.salesVisits.forEach(s => bump(s.rep_name, 'sales'));
+    (billingReqs||[]).filter(b => inPeriod(b.created_at)).forEach(b => bump(b.requested_by, 'bill'));
+    (billingReqs||[]).filter(b => inPeriod(b.decided_at)).forEach(b => bump(b.decided_by, 'appr'));
+    (dcs||[]).forEach(d => bump(d.created_by||d.delivered_by||d.prepared_by, 'dc'));
+    (bankSites||[]).filter(s => inPeriod(s.payment_status_changed_at)).forEach(s => bump(s.payment_status_changed_by, 'bank'));
+    return m;
+  }, [outputData, billingReqs, dcs, bankSites, period]);
+
+  // Build a compact "8 PRs · 2 banking edits" string from a user's bucket
+  const tagsFor = (uname2) => {
+    const b = perUserActivity[String(uname2||'').toUpperCase().trim()] || {};
+    const parts = [];
+    const total = (b.pr||0) + (b.appr||0) + (b.rej||0);
+    if (total > 0) parts.push(`${total} PR`);
+    if (b.po) parts.push(`${b.po} PO`);
+    if (b.recv) parts.push(`${b.recv} recv`);
+    if (b.jobs) parts.push(`${b.jobs} job${b.jobs>1?'s':''}`);
+    if (b.inv) parts.push(`${b.inv} inv`);
+    if (b.dc) parts.push(`${b.dc} DC`);
+    if (b.sales) parts.push(`${b.sales} sales`);
+    if (b.bank) parts.push(`${b.bank} banking`);
+    if (b.bill) parts.push(`${b.bill} billing`);
+    return parts.join(' · ');
+  };
+
   // ── COMMON STYLES ───────────────────────────────────────
   const cardStyle = {background:'#161d2e',border:'1px solid #1a2030',borderRadius:8,padding:'10px 12px',marginBottom:8};
   const sectionTitleStyle = {fontSize:9,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:6};
@@ -9392,6 +9475,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, show}){
           {tabBtn('me', '👤 My Report')}
           {isTeamViewer && tabBtn('stalls', '🚨 Stalls')}
           {isTeamViewer && tabBtn('output', '📈 Output')}
+          {isTeamViewer && tabBtn('standup', '📋 Standup')}
         </div>
         <div style={{flex:1}}/>
         <div style={{display:'flex',gap:3}}>
@@ -9445,6 +9529,31 @@ function ReportsPage({user, jobs, prs, salesActs, firms, show}){
       {/* ═════ MY REPORT TAB ═════ */}
       {!loading && tab === 'me' && (
         <div>
+          {/* Standup post box (Deploy 2) */}
+          <div style={{...cardStyle, borderColor: myLogToday ? '#30b54a40' : '#2a3548', background: myLogToday ? '#0f1a14' : '#0f1419'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+              <span style={{fontSize:11,fontWeight:700,color: myLogToday ? '#30b54a' : '#e3a008'}}>
+                {myLogToday ? '✅ Today\u2019s standup' : '📋 Post your standup'}
+              </span>
+              <span style={{fontSize:9,color:'#64748b'}}>
+                {new Date().toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})}
+              </span>
+              <div style={{flex:1}}/>
+              {myLogToday && <span style={{fontSize:9,color:'#64748b'}}>posted {fmtAge(ageHours(myLogToday.updated_at))} ago</span>}
+            </div>
+            <textarea className="in" value={draftBody} onChange={e=>setDraftBody(e.target.value)}
+              placeholder="What did you do today? What's stuck? What's next?"
+              rows={3}
+              style={{width:'100%',fontSize:11,padding:'8px 10px',resize:'vertical',boxSizing:'border-box',fontFamily:'inherit'}}/>
+            <div style={{display:'flex',gap:6,marginTop:6,alignItems:'center'}}>
+              <button className="b bp" onClick={postStandup} disabled={posting||!draftBody.trim()}
+                style={{fontSize:11,padding:'6px 14px',opacity: posting||!draftBody.trim() ? 0.5 : 1}}>
+                {posting ? 'Saving…' : (myLogToday ? 'Update' : 'Post')}
+              </button>
+              {tagsFor(uname) && <span style={{fontSize:9,color:'#64748b'}}>auto-tagged: {tagsFor(uname)}</span>}
+            </div>
+          </div>
+
           <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:10}}>
             <h2 style={{margin:0,fontSize:15,fontWeight:700}}>👤 {user?.name || uname}</h2>
             <span style={{fontSize:10,color:'#64748b'}}>{periodBounds.label}</span>
@@ -9689,6 +9798,80 @@ function ReportsPage({user, jobs, prs, salesActs, firms, show}){
               ));
             })()}
           </div>
+        </div>
+      )}
+
+      {/* ═════ STANDUP TAB (Deploy 2) ═════ */}
+      {!loading && tab === 'standup' && isTeamViewer && (
+        <div>
+          <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:10,flexWrap:'wrap'}}>
+            <h2 style={{margin:0,fontSize:15,fontWeight:700}}>📋 Today&rsquo;s Standup</h2>
+            <span style={{fontSize:10,color:'#64748b'}}>
+              {new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'})}
+            </span>
+            <div style={{flex:1}}/>
+            <span style={{fontSize:10,color:'#64748b'}}>
+              {todayLogs.length} posted · {Math.max(0, (team||[]).length - todayLogs.length)} pending
+            </span>
+          </div>
+
+          {(() => {
+            // Build merged list: posted first (sorted by updated_at desc), then no-posts.
+            const postedKeys = new Set(todayLogs.map(l => (l.user_name||'').toUpperCase().trim()));
+            const allMembers = (team||[]).map(t => ({name: t.name, role: t.role}));
+            const noPost = allMembers.filter(m => !postedKeys.has((m.name||'').toUpperCase().trim()));
+
+            if (todayLogs.length === 0 && noPost.length === 0) {
+              return (
+                <div style={{...cardStyle, textAlign:'center', padding:'30px 12px', color:'#64748b'}}>
+                  <div style={{fontSize:36,marginBottom:8}}>📋</div>
+                  <div style={{fontSize:12}}>No team members loaded.</div>
+                </div>
+              );
+            }
+
+            return (
+              <div>
+                {/* Posted */}
+                {todayLogs.map(l => {
+                  const u = (l.user_name||'').toUpperCase().trim();
+                  const tags = tagsFor(u);
+                  return (
+                    <div key={l.id} style={{...cardStyle, borderColor:'#30b54a30', background:'#0f1a14'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:700,color:'#30b54a'}}>✅ {l.user_name}</span>
+                        <span style={{fontSize:9,color:'#64748b'}}>{fmtAge(ageHours(l.updated_at))} ago</span>
+                        {l.created_at !== l.updated_at && <span style={{fontSize:9,color:'#64748b'}}>· edited</span>}
+                      </div>
+                      <div style={{fontSize:11,color:'#c9d1d9',whiteSpace:'pre-wrap',marginBottom: tags ? 6 : 0}}>{l.body}</div>
+                      {tags && (
+                        <div style={{fontSize:9,color:'#64748b',borderTop:'1px dashed #1a2030',paddingTop:4,marginTop:4}}>
+                          📊 {tags}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {/* Not yet posted */}
+                {noPost.map(m => {
+                  const tags = tagsFor(m.name);
+                  return (
+                    <div key={'np_'+m.name} style={{...cardStyle, borderColor:'#2a3548', background:'#0f1419', opacity:0.75}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:700,color:'#64748b'}}>⏳ {m.name}</span>
+                        <span style={{fontSize:9,color:'#64748b'}}>no standup yet</span>
+                      </div>
+                      {tags ? (
+                        <div style={{fontSize:10,color:'#8b949e'}}>📊 {tags}</div>
+                      ) : (
+                        <div style={{fontSize:10,color:'#64748b',fontStyle:'italic'}}>No tracked activity {periodBounds.label.toLowerCase()}.</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 
