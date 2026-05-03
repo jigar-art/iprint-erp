@@ -1280,6 +1280,8 @@ function MainApp({user,onLogout,masterData}){
     {id:"po",l:"PO Generator",e:"📄",roles:["accounts"],users:["SHREYA"]},
     // Receive Material — tier-1 + Shreya + Murli + Harish
     {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","HARISH"]},
+    // Reports (04 May 26 — Deploy 1) — visible to everyone (My Report tab); Stalls + Output tabs gated to JIGAR + CHANDNI inside the page itself
+    {id:"reports",l:"Reports",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
   ];
   // ── ACCESS CONTROL (17 Apr 26 rework) ─────────────────────────────────
   // TIER 1 (FULL_ACCESS): see every module automatically. Bypass role + user-gate.
@@ -1346,6 +1348,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="myprs"&&<MyPRsPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms} sm={setModal}/>}
           {pg==="po"&&<POPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
           {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
+          {pg==="reports"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} show={show}/>}
         </div>
       </main>
 
@@ -9172,6 +9175,525 @@ function JobNotesPage({jobs,user,show}){
       </div>}
     </div>}
   </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// REPORTS — Activity dashboard (My Report for all, Team Report for Jigar+Chandni)
+// Deploy 1 of 3 (04 May 26): Stalls + Output + My Report tabs.
+// Standup tab + WhatsApp Digest = Deploys 2 + 3.
+// ═══════════════════════════════════════════════════════════
+function ReportsPage({user, jobs, prs, salesActs, firms, show}){
+  const uname = (user?.name||'').toUpperCase();
+  const TEAM_VIEWERS = ['JIGAR','CHANDNI'];
+  const isTeamViewer = TEAM_VIEWERS.some(u => uname.includes(u));
+
+  // Tabs: 'me' for everyone; 'stalls' + 'output' for team viewers only
+  const [tab, setTab] = React.useState('me');
+  const [period, setPeriod] = React.useState('today'); // today | week | month
+  const [thresholds, setThresholds] = React.useState({pr_hours:48,billing_hours:48,job_days:14,banking_days:30});
+  const [editThresh, setEditThresh] = React.useState(false);
+  const [draftThresh, setDraftThresh] = React.useState(thresholds);
+
+  // Live data (queried on mount + period/tab change)
+  const [billingReqs, setBillingReqs] = React.useState([]);
+  const [bankSites, setBankSites] = React.useState([]);
+  const [siteInvoices, setSiteInvoices] = React.useState([]);
+  const [dcs, setDcs] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  // Period bounds in local time → ISO for query
+  const periodBounds = React.useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (period === 'week') start.setDate(start.getDate() - 7);
+    if (period === 'month') start.setDate(start.getDate() - 30);
+    return {startISO: start.toISOString(), startDate: start, label: period === 'today' ? 'Today' : period === 'week' ? 'Last 7 days' : 'Last 30 days'};
+  }, [period]);
+
+  // Smart default: if today is weekend or has zero PR activity, hint at week view
+  const isSundayMonday = React.useMemo(() => {
+    const d = new Date().getDay();
+    return d === 0 || d === 6;
+  }, []);
+
+  // Load thresholds
+  React.useEffect(() => {
+    sb.from('app_settings').select('value').eq('key','stall_thresholds').single().then(({data,error}) => {
+      if (!error && data?.value) {
+        setThresholds(data.value);
+        setDraftThresh(data.value);
+      }
+    });
+  }, []);
+
+  // Load auxiliary data not in props
+  React.useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    Promise.all([
+      sb.from('billing_requests').select('id,site_id,requested_by,decided_by,status,created_at,decided_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
+      sb.from('banking_sites').select('site_unique_id,job_no,client,bank,project,installation_status,billing_status,payment_status,payment_status_changed_by,payment_status_changed_at,created_at').limit(6000),
+      sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,invoice_date,added_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(2000),
+      sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
+    ]).then(results => {
+      if (!mounted) return;
+      const [br, bs, si, dc] = results;
+      setBillingReqs(br.data||[]);
+      setBankSites(bs.data||[]);
+      setSiteInvoices(si.data||[]);
+      setDcs(dc.data||[]);
+      setLoading(false);
+    }).catch(e => {
+      if (!mounted) return;
+      console.error('Reports load error', e);
+      setLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [period, tab]);
+
+  // ── HELPERS ──────────────────────────────────────────────
+  const inPeriod = (iso) => iso && iso >= periodBounds.startISO;
+  const matchUser = (val) => val && val.toUpperCase().includes(uname);
+  const ageHours = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 3600000) : 0;
+  const ageDays = (iso) => Math.floor(ageHours(iso) / 24);
+  const fmtAge = (h) => h < 24 ? h+'h' : Math.floor(h/24)+'d';
+  const fmtINR = (n) => '₹' + (n || 0).toLocaleString('en-IN');
+
+  // ── STALLS (team view) ──────────────────────────────────
+  const stallData = React.useMemo(() => {
+    const prPending = (prs||[]).filter(p => p.status === 'Pending Approval' && ageHours(p.created_at) >= thresholds.pr_hours).sort((a,b) => (a.created_at||'').localeCompare(b.created_at||''));
+    const billingPending = (billingReqs||[]).filter(b => b.status === 'Pending Approval' && ageHours(b.created_at) >= thresholds.billing_hours);
+
+    // Jobs stuck: status not in terminal/active-ongoing set, last update > N days ago
+    const TERMINAL = new Set(['Billing Done','Cash Received','No Bill','Cancelled','Delivered']);
+    const jobsStuck = (jobs||[]).filter(j => {
+      if (TERMINAL.has(j.status)) return false;
+      const lastTouch = j.updated_at || j.created_at;
+      return lastTouch && ageDays(lastTouch) >= thresholds.job_days;
+    }).sort((a,b) => (a.updated_at||'').localeCompare(b.updated_at||''));
+
+    // Banking sites untouched (proxy: greatest of created_at + payment_status_changed_at)
+    const bankingStale = (bankSites||[]).filter(s => {
+      const last = s.payment_status_changed_at && s.payment_status_changed_at > s.created_at ? s.payment_status_changed_at : s.created_at;
+      if (!last || ageDays(last) < thresholds.banking_days) return false;
+      const inst = (s.installation_status||'').toLowerCase();
+      return !inst.includes('done') && !inst.includes('complete');
+    });
+
+    return {prPending, billingPending, jobsStuck, bankingStale};
+  }, [prs, jobs, billingReqs, bankSites, thresholds]);
+
+  const stallTotal = stallData.prPending.length + stallData.billingPending.length + stallData.jobsStuck.length + stallData.bankingStale.length;
+  const critTotal = stallData.prPending.filter(p => ageHours(p.created_at) >= thresholds.pr_hours*2).length +
+                    stallData.jobsStuck.filter(j => ageDays(j.updated_at||j.created_at) >= thresholds.job_days*2).length;
+
+  // ── OUTPUT (team view) ──────────────────────────────────
+  const outputData = React.useMemo(() => {
+    const prRaised = (prs||[]).filter(p => inPeriod(p.created_at));
+    const prApproved = (prs||[]).filter(p => inPeriod(p.approved_at));
+    const prRejected = (prs||[]).filter(p => inPeriod(p.rejected_at));
+    const poGenerated = (prs||[]).filter(p => inPeriod(p.po_generated_at));
+    const poReceived = (prs||[]).filter(p => inPeriod(p.received_at));
+
+    const jobsCreated = (jobs||[]).filter(j => inPeriod(j.created_at));
+    const jobsDelivered = (jobs||[]).filter(j => j.status === 'Delivered' && j.status_dates?.delivered && inPeriod(j.status_dates.delivered));
+    const jobsBilled = (jobs||[]).filter(j => j.status === 'Billing Done' && j.status_dates?.billing_done && inPeriod(j.status_dates.billing_done));
+
+    const billingDone = (billingReqs||[]).filter(b => inPeriod(b.decided_at) && b.status === 'Approved');
+
+    const invoicesAdded = (siteInvoices||[]).filter(i => inPeriod(i.created_at));
+    const invoiceTotal = invoicesAdded.reduce((s,i) => s + (Number(i.invoice_amount)||0), 0);
+
+    const dcCount = (dcs||[]).length;
+
+    const salesVisits = (salesActs||[]).filter(a => inPeriod(a.created_at));
+    const salesValue = salesVisits.reduce((s,a) => s + (Number(a.estimated_value)||0), 0);
+
+    return {prRaised, prApproved, prRejected, poGenerated, poReceived,
+            jobsCreated, jobsDelivered, jobsBilled, billingDone,
+            invoicesAdded, invoiceTotal, dcCount, salesVisits, salesValue};
+  }, [prs, jobs, billingReqs, siteInvoices, dcs, salesActs, period]);
+
+  // ── MY REPORT (per user) ─────────────────────────────────
+  const myData = React.useMemo(() => {
+    const myPRs = (prs||[]).filter(p => matchUser(p.created_by) && inPeriod(p.created_at));
+    const myApprovals = (prs||[]).filter(p => matchUser(p.approved_by) && inPeriod(p.approved_at));
+    const myRejections = (prs||[]).filter(p => matchUser(p.rejected_by) && inPeriod(p.rejected_at));
+    const myPOs = (prs||[]).filter(p => matchUser(p.po_generated_by) && inPeriod(p.po_generated_at));
+    const myReceived = (prs||[]).filter(p => matchUser(p.received_by) && inPeriod(p.received_at));
+
+    const myBillingReqs = (billingReqs||[]).filter(b => matchUser(b.requested_by));
+    const myBillingDecisions = (billingReqs||[]).filter(b => matchUser(b.decided_by) && b.decided_at);
+
+    const myJobs = (jobs||[]).filter(j => matchUser(j.made_by) && inPeriod(j.created_at));
+    const myInvoices = (siteInvoices||[]).filter(i => matchUser(i.added_by));
+    const myInvoiceTotal = myInvoices.reduce((s,i) => s + (Number(i.invoice_amount)||0), 0);
+
+    const myDCs = (dcs||[]).filter(d => matchUser(d.created_by) || matchUser(d.delivered_by) || matchUser(d.prepared_by));
+    const mySales = (salesActs||[]).filter(a => matchUser(a.rep_name) && inPeriod(a.created_at));
+    const mySalesValue = mySales.reduce((s,a) => s + (Number(a.estimated_value)||0), 0);
+
+    const myBankingEdits = (bankSites||[]).filter(s => matchUser(s.payment_status_changed_by) && inPeriod(s.payment_status_changed_at));
+
+    // My personal stalls (all-time, not period-bounded)
+    const myPendingPRs = (prs||[]).filter(p => matchUser(p.created_by) && p.status === 'Pending Approval');
+    const myStuckJobs = (jobs||[]).filter(j => {
+      if (!matchUser(j.made_by)) return false;
+      const TERMINAL = new Set(['Billing Done','Cash Received','No Bill','Cancelled','Delivered']);
+      if (TERMINAL.has(j.status)) return false;
+      const lastTouch = j.updated_at || j.created_at;
+      return lastTouch && ageDays(lastTouch) >= thresholds.job_days;
+    });
+
+    const total = myPRs.length + myApprovals.length + myRejections.length + myPOs.length + myReceived.length +
+                  myBillingReqs.filter(b => inPeriod(b.created_at)).length +
+                  myBillingDecisions.filter(b => inPeriod(b.decided_at)).length +
+                  myJobs.length + myInvoices.filter(i => inPeriod(i.created_at)).length +
+                  myDCs.length + mySales.length + myBankingEdits.length;
+
+    return {myPRs, myApprovals, myRejections, myPOs, myReceived, myBillingReqs, myBillingDecisions,
+            myJobs, myInvoices, myInvoiceTotal, myDCs, mySales, mySalesValue, myBankingEdits,
+            myPendingPRs, myStuckJobs, total};
+  }, [prs, jobs, billingReqs, siteInvoices, dcs, salesActs, bankSites, period, uname, thresholds]);
+
+  // ── THRESHOLD SAVE ──────────────────────────────────────
+  const saveThresholds = async () => {
+    const v = {
+      pr_hours: Math.max(1, Number(draftThresh.pr_hours)||48),
+      billing_hours: Math.max(1, Number(draftThresh.billing_hours)||48),
+      job_days: Math.max(1, Number(draftThresh.job_days)||14),
+      banking_days: Math.max(1, Number(draftThresh.banking_days)||30),
+    };
+    const {error} = await sb.from('app_settings').update({value: v, updated_at: new Date().toISOString(), updated_by: uname}).eq('key','stall_thresholds');
+    if (error) { show?.('Failed to save: ' + error.message, false); return; }
+    setThresholds(v);
+    setEditThresh(false);
+    show?.('Thresholds saved');
+  };
+
+  // ── COMMON STYLES ───────────────────────────────────────
+  const cardStyle = {background:'#161d2e',border:'1px solid #1a2030',borderRadius:8,padding:'10px 12px',marginBottom:8};
+  const sectionTitleStyle = {fontSize:9,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:6};
+  const numStyle = (color='#e3a008') => ({fontSize:18,fontWeight:700,color});
+  const labelStyle = {fontSize:8.5,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',fontWeight:600};
+  const rowStyle = {display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',fontSize:11,borderBottom:'1px dashed #1a2030'};
+
+  // ── RENDER: TAB PICKER ──────────────────────────────────
+  const tabBtn = (id, label) => (
+    <button key={id} className={`b bs ${tab===id?'bp':''}`} onClick={()=>setTab(id)}
+      style={{fontSize:10,padding:'6px 12px',marginRight:4}}>{label}</button>
+  );
+
+  return (
+    <div style={{maxWidth:1100, margin:'0 auto'}}>
+      {/* Header strip */}
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+        <div style={{display:'flex',alignItems:'center',gap:4}}>
+          {tabBtn('me', '👤 My Report')}
+          {isTeamViewer && tabBtn('stalls', '🚨 Stalls')}
+          {isTeamViewer && tabBtn('output', '📈 Output')}
+        </div>
+        <div style={{flex:1}}/>
+        <div style={{display:'flex',gap:3}}>
+          {[['today','Today'],['week','7d'],['month','30d']].map(([id,l]) =>
+            <button key={id} className={`b bs ${period===id?'bp':''}`} onClick={()=>setPeriod(id)}
+              style={{fontSize:9,padding:'4px 10px'}}>{l}</button>)}
+        </div>
+        {isTeamViewer && tab === 'stalls' && (
+          <button className="b bs" onClick={()=>{setDraftThresh(thresholds);setEditThresh(true);}}
+            style={{fontSize:9,padding:'4px 8px'}}>⚙️ Thresholds</button>
+        )}
+      </div>
+
+      {/* Sunday hint */}
+      {isSundayMonday && period === 'today' && (
+        <div style={{background:'#161d2e',border:'1px solid #2a3548',borderRadius:6,padding:'6px 10px',fontSize:10,color:'#8b949e',marginBottom:8}}>
+          💡 Today is {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]}. Switch to <b>7d</b> to see weekly activity.
+        </div>
+      )}
+
+      {/* Threshold editor modal */}
+      {editThresh && <div onClick={()=>setEditThresh(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div onClick={e=>e.stopPropagation()} style={{background:'#0f1419',border:'1px solid #2a3548',borderRadius:10,padding:18,minWidth:300,maxWidth:380}}>
+          <h3 style={{margin:0,fontSize:14,fontWeight:700,color:'#e3a008',marginBottom:10}}>⚙️ Stall Thresholds</h3>
+          <p style={{fontSize:10,color:'#64748b',marginBottom:12}}>Saved to shared settings — Jigar + Chandni see the same values.</p>
+          {[
+            ['pr_hours','PRs pending (hours)','h'],
+            ['billing_hours','Billing requests pending (hours)','h'],
+            ['job_days','Jobs stuck in same status (days)','d'],
+            ['banking_days','Banking sites untouched (days)','d'],
+          ].map(([key,lbl,suffix]) => (
+            <div key={key} style={{marginBottom:8}}>
+              <label style={{...labelStyle, display:'block',marginBottom:3}}>{lbl}</label>
+              <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                <input className="in" type="number" min={1} value={draftThresh[key]||''}
+                  onChange={e => setDraftThresh(p => ({...p, [key]: e.target.value}))}
+                  style={{width:80,fontSize:11}}/>
+                <span style={{fontSize:10,color:'#64748b'}}>{suffix === 'h' ? 'hours' : 'days'}</span>
+              </div>
+            </div>
+          ))}
+          <div style={{display:'flex',gap:6,marginTop:12}}>
+            <button className="b bp" onClick={saveThresholds} style={{flex:1,fontSize:11}}>Save</button>
+            <button className="b" onClick={()=>setEditThresh(false)} style={{flex:1,fontSize:11}}>Cancel</button>
+          </div>
+        </div>
+      </div>}
+
+      {loading && <div style={{textAlign:'center',color:'#64748b',padding:20,fontSize:11}}>Loading…</div>}
+
+      {/* ═════ MY REPORT TAB ═════ */}
+      {!loading && tab === 'me' && (
+        <div>
+          <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:10}}>
+            <h2 style={{margin:0,fontSize:15,fontWeight:700}}>👤 {user?.name || uname}</h2>
+            <span style={{fontSize:10,color:'#64748b'}}>{periodBounds.label}</span>
+            <div style={{flex:1}}/>
+            <span style={{fontSize:11,color:'#e3a008',fontWeight:700}}>{myData.total} actions</span>
+          </div>
+
+          {/* My output stats — grid */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(150px, 1fr))',gap:6,marginBottom:14}}>
+            {[
+              ['PRs raised', myData.myPRs.length, '#0a84ff'],
+              ['PRs approved (by me)', myData.myApprovals.length, '#30b54a'],
+              ['PRs rejected (by me)', myData.myRejections.length, '#ff3b30'],
+              ['POs generated', myData.myPOs.length, '#ff9500'],
+              ['Material received', myData.myReceived.length, '#5856d6'],
+              ['Billing requested', myData.myBillingReqs.filter(b => inPeriod(b.created_at)).length, '#30b54a'],
+              ['Billing approved (by me)', myData.myBillingDecisions.filter(b => inPeriod(b.decided_at)).length, '#30b54a'],
+              ['Jobs created', myData.myJobs.length, '#e3a008'],
+              ['Site invoices added', myData.myInvoices.filter(i => inPeriod(i.created_at)).length, '#0a84ff'],
+              ['DCs prepared/delivered', myData.myDCs.length, '#5ac8fa'],
+              ['Sales visits logged', myData.mySales.length, '#b88600'],
+              ['Banking status updates', myData.myBankingEdits.length, '#5856d6'],
+            ].map(([l,v,c]) => (
+              <div key={l} style={{...cardStyle, padding:'8px 10px', marginBottom:0}}>
+                <div style={labelStyle}>{l}</div>
+                <div style={numStyle(v > 0 ? c : '#1a2030')}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Money-out summary */}
+          {(myData.myInvoiceTotal > 0 || myData.mySalesValue > 0) && (
+            <div style={cardStyle}>
+              <div style={sectionTitleStyle}>Value contributed</div>
+              {myData.myInvoiceTotal > 0 && <div style={rowStyle}><span style={{color:'#c9d1d9'}}>Invoices raised</span><span style={{color:'#30b54a',fontWeight:700}}>{fmtINR(myData.myInvoiceTotal)}</span></div>}
+              {myData.mySalesValue > 0 && <div style={rowStyle}><span style={{color:'#c9d1d9'}}>Sales pipeline added</span><span style={{color:'#30b54a',fontWeight:700}}>{fmtINR(myData.mySalesValue)}</span></div>}
+            </div>
+          )}
+
+          {/* My personal stalls */}
+          {(myData.myPendingPRs.length > 0 || myData.myStuckJobs.length > 0) && (
+            <div style={{...cardStyle, borderColor:'#ff950040',background:'#1a1410'}}>
+              <div style={{...sectionTitleStyle, color:'#ff9500'}}>⏳ Things waiting on you / from you</div>
+              {myData.myPendingPRs.length > 0 && (
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:11,color:'#c9d1d9',marginBottom:4}}>{myData.myPendingPRs.length} of your PRs still pending approval</div>
+                  {myData.myPendingPRs.slice(0,3).map(p => (
+                    <div key={p.id} style={{...rowStyle,fontSize:10}}>
+                      <span>PR #{p.id} · {p.vendor_name||'—'}</span>
+                      <span style={{color:'#ff9500'}}>{fmtAge(ageHours(p.created_at))} ago</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {myData.myStuckJobs.length > 0 && (
+                <div>
+                  <div style={{fontSize:11,color:'#c9d1d9',marginBottom:4}}>{myData.myStuckJobs.length} of your jobs stuck &gt;{thresholds.job_days}d in same status</div>
+                  {myData.myStuckJobs.slice(0,3).map(j => (
+                    <div key={j.id} style={{...rowStyle,fontSize:10}}>
+                      <span>{j.id} · {j.client_name||'—'}</span>
+                      <span style={{color:'#ff9500'}}>{j.status} · {fmtAge(ageHours(j.updated_at||j.created_at))}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {myData.total === 0 && (
+            <div style={{...cardStyle, textAlign:'center', padding:'30px 12px', color:'#64748b'}}>
+              <div style={{fontSize:36,marginBottom:8}}>🌱</div>
+              <div style={{fontSize:12}}>No tracked activity {periodBounds.label.toLowerCase()}.</div>
+              <div style={{fontSize:10,marginTop:4}}>Production/printing actions are not yet attributed (Phase 2).</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═════ STALLS TAB ═════ */}
+      {!loading && tab === 'stalls' && isTeamViewer && (
+        <div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3, 1fr)',gap:6,marginBottom:14}}>
+            <div style={{...cardStyle,textAlign:'center'}}>
+              <div style={numStyle('#ff3b30')}>{critTotal}</div>
+              <div style={labelStyle}>Critical (&gt;2× threshold)</div>
+            </div>
+            <div style={{...cardStyle,textAlign:'center'}}>
+              <div style={numStyle('#ff9500')}>{stallTotal - critTotal}</div>
+              <div style={labelStyle}>Warning</div>
+            </div>
+            <div style={{...cardStyle,textAlign:'center'}}>
+              <div style={numStyle('#30b54a')}>{stallTotal}</div>
+              <div style={labelStyle}>Total open stalls</div>
+            </div>
+          </div>
+
+          {/* PRs awaiting approval */}
+          {stallData.prPending.length > 0 && <div style={cardStyle}>
+            <div style={sectionTitleStyle}>🔔 PRs awaiting your approval (&gt;{thresholds.pr_hours}h)</div>
+            {stallData.prPending.slice(0,10).map(p => {
+              const h = ageHours(p.created_at);
+              const crit = h >= thresholds.pr_hours * 2;
+              return <div key={p.id} style={{...rowStyle, background: crit?'#1a1010':undefined}}>
+                <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  PR #{p.id} · {p.vendor_name||'—'} · <span style={{color:'#64748b'}}>{p.created_by}</span>
+                </span>
+                <span style={{color: crit?'#ff3b30':'#ff9500',fontWeight:700,fontSize:10,marginLeft:8}}>{fmtAge(h)}</span>
+              </div>;
+            })}
+            {stallData.prPending.length > 10 && <div style={{fontSize:9,color:'#64748b',marginTop:4}}>+{stallData.prPending.length-10} more</div>}
+          </div>}
+
+          {/* Billing requests */}
+          {stallData.billingPending.length > 0 && <div style={cardStyle}>
+            <div style={sectionTitleStyle}>💵 Billing requests untouched (&gt;{thresholds.billing_hours}h)</div>
+            {stallData.billingPending.slice(0,10).map(b => (
+              <div key={b.id} style={rowStyle}>
+                <span>Site {b.site_id} · req by {b.requested_by||'—'}</span>
+                <span style={{color:'#ff9500',fontWeight:700,fontSize:10}}>{fmtAge(ageHours(b.created_at))}</span>
+              </div>
+            ))}
+          </div>}
+
+          {/* Jobs stuck */}
+          {stallData.jobsStuck.length > 0 && <div style={cardStyle}>
+            <div style={sectionTitleStyle}>🏭 Jobs stuck in same status (&gt;{thresholds.job_days}d) · {stallData.jobsStuck.length} total</div>
+            {(() => {
+              // Group by status to make 851 manageable
+              const byStatus = {};
+              stallData.jobsStuck.forEach(j => { byStatus[j.status||'(no status)'] = (byStatus[j.status||'(no status)']||0)+1; });
+              const sorted = Object.entries(byStatus).sort((a,b) => b[1]-a[1]);
+              return sorted.map(([st,n]) => (
+                <div key={st} style={rowStyle}>
+                  <span>{st}</span>
+                  <span style={{color:'#ff9500',fontWeight:700}}>{n}</span>
+                </div>
+              ));
+            })()}
+            <div style={{fontSize:9,color:'#64748b',marginTop:6}}>💡 Many of these are likely legitimately ongoing (e.g. "Installation WIP"). Tune the threshold or filter "active" statuses out via gear icon.</div>
+          </div>}
+
+          {/* Banking sites stale */}
+          {stallData.bankingStale.length > 0 && <div style={cardStyle}>
+            <div style={sectionTitleStyle}>🏦 Banking sites untouched (&gt;{thresholds.banking_days}d) · {stallData.bankingStale.length} total</div>
+            {(() => {
+              const byBank = {};
+              stallData.bankingStale.forEach(s => { const k = (s.bank||s.client||'—'); byBank[k] = (byBank[k]||0)+1; });
+              return Object.entries(byBank).sort((a,b) => b[1]-a[1]).slice(0,10).map(([k,n]) => (
+                <div key={k} style={rowStyle}><span>{k}</span><span style={{color:'#ff9500',fontWeight:700}}>{n}</span></div>
+              ));
+            })()}
+            <div style={{fontSize:9,color:'#64748b',marginTop:6}}>💡 Stale = neither created_at nor payment_status_changed_at touched in {thresholds.banking_days}d. Doesn't catch remarks/file edits — Phase 2 will improve this.</div>
+          </div>}
+
+          {stallTotal === 0 && (
+            <div style={{...cardStyle, textAlign:'center', padding:'30px 12px', color:'#64748b'}}>
+              <div style={{fontSize:36,marginBottom:8}}>✅</div>
+              <div style={{fontSize:12}}>Nothing stalled. Everything within thresholds.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═════ OUTPUT TAB ═════ */}
+      {!loading && tab === 'output' && isTeamViewer && (
+        <div>
+          {/* Procurement funnel */}
+          <div style={cardStyle}>
+            <div style={sectionTitleStyle}>📦 Procurement funnel · {periodBounds.label}</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(5, 1fr)',gap:4,alignItems:'center',marginTop:6}}>
+              {[
+                ['PR Raised', outputData.prRaised.length, '#0a84ff'],
+                ['Approved', outputData.prApproved.length, '#30b54a'],
+                ['Rejected', outputData.prRejected.length, '#ff3b30'],
+                ['PO Sent', outputData.poGenerated.length, '#ff9500'],
+                ['Received', outputData.poReceived.length, '#5856d6'],
+              ].map(([l,v,c]) => (
+                <div key={l} style={{textAlign:'center',padding:'6px 4px',background:'#0f1419',borderRadius:6}}>
+                  <div style={numStyle(v > 0 ? c : '#1a2030')}>{v}</div>
+                  <div style={{...labelStyle,fontSize:8}}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Job pipeline */}
+          <div style={cardStyle}>
+            <div style={sectionTitleStyle}>🏭 Job pipeline · {periodBounds.label}</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3, 1fr)',gap:4,alignItems:'center',marginTop:6}}>
+              {[
+                ['New jobs', outputData.jobsCreated.length, '#0a84ff'],
+                ['Delivered', outputData.jobsDelivered.length, '#30b54a'],
+                ['Billed', outputData.jobsBilled.length, '#ff9500'],
+              ].map(([l,v,c]) => (
+                <div key={l} style={{textAlign:'center',padding:'6px 4px',background:'#0f1419',borderRadius:6}}>
+                  <div style={numStyle(v > 0 ? c : '#1a2030')}>{v}</div>
+                  <div style={{...labelStyle,fontSize:8}}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Banking + Sales + Money */}
+          <div style={cardStyle}>
+            <div style={sectionTitleStyle}>📊 Other activity · {periodBounds.label}</div>
+            <div style={rowStyle}><span>📋 Billing approved</span><span style={{fontWeight:700,color: outputData.billingDone.length > 0 ? '#30b54a':'#1a2030'}}>{outputData.billingDone.length}</span></div>
+            <div style={rowStyle}><span>💵 Site invoices added</span><span style={{fontWeight:700,color: outputData.invoicesAdded.length > 0 ? '#30b54a':'#1a2030'}}>{outputData.invoicesAdded.length}</span></div>
+            <div style={rowStyle}><span>💰 Invoice value</span><span style={{fontWeight:700,color: outputData.invoiceTotal > 0 ? '#30b54a':'#1a2030'}}>{fmtINR(outputData.invoiceTotal)}</span></div>
+            <div style={rowStyle}><span>🚚 DCs created</span><span style={{fontWeight:700,color: outputData.dcCount > 0 ? '#30b54a':'#1a2030'}}>{outputData.dcCount}</span></div>
+            <div style={rowStyle}><span>🚶 Sales visits logged</span><span style={{fontWeight:700,color: outputData.salesVisits.length > 0 ? '#30b54a':'#1a2030'}}>{outputData.salesVisits.length}</span></div>
+            <div style={rowStyle}><span>🎯 Sales pipeline added</span><span style={{fontWeight:700,color: outputData.salesValue > 0 ? '#30b54a':'#1a2030'}}>{fmtINR(outputData.salesValue)}</span></div>
+          </div>
+
+          {/* Per-user breakdown */}
+          <div style={cardStyle}>
+            <div style={sectionTitleStyle}>👥 Top contributors · {periodBounds.label}</div>
+            {(() => {
+              const byUser = {};
+              const bump = (u, n=1) => { if(!u)return; const key=u.toUpperCase().trim(); byUser[key]=(byUser[key]||0)+n; };
+              outputData.prRaised.forEach(p => bump(p.created_by));
+              outputData.prApproved.forEach(p => bump(p.approved_by));
+              outputData.prRejected.forEach(p => bump(p.rejected_by));
+              outputData.poGenerated.forEach(p => bump(p.po_generated_by));
+              outputData.poReceived.forEach(p => bump(p.received_by));
+              outputData.jobsCreated.forEach(j => bump(j.made_by));
+              outputData.invoicesAdded.forEach(i => bump(i.added_by));
+              outputData.salesVisits.forEach(s => bump(s.rep_name));
+              billingReqs.filter(b => inPeriod(b.created_at)).forEach(b => bump(b.requested_by));
+              billingReqs.filter(b => inPeriod(b.decided_at)).forEach(b => bump(b.decided_by));
+              dcs.forEach(d => bump(d.created_by));
+              const sorted = Object.entries(byUser).sort((a,b) => b[1]-a[1]).slice(0,12);
+              if (sorted.length === 0) return <div style={{fontSize:10,color:'#64748b',padding:'4px 0'}}>No tracked activity in this period.</div>;
+              const max = sorted[0][1];
+              return sorted.map(([u,n]) => (
+                <div key={u} style={{...rowStyle, gap:8}}>
+                  <span style={{minWidth:90}}>{u}</span>
+                  <div style={{flex:1,height:12,background:'#0f1419',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{width:`${(n/max)*100}%`,height:'100%',background:'#e3a008'}}/>
+                  </div>
+                  <span style={{fontWeight:700,color:'#e3a008',minWidth:30,textAlign:'right'}}>{n}</span>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
 }
 
 // CLIENT PORTAL — Dept login + status view + notes
