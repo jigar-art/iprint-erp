@@ -9343,12 +9343,13 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
     let cancelled = false;
     (async () => {
       try {
-        // Compute yesterday in same TZ as todayISO (local YYYY-MM-DD)
-        const d = new Date(todayISO + 'T00:00:00');
-        d.setDate(d.getDate() - 1);
-        const yesterdayISO = d.toISOString().slice(0, 10);
-        // Day-of-week for today: 0=Sun 1=Mon ... 6=Sat
-        const dow = new Date(todayISO + 'T00:00:00').getDay();
+        // TZ-safe local-date arithmetic (avoid UTC drift on Date.toISOString)
+        const [yyyy, mm, dd] = todayISO.split('-').map(Number);
+        const yDate = new Date(yyyy, mm - 1, dd - 1);  // local "yesterday"
+        const pad = (n) => String(n).padStart(2, '0');
+        const yesterdayISO = `${yDate.getFullYear()}-${pad(yDate.getMonth()+1)}-${pad(yDate.getDate())}`;
+        // Day-of-week for today (local): 0=Sun 1=Mon ... 6=Sat
+        const dow = new Date(yyyy, mm - 1, dd).getDay();
 
         // Existing rows for today (already loaded, but re-fetch for race safety)
         const {data: existing, error: exErr} = await sb.from('daily_tasks')
