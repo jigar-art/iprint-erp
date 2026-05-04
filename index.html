@@ -9329,6 +9329,106 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
     return () => { mounted = false; };
   }, [period, tab]);
 
+  // ── SB-9 + SB-10: BOOTSTRAP ─────────────────────────────────
+  // Once per user per day, on first load:
+  //   (SB-9) Carry forward yesterday's pending/stuck tasks
+  //   (SB-10) Spawn task instances for active recurring_duties matching today's day
+  // Idempotent: re-checks before INSERTing. Safe to fire multiple times.
+  // Both are no-ops until data exists in daily_tasks (yesterday's rows) and
+  // recurring_duties (admin-seeded). Currently both empty → both fire 0 INSERTs.
+  React.useEffect(() => {
+    if (loading) return;             // wait until first load completes
+    if (!uname || uname === 'UNKNOWN') return;
+    if (!todayISO) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Compute yesterday in same TZ as todayISO (local YYYY-MM-DD)
+        const d = new Date(todayISO + 'T00:00:00');
+        d.setDate(d.getDate() - 1);
+        const yesterdayISO = d.toISOString().slice(0, 10);
+        // Day-of-week for today: 0=Sun 1=Mon ... 6=Sat
+        const dow = new Date(todayISO + 'T00:00:00').getDay();
+
+        // Existing rows for today (already loaded, but re-fetch for race safety)
+        const {data: existing, error: exErr} = await sb.from('daily_tasks')
+          .select('id,source,source_duty_id,source_task_id')
+          .eq('user_name', uname).eq('task_date', todayISO);
+        if (cancelled || exErr) return;
+        const existingDutyIds = new Set((existing||[]).filter(r=>r.source==='recurring').map(r=>r.source_duty_id));
+        const existingCarryIds = new Set((existing||[]).filter(r=>r.source==='carried').map(r=>r.source_task_id));
+
+        const inserts = [];
+
+        // ── SB-9: Carry-forward ─────────────────────────────
+        const {data: yPend, error: yErr} = await sb.from('daily_tasks')
+          .select('id,task_text,linked_job_id,linked_site_id,status')
+          .eq('user_name', uname).eq('task_date', yesterdayISO)
+          .in('status', ['pending', 'stuck']);
+        if (cancelled) return;
+        if (!yErr && yPend) {
+          yPend.forEach(t => {
+            if (existingCarryIds.has(t.id)) return;  // already carried
+            inserts.push({
+              user_name: uname,
+              task_text: t.task_text,
+              task_date: todayISO,
+              status: 'pending',
+              source: 'carried',
+              source_task_id: t.id,
+              linked_job_id: t.linked_job_id || null,
+              linked_site_id: t.linked_site_id || null,
+              added_by: uname
+            });
+          });
+        }
+
+        // ── SB-10: Recurring-duty bootstrap ─────────────────
+        const {data: duties, error: dErr} = await sb.from('recurring_duties')
+          .select('id,duty_text,frequency')
+          .eq('user_name', uname).eq('active', true);
+        if (cancelled) return;
+        if (!dErr && duties) {
+          duties.forEach(duty => {
+            if (existingDutyIds.has(duty.id)) return;  // already spawned today
+            const f = (duty.frequency||'daily').toLowerCase();
+            // Map frequency to days-of-week
+            let firesToday = false;
+            if (f === 'daily') firesToday = true;
+            else if (f === 'mon-sat') firesToday = (dow >= 1 && dow <= 6);
+            else if (f === 'mon-fri' || f === 'weekdays') firesToday = (dow >= 1 && dow <= 5);
+            if (!firesToday) return;
+            inserts.push({
+              user_name: uname,
+              task_text: duty.duty_text,
+              task_date: todayISO,
+              status: 'pending',
+              source: 'recurring',
+              source_duty_id: duty.id,
+              added_by: 'system'
+            });
+          });
+        }
+
+        if (inserts.length === 0) return;  // common case during rollout
+
+        const {data: inserted, error: insErr} = await sb.from('daily_tasks')
+          .insert(inserts).select();
+        if (cancelled || insErr) {
+          if (insErr) console.warn('Bootstrap insert failed', insErr);
+          return;
+        }
+        // Refresh todayTasks so new bootstrap rows appear immediately
+        if (inserted && inserted.length > 0) {
+          setTodayTasks(prev => [...(prev||[]), ...inserted]);
+        }
+      } catch (e) {
+        console.warn('Bootstrap error (non-fatal)', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loading, uname, todayISO]);
+
   // ── HELPERS ──────────────────────────────────────────────
   const inPeriod = (iso) => iso && iso >= periodBounds.startISO;
   const matchUser = (val) => val && val.toUpperCase().includes(uname);
