@@ -2809,7 +2809,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             {itOs.length>0&&<div style={{marginBottom:8}}>{itOs.map(o=><div key={o.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",borderRadius:4,background:"#060810",marginBottom:3,fontSize:9}}>
               <span style={{fontWeight:700,color:"#f97316"}}>{o.task_type}</span>
               <span style={{color:"#c9d1d9"}}>→ {o.vendor_name}</span>
-              <span className="mn" style={{color:"#64748b"}}>₹{(+o.rate||0).toFixed(2)}/{o.rate_mode}</span>
+              <span className="mn" style={{color:"#64748b"}}>₹{(+o.rate||0).toFixed(2)}/{getUomLabel(o.rate_mode).header}</span>
               <span className="mn" style={{fontWeight:700,color:"#e3a008"}}>= ₹{(+o.total||0).toFixed(2)}</span>
               <span style={{padding:"1px 6px",borderRadius:3,fontSize:7,fontWeight:700,background:o.po_status==='PO Generated'?"#4ade8022":"#f9731622",color:o.po_status==='PO Generated'?"#4ade80":"#f97316"}}>{o.po_status}</span>
               {o.po_status==='Pending'&&<input className="in" placeholder="PO#" style={{width:60,fontSize:8,padding:"1px 4px"}} onBlur={e=>{if(e.target.value)updateOsPO(o.id,e.target.value);}}/>}
@@ -4180,7 +4180,7 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
           <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}>{o.job_id}</td>
           <td style={{fontSize:9,fontWeight:600,color:"#f97316"}}>{o.task_type}</td>
           <td style={{fontSize:9}}>{o.vendor_name}</td>
-          <td className="mn" style={{fontSize:9}}>₹{(+o.rate||0).toFixed(2)}/{o.rate_mode}</td>
+          <td className="mn" style={{fontSize:9}}>₹{(+o.rate||0).toFixed(2)}/{getUomLabel(o.rate_mode).header}</td>
           <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>₹{(+o.total||0).toFixed(0)}</td>
           <td><span style={{padding:"1px 6px",borderRadius:3,fontSize:8,fontWeight:700,background:o.po_status==='PO Generated'?"#4ade8022":"#f9731622",color:o.po_status==='PO Generated'?"#4ade80":"#f97316"}}>{o.po_status}</span>{o.po_number&&<span style={{fontSize:8,color:"#64748b",marginLeft:4}}>{o.po_number}</span>}</td>
           <td style={{fontSize:8,color:"#64748b"}}>{o.created_by}</td>
@@ -6419,7 +6419,7 @@ function RemPage({jobs,osItems,setOsItems,items,reqs,setReqs}){const rem=jobs.fi
         <td style={{fontSize:9}}>{li?.internal_name||'—'}</td>
         <td style={{fontWeight:600,color:"#f97316",fontSize:9}}>{o.task_type}</td>
         <td style={{fontSize:9}}>{o.vendor_name}</td>
-        <td className="mn" style={{fontSize:9}}>₹{(+o.rate||0).toFixed(2)}/{o.rate_mode}</td>
+        <td className="mn" style={{fontSize:9}}>₹{(+o.rate||0).toFixed(2)}/{getUomLabel(o.rate_mode).header}</td>
         <td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}>₹{(+o.total||0).toFixed(2)}</td>
         <td style={{fontSize:8,color:"#64748b"}}>{o.created_by}</td>
         <td><input className="in mn" placeholder="Enter PO#" style={{width:80,fontSize:9,padding:"2px 4px"}} onKeyDown={e=>{if(e.key==='Enter'&&e.target.value){updateOsPO(o.id,e.target.value);e.target.value='';}}}/></td>
