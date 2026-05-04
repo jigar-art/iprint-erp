@@ -9257,6 +9257,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
   const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
   const [stuckNoteText, setStuckNoteText] = React.useState('');
 
+  // SB-6: extra sources for autoTasks aggregation (Murli's GRN, Batul's sales)
+  const [grnRows, setGrnRows] = React.useState([]);
+  const [salesActivities, setSalesActivities] = React.useState([]);
+
   // Period bounds in local time → ISO for query
   const periodBounds = React.useMemo(() => {
     const now = new Date();
@@ -9300,15 +9304,19 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
       sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at',{ascending:false}),
       sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at').eq('user_name', uname).eq('task_date', todayISO).order('created_at',{ascending:true}).limit(500),
+      sb.from('grn').select('id,date,supplier,material,job_id,received_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
+      sb.from('sales_activities').select('id,date,activity_type,rep_name,client_name,firm_name,outcome,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
     ]).then(results => {
       if (!mounted) return;
-      const [br, bs, si, dc, dl, dt] = results;
+      const [br, bs, si, dc, dl, dt, gr, sa] = results;
       setBillingReqs(br.data||[]);
       setBankSites(bs.data||[]);
       setSiteInvoices(si.data||[]);
       setDcs(dc.data||[]);
       setTodayLogs(dl.data||[]);
       setTodayTasks(dt.data||[]);
+      setGrnRows(gr.data||[]);
+      setSalesActivities(sa.data||[]);
       // Hydrate the draft from my own log if I posted today
       const mine = (dl.data||[]).find(l => (l.user_name||'').toUpperCase() === uname);
       if (mine) setDraftBody(mine.body || '');
@@ -9633,10 +9641,36 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
         ref_id: p.id
       });
     });
+    // 5. GRN entries received by this user today (SB-6 — Murli)
+    (grnRows||[]).forEach(g => {
+      if ((g.received_by||'').toUpperCase() !== uname) return;
+      if ((g.created_at||'').slice(0,10) !== todayISO) return;
+      out.push({
+        kind: 'grn_received',
+        text: 'GRN entered' + (g.supplier ? ' for ' + g.supplier : '') + (g.material ? ' (' + g.material + ')' : ''),
+        at: g.created_at,
+        ref_type: 'grn',
+        ref_id: g.id
+      });
+    });
+    // 6. Sales activities logged by this user today (SB-6 — Batul)
+    (salesActivities||[]).forEach(s => {
+      if ((s.rep_name||'').toUpperCase() !== uname) return;
+      if ((s.created_at||'').slice(0,10) !== todayISO) return;
+      const who = s.client_name || s.firm_name || '?';
+      const what = s.activity_type || 'activity';
+      out.push({
+        kind: 'sales_activity',
+        text: 'Logged ' + what + ' with ' + who + (s.outcome ? ' (' + s.outcome + ')' : ''),
+        at: s.created_at,
+        ref_type: 'sales_activity',
+        ref_id: s.id
+      });
+    });
     // Sort newest first
     out.sort((a, b) => (b.at||'').localeCompare(a.at||''));
     return out;
-  }, [siteInvoices, jobs, prs, uname, todayISO]);
+  }, [siteInvoices, jobs, prs, grnRows, salesActivities, uname, todayISO]);
 
   // Group auto-tasks by hour bucket per kind for compact display
   const autoTasksGrouped = React.useMemo(() => {
