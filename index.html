@@ -7863,7 +7863,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       total:f.length,
       invoiced:f.filter(s=>s.billing_category==='Invoiced').length,
       givenForBilling:f.filter(s=>s.billing_category==='Given for Billing').length,
-      pending:f.filter(s=>!s.billing_category||['Photo Pending','Work/PO Pending','Billing Pending','Other'].includes(s.billing_category)).length,
+      pending:f.filter(s=>!s.billing_category||s.billing_category===''||['Photo Pending','Work/PO Pending','Billing Pending','Other'].includes(s.billing_category)).length,
       completed:f.filter(s=>s.work_category==='Completed').length,
       photoReceived:f.filter(s=>s.photo_status?.includes('Received')).length,
       photoPending:f.filter(s=>!s.photo_status||s.photo_status.includes('Pending')||s.photo_status==='').length,
