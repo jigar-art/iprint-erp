@@ -1289,6 +1289,7 @@ function MainApp({user,onLogout,masterData}){
   // TIER 2 (everyone else): must pass role AND (if module has users:[...]) be named in that list.
   //   Substring match: "JIGAR" matches "JIGAR"; "HARISH" matches "HARISH - Fab/Graphic Designer".
   const FULL_ACCESS = ["JIGAR","AMOL","CHANDNI","RUCHITA"];
+  const FULL_FINANCIAL_ACCESS = ["JIGAR","CHANDNI"]; // gates invoice_amount visibility (audit 04 May 2026)
   const nav=allNav.filter(n=>{
     const uName=(user.name||'').toUpperCase();
     if(FULL_ACCESS.some(u=>uName.includes(u))) return true; // tier-1 sees everything
@@ -7678,6 +7679,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [showAddInvoice,setShowAddInvoice]=useState(null); // site object or null
   const [newInvoiceNo,setNewInvoiceNo]=useState('');
   const [newInvoiceDate,setNewInvoiceDate]=useState('');
+  const [newInvoiceAmount,setNewInvoiceAmount]=useState(''); // gated to FULL_FINANCIAL_ACCESS (audit 04 May 2026)
   const canAddInvoice=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','AMOL','CHANDNI','RUCHITA','APARNA','VIDYA'].some(u=>uN.includes(u));})();
   const togglePmtStatus=async(site,newStatus,note='')=>{
     const oldStatus=site.payment_status||'Not Started';
@@ -7736,12 +7738,20 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     setSites(p=>p.map(s=>s.id===siteId?{...s,[field]:newArr}:s));
     return true;
   };
-  const addInvoice=async(site,invNo,invDate)=>{
+  const addInvoice=async(site,invNo,invDate,amt)=>{
     const v=(invNo||'').trim();
     const d=(invDate||'').trim();
     if(!/^J-\d+\/\d{2}-\d{2}$/.test(v)){show('Invoice format must be J-NNN/YY-YY (e.g. J-9999/25-26)');return;}
     if(!d){show('Enter invoice date');return;}
-    const {data,error}=await sb.from('site_invoices').insert({site_id:site.id,invoice_no:v,invoice_date:d,added_by:(user?.name||'').toUpperCase()}).select().single();
+    // Gated: only FULL_FINANCIAL_ACCESS (JIGAR, CHANDNI) can write invoice_amount (audit 04 May 2026)
+    const uname=(user?.name||'').toUpperCase();
+    const canSetAmount=["JIGAR","CHANDNI"].some(u=>uname.includes(u));
+    const insertPayload={site_id:site.id,invoice_no:v,invoice_date:d,added_by:uname};
+    if(canSetAmount){
+      const parsedAmt=Number((amt||'').toString().replace(/[^0-9.]/g,''));
+      if(parsedAmt>0) insertPayload.invoice_amount=parsedAmt;
+    }
+    const {data,error}=await sb.from('site_invoices').insert(insertPayload).select().single();
     if(error){
       if(error.code==='23505'){show('Invoice '+v+' already exists for this site');return;}
       show('Error: '+error.message);return;
@@ -7755,7 +7765,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     const {error:siteErr}=await sb.from('banking_sites').update(siteUpdates).eq('id',site.id);
     if(siteErr){show('⚠️ Invoice saved but site update failed: '+siteErr.message,false);}
     else{setSites(p=>p.map(x=>x.id===site.id?{...x,...siteUpdates}:x));}
-    setShowAddInvoice(null);setNewInvoiceNo('');setNewInvoiceDate('');
+    setShowAddInvoice(null);setNewInvoiceNo('');setNewInvoiceDate('');setNewInvoiceAmount('');
     show('Invoice added!');
   };
 
@@ -8369,18 +8379,29 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
           <input className="in" value={newInvoiceNo} onChange={e=>setNewInvoiceNo(e.target.value)}
             placeholder="J-9999/25-26" autoFocus
             style={{fontSize:13,padding:'6px 10px',width:'100%',letterSpacing:1}}
-            onKeyDown={e=>e.key==='Enter'&&addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate)}/>
+            onKeyDown={e=>e.key==='Enter'&&addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate,newInvoiceAmount)}/>
           <div style={{fontSize:9,color:'#64748b',marginTop:4}}>Format: J-NNN/YY-YY (e.g. J-9999/25-26)</div>
         </div>
         <div style={{marginBottom:12}}>
           <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:4}}>INVOICE DATE</label>
           <input type="date" className="in" value={newInvoiceDate} onChange={e=>setNewInvoiceDate(e.target.value)}
             style={{fontSize:12,padding:'6px 10px',width:'100%'}}
-            onKeyDown={e=>e.key==='Enter'&&addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate)}/>
+            onKeyDown={e=>e.key==='Enter'&&addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate,newInvoiceAmount)}/>
         </div>
+        {/* Invoice amount — gated to FULL_FINANCIAL_ACCESS (JIGAR, CHANDNI). Audit 04 May 2026. */}
+        {["JIGAR","CHANDNI"].some(u=>(user?.name||'').toUpperCase().includes(u)) && (
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:9,color:'#e3a008',display:'block',marginBottom:4}}>INVOICE AMOUNT (₹) · OPTIONAL · 🔒 Restricted</label>
+            <input type="number" min="0" step="0.01" className="in" value={newInvoiceAmount} onChange={e=>setNewInvoiceAmount(e.target.value)}
+              placeholder="e.g. 12500"
+              style={{fontSize:12,padding:'6px 10px',width:'100%'}}
+              onKeyDown={e=>e.key==='Enter'&&addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate,newInvoiceAmount)}/>
+            <div style={{fontSize:9,color:'#64748b',marginTop:4}}>Visible only to JIGAR & CHANDNI. Leave blank if not known yet.</div>
+          </div>
+        )}
         <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
-          <button className="b bs" onClick={()=>{setShowAddInvoice(null);setNewInvoiceNo('');setNewInvoiceDate('');}} style={{fontSize:11}}>Cancel</button>
-          <button className="b bp" onClick={()=>addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate)} style={{fontSize:11,background:'#4ade80',borderColor:'#4ade80',color:'#000',fontWeight:700}}>🧾 Add Invoice</button>
+          <button className="b bs" onClick={()=>{setShowAddInvoice(null);setNewInvoiceNo('');setNewInvoiceDate('');setNewInvoiceAmount('');}} style={{fontSize:11}}>Cancel</button>
+          <button className="b bp" onClick={()=>addInvoice(showAddInvoice,newInvoiceNo,newInvoiceDate,newInvoiceAmount)} style={{fontSize:11,background:'#4ade80',borderColor:'#4ade80',color:'#000',fontWeight:700}}>🧾 Add Invoice</button>
         </div>
       </div>
     </div>}
@@ -9770,7 +9791,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
           {(myData.myInvoiceTotal > 0 || myData.mySalesValue > 0) && (
             <div style={cardStyle}>
               <div style={sectionTitleStyle}>Value contributed</div>
-              {myData.myInvoiceTotal > 0 && <div style={rowStyle}><span style={{color:'#c9d1d9'}}>Invoices raised</span><span style={{color:'#30b54a',fontWeight:700}}>{fmtINR(myData.myInvoiceTotal)}</span></div>}
+              {myData.myInvoiceTotal > 0 && ["JIGAR","CHANDNI"].includes(uname) && <div style={rowStyle}><span style={{color:'#c9d1d9'}}>Invoices raised</span><span style={{color:'#30b54a',fontWeight:700}}>{fmtINR(myData.myInvoiceTotal)}</span></div>}
               {myData.mySalesValue > 0 && <div style={rowStyle}><span style={{color:'#c9d1d9'}}>Sales pipeline added</span><span style={{color:'#30b54a',fontWeight:700}}>{fmtINR(myData.mySalesValue)}</span></div>}
             </div>
           )}
@@ -9943,7 +9964,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
             <div style={sectionTitleStyle}>📊 Other activity · {periodBounds.label}</div>
             <div style={rowStyle}><span>📋 Billing approved</span><span style={{fontWeight:700,color: outputData.billingDone.length > 0 ? '#30b54a':'#1a2030'}}>{outputData.billingDone.length}</span></div>
             <div style={rowStyle}><span>💵 Site invoices added</span><span style={{fontWeight:700,color: outputData.invoicesAdded.length > 0 ? '#30b54a':'#1a2030'}}>{outputData.invoicesAdded.length}</span></div>
-            <div style={rowStyle}><span>💰 Invoice value</span><span style={{fontWeight:700,color: outputData.invoiceTotal > 0 ? '#30b54a':'#1a2030'}}>{fmtINR(outputData.invoiceTotal)}</span></div>
+            {["JIGAR","CHANDNI"].includes(uname) && <div style={rowStyle}><span>💰 Invoice value</span><span style={{fontWeight:700,color: outputData.invoiceTotal > 0 ? '#30b54a':'#1a2030'}}>{fmtINR(outputData.invoiceTotal)}</span></div>}
             <div style={rowStyle}><span>🚚 DCs created</span><span style={{fontWeight:700,color: outputData.dcCount > 0 ? '#30b54a':'#1a2030'}}>{outputData.dcCount}</span></div>
             <div style={rowStyle}><span>🚶 Sales visits logged</span><span style={{fontWeight:700,color: outputData.salesVisits.length > 0 ? '#30b54a':'#1a2030'}}>{outputData.salesVisits.length}</span></div>
             <div style={rowStyle}><span>🎯 Sales pipeline added</span><span style={{fontWeight:700,color: outputData.salesValue > 0 ? '#30b54a':'#1a2030'}}>{fmtINR(outputData.salesValue)}</span></div>
