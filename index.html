@@ -9248,6 +9248,15 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
   const [draftBody, setDraftBody] = React.useState('');
   const [posting, setPosting] = React.useState(false);
 
+  // Task system v2 state (Stage A) — manual + admin + carried tasks
+  const [todayTasks, setTodayTasks] = React.useState([]);  // rows from daily_tasks for today + user
+  const [newTaskText, setNewTaskText] = React.useState('');
+  const [newTaskJob, setNewTaskJob] = React.useState('');
+  const [newTaskSite, setNewTaskSite] = React.useState('');
+  const [savingTask, setSavingTask] = React.useState(false);
+  const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
+  const [stuckNoteText, setStuckNoteText] = React.useState('');
+
   // Period bounds in local time → ISO for query
   const periodBounds = React.useMemo(() => {
     const now = new Date();
@@ -9290,14 +9299,16 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
       sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,invoice_date,added_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(2000),
       sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at',{ascending:false}),
+      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at').eq('user_name', uname).eq('task_date', todayISO).order('created_at',{ascending:true}).limit(500),
     ]).then(results => {
       if (!mounted) return;
-      const [br, bs, si, dc, dl] = results;
+      const [br, bs, si, dc, dl, dt] = results;
       setBillingReqs(br.data||[]);
       setBankSites(bs.data||[]);
       setSiteInvoices(si.data||[]);
       setDcs(dc.data||[]);
       setTodayLogs(dl.data||[]);
+      setTodayTasks(dt.data||[]);
       // Hydrate the draft from my own log if I posted today
       const mine = (dl.data||[]).find(l => (l.user_name||'').toUpperCase() === uname);
       if (mine) setDraftBody(mine.body || '');
@@ -9499,6 +9510,154 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
     });
     show?.(myLogToday ? 'Standup updated' : 'Standup posted');
   };
+
+  // ── TASK SYSTEM v2 STAGE A — handlers ───────────────────
+  // Add a manual task for the current user. Optional job/site link.
+  const addManualTask = async () => {
+    const text = (newTaskText||'').trim();
+    if (!text) { show?.('Type a task first', false); return; }
+    setSavingTask(true);
+    const row = {
+      user_name: uname,
+      task_text: text,
+      task_date: todayISO,
+      status: 'pending',
+      source: 'user',
+      added_by: uname,
+      linked_job_id: (newTaskJob||'').trim() || null,
+      linked_site_id: (newTaskSite||'').trim() || null,
+    };
+    const {data, error} = await sb.from('daily_tasks').insert(row).select().single();
+    setSavingTask(false);
+    if (error) { show?.('Failed to add: ' + error.message, false); return; }
+    setTodayTasks(prev => [...(prev||[]), data]);
+    setNewTaskText(''); setNewTaskJob(''); setNewTaskSite('');
+    show?.('Task added');
+  };
+
+  // Mark a task done (set status + done_at). Updates row in place.
+  const markTaskDone = async (taskId) => {
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({status: 'done', done_at: nowISO, updated_at: nowISO})
+      .eq('id', taskId).select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+  };
+
+  // Mark a task stuck — requires a non-empty stuck_note.
+  const markTaskStuck = async (taskId, note) => {
+    const trimmed = (note||'').trim();
+    if (!trimmed) { show?.('Stuck note is required', false); return; }
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({status: 'stuck', stuck_note: trimmed, updated_at: nowISO})
+      .eq('id', taskId).select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+    setStuckNoteFor(null); setStuckNoteText('');
+    show?.('Marked stuck');
+  };
+
+  // Re-open a task (unstuck or undo done)
+  const reopenTask = async (taskId) => {
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({status: 'pending', stuck_note: null, done_at: null, updated_at: nowISO})
+      .eq('id', taskId).select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+  };
+
+  // Cancel a manual task (only own user-added). Soft delete via cancelled status.
+  const cancelTask = async (taskId) => {
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({status: 'cancelled', cancelled_at: nowISO, updated_at: nowISO})
+      .eq('id', taskId).select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+  };
+
+  // ── AUTO-TASKS aggregation (read-only) ──────────────────
+  // Derives "what user did in ERP today" from already-loaded data.
+  // Sources: site_invoices.added_by, jobs.made_by (created today)
+  // Future stages will add: dispatch_logs, batches, status_dates JSONB.
+  const autoTasks = React.useMemo(() => {
+    const out = [];
+    // 1. Site invoices added by this user today
+    (siteInvoices||[]).forEach(si => {
+      if ((si.added_by||'').toUpperCase() !== uname) return;
+      if ((si.created_at||'').slice(0,10) !== todayISO) return;
+      out.push({
+        kind: 'invoice',
+        text: 'Invoiced site ' + (si.site_id || '?') + (si.invoice_no ? ' (Inv ' + si.invoice_no + ')' : ''),
+        at: si.created_at,
+        ref_type: 'banking_site',
+        ref_id: si.site_id
+      });
+    });
+    // 2. Jobs created by this user today (jobs is loaded via props)
+    (jobs||[]).forEach(j => {
+      if ((j.made_by||'').toUpperCase() !== uname) return;
+      if ((j.created_at||'').slice(0,10) !== todayISO) return;
+      out.push({
+        kind: 'job_created',
+        text: 'Created job ' + j.id + (j.client_name ? ' for ' + j.client_name : ''),
+        at: j.created_at,
+        ref_type: 'job',
+        ref_id: j.id
+      });
+    });
+    // 3. Purchase requests created by this user today
+    (prs||[]).forEach(p => {
+      if ((p.created_by||'').toUpperCase() !== uname) return;
+      if ((p.created_at||'').slice(0,10) !== todayISO) return;
+      out.push({
+        kind: 'pr_created',
+        text: 'Generated PR ' + (p.pr_no || p.id) + (p.vendor_name ? ' for ' + p.vendor_name : ''),
+        at: p.created_at,
+        ref_type: 'pr',
+        ref_id: p.id
+      });
+    });
+    // 4. Purchase requests where this user generated PO today
+    (prs||[]).forEach(p => {
+      if ((p.po_generated_by||'').toUpperCase() !== uname) return;
+      if (!p.po_generated_at || p.po_generated_at.slice(0,10) !== todayISO) return;
+      out.push({
+        kind: 'po_generated',
+        text: 'PO generated for PR ' + (p.pr_no || p.id) + (p.po_no ? ' (PO ' + p.po_no + ')' : ''),
+        at: p.po_generated_at,
+        ref_type: 'pr',
+        ref_id: p.id
+      });
+    });
+    // Sort newest first
+    out.sort((a, b) => (b.at||'').localeCompare(a.at||''));
+    return out;
+  }, [siteInvoices, jobs, prs, uname, todayISO]);
+
+  // Group auto-tasks by hour bucket per kind for compact display
+  const autoTasksGrouped = React.useMemo(() => {
+    const buckets = new Map();
+    autoTasks.forEach(t => {
+      const hour = (t.at||'').slice(0,13);  // YYYY-MM-DDTHH
+      const key = t.kind + '|' + hour;
+      if (!buckets.has(key)) buckets.set(key, {kind: t.kind, hour, items: []});
+      buckets.get(key).items.push(t);
+    });
+    return Array.from(buckets.values());
+  }, [autoTasks]);
+
+  // Task counts for stat strip
+  const taskCounts = React.useMemo(() => {
+    const tasks = todayTasks||[];
+    const manualDone = tasks.filter(t => t.status === 'done').length;
+    const manualPending = tasks.filter(t => t.status === 'pending').length;
+    const manualStuck = tasks.filter(t => t.status === 'stuck').length;
+    return {auto: autoTasks.length, manualDone, manualPending, manualStuck};
+  }, [todayTasks, autoTasks]);
 
   // ── PER-USER ACTIVITY (for Standup auto-tagged badges) ──
   // Re-uses the same period-bounded arrays as outputData / billingReqs / dcs.
@@ -9732,11 +9891,136 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
       {/* ═════ MY REPORT TAB ═════ */}
       {!loading && tab === 'me' && (
         <div>
-          {/* Standup post box (Deploy 2) */}
+          {/* ═════ Task System v2 Stage A: My Tasks ═════ */}
+          <div style={{...cardStyle, borderColor: '#7f77dd40', background: '#0f0f1a', marginBottom: 8}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+              <span style={{fontSize:12,fontWeight:700,color:'#afa9ec'}}>📋 My Tasks</span>
+              <span style={{fontSize:9,color:'#64748b'}}>
+                {new Date().toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})}
+              </span>
+              <div style={{flex:1}}/>
+              <span style={{fontSize:9,color:'#64748b'}}>
+                <span style={{color:'#5dcaa5'}}>{taskCounts.auto} auto</span>
+                <span style={{color:'#475569',margin:'0 4px'}}>·</span>
+                <span style={{color:'#30b54a'}}>{taskCounts.manualDone} done</span>
+                <span style={{color:'#475569',margin:'0 4px'}}>·</span>
+                <span style={{color:'#e3a008'}}>{taskCounts.manualPending} pending</span>
+                {taskCounts.manualStuck > 0 && <React.Fragment>
+                  <span style={{color:'#475569',margin:'0 4px'}}>·</span>
+                  <span style={{color:'#e24b4a'}}>{taskCounts.manualStuck} stuck</span>
+                </React.Fragment>}
+              </span>
+            </div>
+
+            {/* Auto section (read-only) */}
+            {autoTasks.length > 0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:9,color:'#5dcaa5',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>⚡ Auto-tracked from ERP today</div>
+                {autoTasks.slice(0, 12).map((t, i) => (
+                  <div key={'auto'+i} style={{background:'#0f1a17',borderLeft:'2px solid #1d9e75',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
+                    <span style={{color:'#5dcaa5'}}>✓</span>
+                    <span style={{textDecoration:'line-through',color:'#9fe1cb'}}>{t.text}</span>
+                    <span style={{marginLeft:'auto',fontSize:8,color:'#475569'}}>{(t.at||'').slice(11,16)}</span>
+                  </div>
+                ))}
+                {autoTasks.length > 12 && <div style={{fontSize:9,color:'#64748b',padding:'4px 8px'}}>+ {autoTasks.length - 12} more auto-tasks</div>}
+              </div>
+            )}
+            {autoTasks.length === 0 && (
+              <div style={{fontSize:9,color:'#475569',marginBottom:10,padding:'4px 0'}}>No ERP activity tracked yet today</div>
+            )}
+
+            {/* Manual tasks (pending) */}
+            {(todayTasks||[]).filter(t => t.status === 'pending').length > 0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:9,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📝 Pending tasks</div>
+                {(todayTasks||[]).filter(t => t.status === 'pending').map(t => (
+                  <div key={'p'+t.id} style={{background:'#0f1422',borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
+                    <span onClick={() => markTaskDone(t.id)} style={{color:'#64748b',cursor:'pointer',fontSize:13}} title="Mark done">☐</span>
+                    <span style={{flex:1}}>{t.task_text}</span>
+                    {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
+                    {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
+                    {t.source === 'admin' && t.added_by && <span style={{fontSize:8,padding:'1px 4px',background:'#2a1408',color:'#f0997b',borderRadius:3}}>{t.added_by}</span>}
+                    <span onClick={() => setStuckNoteFor(t.id)} style={{color:'#e24b4a',cursor:'pointer',fontSize:9}} title="Mark stuck">stuck?</span>
+                    {t.source === 'user' && (
+                      <span onClick={() => { if (confirm('Cancel this task?')) cancelTask(t.id); }} style={{color:'#475569',cursor:'pointer',fontSize:9}} title="Cancel task">×</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Manual tasks (done) */}
+            {(todayTasks||[]).filter(t => t.status === 'done').length > 0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:9,color:'#30b54a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>✅ Done by you today</div>
+                {(todayTasks||[]).filter(t => t.status === 'done').map(t => (
+                  <div key={'d'+t.id} style={{background:'#0f1422',borderLeft:'2px solid #30b54a',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center',opacity:0.6}}>
+                    <span onClick={() => reopenTask(t.id)} style={{color:'#30b54a',cursor:'pointer',fontSize:13}} title="Reopen">☑</span>
+                    <span style={{flex:1,textDecoration:'line-through',color:'#64748b'}}>{t.task_text}</span>
+                    {t.done_at && <span style={{fontSize:8,color:'#475569'}}>{t.done_at.slice(11,16)}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Stuck tasks */}
+            {(todayTasks||[]).filter(t => t.status === 'stuck').length > 0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:9,color:'#e24b4a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>🚫 Stuck</div>
+                {(todayTasks||[]).filter(t => t.status === 'stuck').map(t => (
+                  <div key={'s'+t.id} style={{background:'#1a0d0d',borderLeft:'2px solid #e24b4a',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1'}}>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                      <span style={{color:'#e24b4a'}}>!</span>
+                      <span style={{flex:1}}>{t.task_text}</span>
+                      <span onClick={() => reopenTask(t.id)} style={{color:'#85b7eb',cursor:'pointer',fontSize:9}} title="Unstuck">unstuck</span>
+                    </div>
+                    {t.stuck_note && <div style={{fontSize:9,color:'#f09595',marginTop:3,paddingLeft:18,fontStyle:'italic'}}>↳ {t.stuck_note}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Stuck note input modal-ish */}
+            {stuckNoteFor && (
+              <div style={{background:'#1a0d0d',border:'1px solid #e24b4a',padding:8,borderRadius:4,marginBottom:8}}>
+                <div style={{fontSize:10,color:'#f09595',marginBottom:4}}>Why is this stuck? (required)</div>
+                <input className="in" value={stuckNoteText} onChange={e => setStuckNoteText(e.target.value)}
+                  placeholder="e.g. Waiting on Vidya for amounts"
+                  style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:6}}
+                  autoFocus />
+                <div style={{display:'flex',gap:6}}>
+                  <button className="b bp" onClick={() => markTaskStuck(stuckNoteFor, stuckNoteText)} disabled={!stuckNoteText.trim()}
+                    style={{fontSize:10,padding:'4px 10px',opacity:stuckNoteText.trim()?1:0.5}}>Save</button>
+                  <button className="b" onClick={() => { setStuckNoteFor(null); setStuckNoteText(''); }} style={{fontSize:10,padding:'4px 10px'}}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Add task form */}
+            <div style={{background:'#0a0e1a',border:'1px dashed #2a3548',borderRadius:4,padding:8}}>
+              <input className="in" value={newTaskText} onChange={e => setNewTaskText(e.target.value)}
+                placeholder="+ Add a task (meetings, calls, follow-ups, anything not auto-tracked)"
+                style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:5,background:'transparent',border:'none',color:'#cbd5e1'}}
+                onKeyDown={e => { if (e.key === 'Enter' && newTaskText.trim()) addManualTask(); }} />
+              <div style={{display:'flex',gap:5,alignItems:'center'}}>
+                <input className="in" value={newTaskJob} onChange={e => setNewTaskJob(e.target.value)}
+                  placeholder="job id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
+                <input className="in" value={newTaskSite} onChange={e => setNewTaskSite(e.target.value)}
+                  placeholder="site id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
+                <button className="b bp" onClick={addManualTask} disabled={savingTask || !newTaskText.trim()}
+                  style={{fontSize:10,padding:'4px 12px',opacity:savingTask||!newTaskText.trim()?0.5:1,marginLeft:'auto'}}>
+                  {savingTask ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick note (was: standup post box) — kept as freeform fallback */}
           <div style={{...cardStyle, borderColor: myLogToday ? '#30b54a40' : '#2a3548', background: myLogToday ? '#0f1a14' : '#0f1419'}}>
             <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
               <span style={{fontSize:11,fontWeight:700,color: myLogToday ? '#30b54a' : '#e3a008'}}>
-                {myLogToday ? '✅ Today\u2019s standup' : '📋 Post your standup'}
+                {myLogToday ? '✅ Today\u2019s quick note' : '📝 Quick note (optional)'}
               </span>
               <span style={{fontSize:9,color:'#64748b'}}>
                 {new Date().toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})}
@@ -9745,7 +10029,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
               {myLogToday && <span style={{fontSize:9,color:'#64748b'}}>posted {fmtAge(ageHours(myLogToday.updated_at))} ago</span>}
             </div>
             <textarea className="in" value={draftBody} onChange={e=>setDraftBody(e.target.value)}
-              placeholder="What did you do today? What's stuck? What's next?"
+              placeholder="Anything else worth noting? (free text, not a task)"
               rows={3}
               style={{width:'100%',fontSize:11,padding:'8px 10px',resize:'vertical',boxSizing:'border-box',fontFamily:'inherit'}}/>
             <div style={{display:'flex',gap:6,marginTop:6,alignItems:'center'}}>
