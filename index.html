@@ -9261,6 +9261,93 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
   const [grnRows, setGrnRows] = React.useState([]);
   const [salesActivities, setSalesActivities] = React.useState([]);
 
+  // SB-7: Manage Recurring Duties (admin tab — JIGAR + CHANDNI)
+  const [recurringDuties, setRecurringDuties] = React.useState([]);
+  const [dutiesLoading, setDutiesLoading] = React.useState(false);
+  const [newDutyUser, setNewDutyUser] = React.useState('');
+  const [newDutyText, setNewDutyText] = React.useState('');
+  const [newDutyFreq, setNewDutyFreq] = React.useState('daily');
+  const [savingDuty, setSavingDuty] = React.useState(false);
+  const [editDutyId, setEditDutyId] = React.useState(null);
+  const [editDutyText, setEditDutyText] = React.useState('');
+  const [editDutyFreq, setEditDutyFreq] = React.useState('daily');
+
+  const loadRecurringDuties = React.useCallback(async () => {
+    if (!isTeamViewer) return;
+    setDutiesLoading(true);
+    try {
+      const {data, error} = await sb.from('recurring_duties')
+        .select('id,user_name,duty_text,frequency,active,created_by,created_at,updated_at')
+        .order('user_name',{ascending:true}).order('active',{ascending:false}).order('created_at',{ascending:false});
+      if (error) { console.error('Load duties error', error); return; }
+      setRecurringDuties(data||[]);
+    } finally { setDutiesLoading(false); }
+  }, [isTeamViewer]);
+
+  React.useEffect(() => { if (tab === 'duties') loadRecurringDuties(); }, [tab, loadRecurringDuties]);
+
+  const addRecurringDuty = async () => {
+    if (!isTeamViewer || savingDuty) return;
+    const user = (newDutyUser||'').trim();
+    const text = (newDutyText||'').trim();
+    if (!user || !text) { alert('User and duty text are required.'); return; }
+    if (!['daily','mon-sat','mon-fri','weekdays'].includes(newDutyFreq)) { alert('Invalid frequency.'); return; }
+    setSavingDuty(true);
+    try {
+      const {data, error} = await sb.from('recurring_duties').insert({
+        user_name: user.toUpperCase(),
+        duty_text: text,
+        frequency: newDutyFreq,
+        active: true,
+        created_by: uname
+      }).select().single();
+      if (error) { alert('Failed to add duty: ' + error.message); return; }
+      setRecurringDuties(prev => [data, ...prev]);
+      setNewDutyText(''); setNewDutyUser(''); setNewDutyFreq('daily');
+    } finally { setSavingDuty(false); }
+  };
+
+  const toggleDutyActive = async (id, currentActive) => {
+    if (!isTeamViewer) return;
+    const {error} = await sb.from('recurring_duties')
+      .update({active: !currentActive, updated_at: new Date().toISOString()})
+      .eq('id', id);
+    if (error) { alert('Toggle failed: ' + error.message); return; }
+    setRecurringDuties(prev => prev.map(d => d.id === id ? {...d, active: !currentActive} : d));
+  };
+
+  const startEditDuty = (duty) => {
+    setEditDutyId(duty.id); setEditDutyText(duty.duty_text); setEditDutyFreq(duty.frequency);
+  };
+
+  const saveEditDuty = async () => {
+    if (!isTeamViewer || !editDutyId) return;
+    const text = (editDutyText||'').trim();
+    if (!text) { alert('Duty text cannot be empty.'); return; }
+    const {error} = await sb.from('recurring_duties')
+      .update({duty_text: text, frequency: editDutyFreq, updated_at: new Date().toISOString()})
+      .eq('id', editDutyId);
+    if (error) { alert('Save failed: ' + error.message); return; }
+    setRecurringDuties(prev => prev.map(d => d.id === editDutyId ? {...d, duty_text: text, frequency: editDutyFreq} : d));
+    setEditDutyId(null); setEditDutyText(''); setEditDutyFreq('daily');
+  };
+
+  const deleteDuty = async (id) => {
+    if (!isTeamViewer) return;
+    if (!confirm('Delete this recurring duty? If it has historical task instances, it will be deactivated instead (FK-safe).')) return;
+    // Try hard delete first; if FK refs exist, fall back to deactivate
+    const {error: delErr} = await sb.from('recurring_duties').delete().eq('id', id);
+    if (delErr) {
+      // FK constraint — soft delete by deactivating
+      const {error: updErr} = await sb.from('recurring_duties').update({active: false, updated_at: new Date().toISOString()}).eq('id', id);
+      if (updErr) { alert('Could not delete or deactivate: ' + updErr.message); return; }
+      alert('Duty has historical task instances; deactivated instead of deleted.');
+      setRecurringDuties(prev => prev.map(d => d.id === id ? {...d, active: false} : d));
+    } else {
+      setRecurringDuties(prev => prev.filter(d => d.id !== id));
+    }
+  };
+
   // Period bounds in local time → ISO for query
   const periodBounds = React.useMemo(() => {
     const now = new Date();
@@ -9860,6 +9947,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
           {isTeamViewer && tabBtn('stalls', '🚨 Stalls')}
           {isTeamViewer && tabBtn('output', '📈 Output')}
           {isTeamViewer && tabBtn('standup', '📋 Standup')}
+          {isTeamViewer && tabBtn('duties', '⚙️ Duties')}
         </div>
         <div style={{flex:1}}/>
         <div style={{display:'flex',gap:3}}>
@@ -10494,6 +10582,105 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* SB-7: Manage Recurring Duties (admin) */}
+      {!loading && tab === 'duties' && isTeamViewer && (
+        <div>
+          <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:10,flexWrap:'wrap'}}>
+            <h2 style={{margin:0,fontSize:15,fontWeight:700}}>⚙️ Manage Recurring Duties</h2>
+            <span style={{fontSize:10,color:'#64748b'}}>
+              Spawned automatically each morning into the assigned user's My Tasks
+            </span>
+            <div style={{flex:1}}/>
+            <span style={{fontSize:10,color:'#64748b'}}>
+              {recurringDuties.filter(d=>d.active).length} active · {recurringDuties.filter(d=>!d.active).length} inactive
+            </span>
+          </div>
+
+          {/* Add new duty */}
+          <div style={{...cardStyle, borderColor:'#3b82f650', background:'#0f172a'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#3b82f6',marginBottom:8}}>➕ Add new recurring duty</div>
+            <div style={{display:'grid',gridTemplateColumns:'160px 1fr 130px auto',gap:6,alignItems:'center'}}>
+              <select className="in" value={newDutyUser} onChange={e=>setNewDutyUser(e.target.value)} style={{fontSize:11}}>
+                <option value="">— pick user —</option>
+                {(team||[]).map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+              </select>
+              <input className="in" type="text" placeholder="Duty text (e.g. 'Enter today's banking invoices')"
+                value={newDutyText} onChange={e=>setNewDutyText(e.target.value)} style={{fontSize:11}}/>
+              <select className="in" value={newDutyFreq} onChange={e=>setNewDutyFreq(e.target.value)} style={{fontSize:11}}>
+                <option value="daily">Daily (Sun–Sat)</option>
+                <option value="mon-sat">Mon–Sat</option>
+                <option value="mon-fri">Mon–Fri</option>
+                <option value="weekdays">Weekdays</option>
+              </select>
+              <button className="b bp" onClick={addRecurringDuty} disabled={savingDuty}
+                style={{fontSize:11,padding:'6px 14px',whiteSpace:'nowrap'}}>
+                {savingDuty ? 'Adding…' : '+ Add'}
+              </button>
+            </div>
+            <div style={{fontSize:9,color:'#64748b',marginTop:6}}>
+              Frequency controls which days the duty fires. The instance is created the first time the user opens Reports that day.
+            </div>
+          </div>
+
+          {/* List of duties grouped by user */}
+          {dutiesLoading ? (
+            <div style={{...cardStyle, textAlign:'center', padding:'30px 12px', color:'#64748b'}}>Loading…</div>
+          ) : recurringDuties.length === 0 ? (
+            <div style={{...cardStyle, textAlign:'center', padding:'30px 12px', color:'#64748b'}}>
+              <div style={{fontSize:36,marginBottom:8}}>⚙️</div>
+              <div style={{fontSize:12}}>No recurring duties yet. Add one above to get started.</div>
+            </div>
+          ) : (
+            (() => {
+              const grouped = {};
+              recurringDuties.forEach(d => { (grouped[d.user_name] ||= []).push(d); });
+              const userNames = Object.keys(grouped).sort();
+              return userNames.map(un => (
+                <div key={un} style={{marginBottom:12}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#c9d1d9',padding:'6px 4px',borderBottom:'1px dashed #1a2030',marginBottom:4}}>
+                    👤 {un} <span style={{fontSize:9,color:'#64748b',fontWeight:400}}>· {grouped[un].length} {grouped[un].length===1?'duty':'duties'}</span>
+                  </div>
+                  {grouped[un].map(d => {
+                    const isEditing = editDutyId === d.id;
+                    return (
+                      <div key={d.id} style={{...cardStyle, borderColor: d.active ? '#30b54a30' : '#2a3548', background: d.active ? '#0f1a14' : '#0f1419', padding:'8px 10px', marginBottom:4, opacity: d.active ? 1 : 0.65}}>
+                        {isEditing ? (
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 130px auto auto',gap:6,alignItems:'center'}}>
+                            <input className="in" type="text" value={editDutyText} onChange={e=>setEditDutyText(e.target.value)} style={{fontSize:11}}/>
+                            <select className="in" value={editDutyFreq} onChange={e=>setEditDutyFreq(e.target.value)} style={{fontSize:11}}>
+                              <option value="daily">Daily</option>
+                              <option value="mon-sat">Mon–Sat</option>
+                              <option value="mon-fri">Mon–Fri</option>
+                              <option value="weekdays">Weekdays</option>
+                            </select>
+                            <button className="b bp" onClick={saveEditDuty} style={{fontSize:10,padding:'4px 10px'}}>Save</button>
+                            <button className="b" onClick={()=>{setEditDutyId(null);setEditDutyText('');}} style={{fontSize:10,padding:'4px 10px'}}>Cancel</button>
+                          </div>
+                        ) : (
+                          <div style={{display:'flex',alignItems:'center',gap:8}}>
+                            <span style={{fontSize:11,color: d.active ? '#c9d1d9' : '#64748b', flex:1, textDecoration: d.active ? 'none' : 'line-through'}}>
+                              {d.duty_text}
+                            </span>
+                            <span style={{fontSize:9,color:'#64748b',padding:'2px 6px',borderRadius:4,background:'#1a2030',whiteSpace:'nowrap'}}>
+                              {d.frequency}
+                            </span>
+                            <button className="b" onClick={()=>toggleDutyActive(d.id, d.active)} style={{fontSize:9,padding:'3px 8px',color: d.active ? '#facc15' : '#30b54a'}} title={d.active ? 'Deactivate' : 'Activate'}>
+                              {d.active ? '⏸ Pause' : '▶ Activate'}
+                            </button>
+                            <button className="b" onClick={()=>startEditDuty(d)} style={{fontSize:9,padding:'3px 8px'}}>✎</button>
+                            <button className="b" onClick={()=>deleteDuty(d.id)} style={{fontSize:9,padding:'3px 8px',color:'#ef4444'}}>🗑</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ));
+            })()
+          )}
         </div>
       )}
 
