@@ -684,6 +684,13 @@ function MainApp({user,onLogout,masterData}){
   const show=useCallback((m,ok=true)=>{setToast({m,ok});setTimeout(()=>setToast(null),2500);},[]);
   window._showToast=show;
   window._forceItemRefresh=(itemId,updates)=>{setItems(p=>p.map(i=>i.id===itemId?{...i,...updates}:i));};
+  // SC-3: Navigate from a Reports auto-task badge to its source record's page
+  window._navigateToRecord=(rt,rid)=>{
+    const map={job:'jobs',banking_site:'bankcrm',pr:'myprs',grn:'grn',sales_activity:'sales'};
+    const dest=map[rt]; if(!dest) return;
+    setPg(dest);
+    try{sessionStorage.setItem('erp_focus_ref',JSON.stringify({rt,rid,at:Date.now()}));}catch(e){}
+  };
 
   // Helper: fetch ALL rows from a table (paginate past 1000 limit)
   const fetchAll = async (table, order=null, filter=null) => {
@@ -10151,6 +10158,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
                   <div key={'auto'+i} style={{background:'#0f1a17',borderLeft:'2px solid #1d9e75',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
                     <span style={{color:'#5dcaa5'}}>✓</span>
                     <span style={{textDecoration:'line-through',color:'#9fe1cb'}}>{t.text}</span>
+                    {t.ref_type && t.ref_id && (
+                      <span onClick={()=>window._navigateToRecord&&window._navigateToRecord(t.ref_type,t.ref_id)} title={'Open '+t.ref_type+' '+t.ref_id} style={{cursor:'pointer',color:'#5dcaa5',fontSize:9,padding:'1px 5px',background:'rgba(93,202,165,0.12)',borderRadius:3,border:'1px solid rgba(93,202,165,0.3)',whiteSpace:'nowrap'}}>
+                        → {({job:'Job ',banking_site:'Site ',pr:'PR ',grn:'GRN ',sales_activity:'Activity'})[t.ref_type]||t.ref_type+' '}{t.ref_type==='sales_activity'?'':t.ref_id}
+                      </span>
+                    )}
                     <span style={{marginLeft:'auto',fontSize:8,color:'#475569'}}>{(t.at||'').slice(11,16)}</span>
                   </div>
                 ))}
