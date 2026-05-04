@@ -9301,29 +9301,6 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
 
   React.useEffect(() => { if (tab === 'duties') loadRecurringDuties(); }, [tab, loadRecurringDuties]);
 
-  // SC-1 (SB-8): Team Performance dashboard — gated to JIGAR/CHANDNI
-  // Reads daily_tasks for ALL users within periodBounds. Pure read, no writes.
-  const [teamTasks, setTeamTasks] = React.useState([]);
-  const [teamTasksLoading, setTeamTasksLoading] = React.useState(false);
-
-  const loadTeamTasks = React.useCallback(async () => {
-    if (!isTeamViewer) return;
-    setTeamTasksLoading(true);
-    try {
-      // task_date filter — use period start as YYYY-MM-DD (TZ-safe, see memory #20)
-      const ps = periodBounds.startDate;  // local Date at midnight
-      const startDate = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
-      const {data, error} = await sb.from('daily_tasks')
-        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at')
-        .gte('task_date', startDate)
-        .order('task_date',{ascending:false}).order('created_at',{ascending:false}).limit(2000);
-      if (error) { console.error('Load team tasks error', error); return; }
-      setTeamTasks(data||[]);
-    } finally { setTeamTasksLoading(false); }
-  }, [isTeamViewer, periodBounds]);
-
-  React.useEffect(() => { if (tab === 'team') loadTeamTasks(); }, [tab, loadTeamTasks]);
-
   const addRecurringDuty = async () => {
     if (!isTeamViewer || savingDuty) return;
     const user = (newDutyUser||'').trim();
@@ -9394,6 +9371,30 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
     if (period === 'month') start.setDate(start.getDate() - 30);
     return {startISO: start.toISOString(), startDate: start, label: period === 'today' ? 'Today' : period === 'week' ? 'Last 7 days' : 'Last 30 days'};
   }, [period]);
+
+  // SC-1 (SB-8): Team Performance dashboard — gated to JIGAR/CHANDNI
+  // Reads daily_tasks for ALL users within periodBounds. Pure read, no writes.
+  // NOTE: declared AFTER periodBounds — its useCallback dep array references it.
+  const [teamTasks, setTeamTasks] = React.useState([]);
+  const [teamTasksLoading, setTeamTasksLoading] = React.useState(false);
+
+  const loadTeamTasks = React.useCallback(async () => {
+    if (!isTeamViewer) return;
+    setTeamTasksLoading(true);
+    try {
+      // task_date filter — use period start as YYYY-MM-DD (TZ-safe, see memory #20)
+      const ps = periodBounds.startDate;  // local Date at midnight
+      const startDate = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
+      const {data, error} = await sb.from('daily_tasks')
+        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at')
+        .gte('task_date', startDate)
+        .order('task_date',{ascending:false}).order('created_at',{ascending:false}).limit(2000);
+      if (error) { console.error('Load team tasks error', error); return; }
+      setTeamTasks(data||[]);
+    } finally { setTeamTasksLoading(false); }
+  }, [isTeamViewer, periodBounds]);
+
+  React.useEffect(() => { if (tab === 'team') loadTeamTasks(); }, [tab, loadTeamTasks]);
 
   // Smart default: if today is weekend or has zero PR activity, hint at week view
   const isSundayMonday = React.useMemo(() => {
@@ -10759,19 +10760,18 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
             const byUser = new Map();
             for (const t of teamTasks) {
               const u = (t.user_name||'').toUpperCase().trim() || '(unknown)';
-              if (!byUser.has(u)) byUser.set(u, {user:u, total:0, done:0, pending:0, stuck:0, manual:0, auto:0, carried:0, recurring:0, admin:0, other:0});
+              if (!byUser.has(u)) byUser.set(u, {user:u, total:0, done:0, pending:0, stuck:0, cancelled:0, user_src:0, recurring:0, carried:0, admin:0});
               const r = byUser.get(u);
               r.total++;
               if (t.status === 'done') r.done++;
               else if (t.status === 'pending') r.pending++;
               else if (t.status === 'stuck') r.stuck++;
-              const src = t.source || 'other';
-              if (src === 'manual') r.manual++;
-              else if (src === 'auto') r.auto++;
-              else if (src === 'carried') r.carried++;
+              else if (t.status === 'cancelled') r.cancelled++;
+              const src = t.source;
+              if (src === 'user') r.user_src++;
               else if (src === 'recurring') r.recurring++;
+              else if (src === 'carried') r.carried++;
               else if (src === 'admin') r.admin++;
-              else r.other++;
             }
             const userRows = Array.from(byUser.values()).sort((a,b) => b.total - a.total);
 
@@ -10818,10 +10818,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#30b54a'}}>Done</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#e3a008'}}>Pending</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#d85a30'}}>Stuck</th>
-                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Manual</th>
-                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Auto</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>User</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Recurring</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Carried</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Admin</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -10832,10 +10832,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.done>0?'#30b54a':'#475569'}}>{r.done}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.pending>0?'#e3a008':'#475569'}}>{r.pending}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.stuck>0?'#d85a30':'#475569'}}>{r.stuck}</td>
-                            <td style={{padding:'4px 6px',textAlign:'right',color:r.manual>0?'#cbd5e1':'#475569'}}>{r.manual}</td>
-                            <td style={{padding:'4px 6px',textAlign:'right',color:r.auto>0?'#cbd5e1':'#475569'}}>{r.auto}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.user_src>0?'#cbd5e1':'#475569'}}>{r.user_src}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.recurring>0?'#cbd5e1':'#475569'}}>{r.recurring}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.carried>0?'#cbd5e1':'#475569'}}>{r.carried}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.admin>0?'#cbd5e1':'#475569'}}>{r.admin}</td>
                           </tr>
                         ))}
                       </tbody>
