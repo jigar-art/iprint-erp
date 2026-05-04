@@ -4664,6 +4664,30 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
     const {error} = await sb.from('purchase_requests').update(updates).eq('id', receiving.id);
     if (error) { show('Save failed: ' + error.message, false); setSaving(false); return; }
 
+    // P0-1 (Fix C): mirror per-item rows into grn table so future GRN-table
+    // queries can find this material receipt. Failure here logs only — the
+    // PR itself is already updated, no rollback needed.
+    try {
+      const grnRows = (gf.items_received || []).map((x, i) => ({
+        id: grn_id + '-' + i,
+        date: gf.received_at,
+        supplier: receiving.vendor_name || null,
+        material: x.product || null,
+        qty: +x.received_qty || 0,
+        unit: x.per || null,
+        invoice_no: gf.invoice_no || null,
+        job_id: receiving.job_id || null,
+        inward_type: 'PR',
+        received_by: gf.received_by
+      }));
+      if (grnRows.length) {
+        const {error: grnErr} = await sb.from('grn').insert(grnRows);
+        if (grnErr) console.warn('[P0-1] grn insert failed:', grnErr.message);
+      }
+    } catch (e) {
+      console.warn('[P0-1] grn insert exception:', e);
+    }
+
     const updated = {...receiving, ...updates};
     setPrs(p => p.map(x => x.id === receiving.id ? updated : x));
 
