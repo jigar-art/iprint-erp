@@ -808,7 +808,7 @@ function MainApp({user,onLogout,masterData}){
     setItems(p=>[...lineItemsData,...p]);
     show("Job "+finalJobData.id+" created successfully!");
     setPg("jobs");
-  },[show]);
+  },[show, user]);
 
   // ─── ADD BATCH TO JOB ─────────────────────────────────────
   const addBatchToJob = useCallback(async (batchData) => {
