@@ -3111,7 +3111,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           ['Firm',fm.name||'','Contact',j.contact_person||'','Phone',j.contact_no||''],
           ['Delivery',j.delivery_address||'','PO#',j.po_number||'','Date',j.created_at?.slice(0,10)||''],
           [],
-          ['Sr','Item Name','Material/Spec','Width','Height','Unit','Qty','Rate Mode','SqFt','Rate','Total','GST%','GST','Amount']
+          ['Sr','Item Name','Material/Spec','Width','Height','Unit','Qty','Rate Mode','Area','Rate','Total','GST%','GST','Amount']
         ];
         allItems.forEach((it,i)=>{
           wsData.push([i+1,it.internal_name||it.client_name||'',it.media||'',it.width||'',it.height||'',it.size_unit||'',it.qty||1,it.rate_mode||'UNIT',it.sqft||'',+it.rate||0,+it.total||0,it.gstPct!=null?it.gstPct:18,+it.gst||0,+it.amount||0]);
@@ -3233,8 +3233,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               `<div class="meta"><b>Client:</b><span>${j.client_name||''}</span><b>Project:</b><span>${j.project||''}</span><b>PO No:</b><span>${j.po_number||'Pending'}</span><b>Delivery:</b><span>${j.delivery_address||''}</span>${j.billing_address?'<b>Billing Addr:</b><span>'+j.billing_address+'</span>':''}<b>Firm:</b><span>${fm.name||''}</span><b>Made By:</b><span>${j.made_by||''}</span><b>Status:</b><span>${j.status||''}</span></div>`+
               selBatches.map((b,bi)=>{const bItems=(b.items||[]);if(!bItems.length)return '';const hasImg=bItems.some(it=>it.img_url);
                 return `<div class="batch-hdr">Batch ${bi+1} · ${b.date||''} · ${b.note||''}</div>`+
-                  `<table><thead><tr><th>#</th><th>Description</th>${hasImg?'<th>Image</th>':''}<th>Material / Media Make</th><th>Size (W×H)</th><th>Unit</th><th>Qty</th><th>SqFt</th><th>Machine</th></tr></thead><tbody>`+
-                  bItems.map((it,ii)=>`<tr><td>${ii+1}</td><td style="font-weight:600">${it.internal_name||''}</td>${hasImg?'<td>'+(it.img_url?'<img src="'+it.img_url+'"/>':'—')+'</td>':''}<td style="font-size:9px;color:#555">${(it.media||'').slice(0,80)}</td><td class="r">${it.width&&it.height?it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:''):'—'}</td><td>${getUomLabel(it.rate_mode).header}</td><td class="r" style="font-weight:700">${it.qty}</td><td class="r">${it.sqft||'—'}</td><td>${it.area||'In-house'}</td></tr>`).join('')+
+                  `<table><thead><tr><th>#</th><th>Description</th>${hasImg?'<th>Image</th>':''}<th>Material / Media Make</th><th>Size (W×H)</th><th>Unit</th><th>Qty</th><th>${resolveUomHeader(bItems)}</th><th>Machine</th></tr></thead><tbody>`+
+                  bItems.map((it,ii)=>`<tr><td>${ii+1}</td><td style="font-weight:600">${it.internal_name||''}</td>${hasImg?'<td>'+(it.img_url?'<img src="'+it.img_url+'"/>':'—')+'</td>':''}<td style="font-size:9px;color:#555">${(it.media||'').slice(0,80)}</td><td class="r">${it.width&&it.height?it.width+'×'+it.height+(it.size_unit?' '+it.size_unit:''):'—'}</td><td>${getUomLabel(it.rate_mode).header}</td><td class="r" style="font-weight:700">${it.qty}</td><td class="r">${it.sqft>0?it.sqft+getUomLabel(it.rate_mode).suffix:'—'}</td><td>${it.area||'In-house'}</td></tr>`).join('')+
                   `</tbody></table>`;}).join('')+
               `<table style="margin-top:8px"><tr class="total"><td colspan="5" style="text-align:right"><b>GRAND TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td></tr></table>`+
               (()=>{const allImgs=selItems.filter(it=>it.img_url);const designRefs=Array.isArray(j.design_ref_urls)?j.design_ref_urls:[];return allImgs.length>0||designRefs.length>0?'<div class="refs"><h3 style="font-size:12px;margin-bottom:8px;border-bottom:1px solid #999;padding-bottom:4px">Artwork / Design References</h3><div style="display:flex;flex-wrap:wrap;gap:10px">'+allImgs.map((it,i)=>'<div style="text-align:center"><img src="'+it.img_url+'"/><p style="font-size:9px;font-weight:600;margin-top:2px">'+(it.internal_name||'Item '+(i+1))+'</p></div>').join('')+designRefs.map((u,i)=>'<div style="text-align:center"><img src="'+u+'" style="max-width:250px"/><p style="font-size:9px">Ref '+(i+1)+'</p></div>').join('')+'</div></div>':'';})() +
@@ -3508,7 +3508,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
         ['Firm',(firms.find(x=>x.code===fm)||{}).name||'','Contact',f.cp||'','Phone',f.cph||''],
         ['Delivery',f.da||'','PO#',f.po||'','Date',f.rd||''],
         [],
-        ['Sr','Item Name','Material/Spec','Width','Height','Unit','Qty','Rate Mode','SqFt','Rate','Total','GST%','GST','Amount']
+        ['Sr','Item Name','Material/Spec','Width','Height','Unit','Qty','Rate Mode','Area','Rate','Total','GST%','GST','Amount']
       ];
       its.forEach((it,i)=>{
         wsData.push([i+1,it.int||it.cli||'',it.m||'',it.w||'',it.h||'',su,it.qty||1,it.rm||'UNIT',it.sqft||'',+it.rate||0,it.tot||0,it.gstPct!=null?it.gstPct:18,it.gst||0,it.amt||0]);
