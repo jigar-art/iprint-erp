@@ -792,6 +792,8 @@ function MainApp({user,onLogout,masterData}){
       show("Error: "+je.message,false);return;
     }
     if(attempts>=5){show("Error: Could not generate unique Job#. Please try again.",false);return;}
+    // SB-4: stamp created_by on batches insert
+    batchData = {...batchData, created_by: batchData.created_by || user?.name || ''};
     const {error:be} = await sb.from('batches').insert(batchData);
     if(lineItemsData.length>0) await sb.from('line_items').insert(lineItemsData);
     setJobs(p=>[finalJobData,...p]);
@@ -803,9 +805,11 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── ADD BATCH TO JOB ─────────────────────────────────────
   const addBatchToJob = useCallback(async (batchData) => {
+    // SB-4: stamp created_by on batches insert
+    batchData = {...batchData, created_by: batchData.created_by || user?.name || ''};
     const {error} = await sb.from('batches').insert(batchData);
     if(!error) {setBatches(p=>[batchData,...p]); show("Batch added!");}
-  },[show]);
+  },[show, user]);
 
   const deleteBatch = useCallback(async (batchId) => {
     const batchItems = items.filter(i=>i.batch_id===batchId);
@@ -845,18 +849,20 @@ function MainApp({user,onLogout,masterData}){
   const importBatches = useCallback(async (batchesWithItems) => {
     let imported=0;
     for(const {batch,items:lineItems} of batchesWithItems){
-      const {error:be}=await sb.from('batches').insert(batch);
+      // SB-4: stamp created_by on batches insert
+      const stampedBatch = {...batch, created_by: batch.created_by || user?.name || ''};
+      const {error:be}=await sb.from('batches').insert(stampedBatch);
       if(be){console.error('Batch insert error:',be);continue;}
       if(lineItems.length>0){
         const {error:le}=await sb.from('line_items').insert(lineItems);
         if(le)console.error('Items insert error:',le);
       }
-      setBatches(p=>[batch,...p]);
+      setBatches(p=>[stampedBatch,...p]);
       setItems(p=>[...lineItems,...p]);
       imported++;
     }
     return imported;
-  },[]);
+  },[user]);
 
   // ─── TOGGLE DEPT ──────────────────────────────────────────
   const togDept = useCallback(async (itemId, dept, newVal) => {
@@ -895,7 +901,7 @@ function MainApp({user,onLogout,masterData}){
       } else if(dept==='Dispatch'){
         const ld={id:'DL'+Date.now()+Math.random().toString(36).slice(2,5),date:td(),job_id:item.job_id||'',
           delivery_boy:user?.name||'',mode:'In-house',qty:+item.qty||0,vehicle_no:'',
-          notes:'Auto: '+(item.internal_name||'')};
+          notes:'Auto: '+(item.internal_name||''),created_by:user?.name||''};
         const {error:e}=await sb.from('dispatch_logs').insert(ld);
         if(!e)setDLogs(p=>[ld,...p]);
       }
@@ -948,9 +954,11 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── ADD DISPATCH ─────────────────────────────────────────
   const addDispatch = useCallback(async (data) => {
+    // SB-3: stamp created_by on dispatch_logs insert
+    data = {...data, created_by: data.created_by || user?.name || ''};
     const {error} = await sb.from('dispatch_logs').insert(data);
     if(!error){setDLogs(p=>[data,...p]);show("Dispatch logged!");}
-  },[show]);
+  },[show, user]);
 
   // ─── EXPENSES ──────────────────────────────────────────────
   const addExpense = useCallback(async (data) => {
@@ -2886,7 +2894,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             if(selItems.length===0){show('Select at least one item',false);return;}
             const srcBatch=j.batches?.find(x=>x.id===copyBatch.batchId);
             const newBid="B"+uid();
-            const bd={id:newBid,job_id:j.id,date:td(),note:(srcBatch?.note||'')+(srcBatch?.note?' (Copy)':' Copy'),bill_no:'',status:'New',atm_id:'',site_unique_id:'',po_number:srcBatch?.po_number||'',billing_address:srcBatch?.billing_address||'',delivery_address:srcBatch?.delivery_address||''};
+            const bd={id:newBid,job_id:j.id,date:td(),note:(srcBatch?.note||'')+(srcBatch?.note?' (Copy)':' Copy'),bill_no:'',status:'New',atm_id:'',site_unique_id:'',po_number:srcBatch?.po_number||'',billing_address:srcBatch?.billing_address||'',delivery_address:srcBatch?.delivery_address||'',created_by:user?.name||''};
             const {error:bErr}=await sb.from('batches').insert(bd);
             if(bErr){show('⚠️ Failed: '+bErr.message,false);return;}
             setBatches(p=>[bd,...p]);
