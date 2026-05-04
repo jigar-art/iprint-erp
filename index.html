@@ -9301,6 +9301,29 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
 
   React.useEffect(() => { if (tab === 'duties') loadRecurringDuties(); }, [tab, loadRecurringDuties]);
 
+  // SC-1 (SB-8): Team Performance dashboard — gated to JIGAR/CHANDNI
+  // Reads daily_tasks for ALL users within periodBounds. Pure read, no writes.
+  const [teamTasks, setTeamTasks] = React.useState([]);
+  const [teamTasksLoading, setTeamTasksLoading] = React.useState(false);
+
+  const loadTeamTasks = React.useCallback(async () => {
+    if (!isTeamViewer) return;
+    setTeamTasksLoading(true);
+    try {
+      // task_date filter — use period start as YYYY-MM-DD (TZ-safe, see memory #20)
+      const ps = periodBounds.startDate;  // local Date at midnight
+      const startDate = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
+      const {data, error} = await sb.from('daily_tasks')
+        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at')
+        .gte('task_date', startDate)
+        .order('task_date',{ascending:false}).order('created_at',{ascending:false}).limit(2000);
+      if (error) { console.error('Load team tasks error', error); return; }
+      setTeamTasks(data||[]);
+    } finally { setTeamTasksLoading(false); }
+  }, [isTeamViewer, periodBounds]);
+
+  React.useEffect(() => { if (tab === 'team') loadTeamTasks(); }, [tab, loadTeamTasks]);
+
   const addRecurringDuty = async () => {
     if (!isTeamViewer || savingDuty) return;
     const user = (newDutyUser||'').trim();
@@ -9963,6 +9986,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
           {isTeamViewer && tabBtn('output', '📈 Output')}
           {isTeamViewer && tabBtn('standup', '📋 Standup')}
           {isTeamViewer && tabBtn('duties', '⚙️ Duties')}
+          {isTeamViewer && tabBtn('team', '👥 Team')}
         </div>
         <div style={{flex:1}}/>
         <div style={{display:'flex',gap:3}}>
@@ -10701,6 +10725,176 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
               ));
             })()
           )}
+        </div>
+      )}
+
+      {/* SC-1 (SB-8): Team Performance — gated to JIGAR/CHANDNI */}
+      {!loading && tab === 'team' && isTeamViewer && (
+        <div>
+          <div style={{display:'flex',alignItems:'baseline',gap:10,marginBottom:10,flexWrap:'wrap'}}>
+            <h2 style={{margin:0,fontSize:15,fontWeight:700}}>👥 Team Performance</h2>
+            <span style={{fontSize:10,color:'#64748b'}}>{periodBounds.label}</span>
+            <div style={{flex:1}}/>
+            <span style={{fontSize:10,color:'#64748b'}}>
+              {teamTasks.length} task{teamTasks.length===1?'':'s'} logged
+            </span>
+          </div>
+
+          {teamTasksLoading && <div style={{...cardStyle,textAlign:'center',color:'#64748b',padding:'20px 12px',fontSize:11}}>Loading team activity…</div>}
+
+          {!teamTasksLoading && teamTasks.length === 0 && (
+            <div style={{...cardStyle,textAlign:'center',padding:'30px 12px',color:'#64748b'}}>
+              <div style={{fontSize:36,marginBottom:8}}>📊</div>
+              <div style={{fontSize:12,marginBottom:4}}>No tasks logged yet for this period.</div>
+              <div style={{fontSize:10,lineHeight:1.5}}>
+                As team members start using the My Tasks tab — adding manual notes,<br/>
+                marking pending work as done, or logging stuck items — this dashboard fills in.<br/>
+                Recurring duties seeded via the ⚙️ Duties tab will also appear here once they spawn.
+              </div>
+            </div>
+          )}
+
+          {!teamTasksLoading && teamTasks.length > 0 && (() => {
+            // ── Aggregate per-user counts ──
+            const byUser = new Map();
+            for (const t of teamTasks) {
+              const u = (t.user_name||'').toUpperCase().trim() || '(unknown)';
+              if (!byUser.has(u)) byUser.set(u, {user:u, total:0, done:0, pending:0, stuck:0, manual:0, auto:0, carried:0, recurring:0, admin:0, other:0});
+              const r = byUser.get(u);
+              r.total++;
+              if (t.status === 'done') r.done++;
+              else if (t.status === 'pending') r.pending++;
+              else if (t.status === 'stuck') r.stuck++;
+              const src = t.source || 'other';
+              if (src === 'manual') r.manual++;
+              else if (src === 'auto') r.auto++;
+              else if (src === 'carried') r.carried++;
+              else if (src === 'recurring') r.recurring++;
+              else if (src === 'admin') r.admin++;
+              else r.other++;
+            }
+            const userRows = Array.from(byUser.values()).sort((a,b) => b.total - a.total);
+
+            // ── Aging tasks (pending/stuck, ≥ 2 days old) ──
+            // TZ-safe: build cutoff via local-date components, see memory #20.
+            const now = new Date();
+            const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            cutoff.setDate(cutoff.getDate() - 2);
+            const cutoffISO = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
+            const aging = teamTasks.filter(t => (t.status==='pending'||t.status==='stuck') && (t.task_date||'') <= cutoffISO).slice(0, 30);
+
+            // ── 7-day trend: tasks DONE per day ──
+            const last7 = [];
+            for (let i = 6; i >= 0; i--) {
+              const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+              const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              last7.push({iso, label: d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric'}), done:0});
+            }
+            const isoIdx = new Map(last7.map((d,i)=>[d.iso,i]));
+            for (const t of teamTasks) {
+              if (t.status !== 'done') continue;
+              // prefer done_at date in local TZ; fall back to task_date
+              let key = t.task_date;
+              if (t.done_at) {
+                const da = new Date(t.done_at);
+                key = `${da.getFullYear()}-${String(da.getMonth()+1).padStart(2,'0')}-${String(da.getDate()).padStart(2,'0')}`;
+              }
+              const i = isoIdx.get(key);
+              if (i !== undefined) last7[i].done++;
+            }
+            const maxDone = Math.max(1, ...last7.map(d => d.done));
+
+            return (
+              <div>
+                {/* Per-user table */}
+                <div style={{...cardStyle,padding:'8px 10px'}}>
+                  <div style={{fontSize:9,color:'#5dcaa5',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6,fontWeight:600}}>Per-user activity · {periodBounds.label}</div>
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:10.5,color:'#cbd5e1'}}>
+                      <thead>
+                        <tr style={{borderBottom:'1px solid #1a2030',color:'#64748b',textAlign:'left'}}>
+                          <th style={{padding:'4px 6px',fontWeight:600}}>User</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Total</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#30b54a'}}>Done</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#e3a008'}}>Pending</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#d85a30'}}>Stuck</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Manual</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Auto</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Recurring</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Carried</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {userRows.map(r => (
+                          <tr key={r.user} style={{borderBottom:'1px dashed #1a2030'}}>
+                            <td style={{padding:'4px 6px',fontWeight:600}}>{r.user}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right'}}>{r.total}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.done>0?'#30b54a':'#475569'}}>{r.done}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.pending>0?'#e3a008':'#475569'}}>{r.pending}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.stuck>0?'#d85a30':'#475569'}}>{r.stuck}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.manual>0?'#cbd5e1':'#475569'}}>{r.manual}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.auto>0?'#cbd5e1':'#475569'}}>{r.auto}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.recurring>0?'#cbd5e1':'#475569'}}>{r.recurring}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.carried>0?'#cbd5e1':'#475569'}}>{r.carried}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 7-day completion trend */}
+                <div style={{...cardStyle,padding:'8px 10px'}}>
+                  <div style={{fontSize:9,color:'#5dcaa5',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8,fontWeight:600}}>📈 Tasks completed · last 7 days (all users)</div>
+                  <div style={{display:'flex',alignItems:'flex-end',gap:6,height:80,paddingBottom:4,borderBottom:'1px solid #1a2030'}}>
+                    {last7.map(d => {
+                      const h = Math.round((d.done / maxDone) * 70);
+                      return (
+                        <div key={d.iso} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                          <div style={{fontSize:9,color:d.done>0?'#5dcaa5':'#475569',fontWeight:600,height:11}}>{d.done>0?d.done:''}</div>
+                          <div title={d.iso+': '+d.done+' done'} style={{width:'100%',height:Math.max(2,h),background:d.done>0?'linear-gradient(180deg,#1d9e75 0%,#0f6b4f 100%)':'#1a2030',borderRadius:'2px 2px 0 0'}}/>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{display:'flex',gap:6,marginTop:4}}>
+                    {last7.map(d => (
+                      <div key={d.iso+'_l'} style={{flex:1,fontSize:8.5,color:'#64748b',textAlign:'center'}}>{d.label}</div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Aging tasks (≥ 2 days old, pending or stuck) */}
+                <div style={{...cardStyle,padding:'8px 10px'}}>
+                  <div style={{fontSize:9,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6,fontWeight:600}}>⚠️ Aging tasks (≥ 2 days old, still open)</div>
+                  {aging.length === 0 ? (
+                    <div style={{fontSize:10.5,color:'#64748b',padding:'4px 0'}}>No aging tasks. Backlog is fresh.</div>
+                  ) : (
+                    <div>
+                      {aging.map(t => {
+                        const ageDays = (() => {
+                          const td = (t.task_date||'').slice(0,10);
+                          if (!td) return 0;
+                          const [y,m,d] = td.split('-').map(n=>parseInt(n,10));
+                          const taskDate = new Date(y, (m||1)-1, d||1);
+                          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                          return Math.round((today - taskDate) / 86400000);
+                        })();
+                        return (
+                          <div key={'aging_'+t.id} style={{display:'flex',gap:6,padding:'4px 0',borderBottom:'1px dashed #1a2030',fontSize:10.5,color:'#cbd5e1',alignItems:'center'}}>
+                            <span style={{color:t.status==='stuck'?'#d85a30':'#e3a008',fontWeight:600,minWidth:62}}>{t.status==='stuck'?'🔴 stuck':'🟡 pending'}</span>
+                            <span style={{color:'#94a3b8',fontWeight:600,minWidth:78}}>{t.user_name}</span>
+                            <span style={{flex:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.task_text}</span>
+                            <span style={{fontSize:9,color:'#64748b',whiteSpace:'nowrap'}}>{ageDays}d old</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
