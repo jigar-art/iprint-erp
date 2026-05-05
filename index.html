@@ -8799,7 +8799,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
             <option value="">—</option><option value="Completed">Completed</option><option value="Pending">Pending</option><option value="Duplicate">Duplicate</option><option value="In Progress">Work In Progress</option>
           </select></td>
           <td><select className="in" value={s.photo_status||''} onChange={e=>updateSite(s.id,'photo_status',e.target.value)} style={{fontSize:8,padding:'1px 2px',width:75,color:s.photo_status?.includes('Received')?'#4ade80':'#f59e0b'}}>
-            <option value="">—</option><option value="Photo Received">Received</option><option value="Photo Pending">Pending</option><option value="Duplicate">Duplicate</option>
+            <option value="">—</option><option value="Received">Received</option><option value="Pending">Pending</option><option value="Re-shoot needed">Re-shoot</option><option value="Site Issue">Site Issue</option><option value="Not Applicable">N/A</option>
           </select></td>
           <td style={{fontSize:8,color:'#06b6d4'}}>{s.billing_status?.slice(0,12)||'—'}</td>
           <td><span className="bd" style={{background:billingColor+'20',color:billingColor,fontSize:8}}>{s.billing_category||'Pending'}</span></td>
