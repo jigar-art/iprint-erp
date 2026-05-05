@@ -652,6 +652,167 @@ function Login({onLogin,team}){
 }
 
 // ═══════════════════════════════════════════════════════════
+// MY TASKS FLOATING WIDGET (added 05 May 2026)
+// Bottom-right collapsible bubble. Reads from MainApp's lifted myTasks state.
+// Read-only list; "Open My Tasks" button routes to ReportsPage with forceTab='me'.
+// ═══════════════════════════════════════════════════════════
+function MyTasksFloatingWidget({tasks, autoTasks, onOpen}) {
+  const [open, setOpen] = useState(false);
+  const pending = (tasks||[]).filter(t => t.status === 'pending');
+  const stuck = (tasks||[]).filter(t => t.status === 'stuck');
+  const done = (tasks||[]).filter(t => t.status === 'done');
+  const auto = autoTasks || [];
+  const badgeCount = pending.length + stuck.length;
+
+  // Closed state — small floating button bottom-right
+  if (!open) {
+    return (
+      <div onClick={()=>setOpen(true)}
+        title="My Tasks"
+        style={{
+          position:'fixed', bottom:18, right:18, zIndex:100,
+          width:48, height:48, borderRadius:24,
+          background:'linear-gradient(135deg,#7f77dd,#5d4ec8)',
+          border:'1px solid #afa9ec', boxShadow:'0 4px 12px rgba(0,0,0,0.4)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          cursor:'pointer', fontSize:20, color:'#fff', userSelect:'none'
+        }}>
+        📋
+        {badgeCount > 0 && (
+          <span style={{
+            position:'absolute', top:-3, right:-3,
+            background:'#e3a008', color:'#060810',
+            borderRadius:10, fontSize:10, fontWeight:800,
+            padding:'2px 6px', minWidth:18, textAlign:'center',
+            border:'2px solid #060810'
+          }}>{badgeCount}</span>
+        )}
+      </div>
+    );
+  }
+
+  // Open state — panel with task list + "Open My Tasks" button
+  return (
+    <div style={{
+      position:'fixed', bottom:18, right:18, zIndex:100,
+      width:300, maxHeight:'70vh',
+      background:'#0f0f1a', border:'1px solid #7f77dd80',
+      borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,0.6)',
+      display:'flex', flexDirection:'column', overflow:'hidden'
+    }}>
+      {/* Header */}
+      <div style={{
+        padding:'10px 12px', borderBottom:'1px solid #1a2030',
+        display:'flex', alignItems:'center', gap:8,
+        background:'#1a1530'
+      }}>
+        <span style={{fontSize:14}}>📋</span>
+        <span style={{fontSize:12, fontWeight:700, color:'#afa9ec', flex:1}}>My Tasks</span>
+        <span style={{fontSize:9, color:'#64748b'}}>
+          {pending.length} pending · {stuck.length} stuck · {auto.length} done
+        </span>
+        <span onClick={()=>setOpen(false)}
+          style={{cursor:'pointer', color:'#64748b', fontSize:14, padding:'0 4px'}}
+          title="Close">×</span>
+      </div>
+
+      {/* Body — scrollable task list */}
+      <div style={{flex:1, overflowY:'auto', padding:'8px 10px'}}>
+        {badgeCount === 0 && done.length === 0 && auto.length === 0 && (
+          <div style={{textAlign:'center', padding:'24px 8px', color:'#64748b', fontSize:11}}>
+            <div style={{fontSize:32, marginBottom:6}}>✨</div>
+            <div>No tasks for today.</div>
+            <div style={{fontSize:9, marginTop:4}}>Click "Open My Tasks" to add one.</div>
+          </div>
+        )}
+
+        {pending.length > 0 && (
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:9, color:'#e3a008', textTransform:'uppercase', letterSpacing:0.5, marginBottom:4}}>📝 Pending</div>
+            {pending.map(t => (
+              <div key={'p'+t.id} style={{
+                background:'#0f1422', borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),
+                padding:'5px 8px', marginBottom:2, fontSize:10, color:'#cbd5e1'
+              }}>
+                <div style={{display:'flex', gap:6, alignItems:'center'}}>
+                  <span style={{flex:1}}>{t.task_text}</span>
+                  {t.linked_job_id && <span style={{fontSize:8, padding:'1px 4px', background:'#1a2333', color:'#85b7eb', borderRadius:3}}>{t.linked_job_id}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {stuck.length > 0 && (
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:9, color:'#e24b4a', textTransform:'uppercase', letterSpacing:0.5, marginBottom:4}}>🚫 Stuck</div>
+            {stuck.map(t => (
+              <div key={'s'+t.id} style={{
+                background:'#1a0d0d', borderLeft:'2px solid #e24b4a',
+                padding:'5px 8px', marginBottom:2, fontSize:10, color:'#cbd5e1'
+              }}>
+                <div>{t.task_text}</div>
+                {t.stuck_note && <div style={{fontSize:9, color:'#f09595', marginTop:3, fontStyle:'italic'}}>↳ {t.stuck_note}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Auto-tracked from ERP today (kind === things you did) — read-only */}
+        {auto.length > 0 && (
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:9, color:'#5dcaa5', textTransform:'uppercase', letterSpacing:0.5, marginBottom:4}}>⚡ Auto-tracked from ERP today</div>
+            {auto.slice(0, 8).map((t, i) => (
+              <div key={'a'+i} style={{
+                background:'#0f1a17', borderLeft:'2px solid #1d9e75',
+                padding:'5px 8px', marginBottom:2, fontSize:10, color:'#9fe1cb',
+                textDecoration:'line-through'
+              }}>
+                <div style={{display:'flex', gap:6, alignItems:'center'}}>
+                  <span style={{color:'#5dcaa5'}}>✓</span>
+                  <span style={{flex:1}}>{t.text}</span>
+                  <span style={{fontSize:8, color:'#475569'}}>{(t.at||'').slice(11,16)}</span>
+                </div>
+              </div>
+            ))}
+            {auto.length > 8 && <div style={{fontSize:9, color:'#475569', padding:'2px 8px'}}>+ {auto.length - 8} more in ERP today</div>}
+          </div>
+        )}
+
+        {done.length > 0 && (
+          <div style={{marginBottom:4, opacity:0.6}}>
+            <div style={{fontSize:9, color:'#30b54a', textTransform:'uppercase', letterSpacing:0.5, marginBottom:4}}>✅ Tasks ticked off</div>
+            {done.slice(0, 5).map(t => (
+              <div key={'d'+t.id} style={{
+                background:'#0f1422', borderLeft:'2px solid #30b54a',
+                padding:'4px 8px', marginBottom:2, fontSize:10, color:'#64748b',
+                textDecoration:'line-through'
+              }}>
+                {t.task_text}
+              </div>
+            ))}
+            {done.length > 5 && <div style={{fontSize:9, color:'#475569', padding:'2px 8px'}}>+ {done.length - 5} more done</div>}
+          </div>
+        )}
+      </div>
+
+      {/* Footer — Open button */}
+      <div style={{padding:'8px 10px', borderTop:'1px solid #1a2030', background:'#0a0a14'}}>
+        <button
+          onClick={()=>{setOpen(false); onOpen?.();}}
+          style={{
+            width:'100%', padding:'7px 10px', borderRadius:6,
+            border:'1px solid #7f77dd80', background:'#7f77dd20',
+            color:'#afa9ec', fontSize:11, fontWeight:700, cursor:'pointer'
+          }}>
+          Open My Tasks →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════
 function MainApp({user,onLogout,masterData}){
@@ -691,6 +852,86 @@ function MainApp({user,onLogout,masterData}){
     setPg(dest);
     try{sessionStorage.setItem('erp_focus_ref',JSON.stringify({rt,rid,at:Date.now()}));}catch(e){}
   };
+
+  // ── My Tasks: lightweight badge count + list (lifted from ReportsPage) ──
+  // Powers the sidebar nav badge and the floating widget. Reads daily_tasks
+  // for the logged-in user for today only. Pure read; writes still happen in
+  // ReportsPage's "My Tasks" card. Refetched every 60s to stay roughly fresh.
+  // Added 05 May 2026 to fix discoverability — users couldn't find their tasks.
+  const [myTasks,setMyTasks]=useState([]);
+  // Today's site_invoices added by THIS user — used to derive "auto-done" entries
+  // in the floating widget. We don't load all site_invoices into MainApp (heavy);
+  // instead this is a tiny per-user-per-day slice.
+  const [myInvoicesToday,setMyInvoicesToday]=useState([]);
+  useEffect(()=>{
+    if(!user?.name) return;
+    const uname=(user.name||'').toUpperCase();
+    const todayISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})();
+    let cancelled=false;
+    const fetchTasks=async()=>{
+      try{
+        const [taskRes,invRes]=await Promise.all([
+          sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at').eq('user_name',uname).eq('task_date',todayISO).order('created_at',{ascending:true}).limit(200),
+          sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,added_by,created_at').eq('added_by',uname).gte('created_at',todayISO).order('created_at',{ascending:false}).limit(50),
+        ]);
+        if(!cancelled){
+          setMyTasks(taskRes.data||[]);
+          setMyInvoicesToday(invRes.data||[]);
+        }
+      }catch(e){if(!cancelled) console.warn('MyTasks fetch failed',e);}
+    };
+    fetchTasks();
+    const tid=setInterval(fetchTasks,60000);
+    return ()=>{cancelled=true;clearInterval(tid);};
+  },[user?.name]);
+  const myTaskPendingCount=(myTasks||[]).filter(t=>t.status==='pending'||t.status==='stuck').length;
+  // Allow ReportsPage to invalidate this cache when user adds/marks a task
+  window._refreshMyTasks=async()=>{
+    if(!user?.name) return;
+    const uname=(user.name||'').toUpperCase();
+    const todayISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})();
+    try{
+      const {data}=await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at').eq('user_name',uname).eq('task_date',todayISO).order('created_at',{ascending:true}).limit(200);
+      setMyTasks(data||[]);
+    }catch(e){}
+  };
+
+  // Derived: user's auto-tracked actions today (mirrors ReportsPage autoTasks but
+  // reads from MainApp's existing state — no extra fetches except site_invoices above).
+  // Used in the floating widget's "Done in ERP today" section. Lightweight.
+  const myAutoTasks = React.useMemo(()=>{
+    if(!user?.name) return [];
+    const uname=(user.name||'').toUpperCase();
+    const todayISO=(()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})();
+    const out=[];
+    (myInvoicesToday||[]).forEach(si=>{
+      out.push({kind:'invoice',text:'Invoiced site '+(si.site_id||'?')+(si.invoice_no?' (Inv '+si.invoice_no+')':''),at:si.created_at});
+    });
+    (jobs||[]).forEach(j=>{
+      if((j.made_by||'').toUpperCase()!==uname) return;
+      if((j.created_at||'').slice(0,10)!==todayISO) return;
+      out.push({kind:'job_created',text:'Created job '+j.id+(j.client_name?' for '+j.client_name:''),at:j.created_at});
+    });
+    (prs||[]).forEach(p=>{
+      if((p.created_by||'').toUpperCase()===uname && (p.created_at||'').slice(0,10)===todayISO){
+        out.push({kind:'pr_created',text:'Generated PR '+(p.pr_no||p.id)+(p.vendor_name?' for '+p.vendor_name:''),at:p.created_at});
+      }
+      if((p.po_generated_by||'').toUpperCase()===uname && (p.po_generated_at||'').slice(0,10)===todayISO){
+        out.push({kind:'po_generated',text:'PO generated for PR '+(p.pr_no||p.id),at:p.po_generated_at});
+      }
+    });
+    (grnData||[]).forEach(g=>{
+      if((g.received_by||'').toUpperCase()!==uname) return;
+      if((g.created_at||'').slice(0,10)!==todayISO) return;
+      out.push({kind:'grn',text:'Received material from '+(g.supplier||'—'),at:g.created_at});
+    });
+    (salesActs||[]).forEach(sa=>{
+      if((sa.rep_name||'').toUpperCase()!==uname) return;
+      if((sa.created_at||'').slice(0,10)!==todayISO) return;
+      out.push({kind:'sales_activity',text:(sa.activity_type||'Activity')+' · '+(sa.client_name||sa.firm_name||'—'),at:sa.created_at});
+    });
+    return out.sort((a,b)=>(b.at||'').localeCompare(a.at||''));
+  },[user?.name,myInvoicesToday,jobs,prs,grnData,salesActs]);
 
   // Helper: fetch ALL rows from a table (paginate past 1000 limit)
   const fetchAll = async (table, order=null, filter=null) => {
@@ -1251,6 +1492,8 @@ function MainApp({user,onLogout,masterData}){
   const allNav=[
     // Dashboard — everyone
     {id:"dash",l:"Dashboard",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
+    // My Tasks — everyone (added 05 May 2026 to fix discoverability of My Tasks card)
+    {id:"mytasks",l:"My Tasks",e:"📋",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
     // All Jobs — tier-1 + Aparna + Priyanka + Shreya (BATUL removed per revised matrix)
     {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","SHREYA"]},
     // New Job — admin role + PRIYANKA + ANKITA (sales role added so Priyanka passes role check)
@@ -1323,7 +1566,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):n.id==='myprs'?(()=>{try{const uname=(user.name||'').toUpperCase();const lvKey='myprs_last_viewed_'+uname;const lv=localStorage.getItem(lvKey)||'1970-01-01T00:00:00Z';const myDept=(typeof STAFF_DEPTS!=='undefined')?Object.keys(STAFF_DEPTS).find(k=>k.toUpperCase()===uname||uname.includes(k.toUpperCase())):null;const myDeptTag=myDept?STAFF_DEPTS[myDept]:null;return (prs||[]).filter(p=>{const isMine=p.created_by&&p.created_by.toUpperCase()===uname;const isMyDept=myDeptTag&&p.requestor_dept===myDeptTag;if(!isMine&&!isMyDept)return false;const ts=p.last_status_change_at||p.created_at||'';return ts>lv&&p.status!=='Pending Approval';}).length;}catch(e){return 0;}})():0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='mytasks'?myTaskPendingCount:n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):n.id==='myprs'?(()=>{try{const uname=(user.name||'').toUpperCase();const lvKey='myprs_last_viewed_'+uname;const lv=localStorage.getItem(lvKey)||'1970-01-01T00:00:00Z';const myDept=(typeof STAFF_DEPTS!=='undefined')?Object.keys(STAFF_DEPTS).find(k=>k.toUpperCase()===uname||uname.includes(k.toUpperCase())):null;const myDeptTag=myDept?STAFF_DEPTS[myDept]:null;return (prs||[]).filter(p=>{const isMine=p.created_by&&p.created_by.toUpperCase()===uname;const isMyDept=myDeptTag&&p.requestor_dept===myDeptTag;if(!isMine&&!isMyDept)return false;const ts=p.last_status_change_at||p.created_at||'';return ts>lv&&p.status!=='Pending Approval';}).length;}catch(e){return 0;}})():0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -1365,6 +1608,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="po"&&<POPage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show} firms={firms}/>}
           {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
           {pg==="reports"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} team={masterData.team} show={show}/>}
+          {pg==="mytasks"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} team={masterData.team} show={show} forceTab="me"/>}
         </div>
       </main>
 
@@ -1398,6 +1642,8 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </div>}
       {toast&&<div style={{position:"fixed",bottom:12,right:12,background:toast.ok?"#238636":"#da3633",color:"#fff",padding:"6px 12px",borderRadius:6,fontWeight:600,fontSize:11,zIndex:200,animation:"sr .3s"}}>✓ {toast.m}</div>}
+      {/* My Tasks floating widget — visible on every page for logged-in users (added 05 May 2026) */}
+      <MyTasksFloatingWidget tasks={myTasks} autoTasks={myAutoTasks} onOpen={()=>setPg('mytasks')}/>
     </div>
   );
 }
@@ -9252,13 +9498,15 @@ function JobNotesPage({jobs,user,show}){
 // Deploy 1 of 3 (04 May 26): Stalls + Output + My Report tabs.
 // Standup tab + WhatsApp Digest = Deploys 2 + 3.
 // ═══════════════════════════════════════════════════════════
-function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
+function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const uname = (user?.name||'').toUpperCase();
   const TEAM_VIEWERS = ['JIGAR','CHANDNI'];
   const isTeamViewer = TEAM_VIEWERS.some(u => uname.includes(u));
 
   // Tabs: 'me' for everyone; 'stalls' + 'output' + 'standup' for team viewers only
-  const [tab, setTab] = React.useState('me');
+  const [tab, setTab] = React.useState(forceTab || 'me');
+  // Honor forceTab when nav routes here (e.g. sidebar 'My Tasks' nav item)
+  React.useEffect(() => { if (forceTab) setTab(forceTab); }, [forceTab]);
   const [period, setPeriod] = React.useState('today'); // today | week | month
   const [thresholds, setThresholds] = React.useState({pr_hours:48,billing_hours:48,job_days:14,banking_days:30});
   const [editThresh, setEditThresh] = React.useState(false);
@@ -9297,6 +9545,14 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show}){
   const [savingTask, setSavingTask] = React.useState(false);
   const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
   const [stuckNoteText, setStuckNoteText] = React.useState('');
+
+  // Keep the MainApp-level badge / floating widget in sync with local task ops
+  // (added 05 May 2026). Cheap: the global handler is debounced in MainApp.
+  React.useEffect(() => {
+    if (typeof window._refreshMyTasks === 'function') {
+      window._refreshMyTasks();
+    }
+  }, [todayTasks]);
 
   // SB-6: extra sources for autoTasks aggregation (Murli's GRN, Batul's sales)
   const [grnRows, setGrnRows] = React.useState([]);
