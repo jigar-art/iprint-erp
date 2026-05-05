@@ -9753,9 +9753,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       try {
         // TZ-safe local-date arithmetic (avoid UTC drift on Date.toISOString)
         const [yyyy, mm, dd] = todayISO.split('-').map(Number);
-        const yDate = new Date(yyyy, mm - 1, dd - 1);  // local "yesterday"
         const pad = (n) => String(n).padStart(2, '0');
-        const yesterdayISO = `${yDate.getFullYear()}-${pad(yDate.getMonth()+1)}-${pad(yDate.getDate())}`;
         // Day-of-week for today (local): 0=Sun 1=Mon ... 6=Sat
         const dow = new Date(yyyy, mm - 1, dd).getDay();
 
@@ -9770,14 +9768,33 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
         const inserts = [];
 
         // ── SB-9: Carry-forward ─────────────────────────────
-        const {data: yPend, error: yErr} = await sb.from('daily_tasks')
-          .select('id,task_text,linked_job_id,linked_site_id,status')
-          .eq('user_name', uname).eq('task_date', yesterdayISO)
+        // Carries any pending/stuck task forward indefinitely until the user marks it
+        // done or cancelled. Survives skipped days (weekends, leave) by walking the
+        // task chain via source_task_id: only carries the LEAF of each chain (the row
+        // with no child pointing to it via source_task_id). Idempotent: re-running the
+        // same day is a no-op because today's carry row becomes the new leaf.
+        // Updated 05 May 2026 from previous "yesterday only" version.
+        const {data: pastUnfinished, error: yErr} = await sb.from('daily_tasks')
+          .select('id,task_text,linked_job_id,linked_site_id,status,source_task_id')
+          .eq('user_name', uname)
+          .lt('task_date', todayISO)
           .in('status', ['pending', 'stuck']);
         if (cancelled) return;
-        if (!yErr && yPend) {
-          yPend.forEach(t => {
-            if (existingCarryIds.has(t.id)) return;  // already carried
+        if (!yErr && pastUnfinished && pastUnfinished.length > 0) {
+          // Build set of source_task_ids that are referenced as parents.
+          // Any row whose id appears as someone's source_task_id has been "superseded"
+          // by a child row, so we don't re-carry it.
+          const parentIds = new Set();
+          pastUnfinished.forEach(r => { if (r.source_task_id) parentIds.add(r.source_task_id); });
+          // Also include today's carries — their source_task_id already points to whatever
+          // they carried, so those rows are also not leaves.
+          (existing||[]).forEach(r => { if (r.source==='carried' && r.source_task_id) parentIds.add(r.source_task_id); });
+
+          // Filter to leaves only (rows that aren't anyone's parent in the unfinished set
+          // AND aren't already represented in today's carries).
+          pastUnfinished.forEach(t => {
+            if (parentIds.has(t.id)) return;          // not a leaf — a newer row already carries this
+            if (existingCarryIds.has(t.id)) return;   // already carried today (race safety)
             inserts.push({
               user_name: uname,
               task_text: t.task_text,
