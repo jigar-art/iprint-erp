@@ -630,7 +630,7 @@ function Login({onLogin,team}){
   const submit=()=>{
     const member=team.find(t=>t.name===sel);
     if(!member){setErr('Select your name');return;}
-    if(member.pin&&member.pin!==pin){setErr('Wrong PIN');return;}
+    if(!member.pin||member.pin!==pin){setErr('Wrong PIN');return;}
     onLogin(member);
     window.__currentUser=member;
   };
@@ -1276,15 +1276,15 @@ function MainApp({user,onLogout,masterData}){
     // Clients — tier-1 + Aparna + Priyanka + Shreya (BATUL removed)
     {id:"cli",l:"Clients",e:"👥",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
     // Accounts — tier-1 + Aparna + Shreya
-    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","SHREYA","VIDYA","SONAM","PRATIKSHA"]},
+    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"],users:["JIGAR","CHANDNI","APARNA","SHREYA","VIDYA","SONAM","PRATIKSHA"]},
     // Expenses — tier-1 + Shreya
-    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","SONAM","PRATIKSHA"]},
+    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"],users:["JIGAR","CHANDNI","SHREYA","SONAM","PRATIKSHA"]},
     // Backup Data — admin role only (tier-1 access via FULL_ACCESS shortcut covers all 4 existing admins; Ankita as tier-2 admin is NOT in the user-gate)
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
     // Banking CRM — tier-1 + Aparna + Priyanka + Shreya (Harish/Murli removed per your correction)
     {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA","VIDYA","SONAM","PRATIKSHA"]},
     // Sales CRM — tier-1 + Batul
-    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","BATUL","POONAM"]},
+    {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL","POONAM"]},
     // Job Notes — tier-1 + Batul
     {id:"jobnotes",l:"Job Notes",e:"📝",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","BATUL","POONAM"]},
     // Approvals — JIGAR only (historical; not changing today)
@@ -1294,7 +1294,7 @@ function MainApp({user,onLogout,masterData}){
     // PO Generator — accounts role only (admin removed per your deliberate call). Tier-1 still sees via FULL_ACCESS.
     {id:"po",l:"PO Generator",e:"📄",roles:["accounts"],users:["SHREYA"]},
     // Receive Material — tier-1 + Shreya + Murli + Harish
-    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","HARISH"]},
+    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","HARISH"]},
     // Reports (04 May 26 — Deploy 1) — visible to everyone (My Report tab); Stalls + Output tabs gated to JIGAR + CHANDNI inside the page itself
     {id:"reports",l:"Reports",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
   ];
@@ -1303,7 +1303,7 @@ function MainApp({user,onLogout,masterData}){
   //   Includes: JIGAR (owner), AMOL (operations), CHANDNI S (co-admin), RUCHITA (backend ops)
   // TIER 2 (everyone else): must pass role AND (if module has users:[...]) be named in that list.
   //   Substring match: "JIGAR" matches "JIGAR"; "HARISH" matches "HARISH - Fab/Graphic Designer".
-  const FULL_ACCESS = ["JIGAR","AMOL","CHANDNI","RUCHITA"];
+  const FULL_ACCESS = ["JIGAR","CHANDNI"];
   const FULL_FINANCIAL_ACCESS = ["JIGAR","CHANDNI"]; // gates invoice_amount visibility (audit 04 May 2026)
   const nav=allNav.filter(n=>{
     const uName=(user.name||'').toUpperCase();
