@@ -7383,14 +7383,16 @@ function RootApp(){
         products:p.data||[], materials:m.data||[], machines:mac.data||[],
         agencies:ag.data||[], delBoys:db.data||[], team:tm.data||[],
       });
-      // Validate stored session — if user no longer in team, auto-logout
+      // Validate stored session — auto-logout if user not in team OR session older than 24h
       try{
         const stored=localStorage.getItem('erp_user');
         if(stored){
           const u=JSON.parse(stored);
           const teamList=tm.data||[];
           const valid=teamList.find(t=>t.name===u.name&&t.pin===u.pin);
-          if(!valid){localStorage.removeItem('erp_user');localStorage.removeItem('erp_pg');setUser(null);}
+          const loginTime=parseInt(localStorage.getItem('erp_login_time')||'0',10);
+          const expired=Date.now()-loginTime > 24*60*60*1000;
+          if(!valid||expired){localStorage.removeItem('erp_user');localStorage.removeItem('erp_pg');localStorage.removeItem('erp_login_time');setUser(null);}
         }
       }catch(e){}
       setLoading(false);
