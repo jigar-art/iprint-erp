@@ -10069,7 +10069,12 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
 
   // ── HELPERS ──────────────────────────────────────────────
   const inPeriod = (iso) => iso && iso >= periodBounds.startISO;
-  const matchUser = (val) => val && val.toUpperCase().includes(uname);
+  // Bi-directional match — handles both directions of long/short name mismatch.
+  // Fixes Priyanka et al. whose team_members.name is the long descriptive form
+  // ("PRIYANKA - Banking Client Servicing & Backend") while DB rows store the
+  // short form ("Priyanka"). Without the reverse direction, all of Priyanka's
+  // 29 short-form PRs were dropped from the Reports counters. (06 May 26 — re-applied)
+  const matchUser = (val) => { if (!val) return false; const v = val.toUpperCase(); return v.includes(uname) || uname.includes(v); };
   const ageHours = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 3600000) : 0;
   const ageDays = (iso) => Math.floor(ageHours(iso) / 24);
   const fmtAge = (h) => h < 24 ? h+'h' : Math.floor(h/24)+'d';
