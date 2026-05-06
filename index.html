@@ -8156,11 +8156,15 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   // Stats
   const stats=useMemo(()=>{
     const f=tab==='ALL'?sites:sites.filter(s=>s.project===tab);
+    const pendingSites=f.filter(s=>['Completed','Done'].includes(s.installation_status)&&(s.photo_status==='Received'||s.dc_status==='Received')&&s.billing_category!=='Invoiced'&&!['Cancelled','Duplicate','Wrong atm branding','DOCKET NOT RECEIVED','On Hold'].includes(s.billing_category));
     return {
       total:f.length,
       invoiced:f.filter(s=>s.billing_category==='Invoiced').length,
       givenForBilling:f.filter(s=>s.billing_category==='Given for Billing').length,
-      pending:f.filter(s=>['Completed','Done'].includes(s.installation_status)&&(s.photo_status==='Received'||s.dc_status==='Received')&&s.billing_category!=='Invoiced'&&!['Cancelled','Duplicate','Wrong atm branding','DOCKET NOT RECEIVED','On Hold'].includes(s.billing_category)).length,
+      pending:pendingSites.length,
+      pendingOther:pendingSites.filter(s=>s.billing_category==='Other').length,
+      pendingGiven:pendingSites.filter(s=>s.billing_category==='Given for Billing').length,
+      pendingStale:pendingSites.filter(s=>!s.billing_category||['Photo Pending','Work/PO Pending',''].includes(s.billing_category)).length,
       completed:f.filter(s=>s.work_category==='Completed').length,
       photoReceived:f.filter(s=>s.photo_status?.includes('Received')).length,
       photoPending:f.filter(s=>!s.photo_status||s.photo_status.includes('Pending')||s.photo_status==='').length,
@@ -8408,7 +8412,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
     {/* Stats Cards */}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5}}>
-      <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
+      <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} s={`${stats.pendingOther} other · ${stats.pendingGiven} given · ${stats.pendingStale} stale`} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
     </div>
 
     {/* Dept Status Cards (NEW) — click to filter sites by current production stage */}
