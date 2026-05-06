@@ -9562,6 +9562,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [savingTask, setSavingTask] = React.useState(false);
   const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
   const [stuckNoteText, setStuckNoteText] = React.useState('');
+  const [editTaskId, setEditTaskId] = React.useState(null);  // task id being inline-edited
+  const [editTaskText, setEditTaskText] = React.useState('');
 
   // Keep the MainApp-level badge / floating widget in sync with local task ops
   // (added 05 May 2026). Cheap: the global handler is debounced in MainApp.
@@ -9605,7 +9607,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
     const user = (newDutyUser||'').trim();
     const text = (newDutyText||'').trim();
     if (!user || !text) { alert('User and duty text are required.'); return; }
-    if (!['daily','mon-sat','mon-fri','weekdays'].includes(newDutyFreq)) { alert('Invalid frequency.'); return; }
+    if (!['daily','mon-sat','mon-fri','weekdays','alt-days','sat-only'].includes(newDutyFreq)) { alert('Invalid frequency.'); return; }
     setSavingDuty(true);
     try {
       const {data, error} = await sb.from('recurring_duties').insert({
@@ -9835,11 +9837,13 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
           duties.forEach(duty => {
             if (existingDutyIds.has(duty.id)) return;  // already spawned today
             const f = (duty.frequency||'daily').toLowerCase();
-            // Map frequency to days-of-week
+            // Map frequency to days-of-week (dow: 0=Sun 1=Mon ... 6=Sat)
             let firesToday = false;
             if (f === 'daily') firesToday = true;
             else if (f === 'mon-sat') firesToday = (dow >= 1 && dow <= 6);
             else if (f === 'mon-fri' || f === 'weekdays') firesToday = (dow >= 1 && dow <= 5);
+            else if (f === 'alt-days') firesToday = (dow === 2 || dow === 4 || dow === 6);  // Tue/Thu/Sat
+            else if (f === 'sat-only') firesToday = (dow === 6);  // Saturday only
             if (!firesToday) return;
             inserts.push({
               user_name: uname,
@@ -10128,6 +10132,40 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       .eq('id', taskId).select().single();
     if (error) { show?.('Failed: ' + error.message, false); return; }
     setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+  };
+
+  // Inline edit a manual task's text (own user-added only).
+  // Boundary enforced both in UI (button only on source='user') and at save.
+  const startEditTask = (task) => {
+    if (!task || task.source !== 'user') return;
+    if ((task.user_name||'').toUpperCase() !== uname) return;
+    setEditTaskId(task.id);
+    setEditTaskText(task.task_text || '');
+  };
+  const cancelEditTask = () => {
+    setEditTaskId(null);
+    setEditTaskText('');
+  };
+  const saveEditTask = async () => {
+    const id = editTaskId;
+    if (!id) return;
+    const newText = (editTaskText||'').trim();
+    if (!newText) { show?.('Task text cannot be empty', false); return; }
+    const original = (todayTasks||[]).find(t => t.id === id);
+    if (!original) { cancelEditTask(); return; }
+    if (original.source !== 'user' || (original.user_name||'').toUpperCase() !== uname) {
+      show?.('Only your own tasks can be edited', false); return;
+    }
+    if (newText === (original.task_text||'')) { cancelEditTask(); return; }  // no-op
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({task_text: newText, updated_at: nowISO})
+      .eq('id', id).eq('source', 'user').eq('user_name', uname)  // belt + suspenders boundary
+      .select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setTodayTasks(prev => (prev||[]).map(t => t.id === id ? data : t));
+    cancelEditTask();
+    show?.('Task updated');
   };
 
   // ── AUTO-TASKS aggregation (read-only) ──────────────────
@@ -10520,14 +10558,34 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                 <div style={{fontSize:9,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📝 Pending tasks</div>
                 {(todayTasks||[]).filter(t => t.status === 'pending').map(t => (
                   <div key={'p'+t.id} style={{background:'#0f1422',borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
-                    <span onClick={() => markTaskDone(t.id)} style={{color:'#64748b',cursor:'pointer',fontSize:13}} title="Mark done">☐</span>
-                    <span style={{flex:1}}>{t.task_text}</span>
-                    {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
-                    {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
-                    {t.source === 'admin' && t.added_by && <span style={{fontSize:8,padding:'1px 4px',background:'#2a1408',color:'#f0997b',borderRadius:3}}>{t.added_by}</span>}
-                    <span onClick={() => setStuckNoteFor(t.id)} style={{color:'#e24b4a',cursor:'pointer',fontSize:9}} title="Mark stuck">stuck?</span>
-                    {t.source === 'user' && (
-                      <span onClick={() => { if (confirm('Cancel this task?')) cancelTask(t.id); }} style={{color:'#475569',cursor:'pointer',fontSize:9}} title="Cancel task">×</span>
+                    {editTaskId === t.id ? (
+                      <React.Fragment>
+                        <span style={{color:'#64748b',fontSize:13}}>☐</span>
+                        <input className="in" value={editTaskText} onChange={e => setEditTaskText(e.target.value)}
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && editTaskText.trim()) saveEditTask();
+                            else if (e.key === 'Escape') cancelEditTask();
+                          }}
+                          style={{flex:1,fontSize:10,padding:'3px 6px',background:'#0a0e1a',border:'1px solid #378add',color:'#e2e8f0',borderRadius:3}} />
+                        <span onClick={saveEditTask} style={{color:'#30b54a',cursor:'pointer',fontSize:11}} title="Save">✓</span>
+                        <span onClick={cancelEditTask} style={{color:'#475569',cursor:'pointer',fontSize:11}} title="Cancel">✗</span>
+                      </React.Fragment>
+                    ) : (
+                      <React.Fragment>
+                        <span onClick={() => markTaskDone(t.id)} style={{color:'#64748b',cursor:'pointer',fontSize:13}} title="Mark done">☐</span>
+                        <span style={{flex:1}}>{t.task_text}</span>
+                        {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
+                        {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
+                        {t.source === 'admin' && t.added_by && <span style={{fontSize:8,padding:'1px 4px',background:'#2a1408',color:'#f0997b',borderRadius:3}}>{t.added_by}</span>}
+                        <span onClick={() => setStuckNoteFor(t.id)} style={{color:'#e24b4a',cursor:'pointer',fontSize:9}} title="Mark stuck">stuck?</span>
+                        {t.source === 'user' && (t.user_name||'').toUpperCase() === uname && (
+                          <span onClick={() => startEditTask(t)} style={{color:'#85b7eb',cursor:'pointer',fontSize:9}} title="Edit task">✎</span>
+                        )}
+                        {t.source === 'user' && (
+                          <span onClick={() => { if (confirm('Cancel this task?')) cancelTask(t.id); }} style={{color:'#475569',cursor:'pointer',fontSize:9}} title="Cancel task">×</span>
+                        )}
+                      </React.Fragment>
                     )}
                   </div>
                 ))}
@@ -10971,10 +11029,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               <input className="in" type="text" placeholder="Duty text (e.g. 'Enter today's banking invoices')"
                 value={newDutyText} onChange={e=>setNewDutyText(e.target.value)} style={{fontSize:11}}/>
               <select className="in" value={newDutyFreq} onChange={e=>setNewDutyFreq(e.target.value)} style={{fontSize:11}}>
-                <option value="daily">Daily (Sun–Sat)</option>
-                <option value="mon-sat">Mon–Sat</option>
+                <option value="daily">Daily</option>
                 <option value="mon-fri">Mon–Fri</option>
-                <option value="weekdays">Weekdays</option>
+                <option value="alt-days">Alt Days (Tue/Thu/Sat)</option>
+                <option value="sat-only">Saturdays only</option>
               </select>
               <button className="b bp" onClick={addRecurringDuty} disabled={savingDuty}
                 style={{fontSize:11,padding:'6px 14px',whiteSpace:'nowrap'}}>
@@ -10982,7 +11040,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </button>
             </div>
             <div style={{fontSize:9,color:'#64748b',marginTop:6}}>
-              Frequency controls which days the duty fires. The instance is created the first time the user opens Reports that day.
+              Frequency controls which days the duty fires. The instance is created the first time the user opens Reports that day.<br/>
+              <span style={{color:'#475569'}}>Daily = every day · Mon–Fri = weekdays · Alt Days = Tue/Thu/Sat · Saturdays = once a week.</span>
             </div>
           </div>
 
@@ -11013,9 +11072,9 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                             <input className="in" type="text" value={editDutyText} onChange={e=>setEditDutyText(e.target.value)} style={{fontSize:11}}/>
                             <select className="in" value={editDutyFreq} onChange={e=>setEditDutyFreq(e.target.value)} style={{fontSize:11}}>
                               <option value="daily">Daily</option>
-                              <option value="mon-sat">Mon–Sat</option>
                               <option value="mon-fri">Mon–Fri</option>
-                              <option value="weekdays">Weekdays</option>
+                              <option value="alt-days">Alt Days</option>
+                              <option value="sat-only">Saturdays</option>
                             </select>
                             <button className="b bp" onClick={saveEditDuty} style={{fontSize:10,padding:'4px 10px'}}>Save</button>
                             <button className="b" onClick={()=>{setEditDutyId(null);setEditDutyText('');}} style={{fontSize:10,padding:'4px 10px'}}>Cancel</button>
@@ -11026,7 +11085,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                               {d.duty_text}
                             </span>
                             <span style={{fontSize:9,color:'#64748b',padding:'2px 6px',borderRadius:4,background:'#1a2030',whiteSpace:'nowrap'}}>
-                              {d.frequency}
+                              {({'daily':'Daily','mon-sat':'Mon–Sat','mon-fri':'Mon–Fri','weekdays':'Mon–Fri','alt-days':'Alt Days','sat-only':'Saturdays'})[d.frequency] || d.frequency}
                             </span>
                             <button className="b" onClick={()=>toggleDutyActive(d.id, d.active)} style={{fontSize:9,padding:'3px 8px',color: d.active ? '#facc15' : '#30b54a'}} title={d.active ? 'Deactivate' : 'Activate'}>
                               {d.active ? '⏸ Pause' : '▶ Activate'}
