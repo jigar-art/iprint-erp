@@ -1010,7 +1010,7 @@ function MainApp({user,onLogout,masterData}){
   },[]);
 
   // ─── CREATE JOB ───────────────────────────────────────────
-  const createJob = useCallback(async (jobData, batchData, lineItemsData) => {
+  const createJob = useCallback(async (jobData, batchData, lineItemsData, silent=false) => {
     // Guard 1 (added 27 Apr 26): hard-block if banking_sites already uses
     // this exact jobs.id OR its FY-stripped prefix. Prevents the 9797-2627-
     // class collision where the same job_no string lives in both tables and
@@ -1018,7 +1018,7 @@ function MainApp({user,onLogout,masterData}){
     const bsHit = await checkBankingSiteForJobId(jobData.id);
     if(bsHit){
       show("⚠️ Cannot create Job "+jobData.id+" — Banking CRM already uses job_no '"+bsHit+"'. Pick a different number or update Banking CRM first.", false);
-      return;
+      return null;
     }
     // Retry with incremented ID if duplicate key
     let attempts=0;
@@ -1038,9 +1038,9 @@ function MainApp({user,onLogout,masterData}){
         lineItemsData=lineItemsData.map(li=>({...li,job_id:newId}));
         continue;
       }
-      show("Error: "+je.message,false);return;
+      show("Error: "+je.message,false);return null;
     }
-    if(attempts>=5){show("Error: Could not generate unique Job#. Please try again.",false);return;}
+    if(attempts>=5){show("Error: Could not generate unique Job#. Please try again.",false);return null;}
     // SB-4: stamp created_by on batches insert
     batchData = {...batchData, created_by: batchData.created_by || user?.name || ''};
     const {error:be} = await sb.from('batches').insert(batchData);
@@ -1048,8 +1048,15 @@ function MainApp({user,onLogout,masterData}){
     setJobs(p=>[finalJobData,...p]);
     setBatches(p=>[batchData,...p]);
     setItems(p=>[...lineItemsData,...p]);
-    show("Job "+finalJobData.id+" created successfully!");
-    setPg("jobs");
+    // 06 May 2026: silent=true skips toast + navigation so callers (e.g. BOQ multi_job
+    // import loop) can drive their own UX after creating many jobs in sequence.
+    // Without this, setPg('jobs') unmounts the BOQ wizard mid-loop and the rest of
+    // the jobs are silently dropped — caused recurring "only 1 job created" bug.
+    if(!silent){
+      show("Job "+finalJobData.id+" created successfully!");
+      setPg("jobs");
+    }
+    return finalJobData.id;
   },[show, user]);
 
   // ─── ADD BATCH TO JOB ─────────────────────────────────────
@@ -7314,20 +7321,33 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       const curFYVal=curFY;
       const fyJobs=jobs.filter(j=>j.id?.includes('-'+curFYVal));
       let lastNum=Math.max(0,...fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;}));
+      // 06 May 2026: track success/fail per row so we don't navigate away mid-loop.
+      // Pass silent=true to createJob so it skips its own toast + setPg('jobs') —
+      // the previous flow let setPg() unmount this component on the FIRST iteration,
+      // dropping every subsequent job (Ruchita's recurring "only 1 job created" bug).
+      const createdIds=[];
+      const failedRows=[];
+      let rowIdx=0;
       for(const it of its){
+        rowIdx++;
         lastNum++;
         const newJid=String(lastNum).padStart(4,'0')+'-'+curFYVal;
         const jobData={id:newJid,firm:fm,client_id:f.cl,client_name:f.cn,project:it.int||f.pr,delivery_address:it.siteAddr||f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
         const batchId="B"+uid();
         const batchData={id:batchId,job_id:newJid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
         const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
-        await createJob(jobData,batchData,lineItems);
+        const createdId=await createJob(jobData,batchData,lineItems,true);
+        if(createdId){createdIds.push(createdId);}
+        else{failedRows.push({sr:rowIdx,desc:it.cli||it.int||('row '+rowIdx)});}
         // Sync to Banking CRM if enabled
-        if(syncBanking&&bankProject){
+        if(createdId&&syncBanking&&bankProject){
           const bm=BANK_MAP[bankProject]||['',''];
-          const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5)+i;
+          // 06 May 2026: was 'Math.random()...+i' but `i` was undefined in this scope —
+          // would throw ReferenceError if anyone ever ran multi-job + banking sync.
+          // Use rowIdx instead so each siteId stays unique.
+          const siteId='BS-'+Date.now()+Math.random().toString(36).slice(2,5)+rowIdx;
           const siteCode=it.int?.split(' — ')[0]||it.int?.split('—')[0]||'';
-          const bsJobNoBOQ=String(lastNum).padStart(4,'0');
+          const bsJobNoBOQ=createdId.split('-')[0];
           // Guard 2 (added 27 Apr 26): see checkJobsForBankingJobNo
           const jobsHitBOQ=await checkJobsForBankingJobNo(bsJobNoBOQ);
           if(jobsHitBOQ){
@@ -7338,6 +7358,13 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       }
       await persistTemplate();
       setSubmitting(false);
+      // Single summary toast + navigate once at the end (instead of per-row).
+      if(failedRows.length===0){
+        show(`✅ Created ${createdIds.length} jobs (${createdIds[0]}…${createdIds[createdIds.length-1]})`);
+      } else {
+        show(`⚠ Created ${createdIds.length} of ${its.length} jobs. ${failedRows.length} failed: ${failedRows.slice(0,3).map(r=>r.desc).join(', ')}${failedRows.length>3?'…':''}`, false);
+      }
+      if(createdIds.length>0) setPg("jobs");
     } else {
       // All items = one job
       if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
@@ -10042,12 +10069,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
 
   // ── HELPERS ──────────────────────────────────────────────
   const inPeriod = (iso) => iso && iso >= periodBounds.startISO;
-  // Bi-directional match — handles both directions of long/short name mismatch.
-  // Fixes Priyanka et al. whose team_members.name is the long descriptive form
-  // ("PRIYANKA - Banking Client Servicing & Backend") while DB rows store the
-  // short form ("Priyanka"). Without the reverse direction, all of Priyanka's
-  // 29 short-form PRs were dropped from the Reports counters. (06 May 26)
-  const matchUser = (val) => { if (!val) return false; const v = val.toUpperCase(); return v.includes(uname) || uname.includes(v); };
+  const matchUser = (val) => val && val.toUpperCase().includes(uname);
   const ageHours = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 3600000) : 0;
   const ageDays = (iso) => Math.floor(ageHours(iso) / 24);
   const fmtAge = (h) => h < 24 ? h+'h' : Math.floor(h/24)+'d';
