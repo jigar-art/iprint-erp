@@ -1649,7 +1649,7 @@ function MainApp({user,onLogout,masterData}){
 }
 
 // ─── SMALL COMPONENTS ───────────────────────────────────────
-function SC({l,v,s,c="#e3a008",d=0,delta}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}</p><div style={{display:"flex",alignItems:"baseline",gap:4}}><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{delta!=null&&delta!==0&&<span style={{fontSize:9,fontWeight:700,color:delta>0?'#4ade80':'#f47067'}}>{delta>0?'▲ +'+delta:'▼ '+delta}</span>}</div>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
+function SC({l,v,s,c="#e3a008",d=0,delta,onEdit}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}{onEdit&&<span onClick={onEdit} style={{cursor:'pointer',marginLeft:4,opacity:.5,fontSize:9}} title="Click to rename">✎</span>}</p><div style={{display:"flex",alignItems:"baseline",gap:4}}><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{delta!=null&&delta!==0&&<span style={{fontSize:9,fontWeight:700,color:delta>0?'#4ade80':'#f47067'}}>{delta>0?'▲ +'+delta:'▼ '+delta}</span>}</div>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
 function FB({f,firms}){const fm=firms?.find(x=>x.code===f);return fm?<span className="bd" style={{background:fm.color+"20",color:fm.color}}>{fm.short_name}</span>:null;}
 function Ck({on,onClick,tip}){return <div className={`ck ${on?"on":""}`} onClick={onClick} title={tip||undefined}>{on?"✓":""}</div>;}
 function StatusTip({j,children}){
@@ -7868,6 +7868,10 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const [editInvoice,setEditInvoice]=useState(null); // {invoice_row, newNo}
   // ─── Payment status (money track) — single binary toggle (Not Started ⇄ Invoice Raised) ─
   const [editPmt,setEditPmt]=useState(null); // {site, newStatus, note}
+  // Editable card labels (Banking CRM top row) — persists in app_settings.banking_card_labels
+  const [cardLabels,setCardLabels]=useState({photoNA:'N/A'});
+  useEffect(()=>{(async()=>{const {data}=await sb.from('app_settings').select('value').eq('key','banking_card_labels').maybeSingle();if(data?.value)setCardLabels(prev=>({...prev,...data.value}));})();},[]);
+  const editLabel=(labelKey,currentValue)=>{const newVal=window.prompt(`Rename card label "${currentValue}" to:`,currentValue);if(newVal===null||newVal.trim()===''||newVal===currentValue)return;const updated={...cardLabels,[labelKey]:newVal.trim()};setCardLabels(updated);sb.from('app_settings').upsert({key:'banking_card_labels',value:updated,updated_at:new Date().toISOString()}).then(({error})=>{if(error){alert('Save failed: '+error.message);setCardLabels(cardLabels);}});};
   // ─── Billing request submission (Vidya/Aparna) ──────────────────────────
   const [billingReq,setBillingReq]=useState(null); // {site, note}
   const [billingReqs,setBillingReqs]=useState({}); // {site_id: {id, status, requested_by, created_at}}
@@ -8166,8 +8170,11 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       pendingGiven:pendingSites.filter(s=>s.billing_category==='Given for Billing').length,
       pendingStale:pendingSites.filter(s=>!s.billing_category||['Photo Pending','Work/PO Pending',''].includes(s.billing_category)).length,
       completed:f.filter(s=>s.work_category==='Completed').length,
-      photoReceived:f.filter(s=>s.photo_status?.includes('Received')).length,
-      photoPending:f.filter(s=>!s.photo_status||s.photo_status.includes('Pending')||s.photo_status==='').length,
+      photoClean:f.filter(s=>s.photo_status==='Received').length,
+      photoReshoot:f.filter(s=>s.photo_status==='Re-shoot needed').length,
+      photoPending:f.filter(s=>s.photo_status==='Pending'&&['Completed','Done'].includes(s.installation_status)).length,
+      photoSiteIssue:f.filter(s=>s.photo_status==='Site Issue').length,
+      photoNA:f.filter(s=>s.photo_status==='Not Applicable').length,
     };
   },[sites,tab]);
 
@@ -8412,7 +8419,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
     {/* Stats Cards */}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5}}>
-      <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} s={`${stats.pendingOther} other · ${stats.pendingGiven} given · ${stats.pendingStale} stale`} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓" v={stats.photoReceived} c="#8b5cf6"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/>
+      <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} s={`${stats.pendingOther} other · ${stats.pendingGiven} given · ${stats.pendingStale} stale`} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓ Clean" v={stats.photoClean} c="#8b5cf6"/><SC l="Photo ✓ Re-shoot" v={stats.photoReshoot} c="#a78bfa"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/><SC l="Site Issue" v={stats.photoSiteIssue} c="#ef4444"/><SC l={cardLabels.photoNA||'N/A'} v={stats.photoNA} c="#888780" onEdit={()=>editLabel('photoNA',cardLabels.photoNA||'N/A')}/>
     </div>
 
     {/* Dept Status Cards (NEW) — click to filter sites by current production stage */}
