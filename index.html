@@ -8132,7 +8132,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   const filtered=useMemo(()=>{
     let f=sites;
     if(tab!=='ALL')f=f.filter(s=>s.project===tab);
-    if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
+    if(stFilter==='Billing Pending'){f=f.filter(s=>['Completed','Done'].includes(s.installation_status)&&(s.photo_status==='Received'||s.dc_status==='Received')&&s.billing_category!=='Invoiced'&&!['Cancelled','Duplicate','Wrong atm branding','DOCKET NOT RECEIVED','On Hold'].includes(s.billing_category));}else if(stFilter!=='All')f=f.filter(s=>s.billing_category===stFilter);
     if(stateFilter!=='All')f=f.filter(s=>s.state===stateFilter);
     if(deptFilter){
       const card = STATUS_CARD_BY_KEY[deptFilter];
@@ -8474,6 +8474,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     <div className="c" style={{padding:8,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
       <select className="in" value={stFilter} onChange={e=>{setStFilter(e.target.value);setPage(0);}} style={{fontSize:10,padding:'4px 6px',width:130}}>
         <option value="All">All Billing ({filtered.length})</option>
+        <option value="Billing Pending">⚡ Billing Pending ({stats.pending})</option>
         {billingCats.map(c=><option key={c} value={c}>{c}</option>)}
       </select>
       <select className="in" value={stateFilter} onChange={e=>{setStateFilter(e.target.value);setPage(0);}} style={{fontSize:10,padding:'4px 6px',width:130}}>
