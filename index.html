@@ -9546,9 +9546,20 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [loading, setLoading] = React.useState(true);
 
   // Standup state (Deploy 2)
-  const todayISO = React.useMemo(() => {
+  // todayISO: local-date string. Updates every 60s so a tab left open across midnight
+  // doesn't keep filtering on yesterday's date. (Fixed 06 May 2026.)
+  const computeTodayISO = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  const [todayISO, setTodayISO] = React.useState(computeTodayISO);
+  React.useEffect(() => {
+    const tick = () => {
+      const next = computeTodayISO();
+      setTodayISO(prev => prev === next ? prev : next);  // only setState on actual change
+    };
+    const iv = setInterval(tick, 60_000);
+    return () => clearInterval(iv);
   }, []);
   const [todayLogs, setTodayLogs] = React.useState([]);  // all logs for today (used by Standup feed)
   const [draftBody, setDraftBody] = React.useState('');
@@ -9564,6 +9575,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [stuckNoteText, setStuckNoteText] = React.useState('');
   const [editTaskId, setEditTaskId] = React.useState(null);  // task id being inline-edited
   const [editTaskText, setEditTaskText] = React.useState('');
+  // Task history view (added 06 May 2026 in response to "tasks disappearing" perception)
+  const [taskView, setTaskView] = React.useState('today');  // 'today' | 'week' | 'month' | 'all'
+  const [historicalTasks, setHistoricalTasks] = React.useState([]);  // rows when taskView !== 'today'
+  const [historicalLoading, setHistoricalLoading] = React.useState(false);
 
   // Keep the MainApp-level badge / floating widget in sync with local task ops
   // (added 05 May 2026). Cheap: the global handler is debounced in MainApp.
@@ -10134,6 +10149,59 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
     setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
   };
 
+  // ── HISTORY VIEW ────────────────────────────────────────────
+  // Fetches own past tasks for taskView range. Read-only with one exception:
+  // user can mark a forgotten 'pending' as done from any past day.
+  // (Added 06 May 2026 in response to "tasks disappearing" complaint.)
+  const loadHistoricalTasks = React.useCallback(async (range) => {
+    if (range === 'today') { setHistoricalTasks([]); return; }
+    setHistoricalLoading(true);
+    try {
+      // Compute start date (rolling window from todayISO)
+      const [yy, mm, dd] = todayISO.split('-').map(Number);
+      const todayDate = new Date(yy, mm - 1, dd);
+      let startDate = null;
+      if (range === 'week') startDate = new Date(todayDate.getTime() - 6 * 86400000);
+      else if (range === 'month') startDate = new Date(todayDate.getTime() - 29 * 86400000);
+      // 'all' → no startDate filter
+      const pad = n => String(n).padStart(2,'0');
+      const startISO = startDate ? `${startDate.getFullYear()}-${pad(startDate.getMonth()+1)}-${pad(startDate.getDate())}` : null;
+
+      let q = sb.from('daily_tasks')
+        .select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at')
+        .eq('user_name', uname)
+        .order('task_date', {ascending: false})
+        .order('created_at', {ascending: true})
+        .limit(2000);
+      if (startISO) q = q.gte('task_date', startISO);
+      const {data, error} = await q;
+      if (error) { console.error('History load failed', error); show?.('Failed to load history: ' + error.message, false); return; }
+      setHistoricalTasks(data || []);
+    } finally {
+      setHistoricalLoading(false);
+    }
+  }, [uname, todayISO, show]);
+
+  React.useEffect(() => {
+    if (taskView !== 'today') loadHistoricalTasks(taskView);
+  }, [taskView, loadHistoricalTasks]);
+
+  // Mark a past pending task as done (the "I forgot to tick yesterday" case).
+  // Reuses markTaskDone semantics but updates historicalTasks state instead of todayTasks.
+  const markPastTaskDone = async (taskId) => {
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({status: 'done', done_at: nowISO, updated_at: nowISO})
+      .eq('id', taskId).eq('status', 'pending')  // safety: only flip if still pending
+      .select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    if (!data) { show?.('Task already updated', false); return; }
+    setHistoricalTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+    // Also update todayTasks if the row happens to be today's (shouldn't happen with this UI, but safe)
+    setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+    show?.('Marked done');
+  };
+
   // Inline edit a manual task's text (own user-added only).
   // Boundary enforced both in UI (button only on source='user') and at save.
   const startEditTask = (task) => {
@@ -10529,6 +10597,35 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </span>
             </div>
 
+            {/* View toggle (added 06 May 2026) */}
+            <div style={{display:'flex',gap:4,marginBottom:8,flexWrap:'wrap'}}>
+              {[
+                {k:'today', label:'Today'},
+                {k:'week', label:'This week'},
+                {k:'month', label:'This month'},
+                {k:'all', label:'All'},
+              ].map(({k, label}) => (
+                <button key={k} className="b" onClick={() => setTaskView(k)}
+                  style={{
+                    fontSize: 9,
+                    padding: '3px 8px',
+                    background: taskView === k ? '#7f77dd' : '#1a2030',
+                    color: taskView === k ? '#fff' : '#94a3b8',
+                    border: '1px solid ' + (taskView === k ? '#7f77dd' : '#2a3548'),
+                    fontWeight: taskView === k ? 600 : 400,
+                  }}>
+                  {label}
+                </button>
+              ))}
+              {taskView !== 'today' && (
+                <span style={{fontSize:9,color:'#64748b',marginLeft:'auto',alignSelf:'center'}}>
+                  {historicalLoading ? 'Loading…' : `${historicalTasks.length} task${historicalTasks.length === 1 ? '' : 's'}`}
+                </span>
+              )}
+            </div>
+
+            {/* ═══ TODAY VIEW ═══ */}
+            {taskView === 'today' && <React.Fragment>
             {/* Auto section (read-only) */}
             {autoTasks.length > 0 && (
               <div style={{marginBottom:10}}>
@@ -10656,6 +10753,89 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                 </button>
               </div>
             </div>
+            </React.Fragment>}
+
+            {/* ═══ HISTORY VIEW (week / month / all) ═══ */}
+            {taskView !== 'today' && (
+              <div>
+                {historicalLoading ? (
+                  <div style={{fontSize:11,color:'#64748b',padding:'20px 8px',textAlign:'center'}}>Loading your tasks…</div>
+                ) : historicalTasks.length === 0 ? (
+                  <div style={{fontSize:11,color:'#64748b',padding:'20px 8px',textAlign:'center'}}>
+                    <div style={{fontSize:24,marginBottom:6}}>📭</div>
+                    No tasks found in this range.
+                  </div>
+                ) : (() => {
+                  // Group by task_date (already DESC sorted from query)
+                  const byDate = {};
+                  historicalTasks.forEach(t => { (byDate[t.task_date] ||= []).push(t); });
+                  const dates = Object.keys(byDate);  // already DESC because rows were ordered
+                  return dates.map(d => {
+                    const rows = byDate[d];
+                    const done = rows.filter(r => r.status === 'done').length;
+                    const pending = rows.filter(r => r.status === 'pending').length;
+                    const stuck = rows.filter(r => r.status === 'stuck').length;
+                    const cancelled = rows.filter(r => r.status === 'cancelled').length;
+                    const isToday = d === todayISO;
+                    const dateLabel = (() => {
+                      const [yy,mm,dd] = d.split('-').map(Number);
+                      const dt = new Date(yy, mm-1, dd);
+                      return dt.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+                    })();
+                    return (
+                      <div key={d} style={{marginBottom:10}}>
+                        <div style={{fontSize:10,color:'#94a3b8',padding:'4px 6px',background:'#0a0e1a',borderRadius:3,marginBottom:3,display:'flex',gap:8,alignItems:'center'}}>
+                          <span style={{fontWeight:700,color:isToday?'#7f77dd':'#cbd5e1'}}>
+                            {isToday ? `Today — ${dateLabel}` : dateLabel}
+                          </span>
+                          <div style={{flex:1}}/>
+                          <span style={{fontSize:9}}>
+                            {done > 0 && <span style={{color:'#30b54a'}}>{done} done</span>}
+                            {done > 0 && (pending+stuck+cancelled) > 0 && <span style={{color:'#475569',margin:'0 4px'}}>·</span>}
+                            {pending > 0 && <span style={{color:'#e3a008'}}>{pending} pending</span>}
+                            {pending > 0 && (stuck+cancelled) > 0 && <span style={{color:'#475569',margin:'0 4px'}}>·</span>}
+                            {stuck > 0 && <span style={{color:'#e24b4a'}}>{stuck} stuck</span>}
+                            {stuck > 0 && cancelled > 0 && <span style={{color:'#475569',margin:'0 4px'}}>·</span>}
+                            {cancelled > 0 && <span style={{color:'#64748b'}}>{cancelled} cancelled</span>}
+                          </span>
+                        </div>
+                        {rows.map(t => {
+                          const statusColor = t.status === 'done' ? '#30b54a'
+                            : t.status === 'stuck' ? '#e24b4a'
+                            : t.status === 'cancelled' ? '#64748b'
+                            : '#e3a008';
+                          const icon = t.status === 'done' ? '☑' : t.status === 'stuck' ? '!' : t.status === 'cancelled' ? '✕' : '☐';
+                          const strike = t.status === 'done' || t.status === 'cancelled';
+                          // Allow ticking past PENDING tasks (forgot-to-tick scenario). Only own user-added.
+                          const canTick = t.status === 'pending' && t.source === 'user' && (t.user_name||'').toUpperCase() === uname;
+                          return (
+                            <div key={'h'+t.id} style={{background:'#0f1422',borderLeft:'2px solid '+statusColor,padding:'4px 8px',marginBottom:1,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
+                              <span onClick={canTick ? () => markPastTaskDone(t.id) : undefined}
+                                style={{color:statusColor,fontSize:13,cursor:canTick?'pointer':'default'}}
+                                title={canTick ? 'Mark done (you forgot earlier)' : ''}>
+                                {icon}
+                              </span>
+                              <span style={{flex:1, textDecoration: strike ? 'line-through' : 'none', color: strike ? '#64748b' : '#cbd5e1'}}>
+                                {t.task_text}
+                              </span>
+                              {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
+                              {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
+                              {t.source !== 'user' && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2030',color:'#94a3b8',borderRadius:3}}>{t.source}</span>}
+                              {t.stuck_note && <span style={{fontSize:8,color:'#e2997b',fontStyle:'italic'}}>"{t.stuck_note}"</span>}
+                              {t.done_at && t.status === 'done' && (
+                                <span style={{fontSize:8,color:'#475569'}}>
+                                  {new Date(t.done_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
           </div>
 
           {/* Quick note (was: standup post box) — kept as freeform fallback */}
