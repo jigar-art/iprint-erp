@@ -8163,6 +8163,8 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     const pendingSites=f.filter(s=>['Completed','Done'].includes(s.installation_status)&&(s.photo_status==='Received'||s.dc_status==='Received')&&s.billing_category!=='Invoiced'&&!['Cancelled','Duplicate','Wrong atm branding','DOCKET NOT RECEIVED','On Hold'].includes(s.billing_category));
     return {
       total:f.length,
+      cancelled:f.filter(s=>s.billing_category==='Cancelled').length,
+      duplicate:f.filter(s=>s.billing_category==='Duplicate').length,
       invoiced:f.filter(s=>s.billing_category==='Invoiced').length,
       givenForBilling:f.filter(s=>s.billing_category==='Given for Billing').length,
       pending:pendingSites.length,
@@ -8419,7 +8421,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
 
     {/* Stats Cards */}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:5}}>
-      <SC l="Total Sites" v={stats.total} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} s={`${stats.pendingOther} other · ${stats.pendingGiven} given · ${stats.pendingStale} stale`} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓ Clean" v={stats.photoClean} c="#8b5cf6"/><SC l="Photo ✓ Re-shoot" v={stats.photoReshoot} c="#a78bfa"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/><SC l="Site Issue" v={stats.photoSiteIssue} c="#ef4444"/><SC l={cardLabels.photoNA||'N/A'} v={stats.photoNA} c="#888780" onEdit={()=>editLabel('photoNA',cardLabels.photoNA||'N/A')}/>
+      <SC l="Total Sites" v={stats.total} s={`${stats.cancelled} cancelled · ${stats.duplicate} duplicate`} c="#3b82f6"/><SC l="Invoiced" v={stats.invoiced} c="#4ade80"/><SC l="Given for Billing" v={stats.givenForBilling} c="#06b6d4"/><SC l="Billing Pending" v={stats.pending} s={`${stats.pendingOther} other · ${stats.pendingGiven} given · ${stats.pendingStale} stale`} c="#f59e0b"/><SC l="Work Done" v={stats.completed} c="#10b981"/><SC l="Photo ✓ Clean" v={stats.photoClean} c="#8b5cf6"/><SC l="Photo ✓ Re-shoot" v={stats.photoReshoot} c="#a78bfa"/><SC l="Photo Pending" v={stats.photoPending} c="#f47067"/><SC l="Site Issue" v={stats.photoSiteIssue} c="#ef4444"/><SC l={cardLabels.photoNA||'N/A'} v={stats.photoNA} c="#888780" onEdit={()=>editLabel('photoNA',cardLabels.photoNA||'N/A')}/>
     </div>
 
     {/* Dept Status Cards (NEW) — click to filter sites by current production stage */}
