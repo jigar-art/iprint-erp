@@ -248,8 +248,10 @@ const STATUS_TO_LEADING = (status) => {
 //   color     — hex color
 //   isLeading — true if this card maps to a STATUS_TO_LEADING bucket (used by site-level rollup)
 const STATUS_CARDS = [
-  { key:'estimate',     label:'ESTIMATE',       statuses:['Quotation Sent','PO Pending','Recee'],                                                                              color:'#3b82f6', isLeading:false },
-  { key:'draft',        label:'DRAFT',          statuses:['Draft'],                                                                                                            color:'#64748b', isLeading:false },
+  { key:'quotation_sent', label:'QUOTATION SENT', statuses:['Quotation Sent'],                                                                                                  color:'#3b82f6', isLeading:false },
+  { key:'po_pending',     label:'PO PENDING',     statuses:['PO Pending'],                                                                                                      color:'#f47067', isLeading:false },
+  { key:'recee',          label:'RECEE',          statuses:['Recee'],                                                                                                           color:'#f59e0b', isLeading:false },
+  { key:'draft',          label:'DRAFT',          statuses:['Draft'],                                                                                                           color:'#64748b', isLeading:false },
   { key:'design',       label:'DESIGN',         statuses:['Designing - In House','Designing - Outsource'],                                                                     color:'#8b5cf6', isLeading:true  },
   { key:'printIn',      label:'PRINT-IN-HOUSE', statuses:['Printing · In-House'],                                                                                              color:'#06b6d4', isLeading:true  },
   { key:'printOut',     label:'PRINT-OUT',      statuses:['Printing · Outsource'],                                                                                             color:'#f97316', isLeading:true  },
@@ -1475,6 +1477,9 @@ function MainApp({user,onLogout,masterData}){
       jobs:filteredJobs.length,
       active:filteredJobs.filter(j=>!['Billing Done','Cancelled','No Bill','Cash Received'].includes(j.status)).length,
       draft:sc('Draft'),
+      quotation_sent:sc('Quotation Sent'),
+      po_pending:sc('PO Pending'),
+      recee:sc('Recee'),
       estimate:scm(['Quotation Sent','PO Pending','Recee']),
       design:scm(['Designing - In House','Designing - Outsource']),
       // Post-22Apr26: split production buckets — statuses only, no legacy
@@ -1701,6 +1706,9 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
   const bStats=(jl)=>({
     total:jl.length,
     active:jl.filter(j=>!activeStatuses.includes(j.status)).length,
+    quotation_sent:jl.filter(j=>j.status==='Quotation Sent').length,
+    po_pending:jl.filter(j=>j.status==='PO Pending').length,
+    recee:jl.filter(j=>j.status==='Recee').length,
     estimate:jl.filter(j=>['Quotation Sent','PO Pending','Recee'].includes(j.status)).length,
     design:jl.filter(j=>['Designing - In House','Designing - Outsource'].includes(j.status)).length,
     // Post-22Apr26 status overhaul: only new statuses
@@ -1770,7 +1778,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
     const recentCount=recent.length;
     // Count jobs that entered each status within the period (from status_dates)
     const statusDeltas={};
-    const statusKeys={estimate:['quotation_sent','po_pending','po_received','recce_pending','active'],design:['designing'],printing:['printing'],fab:['fabrication'],install:['installation'],delivered:['delivered'],billPend:['billing_pending','given_for_billing','cash_pending','proforma_invoice','ic_pending'],billed:['billing_done','cash_received']};
+    const statusKeys={quotation_sent:['quotation_sent'],po_pending:['po_pending'],recee:['recee'],estimate:['quotation_sent','po_pending','po_received','recce_pending','active'],design:['designing'],printing:['printing'],fab:['fabrication'],install:['installation'],delivered:['delivered'],billPend:['billing_pending','given_for_billing','cash_pending','proforma_invoice','ic_pending'],billed:['billing_done','cash_received']};
     // Parse status_dates timestamps like "06 Apr 2026 04:26 pm by RUCHITA"
     const parseSD=(str)=>{if(!str)return null;const m=str.match(/(\d{1,2})\s+(\w+)\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);if(!m)return null;const months={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};let hr=+m[4];if(m[6].toLowerCase()==='pm'&&hr!==12)hr+=12;if(m[6].toLowerCase()==='am'&&hr===12)hr=0;return new Date(+m[3],months[m[2]]||0,+m[1],hr,+m[5]);};
     Object.entries(statusKeys).forEach(([key,sdKeys])=>{
@@ -1854,10 +1862,10 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
         </div>
       </div>}
       {indTab==='bank'&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:5}}>
-        <SC l="Total" v={bk.total} c="#3b82f6"/><SC l="Active" v={bk.active} c="#e3a008"/><SC l="Estimate" v={bk.estimate} c="#3b82f6"/><SC l="Design" v={bk.design} c="#8b5cf6"/><SC l="Printing" v={bk.printing} c="#ef4444"/><SC l="Fabrication" v={bk.fab} c="#dc2626"/><SC l="Install" v={bk.install} c="#059669"/><SC l="Billing" v={bk.billPend} c="#06b6d4"/><SC l="Billed" v={bk.billed} c="#4ade80"/>
+        <SC l="Total" v={bk.total} c="#3b82f6"/><SC l="Active" v={bk.active} c="#e3a008"/><SC l="Quotation Sent" v={bk.quotation_sent} c="#3b82f6"/><SC l="PO Pending" v={bk.po_pending} c="#f47067"/><SC l="Recee" v={bk.recee} c="#f59e0b"/><SC l="Design" v={bk.design} c="#8b5cf6"/><SC l="Printing" v={bk.printing} c="#ef4444"/><SC l="Fabrication" v={bk.fab} c="#dc2626"/><SC l="Install" v={bk.install} c="#059669"/><SC l="Billing" v={bk.billPend} c="#06b6d4"/><SC l="Billed" v={bk.billed} c="#4ade80"/>
       </div>}
       {indTab==='nonbank'&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:5}}>
-        <SC l="Total" v={nb.total} c="#f59e0b"/><SC l="Active" v={nb.active} c="#e3a008"/><SC l="Estimate" v={nb.estimate} c="#3b82f6"/><SC l="Design" v={nb.design} c="#8b5cf6"/><SC l="Printing" v={nb.printing} c="#ef4444"/><SC l="Fabrication" v={nb.fab} c="#dc2626"/><SC l="Install" v={nb.install} c="#059669"/><SC l="Billing" v={nb.billPend} c="#06b6d4"/><SC l="Billed" v={nb.billed} c="#4ade80"/>
+        <SC l="Total" v={nb.total} c="#f59e0b"/><SC l="Active" v={nb.active} c="#e3a008"/><SC l="Quotation Sent" v={nb.quotation_sent} c="#3b82f6"/><SC l="PO Pending" v={nb.po_pending} c="#f47067"/><SC l="Recee" v={nb.recee} c="#f59e0b"/><SC l="Design" v={nb.design} c="#8b5cf6"/><SC l="Printing" v={nb.printing} c="#ef4444"/><SC l="Fabrication" v={nb.fab} c="#dc2626"/><SC l="Install" v={nb.install} c="#059669"/><SC l="Billing" v={nb.billPend} c="#06b6d4"/><SC l="Billed" v={nb.billed} c="#4ade80"/>
       </div>}
     </div>
     {low.length>0&&<div className="c" style={{padding:10,borderColor:"#f4706733"}}><p style={{fontSize:9,color:"#f47067",fontWeight:700,marginBottom:4}}>⚠️ Low Stock</p><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{low.map(([m,q])=><span key={m} style={{background:"#1a0505",border:"1px solid #f4706733",borderRadius:5,padding:"3px 6px",fontSize:9.5}}><strong style={{color:"#f47067"}}>{q}</strong> {m}</span>)}</div></div>}
