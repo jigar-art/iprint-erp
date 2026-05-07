@@ -7312,6 +7312,11 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   };
 
   const submitJob=async()=>{
+    // 07 May 2026 — re-entrancy guard. Without this, a second click during the
+    // brief render gap between setSubmitting(false) and setPg('jobs') re-runs
+    // the entire flow with the same `its`, creating a duplicate job batch.
+    // Caused 20 duplicate CMS jobs (10268-10287) in production on 06 May 26.
+    if(submitting)return;
     if(!f.cn){alert("Select client");return;}
     if(its.length===0){alert("No items");return;}
     if(importMode==='multi_job'){
@@ -7357,14 +7362,22 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         }
       }
       await persistTemplate();
-      setSubmitting(false);
-      // Single summary toast + navigate once at the end (instead of per-row).
+      // 07 May 2026 — order matters here. We navigate away and clear state
+      // BEFORE flipping submitting back to false, so there is no render where
+      // the button is enabled while `its` still holds the just-submitted payload.
+      // Previously: setSubmitting(false) → toast → setPg(...) — and a second
+      // click in that gap re-ran the loop with stale `its`, creating duplicates.
       if(failedRows.length===0){
         show(`✅ Created ${createdIds.length} jobs (${createdIds[0]}…${createdIds[createdIds.length-1]})`);
       } else {
         show(`⚠ Created ${createdIds.length} of ${its.length} jobs. ${failedRows.length} failed: ${failedRows.slice(0,3).map(r=>r.desc).join(', ')}${failedRows.length>3?'…':''}`, false);
       }
-      if(createdIds.length>0) setPg("jobs");
+      if(createdIds.length>0){
+        setPg("jobs");
+        setIts([]);setSheets([]);setSelSheets([]);setFileName("");setStep(1);
+        setColHeaders([]);setColMap({});setHeaderRow(0);setBoqImagesByRow({});setBoqImageStatus('');
+      }
+      setSubmitting(false);
     } else {
       // All items = one job
       if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
@@ -7387,6 +7400,15 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         await sb.from('banking_sites').insert({id:siteId,project:bankProject,client:bm[0],bank:bm[1],job_no:bsJobNoBOQ1,po_number:f.po||'',atm_id:'',site_unique_id:'',site_address:f.da||'',city:'',district:'',state:'',pincode:'',vendor_name:'',vendor_contact:'',installation_status:'Pending',photo_status:'',billing_category:'',work_category:'Pending',created_at:new Date().toISOString()});
       }
       await persistTemplate();
+      // 07 May 2026 — same fix as multi_job branch above.
+      // Note: this branch was previously missing both a success toast and any
+      // navigation away from the BOQ Import page — meaning the user stayed on
+      // the same form with all data still loaded, with no visible confirmation
+      // that the job was created. Adding both now.
+      show(`✅ Created Job ${jid}`);
+      setPg("jobs");
+      setIts([]);setSheets([]);setSelSheets([]);setFileName("");setStep(1);
+      setColHeaders([]);setColMap({});setHeaderRow(0);setBoqImagesByRow({});setBoqImageStatus('');
       setSubmitting(false);
     }
   };
