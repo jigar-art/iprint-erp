@@ -7722,7 +7722,24 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 // EXPENSES TRACKER
 // ═══════════════════════════════════════════════════════════
 function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
-  const DEFAULT_CATS=["Material Purchase","Transport","Labour","Rent","Electricity","Fuel","Office Supplies","Food & Tea","Maintenance","Salary Advance","Petty Cash","Tools","Ink Purchase","Outsource Payment","Other"];
+  const DEFAULT_CATS=["Travel - Local","Travel - Outstation","Courier - Wefast","Courier - Porter","Job Site Pickup/Drop","Food - Site/Late Night","Office Pantry","Sample / Catalogue Buy","Bank Work","Voucher Reimbursement","Mobile Recharge","Office Expense"];
+  // Categories where Job# is NOT mandatory (per Hard Rule)
+  const NO_JOB_CATS=new Set(["Office Expense","Office Pantry","Mobile Recharge","Bank Work"]);
+  // Description heads keyed by category — first option is most common, free-text via datalist
+  const DESC_HEADS={
+    "Travel - Local":["Auto","Bus","Train","Taxi","Auto + Travel","Bus + Travel","Travel"],
+    "Travel - Outstation":["Hyderabad - Bus & Travel","Bangalore - Bus & Travel","Pune - Bus & Travel","Airport pickup/drop","Cab Economy"],
+    "Courier - Wefast":["WEFAST - Office to Client","WEFAST - Sample pickup","WEFAST - Sample dropoff","WEFAST - Office to Vendor"],
+    "Courier - Porter":["Porter - Material pickup","Porter - Material drop","Porter - Tempo book","Porter - Office to Site"],
+    "Job Site Pickup/Drop":["Office to Umesh","Umesh to Office","Office to SS Design","SS to Office","Office to Vendor","Vendor to Office"],
+    "Food - Site/Late Night":["Night Dinner","Lunch","Breakfast","Dinner + Lunch + Breakfast","Tea / Snacks at site"],
+    "Office Pantry":["Bisleri / Mineral Water","Office Tea","Office Biscuits","Zepto Order","Pantry supplies"],
+    "Sample / Catalogue Buy":["Wallpaper sample","Sample book","Catalogue purchase","Material sample"],
+    "Bank Work":["Going to Bank","Bank Deposit","Cheque deposit","Withdrawal"],
+    "Voucher Reimbursement":["Voucher - multi-day claim","Voucher - site travel","Voucher - food + travel"],
+    "Mobile Recharge":["Mobile recharge - 1 month","Mobile recharge - prepaid"],
+    "Office Expense":["Plumber","Electrical material","A/C maintenance","Office chair / furniture","Office tools","Cash advance to staff","Other office use"],
+  };
   // Build dynamic categories from existing expenses + defaults
   const allCats=useMemo(()=>{
     const s=new Set(DEFAULT_CATS);
@@ -7737,7 +7754,7 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
   const [fMonth,setFMonth]=useState('all');
   const [addingCat,setAddingCat]=useState(false);
   const [newCat,setNewCat]=useState('');
-  const [f,sF]=useState({date:td(),category:DEFAULT_CATS[0],description:"",amount:"",paid_to:"",payment_mode:"Cash",firm:firms[0]?.code||"",job_id:"",approved_by:team[0]?.name||"",notes:""});
+  const [f,sF]=useState({date:td(),category:"Travel - Local",description:"",amount:"",paid_to:"",payment_mode:"Cash",firm:"",job_id:"",approved_by:team[0]?.name||"",notes:""});
 
   // Get unique "Paid To" names from existing expenses for suggestions
   const paidToNames=useMemo(()=>{
@@ -7746,7 +7763,22 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
     return [...s].sort();
   },[expenses]);
 
-  const add=async()=>{if(!f.amount||!f.description){alert("Fill amount & description");return;}setSaving(true);const rUrl=await uploadFile(receiptFile,'expense-receipts');await addExpense({id:"EX"+uid(),...f,amount:+f.amount,receipt_url:rUrl});sF(p=>({...p,description:"",amount:"",paid_to:"",job_id:"",notes:""}));setReceiptFile(null);setSaving(false);};
+  const add=async()=>{
+    // Validation per Hard Rules
+    if(!f.amount||+f.amount<=0){alert("⚠️ Amount is required and must be greater than 0");return;}
+    if(!f.description||!f.description.trim()){alert("⚠️ Description is required");return;}
+    if(!f.firm){alert("⚠️ Firm is required — please select a firm before saving");return;}
+    if(!NO_JOB_CATS.has(f.category)&&!f.job_id.trim()){
+      alert("⚠️ Job# is required for this category.\n\nIf this is an office/admin expense, change Category to:\n• Office Expense\n• Office Pantry\n• Mobile Recharge\n• Bank Work");
+      return;
+    }
+    setSaving(true);
+    const rUrl=await uploadFile(receiptFile,'expense-receipts');
+    await addExpense({id:"EX"+uid(),...f,amount:+f.amount,receipt_url:rUrl});
+    sF(p=>({...p,description:"",amount:"",paid_to:"",job_id:"",notes:""}));
+    setReceiptFile(null);
+    setSaving(false);
+  };
 
   const filtered=expenses.filter(e=>{if(filter!=='all'&&e.category!==filter)return false;if(fMonth!=='all'){const d=new Date(e.date);const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');if(key!==fMonth)return false;}return true;}).sort((a,b)=>b.date?.localeCompare(a.date));
 
@@ -7772,10 +7804,10 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
         <F l="Category">{addingCat?<div style={{display:"flex",gap:3}}><input className="in" value={newCat} onChange={e=>setNewCat(e.target.value)} placeholder="New category name" autoFocus style={{flex:1}}/><button className="b bp" style={{fontSize:8,padding:"2px 6px"}} onClick={()=>{if(newCat.trim()){sF(p=>({...p,category:newCat.trim()}));setAddingCat(false);setNewCat('');}}} >✓</button><button className="b bs" style={{fontSize:8,padding:"2px 4px"}} onClick={()=>{setAddingCat(false);setNewCat('');}}>✕</button></div>:<div style={{display:"flex",gap:3}}><select className="in" value={f.category} onChange={e=>{if(e.target.value==='__ADD__'){setAddingCat(true);}else sF(p=>({...p,category:e.target.value}));}} style={{flex:1}}>{allCats.map(c=><option key={c}>{c}</option>)}<option value="__ADD__">➕ Add New Category...</option></select></div>}</F>
         <F l="Amount ₹ *"><input className="in mn" type="number" value={f.amount} onChange={e=>sF(p=>({...p,amount:e.target.value}))} placeholder="0"/></F>
         <F l="Paid To"><div style={{position:"relative"}}><input className="in" list="paidToList" value={f.paid_to} onChange={e=>sF(p=>({...p,paid_to:e.target.value}))} placeholder="Name/Vendor — type or select"/><datalist id="paidToList">{paidToNames.map(n=><option key={n} value={n}/>)}</datalist></div></F>
-        <div style={{gridColumn:"span 2"}}><F l="Description *"><input className="in" value={f.description} onChange={e=>sF(p=>({...p,description:e.target.value}))} placeholder="What was this expense for?"/></F></div>
+        <div style={{gridColumn:"span 2"}}><F l="Description *"><input className="in" list="descHeadsList" value={f.description} onChange={e=>sF(p=>({...p,description:e.target.value}))} placeholder="Type or pick from suggestions"/><datalist id="descHeadsList">{(DESC_HEADS[f.category]||[]).map(h=><option key={h} value={h}/>)}</datalist></F></div>
         <F l="Payment Mode"><select className="in" value={f.payment_mode} onChange={e=>sF(p=>({...p,payment_mode:e.target.value}))}>{PAY_MODES.map(m=><option key={m}>{m}</option>)}</select></F>
-        <F l="Firm"><select className="in" value={f.firm} onChange={e=>sF(p=>({...p,firm:e.target.value}))}><option value="">General</option>{firms.map(fm=><option key={fm.code} value={fm.code}>{fm.short_name}</option>)}</select></F>
-        <F l="Job# (optional)"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))} placeholder="Link to job"/></F>
+        <F l="Firm *"><select className="in" value={f.firm} onChange={e=>sF(p=>({...p,firm:e.target.value}))}><option value="">— Select firm —</option>{firms.map(fm=><option key={fm.code} value={fm.code}>{fm.short_name}</option>)}</select></F>
+        <F l={NO_JOB_CATS.has(f.category)?"Job# (not needed)":"Job# *"}><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))} placeholder={NO_JOB_CATS.has(f.category)?"Skip — office expense":"e.g. 2274-2526 or 2274"} disabled={NO_JOB_CATS.has(f.category)}/></F>
         <F l="Approved By"><select className="in" value={f.approved_by} onChange={e=>sF(p=>({...p,approved_by:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
         <F l="📸 Receipt"><input type="file" accept="image/*,.pdf" capture="environment" className="in" style={{padding:2}} onChange={e=>setReceiptFile(e.target.files[0]||null)}/></F>
         <F l="Notes"><input className="in" value={f.notes} onChange={e=>sF(p=>({...p,notes:e.target.value}))} placeholder="Extra details..."/></F>
