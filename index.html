@@ -4386,6 +4386,9 @@ function FabPage({logs,materials,team,stock,addLog,jobs,sm,updateJobStatus}){
 function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStatus,osItems,setOsItems,sp}){
   const [showQ,setShowQ]=useState(true);
   const [showLegacy,setShowLegacy]=useState(false);
+  const [expJob,setExpJob]=useState(null); // job_id whose OS sub-table is expanded
+  const [filt,setFilt]=useState('all'); // 'all' | 'with' | 'without'
+  const [vfilt,setVfilt]=useState(''); // vendor filter (empty = all vendors)
   const queue=(jobs||[]).filter(j=>['Printing · In-House','Printing · Outsource','Fabrication · In-House','Fabrication · Outsource','Installation WIP'].includes(j.status));
   const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   // Analytics on NEW outsource_items (per-line-item flow)
@@ -4398,6 +4401,16 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
   // Group by task type
   const byTask={};allOs.forEach(o=>{const t=o.task_type||'(unset)';if(!byTask[t])byTask[t]={count:0,amount:0};byTask[t].count++;byTask[t].amount+=(+o.total||0);});
   const taskRows=Object.entries(byTask).sort((a,b)=>b[1].amount-a[1].amount);
+  // Per-job OS rollup for queue rendering
+  const osByJob={};allOs.forEach(o=>{if(!osByJob[o.job_id])osByJob[o.job_id]={items:[],vendors:new Set(),total:0};osByJob[o.job_id].items.push(o);osByJob[o.job_id].vendors.add(o.vendor_name||'(unknown)');osByJob[o.job_id].total+=(+o.total||0);});
+  // Filter queue
+  const fQueue=queue.filter(j=>{
+    const r=osByJob[j.id];
+    if(filt==='with'&&!r)return false;
+    if(filt==='without'&&r)return false;
+    if(vfilt&&(!r||!r.vendors.has(vfilt)))return false;
+    return true;
+  });
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <div className="c a" style={{padding:10,background:"linear-gradient(90deg,#f9731622,#0a0f1a)",borderColor:"#f9731633"}}>
       <p style={{fontSize:11,fontWeight:700,color:"#f97316",marginBottom:4}}>📤 OUTSOURCE — PER-ITEM TRACKING</p>
@@ -4413,12 +4426,48 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
     {/* Active queue */}
     <div className="c" style={{padding:0}}>
       <div style={{padding:"6px 10px",borderBottom:"2px solid #f97316",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowQ(p=>!p)}>
-        <span style={{fontSize:11,fontWeight:700,color:"#f97316"}}>📤 Active Jobs (Print/Fab/Install) — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
+        <span style={{fontSize:11,fontWeight:700,color:"#f97316"}}>📤 Active Jobs (Print/Fab/Install) — {fQueue.length}{fQueue.length!==queue.length?` of ${queue.length}`:''}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
       </div>
-      {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Status</th><th>OS Items</th></tr></thead><tbody>
-        {queue.map(j=>{const jobOs=allOs.filter(o=>o.job_id===j.id);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><span className="bd" style={{background:j.status==='Printing'?'#ef444420':j.status==='Fabrication'?'#dc262620':'#05966920',color:j.status==='Printing'?'#ef4444':j.status==='Fabrication'?'#dc2626':'#059669',fontSize:8}}>{j.status}</span></td><td className="mn" style={{fontSize:10,color:jobOs.length>0?"#f97316":"#64748b",fontWeight:700}}>{jobOs.length||'—'}</td></tr>})}
-        {queue.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:12}}>No active jobs</td></tr>}
-      </tbody></table></div>}
+      {showQ&&<>
+      {/* Filter chips */}
+      <div style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a99",display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+        {[['all','All'],['with','Has OS'],['without','No OS']].map(([k,lbl])=><span key={k} onClick={()=>setFilt(k)} style={{cursor:"pointer",padding:"3px 8px",borderRadius:4,fontSize:9,fontWeight:700,background:filt===k?'#f9731633':'#1a2030',color:filt===k?'#f97316':'#64748b',border:filt===k?'1px solid #f97316':'1px solid #1a2030'}}>{lbl}</span>)}
+        <span style={{fontSize:9,color:"#64748b",marginLeft:4}}>•</span>
+        <select className="in" value={vfilt} onChange={e=>setVfilt(e.target.value)} style={{fontSize:9,padding:"2px 6px",maxWidth:160}}>
+          <option value="">All vendors</option>
+          {vendorRows.map(([v])=><option key={v} value={v}>{v}</option>)}
+        </select>
+        {(filt!=='all'||vfilt)&&<span onClick={()=>{setFilt('all');setVfilt('');}} style={{cursor:"pointer",fontSize:9,color:"#ef4444",fontWeight:700}}>✕ Clear</span>}
+      </div>
+      <div style={{overflowX:"auto",maxHeight:400}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Status</th><th>Vendors</th><th className="mn">Items</th><th className="mn">OS Value</th></tr></thead><tbody>
+        {fQueue.map(j=>{const r=osByJob[j.id];const vList=r?[...r.vendors]:[];const isExp=expJob===j.id;return <React.Fragment key={j.id}>
+          <tr style={{cursor:r?"pointer":"default",background:isExp?"#f9731611":"transparent"}} onClick={()=>r&&setExpJob(p=>p===j.id?null:j.id)}>
+            <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><span style={{color:"#64748b",marginRight:4}}>{r?(isExp?'▾':'▸'):' '}</span><span style={{textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={e=>{e.stopPropagation();openJob(j);}}>{j.id}</span></td>
+            <td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td>
+            <td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td>
+            <td><span className="bd" style={{background:j.status?.startsWith('Printing')?'#ef444420':j.status?.startsWith('Fabrication')?'#dc262620':'#05966920',color:j.status?.startsWith('Printing')?'#ef4444':j.status?.startsWith('Fabrication')?'#dc2626':'#059669',fontSize:8}}>{j.status}</span></td>
+            <td style={{fontSize:9,color:vList.length?"#e3a008":"#64748b"}}>{vList.length?vList.slice(0,2).join(', ')+(vList.length>2?` +${vList.length-2}`:''):'—'}</td>
+            <td className="mn" style={{fontSize:10,color:r?"#f97316":"#64748b",fontWeight:700}}>{r?r.items.length:'—'}</td>
+            <td className="mn" style={{fontSize:10,color:r?"#10b981":"#64748b",fontWeight:700}}>{r?'₹'+r.total.toFixed(0):'—'}</td>
+          </tr>
+          {isExp&&r&&<tr><td colSpan={7} style={{padding:0,background:"#05080d"}}>
+            <div style={{padding:"6px 10px",borderTop:"1px solid #f9731633",borderBottom:"1px solid #1a2030"}}>
+              <table style={{width:"100%"}}><thead><tr style={{background:"#0a0f1a"}}><th style={{fontSize:8,color:"#64748b"}}>Task</th><th style={{fontSize:8,color:"#64748b"}}>Vendor</th><th className="mn" style={{fontSize:8,color:"#64748b"}}>Rate</th><th className="mn" style={{fontSize:8,color:"#64748b"}}>Total</th><th style={{fontSize:8,color:"#64748b"}}>PO</th><th style={{fontSize:8,color:"#64748b"}}>Date</th></tr></thead><tbody>
+                {r.items.map(o=><tr key={o.id}>
+                  <td style={{fontSize:9,fontWeight:600,color:"#f97316"}}>{o.task_type}</td>
+                  <td style={{fontSize:9}}>{o.vendor_name}</td>
+                  <td className="mn" style={{fontSize:9}}>₹{(+o.rate||0).toFixed(2)}/{getUomLabel(o.rate_mode).header}</td>
+                  <td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>₹{(+o.total||0).toFixed(0)}</td>
+                  <td><span className="bd" style={{fontSize:7,background:o.po_status==='PO Generated'?'#10b98122':'#f59e0b22',color:o.po_status==='PO Generated'?'#10b981':'#f59e0b'}}>{o.po_status}{o.po_number?' · '+o.po_number:''}</span></td>
+                  <td style={{fontSize:8,color:"#64748b"}}>{(o.created_at||'').slice(0,10)}</td>
+                </tr>)}
+              </tbody></table>
+            </div>
+          </td></tr>}
+        </React.Fragment>})}
+        {fQueue.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:12}}>{queue.length===0?'No active jobs':'No jobs match filter'}</td></tr>}
+      </tbody></table></div>
+      </>}
     </div>
     {/* Analytics */}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
