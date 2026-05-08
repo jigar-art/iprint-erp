@@ -1189,18 +1189,21 @@ function MainApp({user,onLogout,masterData}){
   const addPrintLog = useCallback(async (data) => {
     const {error} = await sb.from('print_logs').insert(data);
     if(!error){setPLogs(p=>[data,...p]);show("Print log saved!");}
+    else show("Error: "+error.message,false);
   },[show]);
 
   // ─── ADD FAB LOG ──────────────────────────────────────────
   const addFabLog = useCallback(async (data) => {
     const {error} = await sb.from('fab_logs').insert(data);
     if(!error){setFLogs(p=>[data,...p]);show("Fab log saved!");}
+    else show("Error: "+error.message,false);
   },[show]);
 
   // ─── ADD OUTSOURCE ────────────────────────────────────────
   const addOsLog = useCallback(async (data) => {
     const {error} = await sb.from('outsource_logs').insert(data);
     if(!error){setOsLogs(p=>[data,...p]);show("Outsource saved!");}
+    else show("Error: "+error.message,false);
   },[show]);
 
   // ─── MARK OUTSOURCE RETURN ────────────────────────────────
@@ -1216,6 +1219,7 @@ function MainApp({user,onLogout,masterData}){
     data = {...data, created_by: data.created_by || user?.name || ''};
     const {error} = await sb.from('dispatch_logs').insert(data);
     if(!error){setDLogs(p=>[data,...p]);show("Dispatch logged!");}
+    else show("Error: "+error.message,false);
   },[show, user]);
 
   // ─── EXPENSES ──────────────────────────────────────────────
@@ -4513,7 +4517,12 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
 
 // DISPATCH
 function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
-  const add=async()=>{await addLog({id:"D"+uid(),...f});};
+  const add=async()=>{
+    if(!f.job_id){alert("Enter Job#");return;}
+    const payload={id:"D"+uid(),...f,install_date:f.install_date||null};
+    await addLog(payload);
+    sF(p=>({...p,job_id:"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""}));
+  };
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🚚 New Dispatch"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f3">
