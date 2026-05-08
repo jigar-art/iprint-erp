@@ -8187,7 +8187,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   // Canonical billing_status values — anything else renders red and qualifies as "messy"
   const CANONICAL_BILLING_STATUSES=['Invoiced','Given for Billing','PO Pending','Photo Pending','Work Pending','Site Cancelled','Site Not Ready','Pending'];
   const isCanonicalStatus=(s)=>!s||s===''||CANONICAL_BILLING_STATUSES.includes(s);
-  const canCleanup=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','AMOL','CHANDNI','RUCHITA','APARNA','VIDYA'].some(u=>uN.includes(u));})();
+  const canCleanup=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','AMOL','CHANDNI','RUCHITA','APARNA','VIDYA','PRIYANKA'].some(u=>uN.includes(u));})();
   const [bankMode,setBankMode]=useState('sites'); // 'sites' | 'cleanup'
   const [cleanupShowMessyOnly,setCleanupShowMessyOnly]=useState(true);
   const [cleanupEditId,setCleanupEditId]=useState(null); // site.id being edited
