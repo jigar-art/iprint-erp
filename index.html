@@ -1408,22 +1408,18 @@ function MainApp({user,onLogout,masterData}){
   },[show]);
 
   // ─── ADD NEW DELIVERY BOY ──────────────────────────────────
-  // 09 May 26: dispatch del-boy combobox needs to add new boys on the fly.
-  // Case-insensitive de-dup against existing rows; refreshes masterData so
-  // the new name appears in the dropdown immediately. Returns row or null.
+  // 09 May 26: matches addNewSupplier pattern — insert + return row.
+  // Caller (DispPage) is responsible for pushing into local state.
   const addNewDelBoy = useCallback(async (rawName) => {
     const name = String(rawName||'').trim();
     if(!name) return null;
-    const existing = (masterData?.delBoys||[]).find(d => String(d.name||'').trim().toLowerCase() === name.toLowerCase());
-    if(existing) return existing;
     const id = 'DB'+uid();
     const row = {id, name};
     const {error} = await sb.from('delivery_boys').insert(row);
     if(error){show("⚠️ Add boy failed: "+error.message,false); return null;}
-    setMasterData(p => ({...p, delBoys:[...(p?.delBoys||[]), row]}));
     show("Boy added!");
     return row;
-  },[show,masterData]);
+  },[show]);
 
   // ─── ADD NEW PRODUCT (material) ────────────────────────────
   // Case-insensitive de-dup against existing products. Returns the
@@ -4536,23 +4532,27 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
 // DISPATCH
 function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
   // 09 May 26: Del Boy is a typeahead combobox — autocomplete existing + add new on the fly.
+  // boysLocal mirrors the delBoys prop but lets us append newly-added boys without waiting
+  // for masterData to round-trip (parent state isn't accessible from here).
+  const [boysLocal,setBoysLocal]=useState(delBoys);
+  useEffect(()=>{setBoysLocal(delBoys);},[delBoys]);
   const [boyQ,setBoyQ]=useState("");
   const [boyOpen,setBoyOpen]=useState(false);
   const boyMatches=useMemo(()=>{
     const q=boyQ.trim().toLowerCase();
-    if(!q) return delBoys;
-    return delBoys.filter(d=>String(d.name||'').toLowerCase().includes(q));
-  },[boyQ,delBoys]);
+    if(!q) return boysLocal;
+    return boysLocal.filter(d=>String(d.name||'').toLowerCase().includes(q));
+  },[boyQ,boysLocal]);
   const exactBoyHit=useMemo(()=>{
     const q=boyQ.trim().toLowerCase();
-    return q ? delBoys.find(d=>String(d.name||'').toLowerCase()===q) : null;
-  },[boyQ,delBoys]);
+    return q ? boysLocal.find(d=>String(d.name||'').toLowerCase()===q) : null;
+  },[boyQ,boysLocal]);
   const pickBoy=(name)=>{sF(p=>({...p,delivery_boy:name}));setBoyQ("");setBoyOpen(false);};
   const handleAddBoy=async()=>{
     const name=boyQ.trim();
     if(!name||!addNewDelBoy) return;
     const row=await addNewDelBoy(name);
-    if(row){pickBoy(row.name);}
+    if(row){setBoysLocal(p=>[...p,row]);pickBoy(row.name);}
   };
   const add=async()=>{
     if(!f.job_id){alert("Enter Job#");return;}
