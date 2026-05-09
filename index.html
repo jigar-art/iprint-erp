@@ -2036,8 +2036,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   };
   // ─── DELIVERY CHALLAN GENERATOR ──
   const [dcMode,setDcMode]=useState(null); // batchId when DC modal is open
+  const [dcStep,setDcStep]=useState('form'); // 'form' | 'edit' | 'preview'
   const [dcForm,setDcForm]=useState({to_name:'',to_address:'',delivery_note:'',po_no:'',po_date:'',dc_date:td(),prepared_by:user?.name||'',delivered_by:''});
   const [dcSelectedItems,setDcSelectedItems]=useState(null); // null = all selected; Set of item ids when customised
+  const [dcEditedItems,setDcEditedItems]=useState([]); // DC-local edited copies of selected items
+  const [dcSaveToBatch,setDcSaveToBatch]=useState(false); // checkbox: also write edits back to batch
   const openDCForm=(batch)=>{
     // Pre-fill from job + batch data
     setDcForm({
@@ -2051,6 +2054,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       delivered_by: ''
     });
     setDcSelectedItems(null); // reset to all items selected
+    setDcEditedItems([]);
+    setDcSaveToBatch(false);
+    setDcStep('form');
     setDcMode(batch.id);
   };
   const generateDCNumber=async(firmCode)=>{
@@ -2069,13 +2075,22 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const firmCode=j.firm||'JXT';
     const firm=firms.find(f=>f.code===firmCode)||{};
     const {dcNo,fy}=await generateDCNumber(firmCode);
-    const allBatchItems=(batch.items||[]);
-    const selectedSet=dcSelectedItems; // null=all, Set=specific
-    const filteredItems=selectedSet===null ? allBatchItems : allBatchItems.filter(it=>selectedSet.has(it.id));
-    const dcItems=filteredItems.map((it,i)=>({
-      sr:i+1, width:it.width||'', height:it.height||'', size_unit:it.size_unit||'',
-      qty:it.qty||0, sqft:it.sqft||0, description:it.internal_name||it.client_name||'—', media:it.media||''
-    }));
+    // Prefer edited items (user reviewed/tweaked them); fall back to building from batch
+    let dcItems;
+    if(dcEditedItems&&dcEditedItems.length){
+      dcItems=dcEditedItems.map((it,i)=>({
+        sr:i+1, item_id:it.item_id||'', width:it.width||'', height:it.height||'', size_unit:it.size_unit||'',
+        qty:it.qty||0, sqft:it.sqft||0, description:it.description||'—', media:it.media||''
+      }));
+    } else {
+      const allBatchItems=(batch.items||[]);
+      const selectedSet=dcSelectedItems; // null=all, Set=specific
+      const filteredItems=selectedSet===null ? allBatchItems : allBatchItems.filter(it=>selectedSet.has(it.id));
+      dcItems=filteredItems.map((it,i)=>({
+        sr:i+1, item_id:it.id||'', width:it.width||'', height:it.height||'', size_unit:it.size_unit||'',
+        qty:it.qty||0, sqft:it.sqft||0, description:it.internal_name||it.client_name||'—', media:it.media||''
+      }));
+    }
     const rec={id:'DC'+Date.now(),dc_no:dcNo,firm_code:firmCode,fy,job_id:j.id,batch_id:batch.id,
       dc_date:dcForm.dc_date,to_name:dcForm.to_name,to_address:dcForm.to_address,
       delivery_note:dcForm.delivery_note,po_no:dcForm.po_no,po_date:dcForm.po_date,
@@ -2084,6 +2099,27 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
     const {error}=await sb.from('delivery_challans').insert(rec);
     if(error){show('⚠️ Failed to save DC: '+error.message,false);return;}
     show('✅ DC '+dcNo+' saved!');
+    // Optional: write edits back to the batch items (irreversible — confirmed in modal)
+    if(dcSaveToBatch&&dcEditedItems&&dcEditedItems.length){
+      try{
+        const editById={}; dcEditedItems.forEach(e=>{if(e.item_id)editById[e.item_id]=e;});
+        const updatedBatches=(j.batches||[]).map(b=>{
+          if(b.id!==batch.id) return b;
+          const newItems=(b.items||[]).map(it=>{
+            const e=editById[it.id]; if(!e) return it;
+            return {...it,
+              width:e.width||it.width, height:e.height||it.height,
+              size_unit:e.size_unit||it.size_unit, qty:e.qty??it.qty,
+              sqft:e.sqft??it.sqft, media:e.media??it.media,
+              internal_name:e.description||it.internal_name};
+          });
+          return {...b,items:newItems};
+        });
+        const {error:bErr}=await sb.from('jobs').update({batches:updatedBatches}).eq('id',j.id);
+        if(bErr) show('⚠️ DC saved, but batch update failed: '+bErr.message,false);
+        else show('✅ DC '+dcNo+' saved + batch updated!');
+      }catch(e){show('⚠️ DC saved, but batch update threw: '+e.message,false);}
+    }
     // Now open print preview with 3 copies
     const copyHTML=(copyLabel)=>`<div class="dc-copy"><div class="dc-box">
       <div class="dc-head"><div class="dc-hdr-l">${firm.logo_url?'<img src="'+firm.logo_url+'" class="dc-logo"/>':''}<div class="dc-firm">${firm.name||''}</div></div>
@@ -2094,9 +2130,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       </div>
       <div class="dc-copy-label">${copyLabel}</div>
       <div class="dc-subhead">Please receive the undermentioned material as per your order</div>
-      <table class="dc-tbl"><thead><tr><th style="width:6%">Sr.No</th><th style="width:10%">Width<br><small>(mm/inch/feet)</small></th><th style="width:10%">Height<br><small>(mm/inch/feet)</small></th><th style="width:8%">Quantity<br><small>(nos)</small></th><th style="width:8%">Sq.Ft.</th><th>Description</th></tr></thead>
-      <tbody>${dcItems.map(x=>`<tr><td>${x.sr}</td><td>${x.width?x.width+(x.size_unit?' '+x.size_unit:''):''}</td><td>${x.height||''}</td><td>${x.qty}</td><td>${x.sqft||'—'}</td><td class="desc">${x.description}</td></tr>`).join('')}
-      ${Array(Math.max(0,10-dcItems.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+      <table class="dc-tbl"><thead><tr><th style="width:5%">Sr.No</th><th style="width:9%">Width<br><small>(mm/inch/feet)</small></th><th style="width:9%">Height<br><small>(mm/inch/feet)</small></th><th style="width:7%">Quantity<br><small>(nos)</small></th><th style="width:7%">Sq.Ft.</th><th style="width:13%">Material</th><th>Description</th></tr></thead>
+      <tbody>${dcItems.map(x=>`<tr><td>${x.sr}</td><td>${x.width?x.width+(x.size_unit?' '+x.size_unit:''):''}</td><td>${x.height||''}</td><td>${x.qty}</td><td>${x.sqft||'—'}</td><td>${x.media||'—'}</td><td class="desc">${x.description}</td></tr>`).join('')}
+      ${Array(Math.max(0,10-dcItems.length)).fill('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
       </tbody></table>
       <div class="dc-foot">
         <div class="dc-foot-l">
@@ -3541,7 +3577,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:20,overflowY:"auto"}} onClick={()=>setDcMode(null)}>
         <div style={{background:"#0c1017",border:"1px solid #10b981",borderRadius:10,width:"100%",maxWidth:700,padding:16,maxHeight:"calc(100vh - 40px)",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <h3 style={{fontSize:13,fontWeight:700,color:"#10b981"}}>🚚 Generate Delivery Challan — Batch: {batch.note||batch.id}</h3>
+            <h3 style={{fontSize:13,fontWeight:700,color:"#10b981"}}>🚚 Generate Delivery Challan — Batch: {batch.note||batch.id} <span style={{fontSize:9,color:'#8b949e',fontWeight:500,marginLeft:6}}>Step {dcStep==='form'?'1/3 · Form':dcStep==='edit'?'2/3 · Edit Items':'3/3 · Preview'}</span></h3>
             <button className="b bs" onClick={()=>setDcMode(null)}>✕</button>
           </div>
           <div style={{background:"#060810",border:"1px solid #1a2030",borderRadius:6,padding:10,marginBottom:10,fontSize:10}}>
@@ -3550,6 +3586,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             <p style={{color:"#8b949e",fontSize:9}}>{firm.address}</p>
             <p style={{color:"#64748b",fontSize:9,marginTop:2}}>GSTIN: {firm.gst}</p>
           </div>
+          {/* STEP 1: FORM */}
+          {dcStep==='form'&&<>
           <div className="fg f2" style={{gap:6}}>
             <div style={{gridColumn:"span 2"}}><label style={{fontSize:8,color:"#64748b"}}>To (Customer Name / Billing Name) *</label><input className="in" value={dcForm.to_name} onChange={e=>setDcForm(p=>({...p,to_name:e.target.value}))} style={{fontSize:10}}/></div>
             <div style={{gridColumn:"span 2"}}><label style={{fontSize:8,color:"#64748b"}}>Delivery Address</label><textarea className="in" value={dcForm.to_address} onChange={e=>setDcForm(p=>({...p,to_address:e.target.value}))} style={{fontSize:10,minHeight:55,resize:"vertical",fontFamily:"inherit",lineHeight:1.4,width:"100%"}}/></div>
@@ -3596,6 +3634,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                       <span style={{flex:1,color:checked?'#e2e8f0':'#64748b',textDecoration:checked?'none':'line-through'}}>
                         {i+1}. {it.internal_name||it.client_name}
                         {it.width&&it.height?' — '+it.width+'×'+it.height+(it.size_unit?''+it.size_unit:''):''}
+                        {it.media?<span style={{color:'#06b6d4',marginLeft:4,fontSize:8}}> · {it.media}</span>:null}
                         <span style={{color:'#64748b',marginLeft:4}}>× {it.qty}</span>
                       </span>
                     </div>;
@@ -3607,8 +3646,136 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           </div>
           <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end"}}>
             <button className="b" onClick={()=>setDcMode(null)}>Cancel</button>
-            {(()=>{const cnt=dcSelectedItems===null?(batch.items||[]).length:(dcSelectedItems?.size||0);return <button className="b bp" onClick={()=>{if(cnt===0){show('Select at least 1 item',false);return;}saveAndPrintDC(batch);}} style={{background:cnt===0?'#374151':'#10b981',borderColor:cnt===0?'#374151':'#10b981',fontSize:11,padding:'6px 16px',opacity:cnt===0?0.6:1}}>🖨️ Save & Print DC ({cnt} item{cnt!==1?'s':''}, 3 Copies)</button>;})()}
+            {(()=>{const cnt=dcSelectedItems===null?(batch.items||[]).length:(dcSelectedItems?.size||0);return <button className="b bp" onClick={()=>{
+              if(!dcForm.to_name){show('Enter To (Customer) name',false);return;}
+              if(cnt===0){show('Select at least 1 item',false);return;}
+              const allItems=batch.items||[];
+              const selSet=dcSelectedItems===null?new Set(allItems.map(x=>x.id)):dcSelectedItems;
+              const filtered=allItems.filter(it=>selSet.has(it.id));
+              setDcEditedItems(filtered.map(it=>({
+                item_id:it.id||'',
+                width:it.width||'', height:it.height||'', size_unit:it.size_unit||'',
+                qty:it.qty||0, sqft:it.sqft||0,
+                media:it.media||'',
+                description:it.internal_name||it.client_name||''
+              })));
+              setDcStep('edit');
+            }} style={{background:cnt===0?'#374151':'#10b981',borderColor:cnt===0?'#374151':'#10b981',fontSize:11,padding:'6px 16px',opacity:cnt===0?0.6:1}}>Next: Review Items ({cnt}) →</button>;})()}
           </div>
+          </>}
+
+          {/* STEP 2: EDIT ITEMS */}
+          {dcStep==='edit'&&<>
+            <div style={{background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:10,marginBottom:10}}>
+              <p style={{fontSize:10,color:'#10b981',fontWeight:700,marginBottom:4}}>✏️ REVIEW & EDIT ITEMS</p>
+              <p style={{fontSize:9,color:'#8b949e'}}>Tweak any field before printing. Edits apply to this DC only — tick the box at the bottom if you also want them written back to the batch.</p>
+            </div>
+            <div style={{maxHeight:'50vh',overflowY:'auto',display:'flex',flexDirection:'column',gap:8}}>
+              {dcEditedItems.map((it,i)=><div key={i} style={{background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:10}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                  <span style={{fontSize:10,color:'#e3a008',fontWeight:700}}>#{i+1}</span>
+                  <button onClick={()=>setDcEditedItems(p=>p.filter((_,idx)=>idx!==i))} style={{fontSize:8,padding:'2px 6px',background:'transparent',border:'1px solid #f47067',borderRadius:3,color:'#f47067',cursor:'pointer'}}>✕ Remove</button>
+                </div>
+                <div className="fg f2" style={{gap:6}}>
+                  <div style={{gridColumn:'span 2'}}><label style={{fontSize:8,color:'#64748b'}}>Description</label><input className="in" value={it.description} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,description:e.target.value}:x))} style={{fontSize:10}}/></div>
+                  <div><label style={{fontSize:8,color:'#64748b'}}>Material</label><input className="in" value={it.media} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,media:e.target.value}:x))} placeholder="e.g. Flex, Vinyl, Star Flex" style={{fontSize:10}}/></div>
+                  <div><label style={{fontSize:8,color:'#64748b'}}>Quantity</label><input className="in mn" type="number" value={it.qty} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,qty:+e.target.value||0}:x))} style={{fontSize:10}}/></div>
+                  <div><label style={{fontSize:8,color:'#64748b'}}>Width</label><input className="in mn" value={it.width} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,width:e.target.value}:x))} style={{fontSize:10}}/></div>
+                  <div><label style={{fontSize:8,color:'#64748b'}}>Height</label><input className="in mn" value={it.height} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,height:e.target.value}:x))} style={{fontSize:10}}/></div>
+                  <div><label style={{fontSize:8,color:'#64748b'}}>Unit</label><select className="in" value={it.size_unit} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,size_unit:e.target.value}:x))} style={{fontSize:10}}><option value="">—</option><option value="mm">mm</option><option value="inch">inch</option><option value="feet">feet</option></select></div>
+                  <div><label style={{fontSize:8,color:'#64748b'}}>Sq.Ft.</label><input className="in mn" type="number" step="0.01" value={it.sqft} onChange={e=>setDcEditedItems(p=>p.map((x,idx)=>idx===i?{...x,sqft:+e.target.value||0}:x))} style={{fontSize:10}}/></div>
+                </div>
+              </div>)}
+              {dcEditedItems.length===0&&<div style={{padding:20,textAlign:'center',color:'#f47067',fontSize:10}}>⚠️ All items removed. Go back and select items.</div>}
+            </div>
+            <div style={{display:'flex',gap:6,marginTop:12,justifyContent:'space-between',alignItems:'center'}}>
+              <button className="b" onClick={()=>setDcStep('form')}>← Back</button>
+              <button className="b bp" onClick={()=>{
+                if(dcEditedItems.length===0){show('No items to print',false);return;}
+                setDcStep('preview');
+              }} style={{background:'#10b981',borderColor:'#10b981',fontSize:11,padding:'6px 16px'}} disabled={dcEditedItems.length===0}>Preview DC →</button>
+            </div>
+          </>}
+
+          {/* STEP 3: PREVIEW */}
+          {dcStep==='preview'&&<>
+            <div style={{background:'#060810',border:'1px solid #1a2030',borderRadius:6,padding:10,marginBottom:10}}>
+              <p style={{fontSize:10,color:'#10b981',fontWeight:700,marginBottom:4}}>👁️ PREVIEW</p>
+              <p style={{fontSize:9,color:'#8b949e'}}>This is roughly how each of the 3 copies will print. Confirm and click Save & Print.</p>
+            </div>
+            <div style={{background:'#fff',color:'#222',padding:14,borderRadius:6,fontSize:10,maxHeight:'50vh',overflowY:'auto'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',borderBottom:'1px solid #222',paddingBottom:6,marginBottom:6}}>
+                <div style={{fontSize:18,fontWeight:900,letterSpacing:1}}>{firm.name||''}</div>
+                <div style={{textAlign:'right',fontSize:9}}>
+                  <div>{firm.address||''}</div>
+                  <div style={{fontWeight:700,marginTop:3}}>GSTIN: {firm.gst||''}</div>
+                </div>
+              </div>
+              <div style={{display:'flex',gap:10,paddingBottom:6,borderBottom:'1px solid #222',marginBottom:6}}>
+                <div style={{flex:1,paddingRight:8,borderRight:'1px solid #222'}}>
+                  <div style={{color:'#555',fontSize:9}}>To,</div>
+                  <div style={{whiteSpace:'pre-line',fontSize:10}}>{dcForm.to_name}<br/>{dcForm.to_address}</div>
+                </div>
+                <div style={{flex:1,fontSize:9}}>
+                  <div><b>Job #:</b> {j.id}</div>
+                  <div><b>Delivery Note:</b> {dcForm.delivery_note||'—'}</div>
+                  <div><b>Date:</b> {dcForm.dc_date}</div>
+                  <div><b>PO. No:</b> {dcForm.po_no||'—'}</div>
+                  <div><b>PO Date:</b> {dcForm.po_date||'—'}</div>
+                </div>
+              </div>
+              <div style={{fontSize:9,marginBottom:4}}>Please receive the undermentioned material as per your order</div>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:9}}>
+                <thead><tr style={{background:'#f0f0f0'}}>
+                  <th style={{border:'1px solid #222',padding:3}}>Sr</th>
+                  <th style={{border:'1px solid #222',padding:3}}>W</th>
+                  <th style={{border:'1px solid #222',padding:3}}>H</th>
+                  <th style={{border:'1px solid #222',padding:3}}>Qty</th>
+                  <th style={{border:'1px solid #222',padding:3}}>Sq.Ft.</th>
+                  <th style={{border:'1px solid #222',padding:3}}>Material</th>
+                  <th style={{border:'1px solid #222',padding:3}}>Description</th>
+                </tr></thead>
+                <tbody>
+                  {dcEditedItems.map((it,i)=><tr key={i}>
+                    <td style={{border:'1px solid #222',padding:3,textAlign:'center'}}>{i+1}</td>
+                    <td style={{border:'1px solid #222',padding:3,textAlign:'center'}}>{it.width?it.width+(it.size_unit?' '+it.size_unit:''):''}</td>
+                    <td style={{border:'1px solid #222',padding:3,textAlign:'center'}}>{it.height||''}</td>
+                    <td style={{border:'1px solid #222',padding:3,textAlign:'center'}}>{it.qty}</td>
+                    <td style={{border:'1px solid #222',padding:3,textAlign:'center'}}>{it.sqft||'—'}</td>
+                    <td style={{border:'1px solid #222',padding:3,textAlign:'center'}}>{it.media||'—'}</td>
+                    <td style={{border:'1px solid #222',padding:3}}>{it.description||'—'}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+              <div style={{display:'flex',marginTop:8,fontSize:9}}>
+                <div style={{flex:1,paddingRight:8,borderRight:'1px solid #222'}}>
+                  <div><b>Prepared By:</b> {dcForm.prepared_by||''}</div>
+                  <div><b>Delivered By:</b> {dcForm.delivered_by||''}</div>
+                </div>
+                <div style={{flex:1,paddingLeft:8}}>
+                  <div>Received the above mentioned Goods in good order and condition.</div>
+                  <div style={{marginTop:4}}><b>Receiver's Name:</b> ____________</div>
+                  <div><b>Signature with Seal:</b> ____________</div>
+                </div>
+              </div>
+            </div>
+            <div style={{marginTop:10,padding:8,background:'rgba(244,112,103,0.08)',border:'1px solid #f47067',borderRadius:6}}>
+              <label style={{display:'flex',alignItems:'flex-start',gap:8,cursor:'pointer',fontSize:10}}>
+                <input type="checkbox" checked={dcSaveToBatch} onChange={e=>setDcSaveToBatch(e.target.checked)} style={{marginTop:2}}/>
+                <span>
+                  <b style={{color:'#f47067'}}>Also save edits back to the batch</b>
+                  <span style={{display:'block',color:'#8b949e',fontSize:9,marginTop:2}}>If ticked, the edited values above will overwrite the original batch item data. This is irreversible — leave unticked to keep batch unchanged (recommended).</span>
+                </span>
+              </label>
+            </div>
+            <div style={{display:'flex',gap:6,marginTop:12,justifyContent:'space-between',alignItems:'center'}}>
+              <button className="b" onClick={()=>setDcStep('edit')}>← Back to Edit</button>
+              <button className="b bp" onClick={()=>{
+                if(dcSaveToBatch&&!confirm('⚠️ This will permanently overwrite items in the original batch.\n\nContinue?'))return;
+                saveAndPrintDC(batch);
+              }} style={{background:'#10b981',borderColor:'#10b981',fontSize:11,padding:'6px 16px'}}>🖨️ Save & Print DC ({dcEditedItems.length} items, 3 Copies)</button>
+            </div>
+          </>}
         </div>
       </div>;
     })()}
