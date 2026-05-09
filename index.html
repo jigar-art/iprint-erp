@@ -1232,6 +1232,16 @@ function MainApp({user,onLogout,masterData}){
     await sb.from('expenses').delete().eq('id',id);
     setExpenses(p=>p.filter(e=>e.id!==id));show("Expense deleted");
   },[show]);
+  // ─── UPDATE EXPENSE FIELD (inline edit) ─────────────────────
+  // 09 May 26: ExpensesPage table row was read-only except for delete.
+  // Users couldn't fix Job# on existing rows after import. Single-field
+  // setter mirrors updateBatchField — instant UI, write-through to DB.
+  const updateExpenseField = useCallback(async (id, field, value) => {
+    const cleaned = (value==null) ? null : String(value).trim();
+    setExpenses(p=>p.map(e=>e.id===id?{...e,[field]:cleaned||null}:e));
+    const {error} = await sb.from('expenses').update({[field]:cleaned||null}).eq('id',id);
+    if(error)show("⚠️ Update failed: "+error.message,false);
+  },[show]);
 
   // ─── UPDATE BATCH BILL ────────────────────────────────────
   const saveBill = useCallback(async (batchId, billNo) => {
@@ -1629,7 +1639,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob} sm={setModal} user={user} setBatches={setBatches} updateBatchField={updateBatchField}/>}
-          {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} team={masterData.team} firms={firms}/>}
+          {pg==="expenses"&&<ExpensesPage expenses={expenses} addExpense={addExpense} deleteExpense={deleteExpense} updateExpenseField={updateExpenseField} team={masterData.team} firms={firms}/>}
           {pg==="backup"&&<BackupPage/>}
           {pg==="bankcrm"&&<BankCRMPage show={show} jobs={fullJobs} sm={setModal} sp={setPg} firms={firms} clients={clients} user={user} items={items} osItems={osItems}/>}
           {pg==="sales"&&<SalesCRMPage activities={salesActs} setActivities={setSalesActs} jobs={fullJobs} clients={clients} firms={firms} team={masterData.team} user={user} show={show} sm={setModal}/>}
@@ -7824,7 +7834,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
 // ═══════════════════════════════════════════════════════════
 // EXPENSES TRACKER
 // ═══════════════════════════════════════════════════════════
-function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
+function ExpensesPage({expenses,addExpense,deleteExpense,updateExpenseField,team,firms}){
   const DEFAULT_CATS=["Travel - Local","Travel - Outstation","Courier - Wefast","Courier - Porter","Job Site Pickup/Drop","Food - Site/Late Night","Office Pantry","Sample / Catalogue Buy","Bank Work","Voucher Reimbursement","Mobile Recharge","Office Expense"];
   // Categories where Job# is NOT mandatory (per Hard Rule)
   const NO_JOB_CATS=new Set(["Office Expense","Office Pantry","Mobile Recharge","Bank Work"]);
@@ -7942,7 +7952,7 @@ function ExpensesPage({expenses,addExpense,deleteExpense,team,firms}){
         <td style={{fontSize:10}}>{e.paid_to}</td>
         <td><span className="bd" style={{background:e.payment_mode==='Cash'?"#f59e0b20":"#3b82f620",color:e.payment_mode==='Cash'?"#f59e0b":"#3b82f6"}}>{e.payment_mode}</span></td>
         <td>{e.firm&&<FB f={e.firm} firms={firms}/>}</td>
-        <td className="mn" style={{fontSize:10,color:"#e3a008"}}>{e.job_id||'—'}</td>
+        <td><input className="in mn" defaultValue={e.job_id||''} placeholder="—" onBlur={ev=>{const v=ev.target.value.trim();if(v!==(e.job_id||''))updateExpenseField&&updateExpenseField(e.id,'job_id',v);}} onKeyDown={ev=>{if(ev.key==='Enter')ev.target.blur();}} style={{fontSize:10,padding:'1px 4px',width:90,color:'#e3a008',background:'transparent',border:'1px dashed transparent'}} onFocus={ev=>{ev.target.style.background='#0c1017';ev.target.style.borderColor='#1a2030';}} onBlurCapture={ev=>{ev.target.style.background='transparent';ev.target.style.borderColor='transparent';}} title="Click to edit Job#"/></td>
         <td style={{fontSize:10}}>{e.approved_by}</td>
         <td>{e.receipt_url?<a href={e.receipt_url} target="_blank" style={{color:"#3b82f6",fontSize:9}}>📸</a>:'—'}</td>
         <td><button className="b br bs" onClick={()=>{if(confirm('Delete this expense?'))deleteExpense(e.id)}} style={{fontSize:8,padding:"1px 4px"}}>✕</button></td>
