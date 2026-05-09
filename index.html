@@ -9877,6 +9877,17 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [savingTask, setSavingTask] = React.useState(false);
   const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
   const [stuckNoteText, setStuckNoteText] = React.useState('');
+  // Edit mode state — added 09 May 2026
+  const [editTaskFor, setEditTaskFor] = React.useState(null);    // task id being edited
+  const [editTaskText, setEditTaskText] = React.useState('');
+  const [editTaskJob, setEditTaskJob] = React.useState('');
+  const [editTaskSite, setEditTaskSite] = React.useState('');
+  // Admin assign-task state — added 09 May 2026 (admins only, source='admin')
+  const [adminTaskUser, setAdminTaskUser] = React.useState('');
+  const [adminTaskText, setAdminTaskText] = React.useState('');
+  const [adminTaskJob, setAdminTaskJob] = React.useState('');
+  const [adminTaskSite, setAdminTaskSite] = React.useState('');
+  const [adminTaskSaving, setAdminTaskSaving] = React.useState(false);
 
   // Keep the MainApp-level badge / floating widget in sync with local task ops
   // (added 05 May 2026). Cheap: the global handler is debounced in MainApp.
@@ -10167,8 +10178,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
         }
 
         // ── SB-10: Recurring-duty bootstrap ─────────────────
+        // Updated 09 May 2026: added 'alt-days' (every other day from duty creation
+        // anchor) and 'weekly' (same weekday as duty.created_at) frequencies.
         const {data: duties, error: dErr} = await sb.from('recurring_duties')
-          .select('id,duty_text,frequency')
+          .select('id,duty_text,frequency,created_at')
           .eq('user_name', uname).eq('active', true);
         if (cancelled) return;
         if (!dErr && duties) {
@@ -10180,6 +10193,25 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             if (f === 'daily') firesToday = true;
             else if (f === 'mon-sat') firesToday = (dow >= 1 && dow <= 6);
             else if (f === 'mon-fri' || f === 'weekdays') firesToday = (dow >= 1 && dow <= 5);
+            else if (f === 'alt-days' || f === 'alt-day' || f === 'every-other-day') {
+              // Anchor: duty.created_at date. Fire when (today - anchor) is even.
+              const anchorDate = (duty.created_at||'').slice(0,10);
+              if (anchorDate) {
+                const [ay,am,ad] = anchorDate.split('-').map(Number);
+                const anchor = new Date(ay, am-1, ad);
+                const todayD = new Date(yyyy, mm-1, dd);
+                const diffDays = Math.round((todayD - anchor) / 86400000);
+                firesToday = (diffDays >= 0 && diffDays % 2 === 0);
+              }
+            }
+            else if (f === 'weekly') {
+              // Fire on same day-of-week as duty.created_at
+              const anchorDate = (duty.created_at||'').slice(0,10);
+              if (anchorDate) {
+                const [ay,am,ad] = anchorDate.split('-').map(Number);
+                firesToday = (new Date(ay, am-1, ad).getDay() === dow);
+              }
+            }
             if (!firesToday) return;
             inserts.push({
               user_name: uname,
@@ -10473,6 +10505,62 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       .eq('id', taskId).select().single();
     if (error) { show?.('Failed: ' + error.message, false); return; }
     setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+  };
+
+  // Edit task text + linked job/site. Added 09 May 2026.
+  // Allowed for any pending/stuck row owned by this user — server-enforced via RLS
+  // would be ideal but daily_tasks has no RLS yet, so client-side guards only.
+  // Permission rule: user can edit their OWN rows that are still pending or stuck.
+  // Carried/recurring rows can be edited too (user complaint: text needs fixing
+  // when carried over with a typo). Done/cancelled/historical-other-user rows blocked.
+  const editTask = async (taskId, newText, newJobId, newSiteId) => {
+    const trimmed = (newText||'').trim();
+    if (!trimmed) { show?.('Task text cannot be empty', false); return; }
+    if (trimmed.length > 1000) { show?.('Task text too long (max 1000 chars)', false); return; }
+    const target = (todayTasks||[]).find(t => t.id === taskId);
+    if (!target) { show?.('Task not found in today\'s list', false); return; }
+    if ((target.user_name||'').toUpperCase() !== uname) { show?.('You can only edit your own tasks', false); return; }
+    if (target.status !== 'pending' && target.status !== 'stuck') { show?.('Only pending/stuck tasks can be edited', false); return; }
+    const nowISO = new Date().toISOString();
+    const {data, error} = await sb.from('daily_tasks')
+      .update({
+        task_text: trimmed,
+        linked_job_id: (newJobId||'').trim() || null,
+        linked_site_id: (newSiteId||'').trim() || null,
+        updated_at: nowISO
+      })
+      .eq('id', taskId).select().single();
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+    show?.('Task updated');
+  };
+
+  // Admin assign-task — added 09 May 2026.
+  // Lets admin/sales role users push a task to ANOTHER user's daily list for today.
+  // Stamps source='admin', added_by=current user. Recipient sees an admin-colored row.
+  const adminAssignTask = async () => {
+    const role = user?.role || '';
+    if (!['admin','sales'].includes(role)) { show?.('Admins only', false); return; }
+    const targetUser = (adminTaskUser||'').trim().toUpperCase();
+    const trimmed = (adminTaskText||'').trim();
+    if (!targetUser) { show?.('Pick a recipient', false); return; }
+    if (!trimmed) { show?.('Task text required', false); return; }
+    setAdminTaskSaving(true);
+    const row = {
+      user_name: targetUser,
+      task_text: trimmed,
+      task_date: todayISO,
+      status: 'pending',
+      source: 'admin',
+      added_by: uname,
+      linked_job_id: (adminTaskJob||'').trim() || null,
+      linked_site_id: (adminTaskSite||'').trim() || null,
+    };
+    const {error} = await sb.from('daily_tasks').insert(row).select().single();
+    setAdminTaskSaving(false);
+    if (error) { show?.('Failed: ' + error.message, false); return; }
+    setAdminTaskUser(''); setAdminTaskText(''); setAdminTaskJob(''); setAdminTaskSite('');
+    show?.('Assigned to ' + targetUser);
   };
 
   // ── AUTO-TASKS aggregation (read-only) ──────────────────
@@ -10870,6 +10958,9 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                     {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
                     {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
                     {t.source === 'admin' && t.added_by && <span style={{fontSize:8,padding:'1px 4px',background:'#2a1408',color:'#f0997b',borderRadius:3}}>{t.added_by}</span>}
+                    {(t.user_name||'').toUpperCase() === uname && t.source !== 'recurring' && (
+                      <span onClick={() => { setEditTaskFor(t.id); setEditTaskText(t.task_text||''); setEditTaskJob(t.linked_job_id||''); setEditTaskSite(t.linked_site_id||''); }} style={{color:'#85b7eb',cursor:'pointer',fontSize:9}} title="Edit task">edit</span>
+                    )}
                     <span onClick={() => setStuckNoteFor(t.id)} style={{color:'#e24b4a',cursor:'pointer',fontSize:9}} title="Mark stuck">stuck?</span>
                     {t.source === 'user' && (
                       <span onClick={() => { if (confirm('Cancel this task?')) cancelTask(t.id); }} style={{color:'#475569',cursor:'pointer',fontSize:9}} title="Cancel task">×</span>
@@ -10902,6 +10993,9 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                     <div style={{display:'flex',gap:8,alignItems:'center'}}>
                       <span style={{color:'#e24b4a'}}>!</span>
                       <span style={{flex:1}}>{t.task_text}</span>
+                      {(t.user_name||'').toUpperCase() === uname && t.source !== 'recurring' && (
+                        <span onClick={() => { setEditTaskFor(t.id); setEditTaskText(t.task_text||''); setEditTaskJob(t.linked_job_id||''); setEditTaskSite(t.linked_site_id||''); }} style={{color:'#85b7eb',cursor:'pointer',fontSize:9}} title="Edit task">edit</span>
+                      )}
                       <span onClick={() => reopenTask(t.id)} style={{color:'#85b7eb',cursor:'pointer',fontSize:9}} title="Unstuck">unstuck</span>
                     </div>
                     {t.stuck_note && <div style={{fontSize:9,color:'#f09595',marginTop:3,paddingLeft:18,fontStyle:'italic'}}>↳ {t.stuck_note}</div>}
@@ -10926,6 +11020,31 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </div>
             )}
 
+            {/* Edit task modal-ish — added 09 May 2026 */}
+            {editTaskFor && (
+              <div style={{background:'#0f1422',border:'1px solid #85b7eb',padding:8,borderRadius:4,marginBottom:8}}>
+                <div style={{fontSize:10,color:'#85b7eb',marginBottom:4}}>Edit task</div>
+                <input className="in" value={editTaskText} onChange={e => setEditTaskText(e.target.value)}
+                  placeholder="Task description"
+                  style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:6}}
+                  autoFocus />
+                <div style={{display:'flex',gap:6,marginBottom:6}}>
+                  <input className="in" value={editTaskJob} onChange={e => setEditTaskJob(e.target.value)}
+                    placeholder="job id (opt)"
+                    style={{flex:1,fontSize:10,padding:'5px 7px',boxSizing:'border-box'}} />
+                  <input className="in" value={editTaskSite} onChange={e => setEditTaskSite(e.target.value)}
+                    placeholder="site id (opt)"
+                    style={{flex:1,fontSize:10,padding:'5px 7px',boxSizing:'border-box'}} />
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <button className="b bp" onClick={() => { editTask(editTaskFor, editTaskText, editTaskJob, editTaskSite); setEditTaskFor(null); setEditTaskText(''); setEditTaskJob(''); setEditTaskSite(''); }}
+                    disabled={!editTaskText.trim()}
+                    style={{fontSize:10,padding:'4px 10px',opacity:editTaskText.trim()?1:0.5}}>Save</button>
+                  <button className="b" onClick={() => { setEditTaskFor(null); setEditTaskText(''); setEditTaskJob(''); setEditTaskSite(''); }} style={{fontSize:10,padding:'4px 10px'}}>Cancel</button>
+                </div>
+              </div>
+            )}
+
             {/* Add task form */}
             <div style={{background:'#0a0e1a',border:'1px dashed #2a3548',borderRadius:4,padding:8}}>
               <input className="in" value={newTaskText} onChange={e => setNewTaskText(e.target.value)}
@@ -10943,6 +11062,32 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                 </button>
               </div>
             </div>
+
+            {/* Admin assign-task form — added 09 May 2026. Visible to admin/sales only. */}
+            {['admin','sales'].includes(user?.role||'') && (
+              <div style={{background:'#1a0e08',border:'1px dashed #d85a30',borderRadius:4,padding:8,marginTop:6}}>
+                <div style={{fontSize:9,color:'#f0997b',textTransform:'uppercase',letterSpacing:0.5,marginBottom:5}}>👑 Assign task to another user</div>
+                <div style={{display:'flex',gap:5,marginBottom:5}}>
+                  <input className="in" value={adminTaskUser} onChange={e => setAdminTaskUser(e.target.value.toUpperCase())}
+                    placeholder="recipient (e.g. BATUL A - SALES EXECUTIVE)"
+                    style={{flex:1,fontSize:10,padding:'4px 7px',boxSizing:'border-box'}} />
+                </div>
+                <input className="in" value={adminTaskText} onChange={e => setAdminTaskText(e.target.value)}
+                  placeholder="Task description"
+                  style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:5,background:'transparent',border:'none',color:'#cbd5e1'}}
+                  onKeyDown={e => { if (e.key === 'Enter' && adminTaskText.trim() && adminTaskUser.trim()) adminAssignTask(); }} />
+                <div style={{display:'flex',gap:5,alignItems:'center'}}>
+                  <input className="in" value={adminTaskJob} onChange={e => setAdminTaskJob(e.target.value)}
+                    placeholder="job id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
+                  <input className="in" value={adminTaskSite} onChange={e => setAdminTaskSite(e.target.value)}
+                    placeholder="site id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
+                  <button className="b" onClick={adminAssignTask} disabled={adminTaskSaving || !adminTaskText.trim() || !adminTaskUser.trim()}
+                    style={{fontSize:10,padding:'4px 12px',opacity:(adminTaskSaving||!adminTaskText.trim()||!adminTaskUser.trim())?0.5:1,marginLeft:'auto',background:'#d85a30',color:'#fff',border:'none'}}>
+                    {adminTaskSaving ? 'Assigning…' : 'Assign'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Quick note (was: standup post box) — kept as freeform fallback */}
