@@ -1407,6 +1407,24 @@ function MainApp({user,onLogout,masterData}){
     return {id,name};
   },[show]);
 
+  // ─── ADD NEW DELIVERY BOY ──────────────────────────────────
+  // 09 May 26: dispatch del-boy combobox needs to add new boys on the fly.
+  // Case-insensitive de-dup against existing rows; refreshes masterData so
+  // the new name appears in the dropdown immediately. Returns row or null.
+  const addNewDelBoy = useCallback(async (rawName) => {
+    const name = String(rawName||'').trim();
+    if(!name) return null;
+    const existing = (masterData?.delBoys||[]).find(d => String(d.name||'').trim().toLowerCase() === name.toLowerCase());
+    if(existing) return existing;
+    const id = 'DB'+uid();
+    const row = {id, name};
+    const {error} = await sb.from('delivery_boys').insert(row);
+    if(error){show("⚠️ Add boy failed: "+error.message,false); return null;}
+    setMasterData(p => ({...p, delBoys:[...(p?.delBoys||[]), row]}));
+    show("Boy added!");
+    return row;
+  },[show,masterData]);
+
   // ─── ADD NEW PRODUCT (material) ────────────────────────────
   // Case-insensitive de-dup against existing products. Returns the
   // canonical product row (existing OR newly inserted) so callers can
@@ -1610,7 +1628,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
-          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch}/>}
+          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
@@ -4516,7 +4534,26 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
 }
 
 // DISPATCH
-function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
+function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
+  // 09 May 26: Del Boy is a typeahead combobox — autocomplete existing + add new on the fly.
+  const [boyQ,setBoyQ]=useState("");
+  const [boyOpen,setBoyOpen]=useState(false);
+  const boyMatches=useMemo(()=>{
+    const q=boyQ.trim().toLowerCase();
+    if(!q) return delBoys;
+    return delBoys.filter(d=>String(d.name||'').toLowerCase().includes(q));
+  },[boyQ,delBoys]);
+  const exactBoyHit=useMemo(()=>{
+    const q=boyQ.trim().toLowerCase();
+    return q ? delBoys.find(d=>String(d.name||'').toLowerCase()===q) : null;
+  },[boyQ,delBoys]);
+  const pickBoy=(name)=>{sF(p=>({...p,delivery_boy:name}));setBoyQ("");setBoyOpen(false);};
+  const handleAddBoy=async()=>{
+    const name=boyQ.trim();
+    if(!name||!addNewDelBoy) return;
+    const row=await addNewDelBoy(name);
+    if(row){pickBoy(row.name);}
+  };
   const add=async()=>{
     if(!f.job_id){alert("Enter Job#");return;}
     const payload={id:"D"+uid(),...f,install_date:f.install_date||null};
@@ -4529,7 +4566,15 @@ function DispPage({logs,delBoys,addLog}){const [sf,ssf]=useState(false);const [f
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
       <F l="Job#"><input className="in mn" value={f.job_id} onChange={e=>sF(p=>({...p,job_id:e.target.value}))}/></F>
       <F l="Type"><select className="in" value={f.dispatch_type} onChange={e=>sF(p=>({...p,dispatch_type:e.target.value}))}><option>Delivery Only</option><option>Delivery + Install</option></select></F>
-      <F l="Del Boy"><select className="in" value={f.delivery_boy} onChange={e=>sF(p=>({...p,delivery_boy:e.target.value}))}>{delBoys.map(d=><option key={d.id} value={d.name}>{d.name}</option>)}<option>Other</option></select></F>
+      <F l="Del Boy"><div style={{position:"relative"}}>
+        <input className="in" placeholder="Type to search or add..." value={boyOpen?boyQ:f.delivery_boy} onChange={e=>{setBoyQ(e.target.value);setBoyOpen(true);}} onFocus={()=>{setBoyQ("");setBoyOpen(true);}} onBlur={()=>setTimeout(()=>setBoyOpen(false),150)}/>
+        {boyOpen&&<div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:"#0c1017",border:"1px solid #1a2030",borderRadius:6,marginTop:2,maxHeight:180,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.4)"}}>
+          {boyMatches.map(d=><div key={d.id} onMouseDown={()=>pickBoy(d.name)} style={{padding:"6px 10px",cursor:"pointer",fontSize:11,borderBottom:"1px solid #1a2030"}} onMouseEnter={e=>e.currentTarget.style.background="#18150a"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>{d.name}</div>)}
+          {boyMatches.length===0&&!boyQ.trim()&&<div style={{padding:"6px 10px",fontSize:10,color:"#64748b"}}>No boys yet — type a name to add</div>}
+          {boyQ.trim()&&!exactBoyHit&&<div onMouseDown={handleAddBoy} style={{padding:"6px 10px",cursor:"pointer",fontSize:11,color:"#4ade80",background:"#0a1f15",fontWeight:600}}>➕ Add "{boyQ.trim()}"</div>}
+          <div onMouseDown={()=>pickBoy("Other")} style={{padding:"6px 10px",cursor:"pointer",fontSize:10,color:"#64748b",borderTop:"1px solid #1a2030"}}>Other (unknown)</div>
+        </div>}
+      </div></F>
       <F l="Vehicle/Courier"><input className="in" value={f.vehicle} onChange={e=>sF(p=>({...p,vehicle:e.target.value}))}/></F>
       <F l="LR/Track#"><input className="in mn" value={f.lr_no} onChange={e=>sF(p=>({...p,lr_no:e.target.value}))}/></F>
       <F l="Challan#"><input className="in mn" value={f.challan_no} onChange={e=>sF(p=>({...p,challan_no:e.target.value}))}/></F>
