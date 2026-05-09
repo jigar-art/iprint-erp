@@ -10106,8 +10106,13 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
         // with no child pointing to it via source_task_id). Idempotent: re-running the
         // same day is a no-op because today's carry row becomes the new leaf.
         // Updated 05 May 2026 from previous "yesterday only" version.
+        // Updated 09 May 2026: added per-(user, task_text) latest-done/cancelled guard
+        // to fix ghost-carry bug where chains corrupted by mismatched source_task_id
+        // resurrected tasks the user had already completed on a later day. The chain
+        // walk via parentIds breaks at done rows (they're excluded from pastUnfinished),
+        // so we cross-check by task_text to seal closed chains regardless of corruption.
         const {data: pastUnfinished, error: yErr} = await sb.from('daily_tasks')
-          .select('id,task_text,linked_job_id,linked_site_id,status,source_task_id')
+          .select('id,task_text,task_date,linked_job_id,linked_site_id,status,source_task_id')
           .eq('user_name', uname)
           .lt('task_date', todayISO)
           .in('status', ['pending', 'stuck']);
@@ -10122,11 +10127,31 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
           // they carried, so those rows are also not leaves.
           (existing||[]).forEach(r => { if (r.source==='carried' && r.source_task_id) parentIds.add(r.source_task_id); });
 
+          // Closed-text guard: fetch latest done/cancelled date per (user, task_text).
+          // If a task_text was completed AFTER the leaf's task_date, the chain is closed
+          // even when source_task_id pointers are corrupted.
+          const {data: pastClosed, error: cErr} = await sb.from('daily_tasks')
+            .select('task_text,task_date')
+            .eq('user_name', uname)
+            .lt('task_date', todayISO)
+            .in('status', ['done', 'cancelled']);
+          if (cancelled) return;
+          const latestClosedByText = new Map();
+          if (!cErr && pastClosed) {
+            pastClosed.forEach(r => {
+              const cur = latestClosedByText.get(r.task_text);
+              if (!cur || r.task_date > cur) latestClosedByText.set(r.task_text, r.task_date);
+            });
+          }
+
           // Filter to leaves only (rows that aren't anyone's parent in the unfinished set
-          // AND aren't already represented in today's carries).
+          // AND aren't already represented in today's carries AND don't have a later
+          // done/cancelled row for the same task_text).
           pastUnfinished.forEach(t => {
             if (parentIds.has(t.id)) return;          // not a leaf — a newer row already carries this
             if (existingCarryIds.has(t.id)) return;   // already carried today (race safety)
+            const lastClosed = latestClosedByText.get(t.task_text);
+            if (lastClosed && lastClosed >= t.task_date) return;  // chain closed by later done/cancelled
             inserts.push({
               user_name: uname,
               task_text: t.task_text,
