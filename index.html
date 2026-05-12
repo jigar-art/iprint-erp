@@ -9516,6 +9516,52 @@ function BackupPage(){
 // ═══════════════════════════════════════════════════════════
 // SALES CRM — Visits, Leads, Pipeline, Reports
 // ═══════════════════════════════════════════════════════════
+// MultiPicker — dropdown with checkbox-multi-select. Stores as comma-separated.
+// Added 12 May 2026 for Batul (Sales CRM). Backwards compatible: single-value
+// strings from old rows render as one chip.
+function MultiPicker({value,options,onChange,placeholder}){
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState('');
+  const ref=React.useRef(null);
+  // Parse current value: comma-split, trim, drop empties
+  const selected=React.useMemo(()=>(value||'').split(',').map(s=>s.trim()).filter(Boolean),[value]);
+  // Click outside closes
+  React.useEffect(()=>{
+    if(!open) return;
+    const onDocClick=(e)=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    const onKey=(e)=>{if(e.key==='Escape')setOpen(false);};
+    document.addEventListener('mousedown',onDocClick);
+    document.addEventListener('keydown',onKey);
+    return ()=>{document.removeEventListener('mousedown',onDocClick);document.removeEventListener('keydown',onKey);};
+  },[open]);
+  const toggle=(opt)=>{
+    const has=selected.includes(opt);
+    const next=has?selected.filter(s=>s!==opt):[...selected,opt];
+    onChange(next.join(', '));
+  };
+  const filteredOpts=q?options.filter(o=>o.toLowerCase().includes(q.toLowerCase())):options;
+  const displayText=selected.length===0?(placeholder||'Select…'):selected.join(', ');
+  return <div ref={ref} style={{position:'relative',width:'100%'}}>
+    <button type="button" onClick={()=>setOpen(o=>!o)} style={{width:'100%',padding:'5px 8px',borderRadius:5,border:`1px solid ${open?'#e3a008':'#1a2030'}`,background:'#060810',color:selected.length===0?'#64748b':'#e2e8f0',fontSize:11,textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',gap:6,minHeight:26,fontFamily:'inherit'}}>
+      <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{displayText}</span>
+      <span style={{display:'inline-flex',alignItems:'center',gap:5,flexShrink:0}}>
+        {selected.length>0&&<span style={{background:'#e3a008',color:'#060810',fontWeight:700,fontSize:9,padding:'1px 6px',borderRadius:999}}>{selected.length}</span>}
+        <span style={{fontSize:10,color:open?'#e3a008':'#64748b'}}>{open?'▲':'▼'}</span>
+      </span>
+    </button>
+    {open&&<div style={{position:'absolute',top:'100%',left:0,right:0,zIndex:1000,marginTop:2,border:'1px solid #e3a008',borderRadius:5,background:'#0c1017',maxHeight:220,overflowY:'auto',boxShadow:'0 4px 12px rgba(0,0,0,0.4)'}}>
+      {options.length>6&&<div style={{padding:'5px 7px',borderBottom:'1px solid #1a2030',position:'sticky',top:0,background:'#0c1017'}}>
+        <input type="text" autoFocus placeholder="Search…" value={q} onChange={e=>setQ(e.target.value)} style={{width:'100%',background:'#060810',border:'1px solid #1a2030',color:'#e2e8f0',fontSize:10,padding:'3px 6px',borderRadius:4,outline:'none',fontFamily:'inherit'}}/>
+      </div>}
+      {filteredOpts.length===0&&<div style={{padding:'8px 10px',fontSize:10,color:'#64748b'}}>No matches</div>}
+      {filteredOpts.map(opt=>{const checked=selected.includes(opt);return <label key={opt} style={{display:'flex',alignItems:'center',gap:7,padding:'5px 10px',fontSize:11,cursor:'pointer',background:checked?'#e3a00810':'transparent'}}>
+        <input type="checkbox" checked={checked} onChange={()=>toggle(opt)} style={{accentColor:'#e3a008',width:12,height:12,cursor:'pointer'}}/>
+        <span style={{color:checked?'#e3a008':'#e2e8f0'}}>{opt}</span>
+      </label>;})}
+    </div>}
+  </div>;
+}
+
 function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,show,sm}){
   const [tab,setTab]=useState('visits');
   const [showAdd,setShowAdd]=useState(false);
@@ -9533,7 +9579,7 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
   const salesReps=[...new Set(activities.map(a=>a.rep_name).filter(Boolean))];
   if(!salesReps.includes('BATUL A'))salesReps.unshift('BATUL A');
 
-  const [nf,setNf]=useState({date:td(),client_type:'New Client',firm_name:'',industry:INDUSTRIES[0],mobile:'',landline:'',email:'',address:'',contact_person:'',designation:'',feedback:FEEDBACKS[0],product_pitched:PRODUCTS[0],response:RESPONSES[0],action_taken:'',pipeline_project:'',pipeline_date:'',pipeline_product:'',pipeline_qty:'',ref_name1:'',ref_company1:'',ref_name2:'',ref_company2:'',remarks:'',revisit_date:'',estimated_value:'',actual_value:'',rep_name:user?.name?.includes('BATUL')?'BATUL A':user?.name||''});
+  const [nf,setNf]=useState({date:td(),client_type:'New Client',firm_name:'',industry:INDUSTRIES[0],mobile:'',landline:'',email:'',address:'',contact_person:'',designation:'',feedback:FEEDBACKS[0],product_pitched:'',response:'',action_taken:'',pipeline_project:'',pipeline_date:'',pipeline_product:'',pipeline_qty:'',ref_name1:'',ref_company1:'',ref_name2:'',ref_company2:'',remarks:'',revisit_date:'',estimated_value:'',actual_value:'',rep_name:user?.name?.includes('BATUL')?'BATUL A':user?.name||''});
 
   const filtered=useMemo(()=>{
     let f=activities;
@@ -9636,7 +9682,7 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
     const rec={id,date:nf.date,activity_type:'visit',rep_name:nf.rep_name,client_type:nf.client_type,firm_name:nf.firm_name,client_name:nf.firm_name,industry:nf.industry,mobile:nf.mobile,landline:nf.landline,email:nf.email,address:nf.address,contact_person:nf.contact_person,designation:nf.designation,description:nf.feedback,product_pitched:nf.product_pitched,outcome:nf.response,follow_up_notes:nf.action_taken,pipeline_project:nf.pipeline_project,pipeline_date:nf.pipeline_date,pipeline_product:nf.pipeline_product,pipeline_qty:nf.pipeline_qty,ref_name1:nf.ref_name1,ref_company1:nf.ref_company1,ref_name2:nf.ref_name2,ref_company2:nf.ref_company2,remarks:nf.remarks,follow_up_date:nf.revisit_date,estimated_value:+nf.estimated_value||null,actual_value:+nf.actual_value||null,status:'Open',created_at:new Date().toISOString()};
     const {error}=await sb.from('sales_activities').insert(rec);
     if(!error){setActivities(p=>[rec,...p]);setShowAdd(false);show('Visit logged!');
-      setNf(p=>({...p,firm_name:'',mobile:'',landline:'',email:'',address:'',contact_person:'',designation:'',feedback:FEEDBACKS[0],product_pitched:PRODUCTS[0],response:RESPONSES[0],action_taken:'',pipeline_project:'',pipeline_date:'',pipeline_product:'',pipeline_qty:'',ref_name1:'',ref_company1:'',ref_name2:'',ref_company2:'',remarks:'',revisit_date:'',estimated_value:'',actual_value:''}));
+      setNf(p=>({...p,firm_name:'',mobile:'',landline:'',email:'',address:'',contact_person:'',designation:'',feedback:FEEDBACKS[0],product_pitched:'',response:'',action_taken:'',pipeline_project:'',pipeline_date:'',pipeline_product:'',pipeline_qty:'',ref_name1:'',ref_company1:'',ref_name2:'',ref_company2:'',remarks:'',revisit_date:'',estimated_value:'',actual_value:''}));
     } else show('Error: '+error.message,false);
   };
 
@@ -9931,8 +9977,8 @@ function SalesCRMPage({activities,setActivities,jobs,clients,firms,team,user,sho
           <F l="Email"><input {...ins} value={nf.email} onChange={e=>setNf(p=>({...p,email:e.target.value}))}/></F>
           <div style={{gridColumn:"span 3"}}><F l="Address"><input {...ins} value={nf.address} onChange={e=>setNf(p=>({...p,address:e.target.value}))} style={{...ins.style,width:"100%"}}/></F></div>
           <F l="Meeting Feedback"><select {...ins} value={nf.feedback} onChange={e=>setNf(p=>({...p,feedback:e.target.value}))}>{FEEDBACKS.map(f=><option key={f}>{f}</option>)}</select></F>
-          <F l="Product Pitched"><select {...ins} value={nf.product_pitched} onChange={e=>setNf(p=>({...p,product_pitched:e.target.value}))}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></F>
-          <F l="Response"><select {...ins} value={nf.response} onChange={e=>setNf(p=>({...p,response:e.target.value}))}>{RESPONSES.map(r=><option key={r}>{r}</option>)}</select></F>
+          <F l="Product Pitched"><MultiPicker value={nf.product_pitched} options={PRODUCTS} onChange={v=>setNf(p=>({...p,product_pitched:v}))} placeholder="Tick products…"/></F>
+          <F l="Response"><MultiPicker value={nf.response} options={RESPONSES} onChange={v=>setNf(p=>({...p,response:v}))} placeholder="Tick responses…"/></F>
           <div style={{gridColumn:"span 3"}}><F l="Action Taken"><input {...ins} value={nf.action_taken} onChange={e=>setNf(p=>({...p,action_taken:e.target.value}))} style={{...ins.style,width:"100%"}} placeholder="Follow-up email, sample sent, etc."/></F></div>
         </div>
         <div style={{borderTop:"1px solid #1a2030",paddingTop:8,marginBottom:8}}>
