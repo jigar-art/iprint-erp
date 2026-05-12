@@ -1625,7 +1625,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} fullJobs={fullJobs} fyFilter={fyFilter} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="jobs"&&<JobsPage jobs={filteredJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
@@ -1721,7 +1721,7 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
+function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [dq,setDq]=useState("");
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   
@@ -1848,7 +1848,7 @@ function DashPage({s,stock,sp,jobs,firms,sm,updateJobStatus,updateJobFields,togD
       {results.length>0&&<div style={{marginTop:6,maxHeight:300,overflowY:"auto"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Invoice</th></tr></thead><tbody>
         {results.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn||'—'}</td></tr>})}
       </tbody></table></div>}
-      {dq.length>=2&&results.length===0&&<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>}
+      {dq.length>=2&&results.length===0&&(()=>{const q=dq.toLowerCase();const otherFY=(fullJobs||[]).filter(j=>j.id?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q)||j.contact_person?.toLowerCase().includes(q)||(j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q))).length;return fyFilter!=='all'&&otherFY>0?<p style={{fontSize:10,color:"#f59e0b",marginTop:4}}>No results in this FY. Try <strong>All Years</strong> — {otherFY} match{otherFY!==1?'es':''} found in other years.</p>:<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>;})()}
     </div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
       <div style={{display:"flex",gap:3}}>
