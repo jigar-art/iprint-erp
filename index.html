@@ -630,12 +630,21 @@ function Login({onLogin,team}){
   const [sel,setSel]=useState('');
   const [pin,setPin]=useState('');
   const [err,setErr]=useState('');
-  const submit=()=>{
+  const submit=async()=>{
     const member=team.find(t=>t.name===sel);
     if(!member){setErr('Select your name');return;}
-    if(!member.pin||member.pin!==pin){setErr('Wrong PIN');return;}
-    onLogin(member);
-    window.__currentUser=member;
+    if(!pin){setErr('Enter PIN');return;}
+    try{
+      // SHA-256(pin + ':' + id) hex — matches DB pin_hash (salted with row id)
+      const data=new TextEncoder().encode(pin+':'+member.id);
+      const buf=await crypto.subtle.digest('SHA-256',data);
+      const hex=Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+      // Primary: hash compare. Fallback: legacy plaintext for migration safety.
+      const ok=(member.pin_hash&&member.pin_hash===hex)||(member.pin&&member.pin===pin);
+      if(!ok){setErr('Wrong PIN');return;}
+      onLogin(member);
+      window.__currentUser=member;
+    }catch(e){setErr('Login error — try again');}
   };
   return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060810"}}>
     <div className="a" style={{width:340,padding:32,background:"#0c1017",border:"1px solid #1a2030",borderRadius:16,textAlign:"center"}}>
@@ -8141,7 +8150,7 @@ function RootApp(){
 
   const handleLogin=(member)=>{
     setUser(member);
-    try{localStorage.setItem('erp_user',JSON.stringify(member));localStorage.setItem('erp_login_time',Date.now().toString());}catch(e){}
+    try{const{pin,pin_hash,...safe}=member;localStorage.setItem('erp_user',JSON.stringify(safe));localStorage.setItem('erp_login_time',Date.now().toString());}catch(e){}
   };
   const handleLogout=()=>{
     setUser(null);
@@ -8172,7 +8181,7 @@ function RootApp(){
         if(stored){
           const u=JSON.parse(stored);
           const teamList=tm.data||[];
-          const valid=teamList.find(t=>t.name===u.name&&t.pin===u.pin);
+          const valid=teamList.find(t=>t.name===u.name);
           const loginTime=parseInt(localStorage.getItem('erp_login_time')||'0',10);
           const expired=Date.now()-loginTime > 24*60*60*1000;
           if(!valid||expired){localStorage.removeItem('erp_user');localStorage.removeItem('erp_pg');localStorage.removeItem('erp_login_time');setUser(null);}
