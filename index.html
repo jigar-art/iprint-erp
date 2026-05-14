@@ -11612,7 +11612,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             <div style={sectionTitleStyle}>👥 Top contributors · {periodBounds.label}</div>
             {(() => {
               const byUser = {};
-              const bump = (u, n=1) => { if(!u)return; const key=u.toUpperCase().trim(); byUser[key]=(byUser[key]||0)+n; };
+              const bump = (u, n=1) => { if(!u)return; const key=(u.toUpperCase().trim().split(/\s*[-(]/)[0]||'').trim(); if(!key||key.startsWith('MIGRATION_')||key.startsWith('MIS_IMPORT_'))return; byUser[key]=(byUser[key]||0)+n; };
               outputData.prRaised.forEach(p => bump(p.created_by));
               outputData.prApproved.forEach(p => bump(p.approved_by));
               outputData.prRejected.forEach(p => bump(p.rejected_by));
@@ -11649,7 +11649,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   const ps = periodBounds.startDate;
                   const startISO = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
                   const stats = {};
-                  const bump = (u, col, n=1) => { if(!u) return; const k=u.toUpperCase().trim(); if(!stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; stats[k][col]+=n; };
+                  const bump = (u, col, n=1) => { if(!u) return; const k=(u.toUpperCase().trim().split(/\s*[-(]/)[0]||'').trim(); if(!k||k.startsWith('MIGRATION_')||k.startsWith('MIS_IMPORT_')) return; if(!stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; stats[k][col]+=n; };
                   outputData.prRaised.forEach(p=>bump(p.created_by,'prs'));
                   outputData.prApproved.forEach(p=>bump(p.approved_by,'prs'));
                   outputData.poGenerated.forEach(p=>bump(p.po_generated_by,'pos'));
@@ -11661,7 +11661,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   outputData.salesVisits.forEach(s=>bump(s.rep_name,'visits'));
                   (teamTasks||[]).filter(t=>t.status==='done' && (t.task_date||'') >= startISO).forEach(t=>bump(t.user_name,'tasks'));
                   // Include idle team members (Fix A, 14 May 2026 PM)
-                  (team||[]).forEach(t => { const k=(t.name||'').toUpperCase().trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
+                  (team||[]).forEach(t => { const k=((t.name||'').toUpperCase().trim().split(/\s*[-(]/)[0]||'').trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
                   // Filter synthetic migration users (Fix B, 14 May 2026 PM)
                   Object.keys(stats).forEach(k => { if (k.startsWith('MIGRATION_') || k === '') delete stats[k]; });
                   const rows = Object.entries(stats).map(([u,s])=>({u, ...s, score:s.prs+s.pos+s.inv+s.jobs+s.dc+s.grn+s.visits+s.tasks})).sort((a,b)=>b.score-a.score);
@@ -11679,7 +11679,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               const ps = periodBounds.startDate;
               const startISO = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
               const stats = {};
-              const bump = (u, col, n=1) => { if(!u) return; const k=u.toUpperCase().trim(); if(!stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; stats[k][col]+=n; };
+              const bump = (u, col, n=1) => { if(!u) return; const k=(u.toUpperCase().trim().split(/\s*[-(]/)[0]||'').trim(); if(!k||k.startsWith('MIGRATION_')||k.startsWith('MIS_IMPORT_')) return; if(!stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; stats[k][col]+=n; };
               outputData.prRaised.forEach(p=>bump(p.created_by,'prs'));
               outputData.prApproved.forEach(p=>bump(p.approved_by,'prs'));
               outputData.poGenerated.forEach(p=>bump(p.po_generated_by,'pos'));
@@ -11692,7 +11692,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               (teamTasks||[]).filter(t=>t.status==='done' && (t.task_date||'') >= startISO).forEach(t=>bump(t.user_name,'tasks'));
 
               // Include all team members even with zero activity so founder can see who's idle
-              (team||[]).forEach(t => { const k=(t.name||'').toUpperCase().trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
+              (team||[]).forEach(t => { const k=((t.name||'').toUpperCase().trim().split(/\s*[-(]/)[0]||'').trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
               // Filter synthetic migration users / blank rows (Fix B, 14 May 2026 PM)
               Object.keys(stats).forEach(k => { if (k.startsWith('MIGRATION_') || k === '') delete stats[k]; });
 
