@@ -201,6 +201,19 @@ const canEditInvoice2 = (user) => {
   return BILLING_TEAM.some(n => u.includes(n));
 };
 
+// 14 May 2026: invoice date validator. HTML date inputs occasionally yield 0026-MM-DD
+// when users mistype the year (e.g. tabbed through with only "26" typed). This caused
+// 101 corrupt batches before the fix. Returns null if invalid, with toast side-effect.
+// Acceptable range: 2020-01-01 to 2030-12-31 (covers any realistic invoice date).
+const validInvDate = (d, show) => {
+  if (!d || typeof d !== 'string') return null;
+  const s = d.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) { show?.('Invalid date format. Use YYYY-MM-DD.', false); return null; }
+  const y = parseInt(s.slice(0,4), 10);
+  if (y < 2020 || y > 2030) { show?.('Invalid year ' + y + '. Did you type 2 digits? Year must be 2020-2030.', false); return null; }
+  return s;
+};
+
 // backwards-compat — existing jobs keep them until naturally updated. Dropdowns show all values.
 const ALL_ST_NEW = [
   // Pre-production (ESTIMATE bucket)
@@ -3107,12 +3120,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                 const tip=(canEditInv?'Click to edit · ':'')+'Invoice '+b.bill_no+(b.invoice_date?' · '+b.invoice_date:'')+(b.billed_by?' · by '+b.billed_by:'')+histTip;
                 return <span className="mn bd" title={tip} onClick={canEditInv?()=>setEditBatchInv({batch:b,newNo:b.bill_no,newDate:b.invoice_date||''}):undefined} style={{fontSize:9,color:"#06b6d4",background:"#06b6d420",cursor:canEditInv?'pointer':'default'}}>{b.bill_no}{hist.length>0?<sup style={{fontSize:7,marginLeft:2,color:'#f59e0b',fontWeight:700}}>✎{hist.length}</sup>:null}</span>;
               })()}
-              <input type="date" className="in mn" value={b.invoice_date||''} onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,invoice_date:v}:x));}} onBlur={e=>updateBatchField(b.id,'invoice_date',e.target.value||null)} title="Invoice date" style={{width:108,fontSize:9,padding:"2px 4px",color:"#06b6d4"}}/>
+              <input type="date" className="in mn" value={b.invoice_date||''} onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,invoice_date:v}:x));}} onBlur={e=>{const raw=e.target.value;if(!raw){updateBatchField(b.id,'invoice_date',null);return;}const ok=validInvDate(raw,show);if(!ok){setBatches(p=>p.map(x=>x.id===b.id?{...x,invoice_date:''}:x));return;}updateBatchField(b.id,'invoice_date',ok);}} title="Invoice date" style={{width:108,fontSize:9,padding:"2px 4px",color:"#06b6d4"}}/>
             </>
             :canSeeRates&&<div style={{display:"flex",gap:2,alignItems:"center",flexWrap:"wrap"}}>
               <input className="in mn" placeholder="Invoice#" style={{width:90,fontSize:9,padding:"2px 4px"}} data-batch-inv-no={b.id}/>
               <input type="date" className="in mn" style={{width:108,fontSize:9,padding:"2px 4px"}} data-batch-inv-date={b.id} title="Invoice date (required)"/>
-              <button className="b bg bs" style={{fontSize:8,padding:"2px 6px"}} onClick={()=>{const noInp=document.querySelector('[data-batch-inv-no="'+b.id+'"]');const dtInp=document.querySelector('[data-batch-inv-date="'+b.id+'"]');const v=noInp?.value?.trim();const d=dtInp?.value?.trim();if(!v){show('Enter invoice#',false);return;}if(!d){show('Enter invoice date',false);return;}saveBill(b.id,v);updateBatchField(b.id,'invoice_date',d);if(noInp)noInp.value='';if(dtInp)dtInp.value='';}}>Save Inv</button>
+              <button className="b bg bs" style={{fontSize:8,padding:"2px 6px"}} onClick={()=>{const noInp=document.querySelector('[data-batch-inv-no="'+b.id+'"]');const dtInp=document.querySelector('[data-batch-inv-date="'+b.id+'"]');const v=noInp?.value?.trim();const d=dtInp?.value?.trim();if(!v){show('Enter invoice#',false);return;}if(!d){show('Enter invoice date',false);return;}const okDate=validInvDate(d,show);if(!okDate)return;saveBill(b.id,v);updateBatchField(b.id,'invoice_date',okDate);if(noInp)noInp.value='';if(dtInp)dtInp.value='';}}>Save Inv</button>
             </div>}
           </div>
         </div>
@@ -3836,16 +3849,17 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             const d=(editBatchInv.newDate||'').trim();
             if(!v){show('Enter invoice number',false);return;}
             if(!d){show('Enter invoice date',false);return;}
+            const okDate=validInvDate(d,show); if(!okDate) return;
             const oldNo=editBatchInv.batch.bill_no;
             const oldDate=editBatchInv.batch.invoice_date||'';
             const noChanged=v!==oldNo;
-            const dateChanged=d!==oldDate;
+            const dateChanged=okDate!==oldDate;
             if(!noChanged&&!dateChanged){setEditBatchInv(null);return;}
             const updates={};
             if(noChanged)updates.bill_no=v;
-            if(dateChanged)updates.invoice_date=d;
+            if(dateChanged)updates.invoice_date=okDate;
             const prevHist=Array.isArray(editBatchInv.batch.bill_no_history)?editBatchInv.batch.bill_no_history:[];
-            const histEntry={at:new Date().toISOString(),by:(user?.name||'?'),old_no:oldNo||null,new_no:noChanged?v:oldNo,old_date:oldDate||null,new_date:dateChanged?d:oldDate};
+            const histEntry={at:new Date().toISOString(),by:(user?.name||'?'),old_no:oldNo||null,new_no:noChanged?v:oldNo,old_date:oldDate||null,new_date:dateChanged?okDate:oldDate};
             updates.bill_no_history=[...prevHist, histEntry];
             updates.billed_by=user?.name||editBatchInv.batch.billed_by||null;
             const {error}=await sb.from('batches').update(updates).eq('id',editBatchInv.batch.id);
@@ -7089,17 +7103,18 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     const invDate=(invoiceDates[j.id]||'').trim();
     if(!inv){alert("Enter invoice# first");return;}
     if(!invDate){alert("Enter invoice date");return;}
+    const okDate=validInvDate(invDate,show); if(!okDate) return;
     // Find a batch without bill_no, or create a new one
     const jBatches=(j.batches||[]);
     const emptyBatch=jBatches.find(b=>!b.bill_no);
     if(emptyBatch){
       // Save bill_no via existing helper, then write invoice_date via updateBatchField
       saveBill(emptyBatch.id,inv);
-      if(updateBatchField)updateBatchField(emptyBatch.id,'invoice_date',invDate);
+      if(updateBatchField)updateBatchField(emptyBatch.id,'invoice_date',okDate);
     } else {
       // Create a new batch for this invoice (with invoice_date baked in)
       const bid="B"+uid();
-      const bd={id:bid,job_id:j.id,date:td(),note:"Invoice: "+inv,bill_no:inv,status:"Done",invoice_date:invDate};
+      const bd={id:bid,job_id:j.id,date:td(),note:"Invoice: "+inv,bill_no:inv,status:"Done",invoice_date:okDate};
       if(addBatchToJob) await addBatchToJob(bd);
     }
     setInvoices(p=>({...p,[j.id]:''}));
@@ -7170,17 +7185,18 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
             const d=(editBatchInv.newDate||'').trim();
             if(!v){show('Enter invoice number',false);return;}
             if(!d){show('Enter invoice date',false);return;}
+            const okDate=validInvDate(d,show); if(!okDate) return;
             const oldNo=editBatchInv.batch.bill_no;
             const oldDate=editBatchInv.batch.invoice_date||'';
             const noChanged=v!==oldNo;
-            const dateChanged=d!==oldDate;
+            const dateChanged=okDate!==oldDate;
             if(!noChanged&&!dateChanged){setEditBatchInv(null);return;}
             const updates={};
             if(noChanged)updates.bill_no=v;
-            if(dateChanged)updates.invoice_date=d;
+            if(dateChanged)updates.invoice_date=okDate;
             // 14 May 2026: append edit to bill_no_history for audit trail
             const prevHist=Array.isArray(editBatchInv.batch.bill_no_history)?editBatchInv.batch.bill_no_history:[];
-            const histEntry={at:new Date().toISOString(),by:(user?.name||'?'),old_no:oldNo||null,new_no:noChanged?v:oldNo,old_date:oldDate||null,new_date:dateChanged?d:oldDate};
+            const histEntry={at:new Date().toISOString(),by:(user?.name||'?'),old_no:oldNo||null,new_no:noChanged?v:oldNo,old_date:oldDate||null,new_date:dateChanged?okDate:oldDate};
             updates.bill_no_history=[...prevHist, histEntry];
             updates.billed_by=user?.name||editBatchInv.batch.billed_by||null;
             const {error}=await sb.from('batches').update(updates).eq('id',editBatchInv.batch.id);
@@ -8656,10 +8672,11 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     const d=(invDate||'').trim();
     if(!/^J-\d+\/\d{2}-\d{2}$/.test(v)){show('Invoice format must be J-NNN/YY-YY (e.g. J-9999/25-26)');return;}
     if(!d){show('Enter invoice date');return;}
+    const okDate=validInvDate(d,show); if(!okDate) return;
     // Gated: only FULL_FINANCIAL_ACCESS (JIGAR, CHANDNI) can write invoice_amount (audit 04 May 2026)
     const uname=(user?.name||'').toUpperCase();
     const canSetAmount=["JIGAR","CHANDNI"].some(u=>uname.includes(u));
-    const insertPayload={site_id:site.id,invoice_no:v,invoice_date:d,added_by:uname};
+    const insertPayload={site_id:site.id,invoice_no:v,invoice_date:okDate,added_by:uname};
     if(canSetAmount){
       const parsedAmt=Number((amt||'').toString().replace(/[^0-9.]/g,''));
       if(parsedAmt>0) insertPayload.invoice_amount=parsedAmt;
@@ -9213,14 +9230,15 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
             const d=(editInvoice.newDate||'').trim();
             if(!v){show('Enter invoice number',false);return;}
             if(!d){show('Enter invoice date',false);return;}
+            const okDate=validInvDate(d,show); if(!okDate) return;
             const oldNo=editInvoice.invoice_row.invoice_no;
             const oldDate=editInvoice.invoice_row.invoice_date||'';
             const noChanged=v!==oldNo;
-            const dateChanged=d!==oldDate;
+            const dateChanged=okDate!==oldDate;
             if(!noChanged&&!dateChanged){setEditInvoice(null);return;}
             const updates={};
             if(noChanged)updates.invoice_no=v;
-            if(dateChanged)updates.invoice_date=d;
+            if(dateChanged)updates.invoice_date=okDate;
             const {error}=await sb.from('site_invoices').update(updates).eq('id',editInvoice.invoice_row.id);
             if(error){
               if(error.code==='23505'){show('Invoice '+v+' already exists for this site',false);return;}
