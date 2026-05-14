@@ -11534,9 +11534,23 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               <div style={{background:'#1a0e08',border:'1px dashed #d85a30',borderRadius:4,padding:8,marginTop:6}}>
                 <div style={{fontSize:9,color:'#f0997b',textTransform:'uppercase',letterSpacing:0.5,marginBottom:5}}>👑 Assign task to another user</div>
                 <div style={{display:'flex',gap:5,marginBottom:5}}>
-                  <input className="in" value={adminTaskUser} onChange={e => setAdminTaskUser(e.target.value.toUpperCase())}
-                    placeholder="recipient (e.g. BATUL A - SALES EXECUTIVE)"
-                    style={{flex:1,fontSize:10,padding:'4px 7px',boxSizing:'border-box'}} />
+                  {/* Recipient dropdown — added 15 May 2026. Replaces free-text input
+                      where users had to type the exact full name (e.g.
+                      "BATUL A - SALES EXECUTIVE") and orphaned rows when they typed
+                      anything shorter. Uses the `team` prop (already loaded, active-
+                      filtered). Stores the uppercased name as value so the handler's
+                      existing toUpperCase() guard stays a no-op. Excludes the current
+                      user from the list — no point assigning to yourself. */}
+                  <select className="in" value={adminTaskUser}
+                    onChange={e => setAdminTaskUser(e.target.value)}
+                    style={{flex:1,fontSize:10,padding:'4px 7px',boxSizing:'border-box'}}>
+                    <option value="">-- pick a recipient --</option>
+                    {(team||[]).filter(t => (t.name||'').toUpperCase() !== uname)
+                               .slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''))
+                               .map(t => (
+                      <option key={t.id || t.name} value={(t.name||'').toUpperCase()}>{t.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <input className="in" value={adminTaskText} onChange={e => setAdminTaskText(e.target.value)}
                   placeholder="Task description"
