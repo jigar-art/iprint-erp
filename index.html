@@ -10279,6 +10279,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   // NOTE: declared AFTER periodBounds — its useCallback dep array references it.
   const [teamTasks, setTeamTasks] = React.useState([]);
   const [teamTasksLoading, setTeamTasksLoading] = React.useState(false);
+  // 14 May 2026 — Team Performance drill-down: click user row to expand their tasks.
+  const [expandedUser, setExpandedUser] = React.useState(null);
 
   const loadTeamTasks = React.useCallback(async () => {
     if (!isTeamViewer) return;
@@ -10288,7 +10290,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       const ps = periodBounds.startDate;  // local Date at midnight
       const startDate = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
       const {data, error} = await sb.from('daily_tasks')
-        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at')
+        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note')
         .gte('task_date', startDate)
         .order('task_date',{ascending:false}).order('created_at',{ascending:false}).limit(2000);
       if (error) { console.error('Load team tasks error', error); return; }
@@ -11908,9 +11910,12 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                         </tr>
                       </thead>
                       <tbody>
-                        {userRows.map(r => (
-                          <tr key={r.user} style={{borderBottom:'1px dashed #1a2030'}}>
-                            <td style={{padding:'4px 6px',fontWeight:600}}>{r.user}</td>
+                        {userRows.map(r => {
+                          const isOpen = expandedUser === r.user;
+                          return (
+                          <React.Fragment key={r.user}>
+                          <tr onClick={() => setExpandedUser(isOpen ? null : r.user)} style={{borderBottom:'1px dashed #1a2030',cursor:'pointer',background:isOpen?'#0f1622':'transparent'}} title="Click to see this user's tasks">
+                            <td style={{padding:'4px 6px',fontWeight:600}}><span style={{color:'#64748b',marginRight:4,fontSize:9}}>{isOpen?'▼':'▶'}</span>{r.user}</td>
                             <td style={{padding:'4px 6px',textAlign:'right'}}>{r.total}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.done>0?'#30b54a':'#475569'}}>{r.done}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.pending>0?'#e3a008':'#475569'}}>{r.pending}</td>
@@ -11920,7 +11925,60 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.carried>0?'#cbd5e1':'#475569'}}>{r.carried}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.admin>0?'#cbd5e1':'#475569'}}>{r.admin}</td>
                           </tr>
-                        ))}
+                          {isOpen && (() => {
+                            const userTasks = teamTasks.filter(t => ((t.user_name||'').toUpperCase().trim() || '(unknown)') === r.user);
+                            const done = userTasks.filter(t => t.status === 'done');
+                            const pending = userTasks.filter(t => t.status === 'pending');
+                            const stuck = userTasks.filter(t => t.status === 'stuck');
+                            const renderTask = (t) => {
+                              const linkJob = t.linked_job_id;
+                              const linkSite = t.linked_site_id;
+                              const onJump = (e) => {
+                                e.stopPropagation();
+                                if (linkJob && window._navigateToRecord) window._navigateToRecord('job', linkJob);
+                                else if (linkSite && window._navigateToRecord) window._navigateToRecord('banking_site', linkSite);
+                              };
+                              const clickable = !!(linkJob || linkSite);
+                              return (
+                                <div key={t.id} style={{display:'flex',gap:6,padding:'3px 0',fontSize:10,color:'#cbd5e1',alignItems:'center',borderBottom:'1px dotted #14181f'}}>
+                                  <span style={{fontSize:9,color:'#64748b',minWidth:60,whiteSpace:'nowrap'}}>{(t.task_date||'').slice(5)}</span>
+                                  <span style={{flex:1,lineHeight:1.4}}>
+                                    {t.task_text}
+                                    {t.stuck_note && <span style={{display:'block',fontSize:9,color:'#d85a30',marginTop:2}}>↳ {t.stuck_note}</span>}
+                                  </span>
+                                  {clickable && (
+                                    <span onClick={onJump} title={'Open '+(linkJob?('job '+linkJob):('site '+linkSite))} style={{cursor:'pointer',fontSize:9,padding:'1px 6px',background:'rgba(93,202,165,0.12)',color:'#5dcaa5',borderRadius:3,border:'1px solid rgba(93,202,165,0.3)',whiteSpace:'nowrap'}}>
+                                      → {linkJob || linkSite}
+                                    </span>
+                                  )}
+                                  {!clickable && (linkJob || linkSite) && (
+                                    <span style={{fontSize:9,color:'#475569',whiteSpace:'nowrap'}}>{linkJob || linkSite}</span>
+                                  )}
+                                  <span style={{fontSize:8,color:'#475569',whiteSpace:'nowrap'}}>{t.source||'—'}</span>
+                                </div>
+                              );
+                            };
+                            const Section = ({label, color, items, emoji}) => (
+                              <div style={{marginBottom:8}}>
+                                <div style={{fontSize:9,color:color,fontWeight:700,textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>{emoji} {label} · {items.length}</div>
+                                {items.length === 0 ? (
+                                  <div style={{fontSize:10,color:'#475569',padding:'2px 0'}}>None.</div>
+                                ) : items.map(renderTask)}
+                              </div>
+                            );
+                            return (
+                              <tr style={{background:'#0a0f17'}}>
+                                <td colSpan={9} style={{padding:'10px 14px 12px 22px',borderBottom:'1px solid #1a2030'}}>
+                                  <Section label="Done" color="#30b54a" items={done} emoji="✅"/>
+                                  <Section label="Pending" color="#e3a008" items={pending} emoji="🟡"/>
+                                  <Section label="Stuck" color="#d85a30" items={stuck} emoji="🔴"/>
+                                </td>
+                              </tr>
+                            );
+                          })()}
+                          </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
