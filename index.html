@@ -192,6 +192,15 @@ const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669",
 // "Installed" replaces "Installation" (naming consistency with Banking CRM "Installed" card).
 // "Dispatch" replaces "Delivered" for the same reason.
 // Legacy values (Active, Printing, Fabrication, Installation, Delivered) are still present for
+// 14 May 2026: Users authorized to enter/edit non-banking invoice numbers on batches.
+// Substring match against user.name.toUpperCase() — see canEditInvoice2() helper.
+// AMOL, RUCHITA, BATUL explicitly excluded per Jigar 14 May PM.
+const BILLING_TEAM = ['SONAM','SHREYA','APARNA','PRATIKSHA','VIDYA','JIGAR','CHANDNI'];
+const canEditInvoice2 = (user) => {
+  const u = (user?.name||'').toUpperCase();
+  return BILLING_TEAM.some(n => u.includes(n));
+};
+
 // backwards-compat — existing jobs keep them until naturally updated. Dropdowns show all values.
 const ALL_ST_NEW = [
   // Pre-production (ESTIMATE bucket)
@@ -1970,6 +1979,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [newPo,setNewPo]=useState({po_number:'',po_date:'',po_amount:'',po_file_url:''});
   const [editingPoId,setEditingPoId]=useState(null);
   const [poUploading,setPoUploading]=useState(false);
+  // 14 May 2026: invoice edit modal (mirrors AccPage's editBatchInv flow)
+  const [editBatchInv,setEditBatchInv]=useState(null); // {batch, newNo, newDate}
+  const canEditInv=canEditInvoice2(user);
   React.useEffect(()=>{
     let alive=true;
     (async()=>{
@@ -3089,7 +3101,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           </div>
           <div style={{display:"flex",alignItems:"center",gap:3,flexWrap:"wrap"}}>
             {b.bill_no?<>
-              <span className="mn bd" style={{fontSize:9,color:"#06b6d4",background:"#06b6d420"}}>{b.bill_no}</span>
+              {(() => {
+                const hist=Array.isArray(b.bill_no_history)?b.bill_no_history:[];
+                const histTip=hist.length>0?`\n\nEdits: ${hist.length}\n`+hist.slice(-3).map(h=>`• ${(h.at||'').slice(0,16).replace('T',' ')} — ${h.by||'?'}: ${h.old_no||'(empty)'} → ${h.new_no}`).join('\n'):'';
+                const tip=(canEditInv?'Click to edit · ':'')+'Invoice '+b.bill_no+(b.invoice_date?' · '+b.invoice_date:'')+(b.billed_by?' · by '+b.billed_by:'')+histTip;
+                return <span className="mn bd" title={tip} onClick={canEditInv?()=>setEditBatchInv({batch:b,newNo:b.bill_no,newDate:b.invoice_date||''}):undefined} style={{fontSize:9,color:"#06b6d4",background:"#06b6d420",cursor:canEditInv?'pointer':'default'}}>{b.bill_no}{hist.length>0?<sup style={{fontSize:7,marginLeft:2,color:'#f59e0b',fontWeight:700}}>✎{hist.length}</sup>:null}</span>;
+              })()}
               <input type="date" className="in mn" value={b.invoice_date||''} onChange={e=>{const v=e.target.value;setBatches(p=>p.map(x=>x.id===b.id?{...x,invoice_date:v}:x));}} onBlur={e=>updateBatchField(b.id,'invoice_date',e.target.value||null)} title="Invoice date" style={{width:108,fontSize:9,padding:"2px 4px",color:"#06b6d4"}}/>
             </>
             :canSeeRates&&<div style={{display:"flex",gap:2,alignItems:"center",flexWrap:"wrap"}}>
@@ -3790,6 +3807,56 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         </div>
       </div>;
     })()}
+
+    {editBatchInv&&<div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={()=>setEditBatchInv(null)}>
+      <div style={{background:'#0c1017',border:'1px solid #06b6d4',borderRadius:10,padding:20,maxWidth:420,width:'100%'}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <h3 style={{fontSize:13,fontWeight:700,color:'#06b6d4',margin:0}}>✎ Edit Invoice</h3>
+          <button className="b bs" onClick={()=>setEditBatchInv(null)} style={{fontSize:11}}>✕</button>
+        </div>
+        <div style={{fontSize:10,color:'#64748b',marginBottom:10}}>Job <strong style={{color:'#e3a008'}}>{editBatchInv.batch.job_id}</strong> · Currently: <span style={{color:'#06b6d4',fontWeight:700}}>{editBatchInv.batch.bill_no}</span>{editBatchInv.batch.invoice_date?<> · <span style={{color:'#06b6d4'}}>{editBatchInv.batch.invoice_date}</span></>:<> · <span style={{color:'#f47067'}}>no date</span></>}</div>
+        {Array.isArray(editBatchInv.batch.bill_no_history)&&editBatchInv.batch.bill_no_history.length>0&&<div style={{background:'#0a0f17',border:'1px solid #1a2030',borderRadius:6,padding:8,marginBottom:12,maxHeight:120,overflowY:'auto'}}>
+          <div style={{fontSize:9,color:'#f59e0b',fontWeight:700,marginBottom:4}}>📜 Edit history ({editBatchInv.batch.bill_no_history.length})</div>
+          {editBatchInv.batch.bill_no_history.slice().reverse().map((h,i)=><div key={i} style={{fontSize:9,color:'#94a3b8',marginBottom:2,paddingLeft:6,borderLeft:'2px solid #1a2030'}}>
+            <span style={{color:'#64748b'}}>{(h.at||'').slice(0,16).replace('T',' ')}</span> · <span style={{color:'#06b6d4'}}>{h.by||'?'}</span>: {h.old_no||'(empty)'} → <strong style={{color:'#4ade80'}}>{h.new_no}</strong>
+          </div>)}
+        </div>}
+        <div style={{marginBottom:10}}>
+          <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:4}}>INVOICE NUMBER</label>
+          <input className="in" value={editBatchInv.newNo} onChange={e=>setEditBatchInv(p=>({...p,newNo:e.target.value}))} placeholder="V-9999/26-27 or J-NNN/YY-YY" autoFocus style={{fontSize:13,padding:'6px 10px',width:'100%',letterSpacing:1}}/>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:9,color:'#64748b',display:'block',marginBottom:4}}>INVOICE DATE</label>
+          <input type="date" className="in" value={editBatchInv.newDate} onChange={e=>setEditBatchInv(p=>({...p,newDate:e.target.value}))} style={{fontSize:12,padding:'6px 10px',width:'100%'}}/>
+        </div>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="b bs" onClick={()=>setEditBatchInv(null)} style={{fontSize:11}}>Cancel</button>
+          <button className="b bp" onClick={async()=>{
+            const v=(editBatchInv.newNo||'').trim();
+            const d=(editBatchInv.newDate||'').trim();
+            if(!v){show('Enter invoice number',false);return;}
+            if(!d){show('Enter invoice date',false);return;}
+            const oldNo=editBatchInv.batch.bill_no;
+            const oldDate=editBatchInv.batch.invoice_date||'';
+            const noChanged=v!==oldNo;
+            const dateChanged=d!==oldDate;
+            if(!noChanged&&!dateChanged){setEditBatchInv(null);return;}
+            const updates={};
+            if(noChanged)updates.bill_no=v;
+            if(dateChanged)updates.invoice_date=d;
+            const prevHist=Array.isArray(editBatchInv.batch.bill_no_history)?editBatchInv.batch.bill_no_history:[];
+            const histEntry={at:new Date().toISOString(),by:(user?.name||'?'),old_no:oldNo||null,new_no:noChanged?v:oldNo,old_date:oldDate||null,new_date:dateChanged?d:oldDate};
+            updates.bill_no_history=[...prevHist, histEntry];
+            updates.billed_by=user?.name||editBatchInv.batch.billed_by||null;
+            const {error}=await sb.from('batches').update(updates).eq('id',editBatchInv.batch.id);
+            if(error){show('Error: '+error.message,false);return;}
+            if(setBatches)setBatches(p=>p.map(b=>b.id===editBatchInv.batch.id?{...b,...updates}:b));
+            show('Invoice updated!');
+            setEditBatchInv(null);
+          }} style={{fontSize:11,background:'#4ade80',borderColor:'#4ade80',color:'#000',fontWeight:700}}>💾 Save</button>
+        </div>
+      </div>
+    </div>}
 
   </div>;
 }
@@ -6999,7 +7066,7 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
   const [sq,setSq]=useState('');
   const [statusFilter,setStatusFilter]=useState('All');
   // Item #16 (Accounts) — same gate as Banking CRM canAddInvoice
-  const canEditInvoice=(()=>{const uN=(user?.name||'').toUpperCase();return ['JIGAR','AMOL','CHANDNI','RUCHITA','APARNA','VIDYA'].some(u=>uN.includes(u));})();
+  const canEditInvoice=canEditInvoice2(user);
   const tabs=[
     {id:'pending',l:'All Pending',c:'#f59e0b',statuses:['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending']},
     {id:'given',l:'Given for Billing',c:'#06b6d4',statuses:['Given for Billing']},
@@ -7051,7 +7118,9 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
     return <div style={{display:'flex',flexWrap:'wrap',gap:2,alignItems:'center'}}>
       {invBatches.map(b=>{
         const dt=b.invoice_date?new Date(b.invoice_date+'T00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'}):null;
-        return <span key={b.id} title={(editable?'Click to edit · ':'')+'Invoice '+b.bill_no+(b.invoice_date?' · '+b.invoice_date:' · no date')} onClick={editable?()=>setEditBatchInv({batch:b,newNo:b.bill_no,newDate:b.invoice_date||''}):undefined} className="bd" style={{background:'#06b6d420',color:'#06b6d4',fontSize:9,padding:'1px 6px',cursor:editable?'pointer':'default'}}>{b.bill_no}{dt?' · '+dt:''}</span>;
+        const hist=Array.isArray(b.bill_no_history)?b.bill_no_history:[];
+        const histTip=hist.length>0?`\n\nEdits: ${hist.length}\n`+hist.slice(-3).map(h=>`• ${(h.at||'').slice(0,16).replace('T',' ')} — ${h.by||'?'}: ${h.old_no||'(empty)'} → ${h.new_no}`).join('\n'):'';
+        return <span key={b.id} title={(editable?'Click to edit · ':'')+'Invoice '+b.bill_no+(b.invoice_date?' · '+b.invoice_date:' · no date')+(b.billed_by?' · by '+b.billed_by:'')+histTip} onClick={editable?()=>setEditBatchInv({batch:b,newNo:b.bill_no,newDate:b.invoice_date||''}):undefined} className="bd" style={{background:'#06b6d420',color:'#06b6d4',fontSize:9,padding:'1px 6px',cursor:editable?'pointer':'default'}}>{b.bill_no}{dt?' · '+dt:''}{hist.length>0?<sup style={{fontSize:7,marginLeft:2,color:'#f59e0b',fontWeight:700}} title={`${hist.length} edit(s)`}>✎{hist.length}</sup>:null}</span>;
       })}
       {editable&&<div style={{display:'flex',gap:2,alignItems:'center',marginTop:invBatches.length?2:0,flexWrap:'wrap'}}>
         <input className="in mn" style={{width:80,fontSize:9,padding:'2px 4px'}} placeholder="Inv#" value={invoices[j.id]||''} onChange={e=>setInvoices(p=>({...p,[j.id]:e.target.value}))} onKeyDown={e=>{if(e.key==='Enter')addInvoice(j);}}/>
@@ -7109,6 +7178,11 @@ function AccPage({jobs,batches,items,saveBill,firms,updateJobStatus,updateJobFil
             const updates={};
             if(noChanged)updates.bill_no=v;
             if(dateChanged)updates.invoice_date=d;
+            // 14 May 2026: append edit to bill_no_history for audit trail
+            const prevHist=Array.isArray(editBatchInv.batch.bill_no_history)?editBatchInv.batch.bill_no_history:[];
+            const histEntry={at:new Date().toISOString(),by:(user?.name||'?'),old_no:oldNo||null,new_no:noChanged?v:oldNo,old_date:oldDate||null,new_date:dateChanged?d:oldDate};
+            updates.bill_no_history=[...prevHist, histEntry];
+            updates.billed_by=user?.name||editBatchInv.batch.billed_by||null;
             const {error}=await sb.from('batches').update(updates).eq('id',editBatchInv.batch.id);
             if(error){show('Error: '+error.message,false);return;}
             if(setBatches)setBatches(p=>p.map(b=>b.id===editBatchInv.batch.id?{...b,...updates}:b));
