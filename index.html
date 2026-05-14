@@ -10232,9 +10232,28 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [loading, setLoading] = React.useState(true);
 
   // Standup state (Deploy 2)
-  const todayISO = React.useMemo(() => {
+  // 14 May 2026 — fixed mount-freeze: was useMemo([]) which froze date at mount.
+  // Now recomputes on visibilitychange + focus so if user keeps page open across
+  // midnight (or device wakes), date refreshes and carry-forward fires for new day.
+  const computeTodayISO = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  const [todayISO, setTodayISO] = React.useState(computeTodayISO);
+  React.useEffect(() => {
+    const refresh = () => {
+      const next = computeTodayISO();
+      setTodayISO(prev => prev === next ? prev : next);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    // Also poll every 60s as a backstop for desktop browsers that may not fire focus
+    const iv = setInterval(refresh, 60000);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+      clearInterval(iv);
+    };
   }, []);
   const [todayLogs, setTodayLogs] = React.useState([]);  // all logs for today (used by Standup feed)
   const [draftBody, setDraftBody] = React.useState('');
