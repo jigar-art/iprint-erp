@@ -10298,7 +10298,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
     } finally { setTeamTasksLoading(false); }
   }, [isTeamViewer, periodBounds]);
 
-  React.useEffect(() => { if (tab === 'team') loadTeamTasks(); }, [tab, loadTeamTasks]);
+  React.useEffect(() => { if (tab === 'team' || tab === 'output') loadTeamTasks(); }, [tab, loadTeamTasks]);
 
   // Smart default: if today is weekend or has zero PR activity, hint at week view
   const isSundayMonday = React.useMemo(() => {
@@ -11636,6 +11636,115 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   <span style={{fontWeight:700,color:'#e3a008',minWidth:30,textAlign:'right'}}>{n}</span>
                 </div>
               ));
+            })()}
+          </div>
+
+          {/* Per-user activity table — added 14 May 2026 (founder visibility) */}
+          <div style={cardStyle}>
+            <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+              <div style={sectionTitleStyle}>👥 Per-user activity · {periodBounds.label}</div>
+              <div style={{flex:1}}/>
+              <button className="b bs" onClick={()=>{
+                try{
+                  const ps = periodBounds.startDate;
+                  const startISO = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
+                  const stats = {};
+                  const bump = (u, col, n=1) => { if(!u) return; const k=u.toUpperCase().trim(); if(!stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; stats[k][col]+=n; };
+                  outputData.prRaised.forEach(p=>bump(p.created_by,'prs'));
+                  outputData.prApproved.forEach(p=>bump(p.approved_by,'prs'));
+                  outputData.poGenerated.forEach(p=>bump(p.po_generated_by,'pos'));
+                  outputData.poReceived.forEach(p=>bump(p.received_by,'pos'));
+                  outputData.invoicesAdded.forEach(i=>bump(i.added_by,'inv'));
+                  outputData.jobsCreated.forEach(j=>bump(j.made_by,'jobs'));
+                  dcs.forEach(d=>bump(d.created_by,'dc'));
+                  (grnRows||[]).filter(g=>inPeriod(g.created_at)).forEach(g=>bump(g.received_by,'grn'));
+                  outputData.salesVisits.forEach(s=>bump(s.rep_name,'visits'));
+                  (teamTasks||[]).filter(t=>t.status==='done' && (t.task_date||'') >= startISO).forEach(t=>bump(t.user_name,'tasks'));
+                  const rows = Object.entries(stats).map(([u,s])=>({u, ...s, score:s.prs+s.pos+s.inv+s.jobs+s.dc+s.grn+s.visits+s.tasks})).sort((a,b)=>b.score-a.score);
+                  const hdr=['User','PRs','POs','Inv','Jobs','DC','GRN','Visits','Tasks','Score'];
+                  const csv=[hdr.join(','), ...rows.map(r=>[r.u,r.prs,r.pos,r.inv,r.jobs,r.dc,r.grn,r.visits,r.tasks,r.score].join(','))].join('\n');
+                  const blob=new Blob([csv],{type:'text/csv'});
+                  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`per-user-activity-${periodBounds.label.replace(/\s/g,'-')}.csv`; a.click();
+                }catch(e){show?.('Export failed: '+e.message,false);}
+              }} style={{fontSize:9,padding:'3px 8px'}}>⬇ CSV</button>
+            </div>
+            <div style={{fontSize:9,color:'#64748b',marginBottom:6}}>
+              PRs = raised + approved · POs = generated + received · Score = equal-weight sum of all 8 columns
+            </div>
+            {(() => {
+              const ps = periodBounds.startDate;
+              const startISO = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
+              const stats = {};
+              const bump = (u, col, n=1) => { if(!u) return; const k=u.toUpperCase().trim(); if(!stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; stats[k][col]+=n; };
+              outputData.prRaised.forEach(p=>bump(p.created_by,'prs'));
+              outputData.prApproved.forEach(p=>bump(p.approved_by,'prs'));
+              outputData.poGenerated.forEach(p=>bump(p.po_generated_by,'pos'));
+              outputData.poReceived.forEach(p=>bump(p.received_by,'pos'));
+              outputData.invoicesAdded.forEach(i=>bump(i.added_by,'inv'));
+              outputData.jobsCreated.forEach(j=>bump(j.made_by,'jobs'));
+              dcs.forEach(d=>bump(d.created_by,'dc'));
+              (grnRows||[]).filter(g=>inPeriod(g.created_at)).forEach(g=>bump(g.received_by,'grn'));
+              outputData.salesVisits.forEach(s=>bump(s.rep_name,'visits'));
+              (teamTasks||[]).filter(t=>t.status==='done' && (t.task_date||'') >= startISO).forEach(t=>bump(t.user_name,'tasks'));
+
+              // Include all team members even with zero activity so founder can see who's idle
+              (team||[]).forEach(t => { const k=(t.name||'').toUpperCase().trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
+
+              const rows = Object.entries(stats)
+                .map(([u,s])=>({u, ...s, score:s.prs+s.pos+s.inv+s.jobs+s.dc+s.grn+s.visits+s.tasks}))
+                .sort((a,b)=>b.score-a.score);
+
+              if (rows.length === 0) return <div style={{fontSize:10,color:'#64748b',padding:'4px 0'}}>No users to display.</div>;
+              const maxScore = Math.max(1, ...rows.map(r=>r.score));
+
+              const cellHead = {padding:'4px 6px',textAlign:'right',fontSize:9,fontWeight:700,color:'#5dcaa5',borderBottom:'1px solid #1a2030',whiteSpace:'nowrap'};
+              const cellHeadL = {...cellHead, textAlign:'left'};
+              const cell = (n) => ({padding:'4px 6px',textAlign:'right',fontSize:10,fontWeight:n>0?700:400,color:n>0?'#e2e8f0':'#475569',borderBottom:'1px solid #0f1419'});
+              const cellL = {padding:'4px 6px',textAlign:'left',fontSize:10,fontWeight:600,color:'#c9d1d9',borderBottom:'1px solid #0f1419',whiteSpace:'nowrap'};
+
+              return (
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:10}}>
+                    <thead>
+                      <tr>
+                        <th style={cellHeadL}>User</th>
+                        <th style={cellHead} title="PRs raised + approved">PRs</th>
+                        <th style={cellHead} title="POs generated + received">POs</th>
+                        <th style={cellHead} title="Site invoices added">Inv</th>
+                        <th style={cellHead} title="Jobs created (made_by)">Jobs</th>
+                        <th style={cellHead} title="DCs created">DC</th>
+                        <th style={cellHead} title="GRN entries received">GRN</th>
+                        <th style={cellHead} title="Sales visits logged">Visits</th>
+                        <th style={cellHead} title="Manual tasks marked done">Tasks✓</th>
+                        <th style={{...cellHead,minWidth:130}}>Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(r => (
+                        <tr key={r.u}>
+                          <td style={cellL}>{r.u}</td>
+                          <td style={cell(r.prs)}>{r.prs||'·'}</td>
+                          <td style={cell(r.pos)}>{r.pos||'·'}</td>
+                          <td style={cell(r.inv)}>{r.inv||'·'}</td>
+                          <td style={cell(r.jobs)}>{r.jobs||'·'}</td>
+                          <td style={cell(r.dc)}>{r.dc||'·'}</td>
+                          <td style={cell(r.grn)}>{r.grn||'·'}</td>
+                          <td style={cell(r.visits)}>{r.visits||'·'}</td>
+                          <td style={cell(r.tasks)}>{r.tasks||'·'}</td>
+                          <td style={{padding:'4px 6px',borderBottom:'1px solid #0f1419'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:6}}>
+                              <div style={{flex:1,height:8,background:'#0f1419',borderRadius:2,overflow:'hidden',minWidth:60}}>
+                                <div style={{width:`${(r.score/maxScore)*100}%`,height:'100%',background:r.score===0?'#ef4444':'#e3a008'}}/>
+                              </div>
+                              <span style={{fontWeight:700,color:r.score===0?'#ef4444':'#e3a008',minWidth:24,textAlign:'right',fontSize:10}}>{r.score===0?'⚠':r.score}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
             })()}
           </div>
         </div>
