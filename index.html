@@ -10446,7 +10446,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,invoice_date,added_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(2000),
       sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at',{ascending:false}),
-      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at').eq('user_name', uname).eq('task_date', todayISO).order('created_at',{ascending:true}).limit(500),
+      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0,10)).lte('task_date', todayISO).order('task_date',{ascending:false}).order('created_at',{ascending:true}).limit(2000),
       sb.from('grn').select('id,date,supplier,material,job_id,received_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('sales_activities').select('id,date,activity_type,rep_name,client_name,firm_name,outcome,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
     ]).then(results => {
@@ -10511,14 +10511,17 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
         // Updated 05 May 2026 from previous "yesterday only" version.
         // Updated 09 May 2026: added per-(user, task_text) latest-done/cancelled guard
         // to fix ghost-carry bug where chains corrupted by mismatched source_task_id
-        // resurrected tasks the user had already completed on a later day. The chain
-        // walk via parentIds breaks at done rows (they're excluded from pastUnfinished),
-        // so we cross-check by task_text to seal closed chains regardless of corruption.
+        // resurrected tasks the user had already completed on a later day.
+        // Updated 14 May 2026: NEVER carry source='recurring' rows. Recurring duties
+        // have their own daily spawn cycle — carrying them creates duplicates that
+        // multiply across days. A missed recurring duty stays in history as 'pending'
+        // for that day but does not pollute future days.
         const {data: pastUnfinished, error: yErr} = await sb.from('daily_tasks')
-          .select('id,task_text,task_date,linked_job_id,linked_site_id,status,source_task_id')
+          .select('id,task_text,task_date,linked_job_id,linked_site_id,status,source,source_task_id')
           .eq('user_name', uname)
           .lt('task_date', todayISO)
-          .in('status', ['pending', 'stuck']);
+          .in('status', ['pending', 'stuck'])
+          .neq('source', 'recurring');
         if (cancelled) return;
         if (!yErr && pastUnfinished && pastUnfinished.length > 0) {
           // Build set of source_task_ids that are referenced as parents.
@@ -11351,11 +11354,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               <div style={{fontSize:9,color:'#475569',marginBottom:10,padding:'4px 0'}}>No ERP activity tracked yet today</div>
             )}
 
-            {/* Manual tasks (pending) */}
-            {(todayTasks||[]).filter(t => t.status === 'pending').length > 0 && (
+            {/* Manual tasks (pending) — today only */}
+            {(todayTasks||[]).filter(t => t.status === 'pending' && t.task_date === todayISO).length > 0 && (
               <div style={{marginBottom:10}}>
                 <div style={{fontSize:9,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📝 Pending tasks</div>
-                {(todayTasks||[]).filter(t => t.status === 'pending').map(t => (
+                {(todayTasks||[]).filter(t => t.status === 'pending' && t.task_date === todayISO).map(t => (
                   <div key={'p'+t.id} style={{background:'#0f1422',borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
                     <span onClick={() => markTaskDone(t.id)} style={{color:'#64748b',cursor:'pointer',fontSize:13}} title="Mark done">☐</span>
                     <span style={{flex:1}}>{t.task_text}</span>
@@ -11374,11 +11377,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </div>
             )}
 
-            {/* Manual tasks (done) */}
-            {(todayTasks||[]).filter(t => t.status === 'done').length > 0 && (
+            {/* Manual tasks (done) — today only */}
+            {(todayTasks||[]).filter(t => t.status === 'done' && t.task_date === todayISO).length > 0 && (
               <div style={{marginBottom:10}}>
                 <div style={{fontSize:9,color:'#30b54a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>✅ Done by you today</div>
-                {(todayTasks||[]).filter(t => t.status === 'done').map(t => (
+                {(todayTasks||[]).filter(t => t.status === 'done' && t.task_date === todayISO).map(t => (
                   <div key={'d'+t.id} style={{background:'#0f1422',borderLeft:'2px solid #30b54a',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center',opacity:0.6}}>
                     <span onClick={() => reopenTask(t.id)} style={{color:'#30b54a',cursor:'pointer',fontSize:13}} title="Reopen">☑</span>
                     <span style={{flex:1,textDecoration:'line-through',color:'#64748b'}}>{t.task_text}</span>
@@ -11388,11 +11391,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </div>
             )}
 
-            {/* Stuck tasks */}
-            {(todayTasks||[]).filter(t => t.status === 'stuck').length > 0 && (
+            {/* Stuck tasks — today only */}
+            {(todayTasks||[]).filter(t => t.status === 'stuck' && t.task_date === todayISO).length > 0 && (
               <div style={{marginBottom:10}}>
                 <div style={{fontSize:9,color:'#e24b4a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>🚫 Stuck</div>
-                {(todayTasks||[]).filter(t => t.status === 'stuck').map(t => (
+                {(todayTasks||[]).filter(t => t.status === 'stuck' && t.task_date === todayISO).map(t => (
                   <div key={'s'+t.id} style={{background:'#1a0d0d',borderLeft:'2px solid #e24b4a',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1'}}>
                     <div style={{display:'flex',gap:8,alignItems:'center'}}>
                       <span style={{color:'#e24b4a'}}>!</span>
@@ -11405,6 +11408,46 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                     {t.stuck_note && <div style={{fontSize:9,color:'#f09595',marginTop:3,paddingLeft:18,fontStyle:'italic'}}>↳ {t.stuck_note}</div>}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* History section — visible only when period != today. Added 14 May 2026. */}
+            {period !== 'today' && (todayTasks||[]).filter(t => t.task_date !== todayISO).length > 0 && (
+              <div style={{marginTop:14,paddingTop:10,borderTop:'1px dashed #2a3548'}}>
+                <div style={{fontSize:10,color:'#85b7eb',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6,fontWeight:700}}>
+                  📅 History ({period === 'week' ? 'Last 7 days' : 'Last 30 days'})
+                </div>
+                {(() => {
+                  const past = (todayTasks||[]).filter(t => t.task_date !== todayISO);
+                  const byDate = {};
+                  past.forEach(t => { (byDate[t.task_date] = byDate[t.task_date] || []).push(t); });
+                  const dates = Object.keys(byDate).sort().reverse();
+                  return dates.map(d => {
+                    const rows = byDate[d];
+                    const doneN = rows.filter(r => r.status === 'done').length;
+                    const pendN = rows.filter(r => r.status === 'pending').length;
+                    const stuckN = rows.filter(r => r.status === 'stuck').length;
+                    const cancelN = rows.filter(r => r.status === 'cancelled').length;
+                    const niceDate = new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+                    return (
+                      <div key={'h'+d} style={{marginBottom:8}}>
+                        <div style={{fontSize:10,color:'#94a3b8',marginBottom:3,display:'flex',gap:8}}>
+                          <span style={{fontWeight:600}}>{niceDate}</span>
+                          {doneN > 0 && <span style={{color:'#30b54a'}}>{doneN} done</span>}
+                          {pendN > 0 && <span style={{color:'#e3a008'}}>{pendN} pending</span>}
+                          {stuckN > 0 && <span style={{color:'#e24b4a'}}>{stuckN} stuck</span>}
+                          {cancelN > 0 && <span style={{color:'#64748b'}}>{cancelN} cancelled</span>}
+                        </div>
+                        {rows.map(t => (
+                          <div key={'hr'+t.id} style={{background:'#0a0e18',borderLeft:'2px solid '+(t.status==='done'?'#30b54a':t.status==='stuck'?'#e24b4a':t.status==='cancelled'?'#64748b':'#e3a008'),padding:'3px 8px',marginBottom:1,fontSize:9,color:'#94a3b8',display:'flex',gap:6,alignItems:'center',opacity:t.status==='done'||t.status==='cancelled'?0.55:0.85}}>
+                            <span style={{fontSize:8}}>{t.status==='done'?'✓':t.status==='stuck'?'!':t.status==='cancelled'?'×':'☐'}</span>
+                            <span style={{flex:1,textDecoration:t.status==='done'||t.status==='cancelled'?'line-through':'none'}}>{t.task_text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             )}
 
