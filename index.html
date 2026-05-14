@@ -11430,14 +11430,27 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </div>
             )}
 
-            {/* History section — visible only when period != today. Added 14 May 2026. */}
-            {period !== 'today' && (todayTasks||[]).filter(t => t.task_date !== todayISO).length > 0 && (
+            {/* History section — visible only when period != today. Added 14 May 2026.
+                Updated 15 May 2026: hide rows whose task_text has an active row today.
+                A still-active task already shows in today's Pending/Done/Stuck section;
+                showing its earlier carried copies as additional History rows misleads
+                users into thinking the task "came back" each day after they did it. */}
+            {(() => {
+              if (period === 'today') return null;
+              const todayTextSet = new Set(
+                (todayTasks||[]).filter(t => t.task_date === todayISO)
+                                .map(t => (t.task_text||'').trim().toLowerCase())
+              );
+              const past = (todayTasks||[])
+                .filter(t => t.task_date !== todayISO)
+                .filter(t => !todayTextSet.has((t.task_text||'').trim().toLowerCase()));
+              if (past.length === 0) return null;
+              return (
               <div style={{marginTop:14,paddingTop:10,borderTop:'1px dashed #2a3548'}}>
                 <div style={{fontSize:10,color:'#85b7eb',textTransform:'uppercase',letterSpacing:0.5,marginBottom:6,fontWeight:700}}>
                   📅 History ({period === 'week' ? 'Last 7 days' : 'Last 30 days'})
                 </div>
                 {(() => {
-                  const past = (todayTasks||[]).filter(t => t.task_date !== todayISO);
                   const byDate = {};
                   past.forEach(t => { (byDate[t.task_date] = byDate[t.task_date] || []).push(t); });
                   const dates = Object.keys(byDate).sort().reverse();
@@ -11468,7 +11481,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   });
                 })()}
               </div>
-            )}
+              );
+            })()}
 
             {/* Stuck note input modal-ish */}
             {stuckNoteFor && (
