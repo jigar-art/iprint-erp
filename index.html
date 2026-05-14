@@ -11660,6 +11660,10 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   (grnRows||[]).filter(g=>inPeriod(g.created_at)).forEach(g=>bump(g.received_by,'grn'));
                   outputData.salesVisits.forEach(s=>bump(s.rep_name,'visits'));
                   (teamTasks||[]).filter(t=>t.status==='done' && (t.task_date||'') >= startISO).forEach(t=>bump(t.user_name,'tasks'));
+                  // Include idle team members (Fix A, 14 May 2026 PM)
+                  (team||[]).forEach(t => { const k=(t.name||'').toUpperCase().trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
+                  // Filter synthetic migration users (Fix B, 14 May 2026 PM)
+                  Object.keys(stats).forEach(k => { if (k.startsWith('MIGRATION_') || k === '') delete stats[k]; });
                   const rows = Object.entries(stats).map(([u,s])=>({u, ...s, score:s.prs+s.pos+s.inv+s.jobs+s.dc+s.grn+s.visits+s.tasks})).sort((a,b)=>b.score-a.score);
                   const hdr=['User','PRs','POs','Inv','Jobs','DC','GRN','Visits','Tasks','Score'];
                   const csv=[hdr.join(','), ...rows.map(r=>[r.u,r.prs,r.pos,r.inv,r.jobs,r.dc,r.grn,r.visits,r.tasks,r.score].join(','))].join('\n');
@@ -11689,6 +11693,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
 
               // Include all team members even with zero activity so founder can see who's idle
               (team||[]).forEach(t => { const k=(t.name||'').toUpperCase().trim(); if(k && !stats[k]) stats[k]={prs:0,pos:0,inv:0,jobs:0,dc:0,grn:0,visits:0,tasks:0}; });
+              // Filter synthetic migration users / blank rows (Fix B, 14 May 2026 PM)
+              Object.keys(stats).forEach(k => { if (k.startsWith('MIGRATION_') || k === '') delete stats[k]; });
 
               const rows = Object.entries(stats)
                 .map(([u,s])=>({u, ...s, score:s.prs+s.pos+s.inv+s.jobs+s.dc+s.grn+s.visits+s.tasks}))
