@@ -10494,11 +10494,18 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
 
         // Existing rows for today (already loaded, but re-fetch for race safety)
         const {data: existing, error: exErr} = await sb.from('daily_tasks')
-          .select('id,source,source_duty_id,source_task_id')
+          .select('id,source,source_duty_id,source_task_id,task_text')
           .eq('user_name', uname).eq('task_date', todayISO);
         if (cancelled || exErr) return;
         const existingDutyIds = new Set((existing||[]).filter(r=>r.source==='recurring').map(r=>r.source_duty_id));
-        const existingCarryIds = new Set((existing||[]).filter(r=>r.source==='carried').map(r=>r.source_task_id));
+        // Map of source_task_id -> expected child text for today's existing carries.
+        // Used by the leaf check below to verify chain integrity (text-match guard).
+        // Added 15 May 2026 to fix bug where a corrupted source_task_id pointer (child
+        // text ≠ parent text) silently dropped a real pending task on the next carry.
+        const existingCarryTextById = new Map(
+          (existing||[]).filter(r=>r.source==='carried' && r.source_task_id)
+                        .map(r=>[r.source_task_id, r.task_text])
+        );
 
         const inserts = [];
 
@@ -10524,14 +10531,19 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
           .neq('source', 'recurring');
         if (cancelled) return;
         if (!yErr && pastUnfinished && pastUnfinished.length > 0) {
-          // Build set of source_task_ids that are referenced as parents.
-          // Any row whose id appears as someone's source_task_id has been "superseded"
-          // by a child row, so we don't re-carry it.
-          const parentIds = new Set();
-          pastUnfinished.forEach(r => { if (r.source_task_id) parentIds.add(r.source_task_id); });
+          // Build map of source_task_id -> expected child text. A row is treated
+          // as a parent (already-carried) only if its task_text matches the child's
+          // task_text. Corrupted pointers (text mismatch) are ignored — the orphaned
+          // parent stays carriable. Added 15 May 2026 to fix silent-drop bug.
+          const parentTextById = new Map();
+          pastUnfinished.forEach(r => {
+            if (r.source_task_id) parentTextById.set(r.source_task_id, r.task_text);
+          });
           // Also include today's carries — their source_task_id already points to whatever
-          // they carried, so those rows are also not leaves.
-          (existing||[]).forEach(r => { if (r.source==='carried' && r.source_task_id) parentIds.add(r.source_task_id); });
+          // they carried, so those rows are also not leaves (if text matches).
+          (existing||[]).forEach(r => {
+            if (r.source==='carried' && r.source_task_id) parentTextById.set(r.source_task_id, r.task_text);
+          });
 
           // Closed-text guard: fetch latest done/cancelled date per (user, task_text).
           // If a task_text was completed AFTER the leaf's task_date, the chain is closed
@@ -10554,8 +10566,15 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
           // AND aren't already represented in today's carries AND don't have a later
           // done/cancelled row for the same task_text).
           pastUnfinished.forEach(t => {
-            if (parentIds.has(t.id)) return;          // not a leaf — a newer row already carries this
-            if (existingCarryIds.has(t.id)) return;   // already carried today (race safety)
+            // Text-match leaf check: only treat a row as "already carried" if the
+            // child's task_text matches this row's task_text. Pointer corruption
+            // (mismatch) means the child isn't a true continuation — let this row
+            // carry. Replaces previous id-only Set check that silently dropped tasks
+            // when a stray source_task_id pointed to an unrelated task.
+            const parentText = parentTextById.get(t.id);
+            if (parentText !== undefined && parentText === t.task_text) return;
+            const todayCarryText = existingCarryTextById.get(t.id);
+            if (todayCarryText !== undefined && todayCarryText === t.task_text) return;   // already carried today (race safety)
             const lastClosed = latestClosedByText.get(t.task_text);
             if (lastClosed && lastClosed >= t.task_date) return;  // chain closed by later done/cancelled
             inserts.push({
