@@ -13238,13 +13238,31 @@ const TASK_TYPES_META = [
 ];
 
 // Compute the Monday of the ISO week containing the given Date.
-// Returns YYYY-MM-DD string.
+// Returns YYYY-MM-DD string. Anchors at noon to avoid IST midnight rollover
+// where new Date('YYYY-MM-DDT00:00:00') in IST (+5:30) lands on prior UTC day,
+// causing toISOString().slice(0,10) to return wrong date after setDate(+N).
 function getMondayOfWeek(d) {
-  const dt = new Date(d);
+  const src = (d instanceof Date) ? d : new Date(d);
+  // Build a noon-anchored copy in local time to dodge timezone boundary errors
+  const dt = new Date(src.getFullYear(), src.getMonth(), src.getDate(), 12, 0, 0);
   const day = dt.getDay();                 // 0=Sun, 1=Mon, ..., 6=Sat
   const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
   dt.setDate(dt.getDate() + diff);
-  return dt.toISOString().slice(0, 10);
+  // Use local Y-M-D, not toISOString (which is UTC)
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return yyyy + '-' + mm + '-' + dd;
+}
+
+// Add N days to a YYYY-MM-DD string. Anchored at noon to avoid timezone bugs.
+function addDaysISO(isoDate, days) {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(y, m - 1, d, 12, 0, 0);
+  dt.setDate(dt.getDate() + days);
+  return dt.getFullYear() + '-' +
+    String(dt.getMonth() + 1).padStart(2, '0') + '-' +
+    String(dt.getDate()).padStart(2, '0');
 }
 
 function TargetSetterPage({user, team, show}) {
@@ -13268,12 +13286,9 @@ function TargetSetterPage({user, team, show}) {
   const [editVal, setEditVal] = React.useState({});      // {user|type: stringValue} for unsaved edits
   const [savingCell, setSavingCell] = React.useState(null); // key being saved
 
-  // Compute week-end (Sunday) ISO for actuals query upper bound
-  const weekEnd = React.useMemo(() => {
-    const d = new Date(weekStart + 'T00:00:00');
-    d.setDate(d.getDate() + 6);
-    return d.toISOString().slice(0, 10);
-  }, [weekStart]);
+  // Compute week-end (Sunday) ISO for actuals query upper bound.
+  // Anchored at noon-local to avoid IST timezone rollover.
+  const weekEnd = React.useMemo(() => addDaysISO(weekStart, 6), [weekStart]);
 
   // Load targets + actuals for the selected week
   const reload = React.useCallback(async () => {
@@ -13340,11 +13355,12 @@ function TargetSetterPage({user, team, show}) {
     show?.('Saved');
   };
 
-  // Shift week +/- 7 days
+  // Shift week +/- 7 days (noon-anchored to dodge IST timezone rollover)
   const shiftWeek = (days) => {
-    const d = new Date(weekStart + 'T00:00:00');
-    d.setDate(d.getDate() + days);
-    setWeekStart(getMondayOfWeek(d));
+    const shifted = addDaysISO(weekStart, days);
+    // Re-snap to Monday in case the shift somehow drifted (defensive)
+    const [y, m, d] = shifted.split('-').map(Number);
+    setWeekStart(getMondayOfWeek(new Date(y, m - 1, d, 12, 0, 0)));
   };
 
   return (
