@@ -1614,6 +1614,9 @@ function MainApp({user,onLogout,masterData}){
     {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","HARISH"]},
     // Reports (04 May 26 — Deploy 1) — visible to everyone (My Report tab); Stalls + Output tabs gated to JIGAR + CHANDNI inside the page itself
     {id:"reports",l:"Reports",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
+    // Target Setter (15 May 2026 PM) — nav visible to everyone; matrix internally gated to admin/sales role.
+    // Non-admins see only "My progress this week" dashboard. Admin/sales see matrix + own progress.
+    {id:"targets",l:"Target Setter",e:"🎯",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
   ];
   // ── ACCESS CONTROL (17 Apr 26 rework) ─────────────────────────────────
   // TIER 1 (FULL_ACCESS): see every module automatically. Bypass role + user-gate.
@@ -1683,6 +1686,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="grn2"&&<GRNReceivePage prs={prs} setPrs={setPrs} jobs={fullJobs} user={user} show={show}/>}
           {pg==="reports"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} team={masterData.team} show={show}/>}
           {pg==="mytasks"&&<ReportsPage user={user} jobs={fullJobs} prs={prs} salesActs={salesActs} firms={firms} team={masterData.team} show={show} forceTab="me"/>}
+          {pg==="targets"&&<TargetSetterPage user={user} team={masterData.team} show={show}/>}
         </div>
       </main>
 
@@ -13216,6 +13220,238 @@ function HealthCheckPage(){
 
     </div>
   </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// TARGET SETTER + DASHBOARD (Phase 4+5 — added 15 May 2026 PM)
+// ═══════════════════════════════════════════════════════════
+// Admin/sales: set weekly targets per user per task type.
+// Everyone: see your own week-to-date progress (target vs actual + %).
+// Reads/writes: task_targets table; reads daily_tasks for actuals.
+// ───────────────────────────────────────────────────────────
+const TASK_TYPES_META = [
+  {key:'call',       emoji:'📞', label:'Calls'},
+  {key:'email',      emoji:'✉️', label:'Emails'},
+  {key:'site_visit', emoji:'🚶', label:'Site Visits'},
+  {key:'meeting',    emoji:'🤝', label:'Meetings'},
+  {key:'closing',    emoji:'💰', label:'Closings'},
+];
+
+// Compute the Monday of the ISO week containing the given Date.
+// Returns YYYY-MM-DD string.
+function getMondayOfWeek(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();                 // 0=Sun, 1=Mon, ..., 6=Sat
+  const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
+  dt.setDate(dt.getDate() + diff);
+  return dt.toISOString().slice(0, 10);
+}
+
+function TargetSetterPage({user, team, show}) {
+  const uname = (user?.name || '').toUpperCase();
+  const role  = user?.role || '';
+  const isAdmin = ['admin','sales'].includes(role);
+
+  // Filter rows: active users with role in {sales, accounts, designer, printing, fabrication}.
+  // 'production' isn't an exact role in team_members — covered by printing/fabrication.
+  const ROW_ROLES = ['sales','accounts','designer','printing','fabrication'];
+  const matrixUsers = React.useMemo(() => {
+    return (team||[])
+      .filter(t => t.active && ROW_ROLES.includes(t.role))
+      .map(t => ({name: (t.name||'').toUpperCase(), display: t.name||'', role: t.role}))
+      .sort((a,b) => a.display.localeCompare(b.display));
+  }, [team]);
+
+  const [weekStart, setWeekStart] = React.useState(getMondayOfWeek(new Date()));
+  const [targets, setTargets] = React.useState([]);      // rows from task_targets for selected week
+  const [actuals, setActuals] = React.useState([]);      // daily_tasks rows for selected week
+  const [editVal, setEditVal] = React.useState({});      // {user|type: stringValue} for unsaved edits
+  const [savingCell, setSavingCell] = React.useState(null); // key being saved
+
+  // Compute week-end (Sunday) ISO for actuals query upper bound
+  const weekEnd = React.useMemo(() => {
+    const d = new Date(weekStart + 'T00:00:00');
+    d.setDate(d.getDate() + 6);
+    return d.toISOString().slice(0, 10);
+  }, [weekStart]);
+
+  // Load targets + actuals for the selected week
+  const reload = React.useCallback(async () => {
+    const tQ = sb.from('task_targets')
+      .select('user_name,task_type,weekly_target')
+      .eq('week_start_date', weekStart);
+    // For non-admin, only fetch own actuals; admin fetches all matrix users
+    let aQ = sb.from('daily_tasks')
+      .select('user_name,task_type,target_count,actual_count,status,task_date')
+      .eq('is_quantified', true)
+      .gte('task_date', weekStart)
+      .lte('task_date', weekEnd);
+    if (!isAdmin) aQ = aQ.eq('user_name', uname);
+    const [tR, aR] = await Promise.all([tQ, aQ]);
+    if (tR.error) { show?.('Targets load: ' + tR.error.message, false); return; }
+    if (aR.error) { show?.('Actuals load: ' + aR.error.message, false); return; }
+    setTargets(tR.data || []);
+    setActuals(aR.data || []);
+  }, [weekStart, weekEnd, isAdmin, uname]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  // Build a fast lookup: target by user|type
+  const targetMap = React.useMemo(() => {
+    const m = {};
+    targets.forEach(t => { m[(t.user_name||'').toUpperCase() + '|' + t.task_type] = t.weekly_target; });
+    return m;
+  }, [targets]);
+
+  // Build actual sums: actualByUserType[user|type] = number
+  const actualByUserType = React.useMemo(() => {
+    const m = {};
+    actuals.forEach(r => {
+      // Use actual_count when set, else 0 (pending tasks contribute target only)
+      const n = (r.actual_count != null) ? r.actual_count : 0;
+      const k = (r.user_name||'').toUpperCase() + '|' + r.task_type;
+      m[k] = (m[k] || 0) + n;
+    });
+    return m;
+  }, [actuals]);
+
+  const saveTarget = async (userName, taskType, value) => {
+    const v = parseInt(value, 10);
+    if (!Number.isFinite(v) || v < 0) { show?.('Target must be 0 or more', false); return; }
+    const key = userName + '|' + taskType;
+    setSavingCell(key);
+    const row = {
+      user_name: userName,
+      week_start_date: weekStart,
+      task_type: taskType,
+      weekly_target: v,
+      set_by: uname,
+      updated_at: new Date().toISOString(),
+    };
+    const {error} = await sb.from('task_targets')
+      .upsert(row, {onConflict: 'user_name,week_start_date,task_type'});
+    setSavingCell(null);
+    if (error) { show?.('Save failed: ' + error.message, false); return; }
+    setTargets(prev => {
+      const others = prev.filter(p => !((p.user_name||'').toUpperCase() === userName && p.task_type === taskType));
+      return [...others, {user_name: userName, task_type: taskType, weekly_target: v}];
+    });
+    setEditVal(prev => { const n = {...prev}; delete n[key]; return n; });
+    show?.('Saved');
+  };
+
+  // Shift week +/- 7 days
+  const shiftWeek = (days) => {
+    const d = new Date(weekStart + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    setWeekStart(getMondayOfWeek(d));
+  };
+
+  return (
+    <div style={{padding:'12px 16px',maxWidth:1200,margin:'0 auto'}}>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
+        <h2 style={{fontSize:16,fontWeight:700,margin:0,color:'#e2e8f0'}}>🎯 Target Setter</h2>
+        <div style={{flex:1}} />
+        <button className="b" onClick={() => shiftWeek(-7)} style={{fontSize:11,padding:'4px 10px'}}>◀ Prev Week</button>
+        <div style={{fontSize:11,color:'#94a3b8'}}>Week of <b style={{color:'#e2e8f0'}}>{weekStart}</b> → {weekEnd}</div>
+        <button className="b" onClick={() => shiftWeek(7)} style={{fontSize:11,padding:'4px 10px'}}>Next Week ▶</button>
+        <button className="b" onClick={() => setWeekStart(getMondayOfWeek(new Date()))} style={{fontSize:11,padding:'4px 10px'}}>This Week</button>
+      </div>
+
+      {/* MY PROGRESS — visible to everyone */}
+      <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:6,padding:12,marginBottom:14}}>
+        <div style={{fontSize:11,color:'#5dcaa5',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8,fontWeight:700}}>📊 My progress this week</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:10}}>
+          {TASK_TYPES_META.map(tt => {
+            const target = targetMap[uname + '|' + tt.key] || 0;
+            const actual = actualByUserType[uname + '|' + tt.key] || 0;
+            const pct = target > 0 ? Math.min(100, Math.round((actual / target) * 100)) : 0;
+            const color = pct >= 100 ? '#1d9e75' : pct >= 60 ? '#e3a008' : pct > 0 ? '#d85a30' : '#475569';
+            return (
+              <div key={tt.key} style={{background:'#0a0e1a',border:'1px solid #1f2937',borderRadius:5,padding:10}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                  <span style={{fontSize:11,color:'#cbd5e1'}}>{tt.emoji} {tt.label}</span>
+                  <span style={{fontSize:10,color:'#94a3b8'}}>{actual} / {target || '—'}</span>
+                </div>
+                <div style={{height:8,background:'#1a2030',borderRadius:4,overflow:'hidden'}}>
+                  <div style={{height:'100%',width:pct+'%',background:color,transition:'width .3s'}} />
+                </div>
+                <div style={{fontSize:9,color:color,marginTop:4,textAlign:'right',fontWeight:700}}>
+                  {target > 0 ? pct + '%' : 'no target set'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* TEAM MATRIX — admin/sales only */}
+      {isAdmin ? (
+        <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:6,padding:12}}>
+          <div style={{fontSize:11,color:'#a5cfff',textTransform:'uppercase',letterSpacing:0.5,marginBottom:8,fontWeight:700}}>
+            👑 Weekly targets — {matrixUsers.length} users
+          </div>
+          {matrixUsers.length === 0 ? (
+            <div style={{fontSize:10,color:'#64748b',padding:10}}>No matching team members loaded.</div>
+          ) : (
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:10}}>
+                <thead>
+                  <tr style={{background:'#0a0e1a',color:'#94a3b8',textAlign:'left'}}>
+                    <th style={{padding:'8px 6px',borderBottom:'1px solid #1f2937',minWidth:160}}>User</th>
+                    {TASK_TYPES_META.map(tt => (
+                      <th key={tt.key} style={{padding:'8px 6px',borderBottom:'1px solid #1f2937',textAlign:'center',minWidth:90}}>
+                        {tt.emoji} {tt.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {matrixUsers.map(u => (
+                    <tr key={u.name} style={{borderBottom:'1px solid #131923'}}>
+                      <td style={{padding:'6px',color:'#cbd5e1'}}>
+                        <div style={{fontSize:11}}>{u.display}</div>
+                        <div style={{fontSize:9,color:'#64748b'}}>{u.role}</div>
+                      </td>
+                      {TASK_TYPES_META.map(tt => {
+                        const key = u.name + '|' + tt.key;
+                        const saved = targetMap[key];
+                        const editing = editVal[key] !== undefined;
+                        const display = editing ? editVal[key] : (saved != null ? String(saved) : '');
+                        const actualNum = actualByUserType[key] || 0;
+                        return (
+                          <td key={tt.key} style={{padding:'6px',textAlign:'center'}}>
+                            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+                              <input
+                                className="in"
+                                type="number" min="0" placeholder="—"
+                                value={display}
+                                onChange={e => setEditVal(prev => ({...prev, [key]: e.target.value}))}
+                                onBlur={() => { if (editing && editVal[key] !== String(saved||'')) saveTarget(u.name, tt.key, editVal[key]); }}
+                                onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+                                disabled={savingCell === key}
+                                style={{width:60,textAlign:'center',fontSize:11,padding:'3px 5px',opacity:savingCell===key?0.5:1}}
+                              />
+                              <div style={{fontSize:8,color:'#475569'}}>act: {actualNum}</div>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{fontSize:9,color:'#64748b',marginTop:8,padding:'4px 0'}}>
+                💡 Click any cell, type a number, press Enter or Tab to save. "act:" shows actual logged for this week.
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{fontSize:10,color:'#64748b',padding:'10px 0'}}>Weekly targets are set by your manager.</div>
+      )}
+    </div>
+  );
 }
 
 // Health check route — chosen OUTSIDE RootApp so the URL check is not
