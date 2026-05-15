@@ -10282,6 +10282,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [newTaskQuantified, setNewTaskQuantified] = React.useState(false);
   const [newTaskType, setNewTaskType] = React.useState('call');
   const [newTaskTarget, setNewTaskTarget] = React.useState('');
+  // 15 May 2026 PM rev5 — client_kind bifurcation for Batul
+  const [newTaskClientKind, setNewTaskClientKind] = React.useState('new');
   // Done/stuck prompts for quantified tasks: when set, show inline input for actual_count
   const [doneActualFor, setDoneActualFor] = React.useState(null);   // task id
   const [doneActualText, setDoneActualText] = React.useState('');
@@ -10468,7 +10470,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,invoice_date,added_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(2000),
       sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at',{ascending:false}),
-      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0,10)).lte('task_date', todayISO).order('task_date',{ascending:false}).order('created_at',{ascending:true}).limit(2000),
+      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count,client_kind').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0,10)).lte('task_date', todayISO).order('task_date',{ascending:false}).order('created_at',{ascending:true}).limit(2000),
       sb.from('grn').select('id,date,supplier,material,job_id,received_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('sales_activities').select('id,date,activity_type,rep_name,client_name,firm_name,outcome,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
     ]).then(results => {
@@ -10899,6 +10901,17 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
     if (newTaskQuantified) {
       const tgt = parseInt(newTaskTarget, 10);
       if (!Number.isFinite(tgt) || tgt < 1) { show?.('Enter a target count (1+)', false); return; }
+      // 15 May 2026 PM rev5 — client_kind required for quantified tasks
+      if (!['new','existing'].includes(newTaskClientKind)) {
+        show?.('Pick New or Existing client', false); return;
+      }
+      // 15 May 2026 PM rev5 — Saturday block for face-to-face activity types
+      // (per policy: no client meetings/visits on Saturdays).
+      // dayOfWeek: 0=Sun, 6=Sat. Local time is the source of truth here.
+      const isSat = new Date().getDay() === 6;
+      if (isSat && (newTaskType === 'meeting' || newTaskType === 'site_visit')) {
+        show?.('No meetings/site visits on Saturday — pick another type', false); return;
+      }
       if (!text) {
         text = tgt + ' ' + (TASK_TYPE_LABELS[newTaskType] || 'tasks');
       }
@@ -10918,6 +10931,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       is_quantified: !!newTaskQuantified,
       task_type: newTaskQuantified ? newTaskType : null,
       target_count: newTaskQuantified ? parseInt(newTaskTarget, 10) : null,
+      client_kind: newTaskQuantified ? newTaskClientKind : null,
     };
     const {data, error} = await sb.from('daily_tasks').insert(row).select().single();
     setSavingTask(false);
@@ -10925,6 +10939,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
     setTodayTasks(prev => [...(prev||[]), data]);
     setNewTaskText(''); setNewTaskJob(''); setNewTaskSite('');
     setNewTaskTarget(''); setNewTaskQuantified(false);
+    setNewTaskClientKind('new');
     show?.('Task added');
   };
 
@@ -11449,6 +11464,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                         {typeLabel} target {t.target_count}
                       </span>
                     )}
+                    {t.is_quantified && t.client_kind && (
+                      <span style={{fontSize:8,padding:'1px 5px',background:t.client_kind==='new'?'#0a2114':'#0f1a2c',color:t.client_kind==='new'?'#5dcaa5':'#85b7eb',borderRadius:3,fontWeight:700}}>
+                        {t.client_kind==='new' ? '🆕 NEW' : '🔁 EXISTING'}
+                      </span>
+                    )}
                     {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
                     {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
                     {t.source === 'admin' && t.added_by && <span style={{fontSize:8,padding:'1px 4px',background:'#2a1408',color:'#f0997b',borderRadius:3}}>{t.added_by}</span>}
@@ -11492,6 +11512,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                     {t.is_quantified && t.actual_count != null && (
                       <span style={{fontSize:9,padding:'1px 5px',background:hitTarget?'#0a2114':'#21170a',color:hitTarget?'#5dcaa5':'#e3a008',borderRadius:3,fontWeight:600}}>
                         {t.actual_count} / {t.target_count}
+                      </span>
+                    )}
+                    {t.is_quantified && t.client_kind && (
+                      <span style={{fontSize:8,padding:'1px 5px',background:t.client_kind==='new'?'#0a2114':'#0f1a2c',color:t.client_kind==='new'?'#5dcaa5':'#85b7eb',borderRadius:3,fontWeight:700}}>
+                        {t.client_kind==='new' ? '🆕' : '🔁'}
                       </span>
                     )}
                     {t.done_at && <span style={{fontSize:8,color:'#475569'}}>{t.done_at.slice(11,16)}</span>}
@@ -11655,6 +11680,18 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                       onChange={e => setNewTaskTarget(e.target.value)}
                       placeholder="target" style={{fontSize:9,padding:'3px 6px',width:60}} />
                     <span style={{fontSize:9,color:'#64748b'}}>per day</span>
+                    {/* 15 May 2026 PM rev5 — client_kind picker (required for quantified) */}
+                    <span style={{fontSize:9,color:'#64748b',marginLeft:6}}>·</span>
+                    <button type="button"
+                      onClick={() => setNewTaskClientKind('new')}
+                      style={{fontSize:9,padding:'3px 7px',border:'1px solid '+(newTaskClientKind==='new'?'#5dcaa5':'#1f2937'),background:newTaskClientKind==='new'?'#0a2114':'transparent',color:newTaskClientKind==='new'?'#5dcaa5':'#94a3b8',borderRadius:3,cursor:'pointer'}}>
+                      🆕 New
+                    </button>
+                    <button type="button"
+                      onClick={() => setNewTaskClientKind('existing')}
+                      style={{fontSize:9,padding:'3px 7px',border:'1px solid '+(newTaskClientKind==='existing'?'#85b7eb':'#1f2937'),background:newTaskClientKind==='existing'?'#0f1a2c':'transparent',color:newTaskClientKind==='existing'?'#85b7eb':'#94a3b8',borderRadius:3,cursor:'pointer'}}>
+                      🔁 Existing
+                    </button>
                   </>
                 )}
               </div>
