@@ -1614,9 +1614,10 @@ function MainApp({user,onLogout,masterData}){
     {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","HARISH"]},
     // Reports (04 May 26 — Deploy 1) — visible to everyone (My Report tab); Stalls + Output tabs gated to JIGAR + CHANDNI inside the page itself
     {id:"reports",l:"Reports",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
-    // Target Setter (15 May 2026 PM) — nav visible to everyone; matrix internally gated to admin/sales role.
-    // Non-admins see only "My progress this week" dashboard. Admin/sales see matrix + own progress.
-    {id:"targets",l:"Target Setter",e:"🎯",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
+    // Target Setter (15 May 2026 PM) — Gated to QUANTIFY_USERS + tier-1 (15 May rev2).
+    // JIGAR/CHANDNI set targets; BATUL/POONAM see own progress + (read-only) matrix.
+    // Other users do not see this nav item or page. Tier-1 FULL_ACCESS still applies via the role check below.
+    {id:"targets",l:"Target Setter",e:"🎯",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL","POONAM"]},
   ];
   // ── ACCESS CONTROL (17 Apr 26 rework) ─────────────────────────────────
   // TIER 1 (FULL_ACCESS): see every module automatically. Bypass role + user-gate.
@@ -10209,6 +10210,12 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const uname = (user?.name||'').toUpperCase();
   const TEAM_VIEWERS = ['JIGAR','CHANDNI'];
   const isTeamViewer = TEAM_VIEWERS.some(u => uname.includes(u));
+  // Quantify gate (15 May 2026 PM rev2) — only these users see the Quantify checkbox
+  // and the badges/inputs on their tasks. Schema and data are shared, but UI
+  // surface is hidden for everyone else to keep their My Tasks clean.
+  // To expand: add another name substring (e.g. 'APARNA') to this list.
+  const QUANTIFY_USERS = ['BATUL','POONAM'];
+  const showQuantifyUI = QUANTIFY_USERS.some(u => uname.includes(u));
 
   // Tabs: 'me' for everyone; 'stalls' + 'output' + 'standup' for team viewers only
   const [tab, setTab] = React.useState(forceTab || 'me');
@@ -11627,7 +11634,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                 placeholder={newTaskQuantified ? '+ Optional label (auto: \"' + (newTaskTarget||'N') + ' ' + ({call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[newTaskType]||'tasks') + '\")' : '+ Add a task (meetings, calls, follow-ups, anything not auto-tracked)'}
                 style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:5,background:'transparent',border:'none',color:'#cbd5e1'}}
                 onKeyDown={e => { if (e.key === 'Enter' && (newTaskText.trim() || (newTaskQuantified && newTaskTarget))) addManualTask(); }} />
-              {/* Quantify row — added 15 May 2026 PM */}
+              {/* Quantify row — added 15 May 2026 PM. Gated to QUANTIFY_USERS (Batul, Poonam) 15 May rev2. */}
+              {showQuantifyUI && (
               <div style={{display:'flex',gap:5,alignItems:'center',marginBottom:5,fontSize:10,color:'#94a3b8'}}>
                 <label style={{display:'flex',gap:4,alignItems:'center',cursor:'pointer',userSelect:'none'}}>
                   <input type="checkbox" checked={newTaskQuantified} onChange={e => setNewTaskQuantified(e.target.checked)} style={{margin:0}} />
@@ -11650,6 +11658,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   </>
                 )}
               </div>
+              )}
               <div style={{display:'flex',gap:5,alignItems:'center'}}>
                 <input className="in" value={newTaskJob} onChange={e => setNewTaskJob(e.target.value)}
                   placeholder="job id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
