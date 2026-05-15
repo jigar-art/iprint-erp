@@ -11407,6 +11407,9 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               </span>
             </div>
 
+            {/* Monthly revenue card — 15 May 2026 PM rev4. Gated to BATUL only. */}
+            {uname.includes('BATUL') && <MonthlyRevenueCard user={user} show={show} />}
+
             {/* Auto section (read-only) */}
             {autoTasks.length > 0 && (
               <div style={{marginBottom:10}}>
@@ -13487,6 +13490,204 @@ function TargetSetterPage({user, team, show}) {
         </div>
       ) : (
         <div style={{fontSize:10,color:'#64748b',padding:'10px 0'}}>Weekly targets are set by your manager.</div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// MONTHLY REVENUE CARD (15 May 2026 PM rev4)
+// ═══════════════════════════════════════════════════════════
+// Self-reported monthly numbers for sales executives. Gated to BATUL only
+// at the render site. Reads/writes monthly_revenue_log keyed by user_name + month.
+// Layout: current month editable card on top, last 3 months read-only history strip below.
+function MonthlyRevenueCard({user, show}) {
+  const uname = (user?.name || '').toUpperCase();
+  // Helper: current month as YYYY-MM (local time)
+  const currentMonth = React.useMemo(() => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }, []);
+  const [rows, setRows] = React.useState([]);    // all rows for this user, newest first
+  const [loading, setLoading] = React.useState(true);
+  const [selectedMonth, setSelectedMonth] = React.useState(currentMonth);  // 15 May 2026 PM rev4b
+  const [editEst, setEditEst] = React.useState('');
+  const [editRcv, setEditRcv] = React.useState('');
+  const [editNotes, setEditNotes] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  // Load this user's full history (newest first). Backfill rows from migration appear here too.
+  React.useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    sb.from('monthly_revenue_log')
+      .select('id,month,estimations_sent,revenue_received,target,notes,updated_at')
+      .ilike('user_name', user?.name || '')
+      .order('month', {ascending: false})
+      .limit(24)
+      .then(({data, error}) => {
+        if (!mounted) return;
+        if (error) { show?.('Revenue log load failed: ' + error.message, false); setLoading(false); return; }
+        setRows(data || []);
+        setLoading(false);
+      });
+    return () => { mounted = false; };
+  }, [user?.name]);
+
+  // Whenever the selected month changes (or rows reload), reseed the edit fields
+  // from the matching row. If the user picks a month that has no row yet, blank inputs.
+  React.useEffect(() => {
+    const sel = rows.find(r => r.month === selectedMonth);
+    if (sel) {
+      setEditEst(sel.estimations_sent != null ? String(sel.estimations_sent) : '');
+      setEditRcv(sel.revenue_received != null ? String(sel.revenue_received) : '');
+      setEditNotes(sel.notes || '');
+    } else {
+      setEditEst(''); setEditRcv(''); setEditNotes('');
+    }
+  }, [selectedMonth, rows]);
+
+  const selectedRow = rows.find(r => r.month === selectedMonth);
+  const target = selectedRow ? Number(selectedRow.target) : 1000000;
+  const rcvNum = Number(editRcv) || 0;
+  const pct = target > 0 ? Math.min(100, Math.round((rcvNum / target) * 100)) : 0;
+  const pctColor = pct >= 100 ? '#1d9e75' : pct >= 60 ? '#e3a008' : pct > 0 ? '#d85a30' : '#475569';
+
+  // Build the month dropdown: union of all DB rows + current month if missing.
+  // Sorted newest-first so current month is on top.
+  const monthOptions = React.useMemo(() => {
+    const set = new Set(rows.map(r => r.month));
+    set.add(currentMonth);
+    return Array.from(set).sort((a,b) => b.localeCompare(a));
+  }, [rows, currentMonth]);
+
+  const formatINR = (n) => {
+    if (n == null || isNaN(n)) return '—';
+    const num = Number(n);
+    if (num >= 100000) return '₹' + (num / 100000).toFixed(2) + ' L';
+    if (num >= 1000)   return '₹' + (num / 1000).toFixed(1) + ' K';
+    return '₹' + num;
+  };
+
+  // Pretty label for the dropdown: "2026-05 (this month)" vs "2026-04" vs "2025-11"
+  const monthLabel = (m) => {
+    if (m === currentMonth) return m + ' (this month)';
+    return m;
+  };
+
+  const saveSelected = async () => {
+    const est = parseFloat(editEst) || 0;
+    const rcv = parseFloat(editRcv) || 0;
+    if (est < 0 || rcv < 0) { show?.('Amounts cannot be negative', false); return; }
+    setSaving(true);
+    const row = {
+      user_name: user?.name || '',
+      month: selectedMonth,
+      estimations_sent: est,
+      revenue_received: rcv,
+      target: target,
+      notes: (editNotes||'').trim() || null,
+      filled_by: uname,
+      updated_at: new Date().toISOString(),
+    };
+    const {data, error} = await sb.from('monthly_revenue_log')
+      .upsert(row, {onConflict: 'user_name,month'})
+      .select().single();
+    setSaving(false);
+    if (error) { show?.('Save failed: ' + error.message, false); return; }
+    setRows(prev => {
+      const others = prev.filter(r => r.month !== selectedMonth);
+      return [data, ...others].sort((a,b) => b.month.localeCompare(a.month));
+    });
+    show?.('Saved ' + selectedMonth);
+  };
+
+  // History strip: all months except the one currently being edited
+  const history = rows.filter(r => r.month !== selectedMonth).slice(0, 8);
+
+  if (loading) return <div style={{padding:8,fontSize:10,color:'#64748b'}}>Loading revenue log…</div>;
+
+  return (
+    <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:6,padding:10,marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,gap:8,flexWrap:'wrap'}}>
+        <div style={{fontSize:11,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,fontWeight:700}}>
+          💰 Monthly Revenue
+        </div>
+        {/* Month dropdown — added 15 May 2026 PM rev4b so Batul can backfill past months */}
+        <div style={{display:'flex',gap:6,alignItems:'center'}}>
+          <label style={{fontSize:9,color:'#94a3b8'}}>Month:</label>
+          <select className="in" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
+            style={{fontSize:10,padding:'3px 6px',minWidth:140}}>
+            {monthOptions.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+        </div>
+        <div style={{fontSize:10,color:'#94a3b8'}}>Target: <b style={{color:'#e3a008'}}>{formatINR(target)}</b></div>
+      </div>
+
+      {/* Selected month inputs */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:6}}>
+        <div>
+          <label style={{fontSize:9,color:'#94a3b8',display:'block',marginBottom:3}}>Estimations sent (₹)</label>
+          <input className="in" type="number" min="0" value={editEst}
+            onChange={e => setEditEst(e.target.value)}
+            placeholder="0"
+            style={{width:'100%',fontSize:11,padding:'5px 8px',boxSizing:'border-box'}} />
+        </div>
+        <div>
+          <label style={{fontSize:9,color:'#94a3b8',display:'block',marginBottom:3}}>Revenue received (₹)</label>
+          <input className="in" type="number" min="0" value={editRcv}
+            onChange={e => setEditRcv(e.target.value)}
+            placeholder="0"
+            style={{width:'100%',fontSize:11,padding:'5px 8px',boxSizing:'border-box'}} />
+        </div>
+      </div>
+
+      {/* Progress bar — reflects selected month */}
+      <div style={{marginBottom:6}}>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#94a3b8',marginBottom:3}}>
+          <span>{selectedMonth} received: <b style={{color:'#e2e8f0'}}>{formatINR(rcvNum)}</b></span>
+          <span style={{color:pctColor,fontWeight:700}}>{pct}%</span>
+        </div>
+        <div style={{height:8,background:'#1a2030',borderRadius:4,overflow:'hidden'}}>
+          <div style={{height:'100%',width:pct+'%',background:pctColor,transition:'width .3s'}} />
+        </div>
+      </div>
+
+      <input className="in" value={editNotes}
+        onChange={e => setEditNotes(e.target.value)}
+        placeholder="Notes (optional) — main wins, pending receivables, late payers"
+        style={{width:'100%',fontSize:10,padding:'5px 8px',boxSizing:'border-box',marginBottom:6}} />
+
+      <button className="b bp" onClick={saveSelected} disabled={saving}
+        style={{fontSize:10,padding:'4px 14px',opacity:saving?0.5:1}}>
+        {saving ? 'Saving…' : 'Save ' + selectedMonth}
+      </button>
+
+      {/* History strip: all other months at a glance, click to switch */}
+      {history.length > 0 && (
+        <div style={{marginTop:10,paddingTop:8,borderTop:'1px dashed #1f2937'}}>
+          <div style={{fontSize:9,color:'#64748b',textTransform:'uppercase',letterSpacing:0.5,marginBottom:5}}>
+            Other months ({history.length}) — click to edit
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:6}}>
+            {history.map(h => {
+              const hRcv = Number(h.revenue_received) || 0;
+              const hTgt = Number(h.target) || 1;
+              const hPct = Math.min(100, Math.round((hRcv / hTgt) * 100));
+              const hColor = hPct >= 100 ? '#1d9e75' : hPct >= 60 ? '#e3a008' : hPct > 0 ? '#d85a30' : '#475569';
+              return (
+                <div key={h.month}
+                  onClick={() => setSelectedMonth(h.month)}
+                  style={{background:'#0a0e1a',border:'1px solid #1f2937',borderRadius:4,padding:6,cursor:'pointer'}}
+                  title="Click to edit this month">
+                  <div style={{fontSize:10,color:'#cbd5e1',marginBottom:2}}>{h.month}</div>
+                  <div style={{fontSize:9,color:'#94a3b8'}}>Est: <b style={{color:'#e2e8f0'}}>{formatINR(h.estimations_sent)}</b></div>
+                  <div style={{fontSize:9,color:'#94a3b8'}}>Rcv: <b style={{color:hColor}}>{formatINR(h.revenue_received)}</b> <span style={{color:hColor}}>({hPct}%)</span></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
