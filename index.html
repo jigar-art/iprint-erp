@@ -10264,9 +10264,20 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [newTaskText, setNewTaskText] = React.useState('');
   const [newTaskJob, setNewTaskJob] = React.useState('');
   const [newTaskSite, setNewTaskSite] = React.useState('');
+  // Quantified-task state — added 15 May 2026 PM.
+  // Lets sales/ops users enter measurable tasks (calls / emails / visits / meetings / closings)
+  // with a target_count, then record actual_count when marking done/stuck.
+  // Backed by daily_tasks.is_quantified, task_type, target_count, actual_count columns.
+  const [newTaskQuantified, setNewTaskQuantified] = React.useState(false);
+  const [newTaskType, setNewTaskType] = React.useState('call');
+  const [newTaskTarget, setNewTaskTarget] = React.useState('');
+  // Done/stuck prompts for quantified tasks: when set, show inline input for actual_count
+  const [doneActualFor, setDoneActualFor] = React.useState(null);   // task id
+  const [doneActualText, setDoneActualText] = React.useState('');
   const [savingTask, setSavingTask] = React.useState(false);
   const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
   const [stuckNoteText, setStuckNoteText] = React.useState('');
+  const [stuckActualText, setStuckActualText] = React.useState('');  // partial count for stuck quantified tasks
   // Edit mode state — added 09 May 2026
   const [editTaskFor, setEditTaskFor] = React.useState(null);    // task id being edited
   const [editTaskText, setEditTaskText] = React.useState('');
@@ -10446,7 +10457,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,invoice_date,added_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(2000),
       sb.from('delivery_challans').select('id,batch_id,created_by,delivered_by,prepared_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at',{ascending:false}),
-      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0,10)).lte('task_date', todayISO).order('task_date',{ascending:false}).order('created_at',{ascending:true}).limit(2000),
+      sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0,10)).lte('task_date', todayISO).order('task_date',{ascending:false}).order('created_at',{ascending:true}).limit(2000),
       sb.from('grn').select('id,date,supplier,material,job_id,received_by,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
       sb.from('sales_activities').select('id,date,activity_type,rep_name,client_name,firm_name,outcome,created_at').gte('created_at', periodBounds.startISO).order('created_at',{ascending:false}).limit(500),
     ]).then(results => {
@@ -10867,9 +10878,23 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
 
   // ── TASK SYSTEM v2 STAGE A — handlers ───────────────────
   // Add a manual task for the current user. Optional job/site link.
+  // 15 May 2026 PM: when newTaskQuantified is true, also stamps task_type +
+  // target_count + is_quantified=true so the dashboard can compute target-vs-actual.
+  // Auto-derives a sensible default task_text if user left it blank but ticked quantify
+  // (e.g. "10 calls" for type=call, target=10).
   const addManualTask = async () => {
-    const text = (newTaskText||'').trim();
-    if (!text) { show?.('Type a task first', false); return; }
+    let text = (newTaskText||'').trim();
+    // Quantified-task validation + sensible defaults
+    if (newTaskQuantified) {
+      const tgt = parseInt(newTaskTarget, 10);
+      if (!Number.isFinite(tgt) || tgt < 1) { show?.('Enter a target count (1+)', false); return; }
+      if (!text) {
+        const labelMap = {call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'};
+        text = tgt + ' ' + (labelMap[newTaskType] || 'tasks');
+      }
+    } else if (!text) {
+      show?.('Type a task first', false); return;
+    }
     setSavingTask(true);
     const row = {
       user_name: uname,
@@ -10880,36 +10905,58 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       added_by: uname,
       linked_job_id: (newTaskJob||'').trim() || null,
       linked_site_id: (newTaskSite||'').trim() || null,
+      is_quantified: !!newTaskQuantified,
+      task_type: newTaskQuantified ? newTaskType : null,
+      target_count: newTaskQuantified ? parseInt(newTaskTarget, 10) : null,
     };
     const {data, error} = await sb.from('daily_tasks').insert(row).select().single();
     setSavingTask(false);
     if (error) { show?.('Failed to add: ' + error.message, false); return; }
     setTodayTasks(prev => [...(prev||[]), data]);
     setNewTaskText(''); setNewTaskJob(''); setNewTaskSite('');
+    setNewTaskTarget(''); setNewTaskQuantified(false);
     show?.('Task added');
   };
 
   // Mark a task done (set status + done_at). Updates row in place.
-  const markTaskDone = async (taskId) => {
+  // 15 May 2026 PM: accepts optional actualCount for quantified tasks.
+  // For non-quantified tasks, called directly. For quantified, the UI first
+  // prompts the user via doneActualFor state, then calls this with the count.
+  const markTaskDone = async (taskId, actualCount) => {
     const nowISO = new Date().toISOString();
+    const patch = {status: 'done', done_at: nowISO, updated_at: nowISO};
+    if (actualCount !== undefined && actualCount !== null && actualCount !== '') {
+      const n = parseInt(actualCount, 10);
+      if (!Number.isFinite(n) || n < 0) { show?.('Actual count must be 0 or more', false); return; }
+      patch.actual_count = n;
+    }
     const {data, error} = await sb.from('daily_tasks')
-      .update({status: 'done', done_at: nowISO, updated_at: nowISO})
+      .update(patch)
       .eq('id', taskId).select().single();
     if (error) { show?.('Failed: ' + error.message, false); return; }
     setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
+    setDoneActualFor(null); setDoneActualText('');
   };
 
   // Mark a task stuck — requires a non-empty stuck_note.
-  const markTaskStuck = async (taskId, note) => {
+  // 15 May 2026 PM: also accepts optional actualCount (partial completion) for
+  // quantified tasks. E.g. "15 emails" stuck with 8 sent → actual_count=8.
+  const markTaskStuck = async (taskId, note, actualCount) => {
     const trimmed = (note||'').trim();
     if (!trimmed) { show?.('Stuck note is required', false); return; }
     const nowISO = new Date().toISOString();
+    const patch = {status: 'stuck', stuck_note: trimmed, updated_at: nowISO};
+    if (actualCount !== undefined && actualCount !== null && actualCount !== '') {
+      const n = parseInt(actualCount, 10);
+      if (!Number.isFinite(n) || n < 0) { show?.('Actual count must be 0 or more', false); return; }
+      patch.actual_count = n;
+    }
     const {data, error} = await sb.from('daily_tasks')
-      .update({status: 'stuck', stuck_note: trimmed, updated_at: nowISO})
+      .update(patch)
       .eq('id', taskId).select().single();
     if (error) { show?.('Failed: ' + error.message, false); return; }
     setTodayTasks(prev => (prev||[]).map(t => t.id === taskId ? data : t));
-    setStuckNoteFor(null); setStuckNoteText('');
+    setStuckNoteFor(null); setStuckNoteText(''); setStuckActualText('');
     show?.('Marked stuck');
   };
 
@@ -11377,10 +11424,18 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             {(todayTasks||[]).filter(t => t.status === 'pending' && t.task_date === todayISO).length > 0 && (
               <div style={{marginBottom:10}}>
                 <div style={{fontSize:9,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📝 Pending tasks</div>
-                {(todayTasks||[]).filter(t => t.status === 'pending' && t.task_date === todayISO).map(t => (
-                  <div key={'p'+t.id} style={{background:'#0f1422',borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
-                    <span onClick={() => markTaskDone(t.id)} style={{color:'#64748b',cursor:'pointer',fontSize:13}} title="Mark done">☐</span>
+                {(todayTasks||[]).filter(t => t.status === 'pending' && t.task_date === todayISO).map(t => {
+                  const typeLabel = {call:'📞',email:'✉️',site_visit:'🚶',meeting:'🤝',closing:'💰'}[t.task_type] || '📊';
+                  return (
+                  <div key={'p'+t.id}>
+                  <div style={{background:'#0f1422',borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
+                    <span onClick={() => { if (t.is_quantified) { setDoneActualFor(t.id); setDoneActualText(String(t.target_count||'')); } else { markTaskDone(t.id); } }} style={{color:'#64748b',cursor:'pointer',fontSize:13}} title="Mark done">☐</span>
                     <span style={{flex:1}}>{t.task_text}</span>
+                    {t.is_quantified && (
+                      <span style={{fontSize:9,padding:'1px 5px',background:'#1a2230',color:'#a5cfff',borderRadius:3,fontWeight:600}}>
+                        {typeLabel} target {t.target_count}
+                      </span>
+                    )}
                     {t.linked_job_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_job_id}</span>}
                     {t.linked_site_id && <span style={{fontSize:8,padding:'1px 4px',background:'#1a2333',color:'#85b7eb',borderRadius:3}}>→ {t.linked_site_id}</span>}
                     {t.source === 'admin' && t.added_by && <span style={{fontSize:8,padding:'1px 4px',background:'#2a1408',color:'#f0997b',borderRadius:3}}>{t.added_by}</span>}
@@ -11392,7 +11447,22 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                       <span onClick={() => { if (confirm('Cancel this task?')) cancelTask(t.id); }} style={{color:'#475569',cursor:'pointer',fontSize:9}} title="Cancel task">×</span>
                     )}
                   </div>
-                ))}
+                  {/* Inline actual-count prompt for quantified done — 15 May 2026 PM */}
+                  {doneActualFor === t.id && (
+                    <div style={{background:'#0a1a14',border:'1px solid #1d9e75',borderRadius:3,padding:6,marginBottom:4,display:'flex',gap:5,alignItems:'center',fontSize:10}}>
+                      <span style={{color:'#5dcaa5'}}>How many {{call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[t.task_type]||'units'} did you actually do?</span>
+                      <input className="in" type="number" min="0" autoFocus value={doneActualText}
+                        onChange={e => setDoneActualText(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') markTaskDone(t.id, doneActualText); }}
+                        style={{fontSize:10,padding:'2px 6px',width:60}} />
+                      <span style={{color:'#64748b'}}>/ {t.target_count}</span>
+                      <button className="b bp" onClick={() => markTaskDone(t.id, doneActualText)} style={{fontSize:9,padding:'2px 8px'}}>Mark Done</button>
+                      <button className="b" onClick={() => { setDoneActualFor(null); setDoneActualText(''); }} style={{fontSize:9,padding:'2px 8px'}}>Cancel</button>
+                    </div>
+                  )}
+                  </div>
+                  );
+                })}
               </div>
             )}
 
@@ -11400,13 +11470,21 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             {(todayTasks||[]).filter(t => t.status === 'done' && t.task_date === todayISO).length > 0 && (
               <div style={{marginBottom:10}}>
                 <div style={{fontSize:9,color:'#30b54a',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>✅ Done by you today</div>
-                {(todayTasks||[]).filter(t => t.status === 'done' && t.task_date === todayISO).map(t => (
+                {(todayTasks||[]).filter(t => t.status === 'done' && t.task_date === todayISO).map(t => {
+                  const hitTarget = t.is_quantified && t.actual_count != null && t.target_count != null && t.actual_count >= t.target_count;
+                  return (
                   <div key={'d'+t.id} style={{background:'#0f1422',borderLeft:'2px solid #30b54a',padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center',opacity:0.6}}>
                     <span onClick={() => reopenTask(t.id)} style={{color:'#30b54a',cursor:'pointer',fontSize:13}} title="Reopen">☑</span>
                     <span style={{flex:1,textDecoration:'line-through',color:'#64748b'}}>{t.task_text}</span>
+                    {t.is_quantified && t.actual_count != null && (
+                      <span style={{fontSize:9,padding:'1px 5px',background:hitTarget?'#0a2114':'#21170a',color:hitTarget?'#5dcaa5':'#e3a008',borderRadius:3,fontWeight:600}}>
+                        {t.actual_count} / {t.target_count}
+                      </span>
+                    )}
                     {t.done_at && <span style={{fontSize:8,color:'#475569'}}>{t.done_at.slice(11,16)}</span>}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -11485,20 +11563,34 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             })()}
 
             {/* Stuck note input modal-ish */}
-            {stuckNoteFor && (
+            {stuckNoteFor && (() => {
+              const stuckTask = (todayTasks||[]).find(t => t.id === stuckNoteFor);
+              const isQuant = stuckTask && stuckTask.is_quantified;
+              const typeLbl = stuckTask && {call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[stuckTask.task_type] || 'units';
+              return (
               <div style={{background:'#1a0d0d',border:'1px solid #e24b4a',padding:8,borderRadius:4,marginBottom:8}}>
                 <div style={{fontSize:10,color:'#f09595',marginBottom:4}}>Why is this stuck? (required)</div>
                 <input className="in" value={stuckNoteText} onChange={e => setStuckNoteText(e.target.value)}
                   placeholder="e.g. Waiting on Vidya for amounts"
                   style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:6}}
                   autoFocus />
+                {isQuant && (
+                  <div style={{display:'flex',gap:5,alignItems:'center',marginBottom:6,fontSize:10,color:'#f09595'}}>
+                    <span>How many {typeLbl} did you do before getting stuck?</span>
+                    <input className="in" type="number" min="0" value={stuckActualText}
+                      onChange={e => setStuckActualText(e.target.value)}
+                      placeholder="0" style={{fontSize:10,padding:'2px 6px',width:60}} />
+                    <span style={{color:'#94a3b8'}}>/ {stuckTask.target_count}</span>
+                  </div>
+                )}
                 <div style={{display:'flex',gap:6}}>
-                  <button className="b bp" onClick={() => markTaskStuck(stuckNoteFor, stuckNoteText)} disabled={!stuckNoteText.trim()}
+                  <button className="b bp" onClick={() => markTaskStuck(stuckNoteFor, stuckNoteText, isQuant ? stuckActualText : undefined)} disabled={!stuckNoteText.trim()}
                     style={{fontSize:10,padding:'4px 10px',opacity:stuckNoteText.trim()?1:0.5}}>Save</button>
-                  <button className="b" onClick={() => { setStuckNoteFor(null); setStuckNoteText(''); }} style={{fontSize:10,padding:'4px 10px'}}>Cancel</button>
+                  <button className="b" onClick={() => { setStuckNoteFor(null); setStuckNoteText(''); setStuckActualText(''); }} style={{fontSize:10,padding:'4px 10px'}}>Cancel</button>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* Edit task modal-ish — added 09 May 2026 */}
             {editTaskFor && (
@@ -11528,16 +11620,40 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             {/* Add task form */}
             <div style={{background:'#0a0e1a',border:'1px dashed #2a3548',borderRadius:4,padding:8}}>
               <input className="in" value={newTaskText} onChange={e => setNewTaskText(e.target.value)}
-                placeholder="+ Add a task (meetings, calls, follow-ups, anything not auto-tracked)"
+                placeholder={newTaskQuantified ? '+ Optional label (auto: \"' + (newTaskTarget||'N') + ' ' + ({call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[newTaskType]||'tasks') + '\")' : '+ Add a task (meetings, calls, follow-ups, anything not auto-tracked)'}
                 style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:5,background:'transparent',border:'none',color:'#cbd5e1'}}
-                onKeyDown={e => { if (e.key === 'Enter' && newTaskText.trim()) addManualTask(); }} />
+                onKeyDown={e => { if (e.key === 'Enter' && (newTaskText.trim() || (newTaskQuantified && newTaskTarget))) addManualTask(); }} />
+              {/* Quantify row — added 15 May 2026 PM */}
+              <div style={{display:'flex',gap:5,alignItems:'center',marginBottom:5,fontSize:10,color:'#94a3b8'}}>
+                <label style={{display:'flex',gap:4,alignItems:'center',cursor:'pointer',userSelect:'none'}}>
+                  <input type="checkbox" checked={newTaskQuantified} onChange={e => setNewTaskQuantified(e.target.checked)} style={{margin:0}} />
+                  <span>📊 Quantify</span>
+                </label>
+                {newTaskQuantified && (
+                  <>
+                    <select className="in" value={newTaskType} onChange={e => setNewTaskType(e.target.value)}
+                      style={{fontSize:9,padding:'3px 6px'}}>
+                      <option value="call">📞 Calls</option>
+                      <option value="email">✉️ Emails</option>
+                      <option value="site_visit">🚶 Site Visits</option>
+                      <option value="meeting">🤝 Meetings</option>
+                      <option value="closing">💰 Closings</option>
+                    </select>
+                    <input className="in" type="number" min="1" value={newTaskTarget}
+                      onChange={e => setNewTaskTarget(e.target.value)}
+                      placeholder="target" style={{fontSize:9,padding:'3px 6px',width:60}} />
+                    <span style={{fontSize:9,color:'#64748b'}}>per day</span>
+                  </>
+                )}
+              </div>
               <div style={{display:'flex',gap:5,alignItems:'center'}}>
                 <input className="in" value={newTaskJob} onChange={e => setNewTaskJob(e.target.value)}
                   placeholder="job id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
                 <input className="in" value={newTaskSite} onChange={e => setNewTaskSite(e.target.value)}
                   placeholder="site id (opt)" style={{fontSize:9,padding:'3px 6px',width:90}} />
-                <button className="b bp" onClick={addManualTask} disabled={savingTask || !newTaskText.trim()}
-                  style={{fontSize:10,padding:'4px 12px',opacity:savingTask||!newTaskText.trim()?0.5:1,marginLeft:'auto'}}>
+                <button className="b bp" onClick={addManualTask}
+                  disabled={savingTask || (!newTaskText.trim() && !(newTaskQuantified && newTaskTarget))}
+                  style={{fontSize:10,padding:'4px 12px',opacity:(savingTask||(!newTaskText.trim()&&!(newTaskQuantified&&newTaskTarget)))?0.5:1,marginLeft:'auto'}}>
                   {savingTask ? 'Adding…' : 'Add'}
                 </button>
               </div>
