@@ -12439,6 +12439,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#30b54a'}}>Done</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#e3a008'}}>Pending</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#d85a30'}}>Stuck</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#64748b'}}>Cancel</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>User</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Recurring</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Carried</th>
@@ -12456,6 +12457,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.done>0?'#30b54a':'#475569'}}>{r.done}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.pending>0?'#e3a008':'#475569'}}>{r.pending}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.stuck>0?'#d85a30':'#475569'}}>{r.stuck}</td>
+                            <td style={{padding:'4px 6px',textAlign:'right',color:r.cancelled>0?'#64748b':'#475569'}}>{r.cancelled}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.user_src>0?'#cbd5e1':'#475569'}}>{r.user_src}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.recurring>0?'#cbd5e1':'#475569'}}>{r.recurring}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.carried>0?'#cbd5e1':'#475569'}}>{r.carried}</td>
