@@ -10900,8 +10900,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       const tgt = parseInt(newTaskTarget, 10);
       if (!Number.isFinite(tgt) || tgt < 1) { show?.('Enter a target count (1+)', false); return; }
       if (!text) {
-        const labelMap = {call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'};
-        text = tgt + ' ' + (labelMap[newTaskType] || 'tasks');
+        text = tgt + ' ' + (TASK_TYPE_LABELS[newTaskType] || 'tasks');
       }
     } else if (!text) {
       show?.('Type a task first', false); return;
@@ -11436,7 +11435,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               <div style={{marginBottom:10}}>
                 <div style={{fontSize:9,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:4}}>📝 Pending tasks</div>
                 {(todayTasks||[]).filter(t => t.status === 'pending' && t.task_date === todayISO).map(t => {
-                  const typeLabel = {call:'📞',email:'✉️',site_visit:'🚶',meeting:'🤝',closing:'💰'}[t.task_type] || '📊';
+                  const typeLabel = TASK_TYPE_EMOJI[t.task_type] || '📊';
                   return (
                   <div key={'p'+t.id}>
                   <div style={{background:'#0f1422',borderLeft:'2px solid '+(t.source==='admin'?'#d85a30':t.source==='carried'?'#d4a435':'#378add'),padding:'5px 8px',marginBottom:2,fontSize:10,color:'#cbd5e1',display:'flex',gap:8,alignItems:'center'}}>
@@ -11461,7 +11460,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   {/* Inline actual-count prompt for quantified done — 15 May 2026 PM */}
                   {doneActualFor === t.id && (
                     <div style={{background:'#0a1a14',border:'1px solid #1d9e75',borderRadius:3,padding:6,marginBottom:4,display:'flex',gap:5,alignItems:'center',fontSize:10}}>
-                      <span style={{color:'#5dcaa5'}}>How many {{call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[t.task_type]||'units'} did you actually do?</span>
+                      <span style={{color:'#5dcaa5'}}>How many {TASK_TYPE_LABELS[t.task_type]||'units'} did you actually do?</span>
                       <input className="in" type="number" min="0" autoFocus value={doneActualText}
                         onChange={e => setDoneActualText(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') markTaskDone(t.id, doneActualText); }}
@@ -11577,7 +11576,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             {stuckNoteFor && (() => {
               const stuckTask = (todayTasks||[]).find(t => t.id === stuckNoteFor);
               const isQuant = stuckTask && stuckTask.is_quantified;
-              const typeLbl = stuckTask && {call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[stuckTask.task_type] || 'units';
+              const typeLbl = stuckTask && (TASK_TYPE_LABELS[stuckTask.task_type] || 'units');
               return (
               <div style={{background:'#1a0d0d',border:'1px solid #e24b4a',padding:8,borderRadius:4,marginBottom:8}}>
                 <div style={{fontSize:10,color:'#f09595',marginBottom:4}}>Why is this stuck? (required)</div>
@@ -11631,7 +11630,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             {/* Add task form */}
             <div style={{background:'#0a0e1a',border:'1px dashed #2a3548',borderRadius:4,padding:8}}>
               <input className="in" value={newTaskText} onChange={e => setNewTaskText(e.target.value)}
-                placeholder={newTaskQuantified ? '+ Optional label (auto: \"' + (newTaskTarget||'N') + ' ' + ({call:'calls',email:'emails',site_visit:'site visits',meeting:'meetings',closing:'closings'}[newTaskType]||'tasks') + '\")' : '+ Add a task (meetings, calls, follow-ups, anything not auto-tracked)'}
+                placeholder={newTaskQuantified ? '+ Optional label (auto: \"' + (newTaskTarget||'N') + ' ' + (TASK_TYPE_LABELS[newTaskType]||'tasks') + '\")' : '+ Add a task (meetings, calls, follow-ups, anything not auto-tracked)'}
                 style={{width:'100%',fontSize:11,padding:'6px 8px',boxSizing:'border-box',marginBottom:5,background:'transparent',border:'none',color:'#cbd5e1'}}
                 onKeyDown={e => { if (e.key === 'Enter' && (newTaskText.trim() || (newTaskQuantified && newTaskTarget))) addManualTask(); }} />
               {/* Quantify row — added 15 May 2026 PM. Gated to QUANTIFY_USERS (Batul, Poonam) 15 May rev2. */}
@@ -11645,11 +11644,9 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                   <>
                     <select className="in" value={newTaskType} onChange={e => setNewTaskType(e.target.value)}
                       style={{fontSize:9,padding:'3px 6px'}}>
-                      <option value="call">📞 Calls</option>
-                      <option value="email">✉️ Emails</option>
-                      <option value="site_visit">🚶 Site Visits</option>
-                      <option value="meeting">🤝 Meetings</option>
-                      <option value="closing">💰 Closings</option>
+                      {TASK_TYPES_META.map(tt => (
+                        <option key={tt.key} value={tt.key}>{tt.emoji} {tt.label}</option>
+                      ))}
                     </select>
                     <input className="in" type="number" min="1" value={newTaskTarget}
                       onChange={e => setNewTaskTarget(e.target.value)}
@@ -13239,12 +13236,21 @@ function HealthCheckPage(){
 // Reads/writes: task_targets table; reads daily_tasks for actuals.
 // ───────────────────────────────────────────────────────────
 const TASK_TYPES_META = [
-  {key:'call',       emoji:'📞', label:'Calls'},
-  {key:'email',      emoji:'✉️', label:'Emails'},
-  {key:'site_visit', emoji:'🚶', label:'Site Visits'},
-  {key:'meeting',    emoji:'🤝', label:'Meetings'},
-  {key:'closing',    emoji:'💰', label:'Closings'},
+  {key:'call',                 emoji:'📞', label:'Calls'},
+  {key:'email',                emoji:'✉️', label:'Emails'},
+  {key:'site_visit',           emoji:'🚶', label:'Site Visits'},
+  {key:'meeting',              emoji:'🤝', label:'Meetings'},
+  {key:'closing',              emoji:'💰', label:'Closings'},
+  // Added 15 May 2026 PM rev3 — Poonam workflow (inbound + servicing)
+  {key:'lead_response',        emoji:'📟', label:'Lead Response'},
+  {key:'client_servicing',     emoji:'🔄', label:'Client Servicing'},
+  {key:'existing_client_call', emoji:'📞', label:'Existing Client Call'},
+  {key:'account_management',   emoji:'🤝', label:'Account Management'},
 ];
+
+// Derived lookup maps so we don't hardcode 5 inline {call:..., email:...} maps everywhere
+const TASK_TYPE_LABELS = TASK_TYPES_META.reduce((a,t) => { a[t.key] = t.label.toLowerCase(); return a; }, {});
+const TASK_TYPE_EMOJI  = TASK_TYPES_META.reduce((a,t) => { a[t.key] = t.emoji; return a; }, {});
 
 // Compute the Monday of the ISO week containing the given Date.
 // Returns YYYY-MM-DD string. Anchors at noon to avoid IST midnight rollover
@@ -13452,7 +13458,14 @@ function TargetSetterPage({user, team, show}) {
                                 type="number" min="0" placeholder="—"
                                 value={display}
                                 onChange={e => setEditVal(prev => ({...prev, [key]: e.target.value}))}
-                                onBlur={() => { if (editing && editVal[key] !== String(saved||'')) saveTarget(u.name, tt.key, editVal[key]); }}
+                                onBlur={() => {
+                                  // 15 May 2026 PM rev3 — only save if (a) we have a non-empty edited value AND (b) it's actually different from current saved value
+                                  if (!editing) return;
+                                  const raw = (editVal[key] ?? '').trim();
+                                  if (raw === '') { setEditVal(prev => { const n = {...prev}; delete n[key]; return n; }); return; }
+                                  if (raw === String(saved||'')) { setEditVal(prev => { const n = {...prev}; delete n[key]; return n; }); return; }
+                                  saveTarget(u.name, tt.key, raw);
+                                }}
                                 onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
                                 disabled={savingCell === key}
                                 style={{width:60,textAlign:'center',fontSize:11,padding:'3px 5px',opacity:savingCell===key?0.5:1}}
