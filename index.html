@@ -10301,6 +10301,11 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [doneActualFor, setDoneActualFor] = React.useState(null);   // task id
   const [doneActualText, setDoneActualText] = React.useState('');
   const [savingTask, setSavingTask] = React.useState(false);
+  // 15 May 2026 Late PM — synchronous re-entrancy guard for addManualTask.
+  // setSavingTask(true) is async; without this ref a fast double-tap could enter
+  // addManualTask twice before the disabled button reflects state. Caused 6 dup
+  // 'Quote sent' rows for Ruchita on 15 May 2026 (manual user-source dups in 2 min).
+  const savingTaskRef = React.useRef(false);
   const [stuckNoteFor, setStuckNoteFor] = React.useState(null);  // task id while entering stuck reason
   const [stuckNoteText, setStuckNoteText] = React.useState('');
   const [stuckActualText, setStuckActualText] = React.useState('');  // partial count for stuck quantified tasks
@@ -10535,14 +10540,25 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
           .eq('user_name', uname).eq('task_date', todayISO);
         if (cancelled || exErr) return;
         const existingDutyIds = new Set((existing||[]).filter(r=>r.source==='recurring').map(r=>r.source_duty_id));
-        // Map of source_task_id -> expected child text for today's existing carries.
+        // Map of source_task_id -> Set<task_text> for today's existing carries.
         // Used by the leaf check below to verify chain integrity (text-match guard).
         // Added 15 May 2026 to fix bug where a corrupted source_task_id pointer (child
         // text ≠ parent text) silently dropped a real pending task on the next carry.
-        const existingCarryTextById = new Map(
-          (existing||[]).filter(r=>r.source==='carried' && r.source_task_id)
-                        .map(r=>[r.source_task_id, r.task_text])
-        );
+        // Updated 15 May 2026 Late PM: changed from single-value Map to Map<id,Set<text>>.
+        // Previous version collapsed multiple today-carries sharing the same source_task_id
+        // into one value (last-write-wins), which broke the text-match guard when a
+        // text-edited child existed alongside a same-text child. Caused 5 dup carry rows
+        // for Sonam on 15 May 2026 (task_text='GST reconcilation' parent ID 727 + two
+        // text-edited children 889/909). Set-based check is correct: parent is "already
+        // carried" iff ANY existing carry pointing to it has matching text.
+        const existingCarryTextById = new Map();
+        (existing||[]).forEach(r => {
+          if (r.source==='carried' && r.source_task_id) {
+            const s = existingCarryTextById.get(r.source_task_id);
+            if (s) s.add(r.task_text);
+            else existingCarryTextById.set(r.source_task_id, new Set([r.task_text]));
+          }
+        });
 
         const inserts = [];
 
@@ -10610,8 +10626,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             // when a stray source_task_id pointed to an unrelated task.
             const parentText = parentTextById.get(t.id);
             if (parentText !== undefined && parentText === t.task_text) return;
-            const todayCarryText = existingCarryTextById.get(t.id);
-            if (todayCarryText !== undefined && todayCarryText === t.task_text) return;   // already carried today (race safety)
+            const todayCarrySet = existingCarryTextById.get(t.id);
+            if (todayCarrySet && todayCarrySet.has(t.task_text)) return;   // already carried today (race safety)
             const lastClosed = latestClosedByText.get(t.task_text);
             if (lastClosed && lastClosed >= t.task_date) return;  // chain closed by later done/cancelled
             inserts.push({
@@ -10909,27 +10925,31 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   // Auto-derives a sensible default task_text if user left it blank but ticked quantify
   // (e.g. "10 calls" for type=call, target=10).
   const addManualTask = async () => {
+    // 15 May 2026 Late PM — synchronous re-entrancy guard. setSavingTask is async
+    // so the disabled button can be tapped twice in <100ms before state propagates.
+    if (savingTaskRef.current) return;
+    savingTaskRef.current = true;
     let text = (newTaskText||'').trim();
     // Quantified-task validation + sensible defaults
     if (newTaskQuantified) {
       const tgt = parseInt(newTaskTarget, 10);
-      if (!Number.isFinite(tgt) || tgt < 1) { show?.('Enter a target count (1+)', false); return; }
+      if (!Number.isFinite(tgt) || tgt < 1) { savingTaskRef.current = false; show?.('Enter a target count (1+)', false); return; }
       // 15 May 2026 PM rev5 — client_kind required for quantified tasks
       if (!['new','existing'].includes(newTaskClientKind)) {
-        show?.('Pick New or Existing client', false); return;
+        savingTaskRef.current = false; show?.('Pick New or Existing client', false); return;
       }
       // 15 May 2026 PM rev5 — Saturday block for face-to-face activity types
       // (per policy: no client meetings/visits on Saturdays).
       // dayOfWeek: 0=Sun, 6=Sat. Local time is the source of truth here.
       const isSat = new Date().getDay() === 6;
       if (isSat && (newTaskType === 'meeting' || newTaskType === 'site_visit')) {
-        show?.('No meetings/site visits on Saturday — pick another type', false); return;
+        savingTaskRef.current = false; show?.('No meetings/site visits on Saturday — pick another type', false); return;
       }
       if (!text) {
         text = tgt + ' ' + (TASK_TYPE_LABELS[newTaskType] || 'tasks');
       }
     } else if (!text) {
-      show?.('Type a task first', false); return;
+      savingTaskRef.current = false; show?.('Type a task first', false); return;
     }
     setSavingTask(true);
     const row = {
@@ -10948,6 +10968,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
     };
     const {data, error} = await sb.from('daily_tasks').insert(row).select().single();
     setSavingTask(false);
+    savingTaskRef.current = false;
     if (error) { show?.('Failed to add: ' + error.message, false); return; }
     setTodayTasks(prev => [...(prev||[]), data]);
     setNewTaskText(''); setNewTaskJob(''); setNewTaskSite('');
@@ -11489,7 +11510,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                       <span onClick={() => { setEditTaskFor(t.id); setEditTaskText(t.task_text||''); setEditTaskJob(t.linked_job_id||''); setEditTaskSite(t.linked_site_id||''); }} style={{color:'#85b7eb',cursor:'pointer',fontSize:9}} title="Edit task">edit</span>
                     )}
                     <span onClick={() => setStuckNoteFor(t.id)} style={{color:'#e24b4a',cursor:'pointer',fontSize:9}} title="Mark stuck">stuck?</span>
-                    {t.source === 'user' && (
+                    {(t.source === 'user' || t.source === 'carried') && (
                       <span onClick={() => { if (confirm('Cancel this task?')) cancelTask(t.id); }} style={{color:'#475569',cursor:'pointer',fontSize:9}} title="Cancel task">×</span>
                     )}
                   </div>
