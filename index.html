@@ -1728,7 +1728,7 @@ function MainApp({user,onLogout,masterData}){
 }
 
 // ─── SMALL COMPONENTS ───────────────────────────────────────
-function SC({l,v,s,c="#e3a008",d=0,delta,onEdit}){return <div className="c a" style={{padding:"10px 12px",animationDelay:`${d}ms`}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}{onEdit&&<span onClick={onEdit} style={{cursor:'pointer',marginLeft:4,opacity:.5,fontSize:9}} title="Click to rename">✎</span>}</p><div style={{display:"flex",alignItems:"baseline",gap:4}}><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{delta!=null&&delta!==0&&<span style={{fontSize:9,fontWeight:700,color:delta>0?'#4ade80':'#f47067'}}>{delta>0?'▲ +'+delta:'▼ '+delta}</span>}</div>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
+function SC({l,v,s,c="#e3a008",d=0,delta,onEdit,onClick}){return <div className="c a" onClick={onClick} style={{padding:"10px 12px",animationDelay:`${d}ms`,cursor:onClick?'pointer':'default'}}><p style={{fontSize:8.5,color:"#64748b",textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,marginBottom:2}}>{l}{onEdit&&<span onClick={onEdit} style={{cursor:'pointer',marginLeft:4,opacity:.5,fontSize:9}} title="Click to rename">✎</span>}</p><div style={{display:"flex",alignItems:"baseline",gap:4}}><p className="mn" style={{fontSize:16,fontWeight:700,color:c}}>{v}</p>{delta!=null&&delta!==0&&<span style={{fontSize:9,fontWeight:700,color:delta>0?'#4ade80':'#f47067'}}>{delta>0?'▲ +'+delta:'▼ '+delta}</span>}</div>{s&&<p style={{fontSize:9,color:"#64748b"}}>{s}</p>}</div>;}
 function FB({f,firms}){const fm=firms?.find(x=>x.code===f);return fm?<span className="bd" style={{background:fm.color+"20",color:fm.color}}>{fm.short_name}</span>:null;}
 function Ck({on,onClick,tip}){return <div className={`ck ${on?"on":""}`} onClick={onClick} title={tip||undefined}>{on?"✓":""}</div>;}
 function StatusTip({j,children}){
@@ -1895,8 +1895,8 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
       {cmpDays>0&&<span style={{fontSize:9,color:"#64748b"}}>Showing changes in last {cmpDays} days</span>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs}/>
-      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15} s={sitesPerCard?`${sitesPerCard[card.key]||0} sites`:undefined}/>)}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs} onClick={()=>{try{sessionStorage.setItem('dash_card_filter','__ALL__');}catch(e){} sp('dept');}}/>
+      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15} s={sitesPerCard?`${sitesPerCard[card.key]||0} sites`:undefined} onClick={()=>{try{sessionStorage.setItem('dash_card_filter',card.key);}catch(e){} sp('dept');}}/>)}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
@@ -4162,6 +4162,19 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
       : (j) => card.statuses.includes(j.status)
   }));
   const [ad,sad]=useState(tabs[0].id);
+  // 15 May 26: read dash_card_filter set by Dashboard cards on mount; pick the
+  // matching tab (or null for "show all"). One-shot — clears after read.
+  React.useEffect(()=>{
+    try{
+      const k=sessionStorage.getItem('dash_card_filter');
+      if(k){
+        sessionStorage.removeItem('dash_card_filter');
+        if(k==='__ALL__') sad(null);
+        else if(tabs.some(t=>t.id===k)) sad(k);
+      }
+    }catch(e){}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   const cur=tabs.find(t=>t.id===ad) || tabs[0];
   const pen=useMemo(()=>jobs.filter(j=>{
     if(s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
