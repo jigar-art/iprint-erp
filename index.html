@@ -10436,6 +10436,8 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
   const [teamTasksLoading, setTeamTasksLoading] = React.useState(false);
   // 14 May 2026 — Team Performance drill-down: click user row to expand their tasks.
   const [expandedUser, setExpandedUser] = React.useState(null);
+  // 16 May 2026 — Quantified Target/Actual drill-down: click cells to see contributing tasks.
+  const [qTaskPopup, setQTaskPopup] = React.useState(null);
 
   const loadTeamTasks = React.useCallback(async () => {
     if (!isTeamViewer) return;
@@ -12482,9 +12484,19 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                               </React.Fragment>);
                               const pct = r.qTarget > 0 ? Math.min(999, Math.round((r.qActual / r.qTarget) * 100)) : 0;
                               const pctColor = pct >= 100 ? '#1d9e75' : pct >= 60 ? '#e3a008' : pct > 0 ? '#d85a30' : '#475569';
+                              // 16 May 2026 — Click Target/Actual cells → open popup listing the contributing quantified tasks.
+                              const openQPopup = (e) => {
+                                e.stopPropagation();
+                                const qTasks = teamTasks
+                                  .filter(t => ((t.user_name||'').toUpperCase().trim() || '(unknown)') === r.user)
+                                  .filter(t => t.is_quantified === true && t.status !== 'cancelled')
+                                  .sort((a,b) => (b.task_date||'').localeCompare(a.task_date||''));
+                                setQTaskPopup({user:r.user, tasks:qTasks, qTarget:r.qTarget, qActual:r.qActual});
+                              };
+                              const clickStyle = {cursor:'pointer',textDecoration:'underline',textDecorationColor:'#3a4a66',textDecorationStyle:'dotted',textUnderlineOffset:2};
                               return (<React.Fragment>
-                                <td style={{padding:'4px 6px',textAlign:'right',color:'#cbd5e1',borderLeft:'1px solid #1a2030'}}>{r.qTarget || '—'}</td>
-                                <td style={{padding:'4px 6px',textAlign:'right',color:'#cbd5e1'}}>{r.qActual}</td>
+                                <td onClick={openQPopup} title="Click to see contributing tasks" style={{padding:'4px 6px',textAlign:'right',color:'#cbd5e1',borderLeft:'1px solid #1a2030',...clickStyle}}>{r.qTarget || '—'}</td>
+                                <td onClick={openQPopup} title="Click to see contributing tasks" style={{padding:'4px 6px',textAlign:'right',color:'#cbd5e1',...clickStyle}}>{r.qActual}</td>
                                 <td style={{padding:'4px 6px',textAlign:'right',color:pctColor,fontWeight:600}}>{r.qTarget > 0 ? pct + '%' : '—'}</td>
                               </React.Fragment>);
                             })()}
@@ -12603,10 +12615,55 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
         </div>
       )}
 
+      {/* 16 May 2026 — Quantified task drill-down modal (Target/Actual click). */}
+      {qTaskPopup && (
+        <div onClick={() => setQTaskPopup(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div onClick={(e)=>e.stopPropagation()} style={{background:'#0f1622',border:'1px solid #1a2030',borderRadius:8,maxWidth:680,width:'100%',maxHeight:'80vh',display:'flex',flexDirection:'column'}}>
+            <div style={{padding:'10px 14px',borderBottom:'1px solid #1a2030',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontSize:11,color:'#a5cfff',fontWeight:600,textTransform:'uppercase',letterSpacing:0.5}}>Quantified tasks · {qTaskPopup.user}</div>
+                <div style={{fontSize:10,color:'#64748b',marginTop:2}}>Target {qTaskPopup.qTarget} · Actual {qTaskPopup.qActual} · {qTaskPopup.tasks.length} task row{qTaskPopup.tasks.length===1?'':'s'}</div>
+              </div>
+              <span onClick={()=>setQTaskPopup(null)} style={{color:'#64748b',cursor:'pointer',fontSize:18,padding:'0 6px'}} title="Close">×</span>
+            </div>
+            <div style={{overflowY:'auto',flex:1,padding:'8px 14px'}}>
+              {qTaskPopup.tasks.length === 0 ? (
+                <div style={{padding:20,textAlign:'center',color:'#64748b',fontSize:11}}>No quantified tasks in this period.</div>
+              ) : (
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,color:'#cbd5e1'}}>
+                  <thead>
+                    <tr style={{borderBottom:'1px solid #1a2030',color:'#64748b',textAlign:'left'}}>
+                      <th style={{padding:'4px 6px',fontWeight:600,width:80}}>Date</th>
+                      <th style={{padding:'4px 6px',fontWeight:600}}>Task</th>
+                      <th style={{padding:'4px 6px',fontWeight:600,width:90,textAlign:'right'}}>Target/Actual</th>
+                      <th style={{padding:'4px 6px',fontWeight:600,width:70}}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {qTaskPopup.tasks.map(t => {
+                      const sColor = t.status==='done'?'#30b54a':t.status==='pending'?'#e3a008':t.status==='stuck'?'#d85a30':'#64748b';
+                      const tgt = t.target_count!=null ? t.target_count : '—';
+                      const act = t.actual_count!=null ? t.actual_count : '—';
+                      return (
+                        <tr key={t.id} style={{borderBottom:'1px dashed #1a2030'}}>
+                          <td style={{padding:'4px 6px',color:'#64748b',whiteSpace:'nowrap'}}>{(t.task_date||'').slice(5)}</td>
+                          <td style={{padding:'4px 6px'}}>{t.task_text || '—'}</td>
+                          <td style={{padding:'4px 6px',textAlign:'right',color:'#a5cfff',whiteSpace:'nowrap'}}>{tgt} / {act}</td>
+                          <td style={{padding:'4px 6px',color:sColor,fontSize:10,textTransform:'uppercase',fontWeight:600}}>{t.status}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
-
 // CLIENT PORTAL — Dept login + status view + notes
 // ═══════════════════════════════════════════════════════════
 function ClientPortal({code}){
