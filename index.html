@@ -10445,7 +10445,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
       const ps = periodBounds.startDate;  // local Date at midnight
       const startDate = `${ps.getFullYear()}-${String(ps.getMonth()+1).padStart(2,'0')}-${String(ps.getDate()).padStart(2,'0')}`;
       const {data, error} = await sb.from('daily_tasks')
-        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note')
+        .select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note,is_quantified,task_type,target_count,actual_count')
         .gte('task_date', startDate)
         .order('task_date',{ascending:false}).order('created_at',{ascending:false}).limit(2000);
       if (error) { console.error('Load team tasks error', error); return; }
@@ -12381,7 +12381,7 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
             const byUser = new Map();
             for (const t of teamTasks) {
               const u = (t.user_name||'').toUpperCase().trim() || '(unknown)';
-              if (!byUser.has(u)) byUser.set(u, {user:u, total:0, done:0, pending:0, stuck:0, cancelled:0, user_src:0, recurring:0, carried:0, admin:0});
+              if (!byUser.has(u)) byUser.set(u, {user:u, total:0, done:0, pending:0, stuck:0, cancelled:0, user_src:0, recurring:0, carried:0, admin:0, qTarget:0, qActual:0, qRows:0});
               const r = byUser.get(u);
               r.total++;
               if (t.status === 'done') r.done++;
@@ -12393,6 +12393,13 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
               else if (src === 'recurring') r.recurring++;
               else if (src === 'carried') r.carried++;
               else if (src === 'admin') r.admin++;
+              // 16 May 2026 — Quantified target/actual aggregation. Only count quantified rows.
+              // Skip cancelled rows defensively to avoid double-count if a row was cancelled after actual_count was filled.
+              if (t.is_quantified === true && t.status !== 'cancelled') {
+                r.qRows++;
+                if (t.target_count != null) r.qTarget += Number(t.target_count) || 0;
+                if (t.actual_count != null) r.qActual += Number(t.actual_count) || 0;
+              }
             }
             const userRows = Array.from(byUser.values()).sort((a,b) => b.total - a.total);
 
@@ -12444,6 +12451,9 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Recurring</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Carried</th>
                           <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right'}}>Admin</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#a5cfff',borderLeft:'1px solid #1a2030'}}>Target</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#a5cfff'}}>Actual</th>
+                          <th style={{padding:'4px 6px',fontWeight:600,textAlign:'right',color:'#a5cfff'}}>%</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -12462,6 +12472,22 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.recurring>0?'#cbd5e1':'#475569'}}>{r.recurring}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.carried>0?'#cbd5e1':'#475569'}}>{r.carried}</td>
                             <td style={{padding:'4px 6px',textAlign:'right',color:r.admin>0?'#cbd5e1':'#475569'}}>{r.admin}</td>
+                            {(() => {
+                              // 16 May 2026 — Target vs actual columns. Only quantified rows count.
+                              // If user has zero quantified rows in this period, show — across all three cols.
+                              if (r.qRows === 0) return (<React.Fragment>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:'#475569',borderLeft:'1px solid #1a2030'}}>—</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:'#475569'}}>—</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:'#475569'}}>—</td>
+                              </React.Fragment>);
+                              const pct = r.qTarget > 0 ? Math.min(999, Math.round((r.qActual / r.qTarget) * 100)) : 0;
+                              const pctColor = pct >= 100 ? '#1d9e75' : pct >= 60 ? '#e3a008' : pct > 0 ? '#d85a30' : '#475569';
+                              return (<React.Fragment>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:'#cbd5e1',borderLeft:'1px solid #1a2030'}}>{r.qTarget || '—'}</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:'#cbd5e1'}}>{r.qActual}</td>
+                                <td style={{padding:'4px 6px',textAlign:'right',color:pctColor,fontWeight:600}}>{r.qTarget > 0 ? pct + '%' : '—'}</td>
+                              </React.Fragment>);
+                            })()}
                           </tr>
                           {isOpen && (() => {
                             const userTasks = teamTasks.filter(t => ((t.user_name||'').toUpperCase().trim() || '(unknown)') === r.user);
@@ -13564,6 +13590,50 @@ function TargetSetterPage({user, team, show}) {
       ) : (
         <div style={{fontSize:10,color:'#64748b',padding:'10px 0'}}>Weekly targets are set by your manager.</div>
       )}
+
+      {/* ADMIN REVENUE OVERVIEW — admin/sales role only, read-only */}
+      {isAdmin && <AdminRevenueOverview team={team} show={show} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN REVENUE OVERVIEW (16 May 2026)
+// ═══════════════════════════════════════════════════════════
+// Read-only view of all sales-role users' monthly_revenue_log entries.
+// Rendered inside TargetSetterPage for admin/sales-role viewers (Jigar/Chandni).
+// Shows each user's current month progress + last 3 months strip.
+// Reuses MonthlyRevenueCard in readOnly mode (one card per user).
+function AdminRevenueOverview({team, show}) {
+  // Pick users with role 'sales' or any whose name includes BATUL/POONAM (legacy safety net).
+  const revenueUsers = React.useMemo(() => {
+    const sales = (team||[]).filter(t => t.active && t.role === 'sales');
+    const seen = new Set();
+    const out = [];
+    sales.forEach(t => {
+      const u = (t.name||'').toUpperCase();
+      if (!seen.has(u)) { seen.add(u); out.push(t); }
+    });
+    return out.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+  }, [team]);
+
+  if (revenueUsers.length === 0) {
+    return <div style={{fontSize:10,color:'#64748b',padding:10}}>No sales-role users found.</div>;
+  }
+
+  return (
+    <div style={{background:'#0c1017',border:'1px solid #1a2030',borderRadius:6,padding:12,marginTop:14}}>
+      <div style={{fontSize:11,color:'#e3a008',textTransform:'uppercase',letterSpacing:0.5,marginBottom:10,fontWeight:700}}>
+        💰 Monthly Revenue — {revenueUsers.length} sales user{revenueUsers.length===1?'':'s'} (read-only)
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(420px,1fr))',gap:12}}>
+        {revenueUsers.map(u => (
+          <div key={u.name}>
+            <div style={{fontSize:11,color:'#cbd5e1',marginBottom:4,fontWeight:600}}>{u.name}</div>
+            <MonthlyRevenueCard user={{name: u.name}} show={show} readOnly={true} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -13574,7 +13644,7 @@ function TargetSetterPage({user, team, show}) {
 // Self-reported monthly numbers for sales executives. Gated to BATUL only
 // at the render site. Reads/writes monthly_revenue_log keyed by user_name + month.
 // Layout: current month editable card on top, last 3 months read-only history strip below.
-function MonthlyRevenueCard({user, show}) {
+function MonthlyRevenueCard({user, show, readOnly}) {
   const uname = (user?.name || '').toUpperCase();
   // Helper: current month as YYYY-MM (local time)
   const currentMonth = React.useMemo(() => {
@@ -13704,14 +13774,16 @@ function MonthlyRevenueCard({user, show}) {
           <input className="in" type="number" min="0" value={editEst}
             onChange={e => setEditEst(e.target.value)}
             placeholder="0"
-            style={{width:'100%',fontSize:11,padding:'5px 8px',boxSizing:'border-box'}} />
+            disabled={readOnly}
+            style={{width:'100%',fontSize:11,padding:'5px 8px',boxSizing:'border-box',opacity:readOnly?0.7:1}} />
         </div>
         <div>
           <label style={{fontSize:9,color:'#94a3b8',display:'block',marginBottom:3}}>Revenue received (₹)</label>
           <input className="in" type="number" min="0" value={editRcv}
             onChange={e => setEditRcv(e.target.value)}
             placeholder="0"
-            style={{width:'100%',fontSize:11,padding:'5px 8px',boxSizing:'border-box'}} />
+            disabled={readOnly}
+            style={{width:'100%',fontSize:11,padding:'5px 8px',boxSizing:'border-box',opacity:readOnly?0.7:1}} />
         </div>
       </div>
 
@@ -13729,12 +13801,20 @@ function MonthlyRevenueCard({user, show}) {
       <input className="in" value={editNotes}
         onChange={e => setEditNotes(e.target.value)}
         placeholder="Notes (optional) — main wins, pending receivables, late payers"
-        style={{width:'100%',fontSize:10,padding:'5px 8px',boxSizing:'border-box',marginBottom:6}} />
+        disabled={readOnly}
+        style={{width:'100%',fontSize:10,padding:'5px 8px',boxSizing:'border-box',marginBottom:6,opacity:readOnly?0.7:1}} />
 
+      {!readOnly && (
       <button className="b bp" onClick={saveSelected} disabled={saving}
         style={{fontSize:10,padding:'4px 14px',opacity:saving?0.5:1}}>
         {saving ? 'Saving…' : 'Save ' + selectedMonth}
       </button>
+      )}
+      {readOnly && (
+      <div style={{fontSize:9,color:'#64748b',fontStyle:'italic',padding:'2px 0'}}>
+        Read-only — filled by {selectedRow?.filled_by || '(unfilled)'}{selectedRow?.updated_at ? ' · last updated ' + (selectedRow.updated_at||'').slice(0,10) : ''}
+      </div>
+      )}
 
       {/* History strip: all other months at a glance, click to switch */}
       {history.length > 0 && (
