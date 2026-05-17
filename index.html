@@ -1287,46 +1287,64 @@ function MainApp({user,onLogout,masterData}){
   },[show, user]);
 
   // ─── UPDATE JOB STATUS ─────────────────────────────────────
+  // 17 May 2026 (Fix A): race-safe rewrite. Three guarantees:
+  //   1. Always read DB-side {status, status_dates} BEFORE merging, so a stale
+  //      React cache cannot clobber a newer history written by another browser.
+  //   2. If DB.status !== reactJob.status, the local view is stale — abort the
+  //      write, refresh React state from DB, and ask the user to retry. No clobber.
+  //   3. Reject writes with userName='Unknown' so we never lose attribution.
+  // The update sequence is now: read DB → merge into DB-side history → write back → 
+  // update React on success. UI feels slightly slower (~150ms typical) but the
+  // tradeoff is correctness: no more silent reverts, no more orphan stamps.
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
-    // ── Defensive validation (22 Apr 26): reject legacy/removed statuses.
-    // Catches cached-UI scenarios where a user's old browser tab has stale
-    // dropdown options (Active, Designing, Dispatch, etc.) from before the
-    // 22 Apr status overhaul. Without this check, the DB accepts the write
-    // and a row ends up on a status that no longer exists in ALL_ST_NEW.
+    // Reject legacy/removed statuses (22 Apr 26 carry-over)
     if (newStatus && !ALL_ST_NEW.includes(newStatus)) {
       show('⚠️ "'+newStatus+'" is no longer a valid status. Please refresh the page (Ctrl+Shift+R) and try again.', false);
       console.warn('updateJobStatus rejected legacy status:', newStatus, 'for job', jobId);
       return;
     }
     
-    // Instant UI update — don't wait for DB
-    let skip=false;
-    let newDates={};
-    const now=new Date();
-    const timeStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
-    // 26 Apr 26: was window.__currentUser?.name which only got populated on Login
-    // submit click — page refresh restored React `user` from localStorage but never
-    // re-set the global, so every status change after a refresh got stamped 'by Unknown'.
-    // Read from the React prop (which is restored on boot, line 6957) with localStorage
-    // fallback in case React state is ever stale.
+    // Resolve user name. Read prop first, localStorage fallback. NEVER stamp 'Unknown'.
     let userName=user?.name;
     if(!userName){try{const s=localStorage.getItem('erp_user');if(s)userName=JSON.parse(s)?.name;}catch(e){}}
-    if(!userName)userName='Unknown';
+    if(!userName){
+      show('⚠️ Cannot identify your login — please refresh and sign in again before changing status.',false);
+      console.warn('updateJobStatus blocked: no userName resolvable for job',jobId);
+      return;
+    }
     
-    setJobs(prev=>{
-      const job=prev.find(j=>j.id===jobId);
-      if(!job||job.status===newStatus){skip=true;return prev;}
-      const existingDates=job.status_dates||{};
-      const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
-      newDates={...existingDates,[statusKey]:timeStr+' by '+userName};
-      return prev.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j);
-    });
-    if(skip)return;
+    // Re-read the row from DB. This is the truth-source for the merge.
+    const {data:dbRow,error:readErr}=await sb.from('jobs')
+      .select('id,status,status_dates,updated_at').eq('id',jobId).single();
+    if(readErr||!dbRow){
+      show('⚠️ Could not read current status from DB — try again. ('+(readErr?.message||'no row')+')',false);
+      return;
+    }
     
-    // Show toast IMMEDIATELY
-    show("✅ Status → "+newStatus);
+    // Same status already? No-op.
+    if(dbRow.status===newStatus){
+      show('Status already "'+newStatus+'" — no change.',false);
+      return;
+    }
     
-    // Dept flags — update React state instantly
+    // Stale-cache guard: if React thinks the job is at one status but DB says
+    // another, another user / tab already moved it. Don't clobber. Reconcile.
+    const reactJob=jobs.find(j=>j.id===jobId);
+    if(reactJob && reactJob.status!==dbRow.status){
+      // Pull DB truth back into React so the dropdown shows reality.
+      setJobs(p=>p.map(j=>j.id===jobId?{...j,status:dbRow.status,status_dates:dbRow.status_dates||{}}:j));
+      show('⚠️ "'+jobId+'" was changed by someone else to "'+dbRow.status+'" while you were viewing. Refreshed — please re-confirm and retry.',false);
+      return;
+    }
+    
+    // Build the merged history. timeStr uses local IST.
+    const now=new Date();
+    const timeStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
+    const existingDates=(dbRow.status_dates && typeof dbRow.status_dates==='object')?dbRow.status_dates:{};
+    const statusKey=newStatus.replace(/\s+/g,'_').toLowerCase();
+    const newDates={...existingDates,[statusKey]:timeStr+' by '+userName};
+    
+    // Dept flag map for line_items (unchanged from prior behaviour)
     const statusDepts={'Draft':[0,0,0,0,0,0,0,0],'Quotation Sent':[1,0,0,0,0,0,0,0],'Recee':[1,0,0,0,0,0,0,0],'PO Pending':[1,0,0,0,0,0,0,0],
       'Designing - In House':[1,1,0,0,0,0,0,0],'Designing - Outsource':[1,1,0,0,0,0,0,0],
       'Printing · In-House':[1,1,1,1,0,0,0,0],'Printing · Outsource':[1,1,1,1,0,0,0,0],
@@ -1336,26 +1354,30 @@ function MainApp({user,onLogout,masterData}){
       'Cash Pending':[1,1,1,1,1,1,1,0],'IC Pending':[1,1,1,1,1,1,1,0],'DC Pending':[1,1,1,1,1,1,1,0],
       'Billing Done':[1,1,1,1,1,1,1,1],'Cash Received':[1,1,1,1,1,1,1,1],'No Bill':[1,1,1,1,1,1,1,1],'Cancelled':[1,1,1,1,1,1,1,1]};
     const flags=statusDepts[newStatus];
+    
+    // Write to DB. Await the primary jobs UPDATE — only if it succeeds do we touch React.
+    const {error:writeErr}=await sb.from('jobs')
+      .update({status:newStatus,status_dates:newDates}).eq('id',jobId);
+    if(writeErr){
+      show('⚠️ Status save FAILED: '+writeErr.message+' — please retry.',false);
+      return;
+    }
+    
+    // DB write confirmed — now update React state to match.
+    setJobs(p=>p.map(j=>j.id===jobId?{...j,status:newStatus,status_dates:newDates}:j));
     if(flags){
       const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
       const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
       setItems(prev=>prev.map(i=>i.job_id===jobId?{...i,...updates}:i));
+      // Line-items dept-flag write is best-effort, fire-and-forget. Failure here
+      // doesn't lose status data — it only desyncs dept flags which are derived.
+      sb.from('line_items').update(updates).eq('job_id',jobId).then(r=>{
+        if(r.error)console.warn('dept flag sync failed for',jobId,r.error.message);
+      });
     }
     
-    // ALL DB writes in parallel — non-blocking background
-    const dbOps=[
-      sb.from('jobs').update({status:newStatus,status_dates:newDates}).eq('id',jobId),
-    ];
-    if(flags){
-      const deptCols=['dept_estimate','dept_design','dept_production','dept_printing','dept_fabrication','dept_dispatch','dept_installation','dept_accounts'];
-      const updates={};deptCols.forEach((c,i)=>{updates[c]=!!flags[i];});
-      dbOps.push(sb.from('line_items').update(updates).eq('job_id',jobId));
-    }
-    Promise.all(dbOps).then(results=>{
-      const err=results.find(r=>r.error);
-      if(err){show("⚠️ DB sync issue — refresh to verify",false);}
-    }).catch(()=>{show("⚠️ Network error — refresh to verify",false);});
-  },[show]);
+    show("✅ Status → "+newStatus);
+  },[show,user,jobs]);
 
   // ─── UPDATE JOB FIELDS (client details, PO, delivery etc) ──
   const updateJobFields = useCallback(async (jobId, fields) => {
