@@ -1613,19 +1613,19 @@ function MainApp({user,onLogout,masterData}){
     // Import BOQ — admin + sales role; tier-1 + APARNA + PRIYANKA
     {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA"]},
     // Dept Tracker — tier-1 + APARNA + PRIYANKA + designers + HARISH + MURLI + ANKITA (BATUL removed)
-    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer","printing","fabrication","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI"]},
+    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer","printing","fabrication","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","PRINTING"]},
     // Material In (GRN) — tier-1 + Shreya + Murli
-    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","VIDYA"]},
+    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","VIDYA","PRINTING"]},
     // Printing — tier-1 + PRIYANKA + designers + Harish
-    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing","designer","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH"]},
+    {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing","designer","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","PRINTING"]},
     // Fabrication — tier-1 + PRIYANKA + designers + Harish + Murli (dispatch role added)
-    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication","designer","printing","sales","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI"]},
+    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication","designer","printing","sales","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","PRINTING"]},
     // Outsource — tier-1 + PRIYANKA + SHREYA + designers + Harish (accounts role added for Shreya)
-    {id:"os",l:"Outsource",e:"📤",roles:["admin","production","printing","fabrication","designer","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","SHREYA","PRAJAKTA","MEDHA","HARISH"]},
+    {id:"os",l:"Outsource",e:"📤",roles:["admin","production","printing","fabrication","designer","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","SHREYA","PRAJAKTA","MEDHA","HARISH","PRINTING"]},
     // Dispatch — tier-1 + PRIYANKA + Murli + Harish (BATUL removed)
-    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch","designer","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","MURLI","HARISH"]},
+    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch","designer","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","MURLI","HARISH","PRINTING"]},
     // Stock — tier-1 + Shreya + Murli
-    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI"]},
+    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","PRINTING"]},
     // PO Reminders — tightened to tier-1 + RUCHITA + ANKITA only (per your correction)
     {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA"]},
     // Clients — tier-1 + Aparna + Priyanka + Shreya (BATUL removed)
@@ -1649,7 +1649,7 @@ function MainApp({user,onLogout,masterData}){
     // PO Generator — accounts role only (admin removed per your deliberate call). Tier-1 still sees via FULL_ACCESS.
     {id:"po",l:"PO Generator",e:"📄",roles:["accounts"],users:["SHREYA"]},
     // Receive Material — tier-1 + Shreya + Murli + Harish
-    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","HARISH"]},
+    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","HARISH","PRINTING"]},
     // Reports (04 May 26 — Deploy 1) — visible to everyone (My Report tab); Stalls + Output tabs gated to JIGAR + CHANDNI inside the page itself
     {id:"reports",l:"Reports",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
     // Target Setter (15 May 2026 PM) — Gated to QUANTIFY_USERS + tier-1 (15 May rev2).
