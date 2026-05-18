@@ -1699,11 +1699,11 @@ function MainApp({user,onLogout,masterData}){
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal} items={items} osItems={osItems}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
-          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} user={user} show={show}/>}
+          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} user={user} show={show} grn={grnData}/>}
           {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy}/>}
-          {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs}/>}
+          {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} materialsV2={masterData.materialsV2||[]}/>}
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob} sm={setModal} user={user} setBatches={setBatches} updateBatchField={updateBatchField}/>}
@@ -4583,7 +4583,7 @@ function GRNPage({grn,suppliers,materials,team,addGRN,updateGRN,deleteGRN,addNew
 }
 
 // PRINTING — Rebuilt 18 May 2026 — modal-based logging + 5 dashboard cards
-function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,user,show}){
+function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,user,show,grn}){
   const [showModal,setShowModal]=useState(false);
   const [showInkDetails,setShowInkDetails]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -4605,6 +4605,15 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
 
   const MACHINES=['Witcolour UV R2R','EPSON UV Flatbed','EPSON Latex'];
   const rollMaterials=(materialsV2||[]).filter(m=>m.unit==='roll'&&m.active).sort((a,b)=>a.name.localeCompare(b.name));
+
+  // Stock balance per material (sqft) — case-insensitive trim match.
+  // Same math as StockPage Roll Material Balance section.
+  const normMat=s=>(s||'').toLowerCase().trim();
+  const grnByMat={};(grn||[]).forEach(g=>{const k=normMat(g.material);if(k)grnByMat[k]=(grnByMat[k]||0)+(+g.sqft||0);});
+  const usedByMat={};(logs||[]).forEach(l=>{const k=normMat(l.material);if(k)usedByMat[k]=(usedByMat[k]||0)+(+l.print_sqft||0);});
+  const matBalance=f.material?(grnByMat[normMat(f.material)]||0)-(usedByMat[normMat(f.material)]||0):null;
+  const matInward=f.material?(grnByMat[normMat(f.material)]||0):null;
+  const matUsed=f.material?(usedByMat[normMat(f.material)]||0):null;
 
   // Active printing jobs
   const activeJobs=(jobs||[]).filter(j=>j.status==='Printing'||j.status==='Printing · In-House'||j.status==='Printing · Outsource');
@@ -4838,6 +4847,11 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
           <F l="Material * (from stock)"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}><option value="">— pick material —</option>{rollMaterials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
           <F l="Actual sqft (auto)"><input className="in mn" value={f.actual_sqft} readOnly style={{background:"#0a0f1a",color:"#8b949e"}}/></F>
         </div>
+
+        {f.material&&<div style={{marginTop:6,padding:"6px 10px",background:matBalance<=0?"#3b060720":matBalance<100?"#3b250620":"#05200e20",border:"1px solid "+(matBalance<=0?"#f47067":matBalance<100?"#e3a008":"#10b98140"),borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10}}>
+          <span style={{color:"#8b949e"}}>📦 <strong style={{color:"#e3a008"}}>{f.material}</strong> stock</span>
+          <span style={{color:"#8b949e"}}>Inward <strong style={{color:"#10b981"}}>{matInward.toFixed(0)}</strong> · Used <strong style={{color:"#ef4444"}}>{matUsed.toFixed(0)}</strong> · Remaining <strong style={{color:matBalance<=0?"#f47067":matBalance<100?"#e3a008":"#4ade80",fontSize:11}}>{matBalance.toFixed(0)} sqft</strong>{f.print_sqft&&+f.print_sqft>0&&<span style={{marginLeft:6,color:"#64748b"}}>(after this log: <strong style={{color:(matBalance-(+f.print_sqft))<0?"#f47067":"#8b949e"}}>{(matBalance-(+f.print_sqft)).toFixed(0)}</strong>)</span>}</span>
+        </div>}
 
         <div className="fg f2" style={{marginTop:6}}>
           <F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={f.print_sqft} onChange={e=>sF(p=>({...p,print_sqft:e.target.value}))} placeholder="e.g. 55"/></F>
@@ -5151,12 +5165,33 @@ function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(fa
 }
 
 // STOCK
-function StockPage({stock,grn,pl,fl}){const rows=Object.entries(stock).filter(([,v])=>v!==0||true).sort((a,b)=>a[0].localeCompare(b[0]));
+function StockPage({stock,grn,pl,fl,materialsV2}){const rows=Object.entries(stock).filter(([,v])=>v!==0||true).sort((a,b)=>a[0].localeCompare(b[0]));
+  // ── Roll Material Balance (sqft) — added 18 May 2026 v27 ─────────
+  // Computes per-material sqft balance: SUM(grn.sqft) - SUM(print_logs.print_sqft).
+  // Case-insensitive trim match between GRN raw material text and materials_master_v2 names.
+  // Only shows materials_master_v2 rows where unit='roll' AND active=true.
+  const norm=s=>(s||'').toLowerCase().trim();
+  const rollMats=(materialsV2||[]).filter(m=>m.unit==='roll'&&m.active);
+  const grnByName={};(grn||[]).forEach(g=>{const k=norm(g.material);if(k)grnByName[k]=(grnByName[k]||0)+(+g.sqft||0);});
+  const usedByName={};(pl||[]).forEach(l=>{const k=norm(l.material);if(k)usedByName[k]=(usedByName[k]||0)+(+l.print_sqft||0);});
+  const rollBalances=rollMats.map(m=>{const k=norm(m.name);const inward=grnByName[k]||0;const used=usedByName[k]||0;return{name:m.name,inward,used,remaining:inward-used};}).sort((a,b)=>a.remaining-b.remaining);
+  const totalInward=rollBalances.reduce((s,r)=>s+r.inward,0);
+  const totalUsed=rollBalances.reduce((s,r)=>s+r.used,0);
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
       <SC l="Inward" v={grn.reduce((s,g)=>s+(+g.qty||0),0)} c="#10b981"/><SC l="Print Used" v={pl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#ef4444" d={30}/><SC l="Fab Used" v={fl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#dc2626" d={60}/><SC l="Materials" v={rows.length} c="#3b82f6" d={90}/>
     </div>
-    <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-180px)"}}><table><thead><tr><th>Material</th><th>Available</th><th>Status</th></tr></thead><tbody>
+    <div className="c" style={{padding:0}}>
+      <div style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:11,fontWeight:700,color:"#8b5cf6"}}>📊 Roll Material Balance (sqft) — {rollBalances.length} rolls</span>
+        <span style={{fontSize:9,color:"#64748b"}}>Inward: <strong style={{color:"#10b981"}}>{totalInward.toFixed(0)}</strong> · Used: <strong style={{color:"#ef4444"}}>{totalUsed.toFixed(0)}</strong> · Remaining: <strong style={{color:"#e3a008"}}>{(totalInward-totalUsed).toFixed(0)}</strong></span>
+      </div>
+      <div style={{overflowX:"auto",maxHeight:300}}><table style={{width:"100%"}}><thead><tr><th>Material</th><th style={{textAlign:"right"}}>Inward sqft</th><th style={{textAlign:"right"}}>Used sqft</th><th style={{textAlign:"right"}}>Remaining</th><th>Status</th></tr></thead><tbody>
+        {rollBalances.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No roll materials in materials_master_v2</td></tr>}
+        {rollBalances.map(r=><tr key={r.name}><td style={{fontSize:10,fontWeight:600}}>{r.name}</td><td className="mn" style={{fontSize:10,textAlign:"right",color:"#10b981"}}>{r.inward.toFixed(0)}</td><td className="mn" style={{fontSize:10,textAlign:"right",color:"#ef4444"}}>{r.used.toFixed(0)}</td><td className="mn" style={{fontSize:11,textAlign:"right",fontWeight:700,color:r.remaining<=0?"#f47067":r.remaining<100?"#e3a008":"#4ade80"}}>{r.remaining.toFixed(0)}</td><td>{r.remaining<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:r.remaining<100?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:r.inward===0?<span className="bd" style={{background:"#1a203020",color:"#64748b"}}>No GRN</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td></tr>)}
+      </tbody></table></div>
+    </div>
+    <div className="c" style={{padding:0}}><div style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a"}}><span style={{fontSize:11,fontWeight:700,color:"#64748b"}}>📦 Legacy stock count (qty-based)</span></div><div style={{overflowX:"auto",maxHeight:"calc(100vh-540px)"}}><table><thead><tr><th>Material</th><th>Available</th><th>Status</th></tr></thead><tbody>
       {rows.map(([m,q])=><tr key={m}><td style={{fontWeight:600}}>{m}</td><td className="mn" style={{fontWeight:700}}>{q}</td><td>{q<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:q<=2?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td></tr>)}
     </tbody></table></div></div></div>;
 }
