@@ -1693,7 +1693,7 @@ function MainApp({user,onLogout,masterData}){
           <div style={{position:"relative"}}><input className="in" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:150,paddingLeft:22,fontSize:10}}/><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:10}}>🔍</span></div>
         </header>
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
-          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} fullJobs={fullJobs} fyFilter={fyFilter} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
+          {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} fullJobs={fullJobs} fyFilter={fyFilter} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user}/>}
           {pg==="jobs"&&<JobsPage jobs={filteredJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
@@ -1790,8 +1790,11 @@ function F({l,children}){return <div><label style={{fontSize:8.5,color:"#64748b"
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════
-function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
+function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,updateJobFields,togDept,addBatchToJob,show,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user}){
   const [dq,setDq]=useState("");
+  // ── View-only access for printing operators (no clickable navigation / job-sheet opening) ──
+  const DASH_VIEW_ONLY_USERS=['ANKIT','SONU','PRATIK','PRINTING TEAM'];
+  const isDashViewOnly=DASH_VIEW_ONLY_USERS.includes((user?.name||'').toUpperCase());
   const low=Object.entries(stock).filter(([,v])=>v<=2&&v>=0).slice(0,5);
   
   // Banking client patterns
@@ -1912,13 +1915,13 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
   const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
   const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
-    <div className="c" style={{padding:10}}>
+    {!isDashViewOnly&&<div className="c" style={{padding:10}}>
       <div style={{position:"relative"}}><input className="in" placeholder="🔍 Search by Job#, Invoice#, Client, Project, PO#..." value={dq} onChange={e=>setDq(e.target.value)} style={{fontSize:12,padding:"8px 12px",paddingLeft:12}}/></div>
       {results.length>0&&<div style={{marginTop:6,maxHeight:300,overflowY:"auto"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Invoice</th></tr></thead><tbody>
         {results.map(j=>{const bn=(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ');return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10}}>{j.client_name?.slice(0,22)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10,color:"#06b6d4"}}>{bn||'—'}</td></tr>})}
       </tbody></table></div>}
       {dq.length>=2&&results.length===0&&(()=>{const q=dq.toLowerCase();const otherFY=(fullJobs||[]).filter(j=>j.id?.toLowerCase().includes(q)||j.client_name?.toLowerCase().includes(q)||j.project?.toLowerCase().includes(q)||j.po_number?.toLowerCase().includes(q)||j.contact_person?.toLowerCase().includes(q)||(j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q))).length;return fyFilter!=='all'&&otherFY>0?<p style={{fontSize:10,color:"#f59e0b",marginTop:4}}>No results in this FY. Try <strong>All Years</strong> — {otherFY} match{otherFY!==1?'es':''} found in other years.</p>:<p style={{fontSize:10,color:"#64748b",marginTop:4}}>No results found for "{dq}"</p>;})()}
-    </div>
+    </div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
       <div style={{display:"flex",gap:3}}>
         {[{d:0,l:'No Compare'},{d:7,l:'7 Days'},{d:30,l:'30 Days'}].map(p=><button key={p.d} className={`b bs ${cmpDays===p.d?'bp':''}`} onClick={()=>setCmpDays(p.d)} style={{fontSize:9,padding:"3px 8px"}}>{p.d?'📊 '+p.l:'—'}</button>)}
@@ -1926,8 +1929,8 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
       {cmpDays>0&&<span style={{fontSize:9,color:"#64748b"}}>Showing changes in last {cmpDays} days</span>}
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:7}}>
-      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs} onClick={()=>{try{sessionStorage.setItem('dash_card_filter','__ALL__');}catch(e){} sp('dept');}}/>
-      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15} s={sitesPerCard?`${sitesPerCard[card.key]||0} sites`:undefined} onClick={()=>{try{sessionStorage.setItem('dash_card_filter',card.key);}catch(e){} sp('dept');}}/>)}
+      <SC l="Total Jobs" v={s.jobs} s={`${s.active} active`} delta={deltas.jobs} onClick={isDashViewOnly?undefined:()=>{try{sessionStorage.setItem('dash_card_filter','__ALL__');}catch(e){} sp('dept');}}/>
+      {STATUS_CARDS.map((card,idx)=><SC key={card.key} l={card.label} v={countJobsByCard(jobs,card.key)} c={card.color} d={30+idx*15} s={sitesPerCard?`${sitesPerCard[card.key]||0} sites`:undefined} onClick={isDashViewOnly?undefined:()=>{try{sessionStorage.setItem('dash_card_filter',card.key);}catch(e){} sp('dept');}}/>)}
     </div>
     {/* Banking / Non-Banking Split */}
     <div className="c" style={{padding:10}}>
@@ -1966,7 +1969,7 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
       </div>}
     </div>
     {low.length>0&&<div className="c" style={{padding:10,borderColor:"#f4706733"}}><p style={{fontSize:9,color:"#f47067",fontWeight:700,marginBottom:4}}>⚠️ Low Stock</p><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{low.map(([m,q])=><span key={m} style={{background:"#1a0505",border:"1px solid #f4706733",borderRadius:5,padding:"3px 6px",fontSize:9.5}}><strong style={{color:"#f47067"}}>{q}</strong> {m}</span>)}</div></div>}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:5}}>{[{l:"New Job",p:"new",e:"➕"},{l:"Material In",p:"grn",e:"📦"},{l:"Printing",p:"print",e:"🖨️"},{l:"Fabrication",p:"fab",e:"🔧"},{l:"Outsource",p:"os",e:"📤"},{l:"Dispatch",p:"disp",e:"🚚"},{l:"Stock",p:"stock",e:"📊"},{l:"Accounts",p:"acc",e:"🧾"}].map(a=><button key={a.l} className="b" style={{padding:8,justifyContent:"flex-start"}} onClick={()=>sp(a.p)}>{a.e} {a.l}</button>)}</div>
+    {!isDashViewOnly&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:5}}>{[{l:"New Job",p:"new",e:"➕"},{l:"Material In",p:"grn",e:"📦"},{l:"Printing",p:"print",e:"🖨️"},{l:"Fabrication",p:"fab",e:"🔧"},{l:"Outsource",p:"os",e:"📤"},{l:"Dispatch",p:"disp",e:"🚚"},{l:"Stock",p:"stock",e:"📊"},{l:"Accounts",p:"acc",e:"🧾"}].map(a=><button key={a.l} className="b" style={{padding:8,justifyContent:"flex-start"}} onClick={()=>sp(a.p)}>{a.e} {a.l}</button>)}</div>}
   </div>;
 }
 
