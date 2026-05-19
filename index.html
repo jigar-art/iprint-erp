@@ -9644,6 +9644,22 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     return Object.entries(p).sort((a,b)=>b[1]-a[1]);
   },[sites]);
 
+  // dupIds — must be declared BEFORE filtered (which references it via dupOnly)
+  // because Babel-standalone hoists const-as-var (=undefined) on first render.
+  const dupIds=useMemo(()=>{
+    const seen={};const dups=new Set();const groupKeys=new Set();
+    sites.forEach(s=>{
+      const key=(s.atm_id||'')+'||'+(s.site_unique_id||'');
+      if(key!=='||'){
+        if(seen[key]){ dups.add(s.id); dups.add(seen[key]); groupKeys.add(key); }
+        else seen[key]=s.id;
+      }
+    });
+    dups.groupCount = groupKeys.size;
+    dups.extraRows  = dups.size - groupKeys.size;
+    return dups;
+  },[sites]);
+
   // Filtered sites
   const filtered=useMemo(()=>{
     let f=sites;
@@ -9745,21 +9761,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     show('✅ Site moved to Job '+cleaned);
   };
   // ── DUPLICATE DETECTION ───────────────────────────────────────────────────
-  const dupIds=useMemo(()=>{
-    const seen={};const dups=new Set();const groupKeys=new Set();
-    sites.forEach(s=>{
-      const key=(s.atm_id||'')+'||'+(s.site_unique_id||'');
-      if(key!=='||'){
-        if(seen[key]){ dups.add(s.id); dups.add(seen[key]); groupKeys.add(key); }
-        else seen[key]=s.id;
-      }
-    });
-    // Attach counts as non-enumerable props so dups.has() / dups.size still work normally
-    // for the row-highlighting code path at line ~6163.
-    dups.groupCount = groupKeys.size;        // 1 group per unique duplicate key (int, actionable)
-    dups.extraRows  = dups.size - groupKeys.size; // rows beyond the first in each group
-    return dups;
-  },[sites]);
+  // (moved above `filtered` useMemo — see top of component for the actual declaration)
 
   const billingCats=useMemo(()=>{
     const s=new Set();sites.forEach(r=>{if(r.billing_category)s.add(r.billing_category);});
