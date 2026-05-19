@@ -5165,34 +5165,77 @@ function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(fa
 }
 
 // STOCK
-function StockPage({stock,grn,pl,fl,materialsV2}){const rows=Object.entries(stock).filter(([,v])=>v!==0||true).sort((a,b)=>a[0].localeCompare(b[0]));
-  // ── Roll Material Balance (sqft) — added 18 May 2026 v27 ─────────
+function StockPage({stock,grn,pl,fl,materialsV2}){
+  // ── Roll Material Balance (sqft) — rebuilt 19 May 2026 v28 ─────────
   // Computes per-material sqft balance: SUM(grn.sqft) - SUM(print_logs.print_sqft).
   // Case-insensitive trim match between GRN raw material text and materials_master_v2 names.
-  // Only shows materials_master_v2 rows where unit='roll' AND active=true.
+  // Shows materials_master_v2 rows where active=true (roll, nos, sheet).
+  // Adds: search box, sortable columns, brand/width from notes, status filter.
+  const [q,setQ]=React.useState('');
+  const [sortKey,setSortKey]=React.useState('remaining');
+  const [sortDir,setSortDir]=React.useState('asc');
+  const [statusFilter,setStatusFilter]=React.useState('all');
   const norm=s=>(s||'').toLowerCase().trim();
-  const rollMats=(materialsV2||[]).filter(m=>m.unit==='roll'&&m.active);
+  const activeMats=(materialsV2||[]).filter(m=>m.active);
   const grnByName={};(grn||[]).forEach(g=>{const k=norm(g.material);if(k)grnByName[k]=(grnByName[k]||0)+(+g.sqft||0);});
   const usedByName={};(pl||[]).forEach(l=>{const k=norm(l.material);if(k)usedByName[k]=(usedByName[k]||0)+(+l.print_sqft||0);});
-  const rollBalances=rollMats.map(m=>{const k=norm(m.name);const inward=grnByName[k]||0;const used=usedByName[k]||0;return{name:m.name,inward,used,remaining:inward-used};}).sort((a,b)=>a.remaining-b.remaining);
-  const totalInward=rollBalances.reduce((s,r)=>s+r.inward,0);
-  const totalUsed=rollBalances.reduce((s,r)=>s+r.used,0);
+  const parseNotes=(n)=>{const o={brand:'',width:''};if(!n)return o;const bm=n.match(/Brand:\s*([^·]+)/);if(bm)o.brand=bm[1].trim();const wm=n.match(/Width\(m\):\s*([^·]+)/);if(wm)o.width=wm[1].trim();return o;};
+  const balances=activeMats.map(m=>{const k=norm(m.name);const inward=grnByName[k]||0;const used=usedByName[k]||0;const meta=parseNotes(m.notes);return{name:m.name,unit:m.unit,brand:meta.brand,width:meta.width,inward,used,remaining:inward-used};});
+  const statusOf=(r)=>r.inward===0?'no-grn':r.remaining<=0?'out':r.remaining<100?'low':'ok';
+  const ql=q.toLowerCase().trim();
+  const filtered=balances.filter(r=>{
+    if(ql&&!r.name.toLowerCase().includes(ql)&&!r.brand.toLowerCase().includes(ql))return false;
+    if(statusFilter!=='all'&&statusOf(r)!==statusFilter)return false;
+    return true;
+  }).sort((a,b)=>{
+    const dir=sortDir==='asc'?1:-1;
+    if(sortKey==='name')return a.name.localeCompare(b.name)*dir;
+    return (((+a[sortKey])||0)-((+b[sortKey])||0))*dir;
+  });
+  const totalInward=filtered.reduce((s,r)=>s+r.inward,0);
+  const totalUsed=filtered.reduce((s,r)=>s+r.used,0);
+  const counts={all:balances.length,out:balances.filter(r=>statusOf(r)==='out').length,low:balances.filter(r=>statusOf(r)==='low').length,'no-grn':balances.filter(r=>statusOf(r)==='no-grn').length,ok:balances.filter(r=>statusOf(r)==='ok').length};
+  const sortBy=(k)=>{if(sortKey===k)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(k);setSortDir('asc');}};
+  const sortIcon=(k)=>sortKey===k?(sortDir==='asc'?' ▲':' ▼'):'';
+  const legacyRows=Object.entries(stock).sort((a,b)=>a[0].localeCompare(b[0]));
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
-      <SC l="Inward" v={grn.reduce((s,g)=>s+(+g.qty||0),0)} c="#10b981"/><SC l="Print Used" v={pl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#ef4444" d={30}/><SC l="Fab Used" v={fl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#dc2626" d={60}/><SC l="Materials" v={rows.length} c="#3b82f6" d={90}/>
+      <SC l="Inward" v={grn.reduce((s,g)=>s+(+g.qty||0),0)} c="#10b981"/><SC l="Print Used" v={pl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#ef4444" d={30}/><SC l="Fab Used" v={fl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#dc2626" d={60}/><SC l="Materials" v={legacyRows.length} c="#3b82f6" d={90}/>
     </div>
     <div className="c" style={{padding:0}}>
-      <div style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontSize:11,fontWeight:700,color:"#8b5cf6"}}>📊 Roll Material Balance (sqft) — {rollBalances.length} rolls</span>
-        <span style={{fontSize:9,color:"#64748b"}}>Inward: <strong style={{color:"#10b981"}}>{totalInward.toFixed(0)}</strong> · Used: <strong style={{color:"#ef4444"}}>{totalUsed.toFixed(0)}</strong> · Remaining: <strong style={{color:"#e3a008"}}>{(totalInward-totalUsed).toFixed(0)}</strong></span>
+      <div style={{padding:"8px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+          <span style={{fontSize:11,fontWeight:700,color:"#8b5cf6"}}>📊 Roll Material Balance (sqft) — {filtered.length} of {balances.length}</span>
+          <span style={{fontSize:9,color:"#64748b"}}>Inward: <strong style={{color:"#10b981"}}>{totalInward.toFixed(0)}</strong> · Used: <strong style={{color:"#ef4444"}}>{totalUsed.toFixed(0)}</strong> · Remaining: <strong style={{color:"#e3a008"}}>{(totalInward-totalUsed).toFixed(0)}</strong></span>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <input className="in" placeholder="🔍 Search by name or brand…" value={q} onChange={e=>setQ(e.target.value)} style={{flex:"1 1 220px",minWidth:200,fontSize:10,padding:"4px 8px"}}/>
+          {['all','out','low','no-grn','ok'].map(s=>{const labels={all:'All',out:'Out',low:'Low','no-grn':'No GRN',ok:'OK'};const colors={all:'#8b5cf6',out:'#f47067',low:'#f59e0b','no-grn':'#64748b',ok:'#4ade80'};return <button key={s} onClick={()=>setStatusFilter(s)} style={{padding:"3px 8px",fontSize:10,fontWeight:600,borderRadius:4,border:"1px solid "+(statusFilter===s?colors[s]:"#1a2030"),background:statusFilter===s?colors[s]+"20":"transparent",color:statusFilter===s?colors[s]:"#8b949e",cursor:"pointer"}}>{labels[s]} <span style={{opacity:0.7}}>({counts[s]})</span></button>;})}
+        </div>
       </div>
-      <div style={{overflowX:"auto",maxHeight:300}}><table style={{width:"100%"}}><thead><tr><th>Material</th><th style={{textAlign:"right"}}>Inward sqft</th><th style={{textAlign:"right"}}>Used sqft</th><th style={{textAlign:"right"}}>Remaining</th><th>Status</th></tr></thead><tbody>
-        {rollBalances.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No roll materials in materials_master_v2</td></tr>}
-        {rollBalances.map(r=><tr key={r.name}><td style={{fontSize:10,fontWeight:600}}>{r.name}</td><td className="mn" style={{fontSize:10,textAlign:"right",color:"#10b981"}}>{r.inward.toFixed(0)}</td><td className="mn" style={{fontSize:10,textAlign:"right",color:"#ef4444"}}>{r.used.toFixed(0)}</td><td className="mn" style={{fontSize:11,textAlign:"right",fontWeight:700,color:r.remaining<=0?"#f47067":r.remaining<100?"#e3a008":"#4ade80"}}>{r.remaining.toFixed(0)}</td><td>{r.remaining<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:r.remaining<100?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:r.inward===0?<span className="bd" style={{background:"#1a203020",color:"#64748b"}}>No GRN</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td></tr>)}
+      <div style={{overflowX:"auto",maxHeight:380}}><table style={{width:"100%"}}><thead><tr>
+        <th style={{cursor:"pointer"}} onClick={()=>sortBy('name')}>Material{sortIcon('name')}</th>
+        <th>Brand</th>
+        <th>Width</th>
+        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('inward')}>Inward sqft{sortIcon('inward')}</th>
+        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('used')}>Used sqft{sortIcon('used')}</th>
+        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('remaining')}>Remaining{sortIcon('remaining')}</th>
+        <th>Status</th>
+      </tr></thead><tbody>
+        {filtered.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No materials match filter</td></tr>}
+        {filtered.map(r=><tr key={r.name}>
+          <td style={{fontSize:10,fontWeight:600}}>{r.name}</td>
+          <td style={{fontSize:9,color:"#8b949e"}}>{r.brand||'—'}</td>
+          <td style={{fontSize:9,color:"#8b949e"}}>{r.width||'—'}</td>
+          <td className="mn" style={{fontSize:10,textAlign:"right",color:"#10b981"}}>{r.inward.toFixed(0)}</td>
+          <td className="mn" style={{fontSize:10,textAlign:"right",color:"#ef4444"}}>{r.used.toFixed(0)}</td>
+          <td className="mn" style={{fontSize:11,textAlign:"right",fontWeight:700,color:r.remaining<=0?"#f47067":r.remaining<100?"#e3a008":"#4ade80"}}>{r.remaining.toFixed(0)}</td>
+          <td>{r.inward===0?<span className="bd" style={{background:"#1a203020",color:"#64748b"}}>No GRN</span>:r.remaining<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:r.remaining<100?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td>
+        </tr>)}
       </tbody></table></div>
     </div>
     <div className="c" style={{padding:0}}><div style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a"}}><span style={{fontSize:11,fontWeight:700,color:"#64748b"}}>📦 Legacy stock count (qty-based)</span></div><div style={{overflowX:"auto",maxHeight:"calc(100vh-540px)"}}><table><thead><tr><th>Material</th><th>Available</th><th>Status</th></tr></thead><tbody>
-      {rows.map(([m,q])=><tr key={m}><td style={{fontWeight:600}}>{m}</td><td className="mn" style={{fontWeight:700}}>{q}</td><td>{q<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:q<=2?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td></tr>)}
+      {legacyRows.map(([m,q])=><tr key={m}><td style={{fontWeight:600}}>{m}</td><td className="mn" style={{fontWeight:700}}>{q}</td><td>{q<=0?<span className="bd" style={{background:"#3b060720",color:"#f47067"}}>Out</span>:q<=2?<span className="bd" style={{background:"#3b250620",color:"#f59e0b"}}>Low</span>:<span className="bd" style={{background:"#05200e20",color:"#4ade80"}}>OK</span>}</td></tr>)}
     </tbody></table></div></div></div>;
 }
 
