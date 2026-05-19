@@ -4719,10 +4719,27 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   const jobBatches=f.job_id?(batches||[]).filter(b=>b.job_id===f.job_id):[];
   const batchItems=f.batch_id?(items||[]).filter(i=>i.batch_id===f.batch_id):[];
 
-  // When line item changes, auto-fill actual_sqft from line_items.sqft
+  // When line item changes, auto-fill actual_sqft from job sheet:
+  //  1) if line_items.sqft > 0 (SqFt rate_mode) → use it directly
+  //  2) else if W×H > 0 → compute (W×H/divisor)×qty based on size_unit
+  //  3) else → leave blank (operator must type it manually)
+  // sqftHint = human-readable explanation of the calc (shown next to the field)
+  const computeAreaFromJobSheet=(item)=>{
+    if(!item) return {val:'',hint:''};
+    const ls=+item.sqft||0;
+    if(ls>0) return {val:ls,hint:'from job sheet'};
+    const W=+item.width||0, H=+item.height||0, Q=+item.qty||1;
+    if(W<=0||H<=0) return {val:'',hint:'no W×H on job sheet — enter manually'};
+    const unit=(item.size_unit||'INCH').toUpperCase();
+    const div=unit==='INCH'?144:unit==='FOOT'||unit==='FT'?1:unit==='MM'?92903.04:unit==='MTR'||unit==='M'?(1/10.7639):144;
+    const perPiece=unit==='MTR'||unit==='M'?(W*H*10.7639):(W*H/div);
+    const total=Math.round(perPiece*Q*100)/100;
+    return {val:total,hint:`auto: ${W}×${H} ${unit.toLowerCase()} × ${Q} pcs = ${total} sqft`};
+  };
   const pickLineItem=(itemId)=>{
     const item=(items||[]).find(i=>i.id===itemId);
-    sF(p=>({...p,line_item_id:itemId,actual_sqft:item?.sqft||''}));
+    const {val,hint}=computeAreaFromJobSheet(item);
+    sF(p=>({...p,line_item_id:itemId,actual_sqft:val,_sqftHint:hint,_pickedQty:item?.qty||''}));
   };
 
   const resetForm=()=>{sF(blankForm);setShowInkDetails(false);};
@@ -4734,6 +4751,9 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     if(!f.actual_sqft||+f.actual_sqft<=0){show("Enter actual printed sqft (cannot be 0)",false);return;}
     if(+f.actual_sqft>+f.print_sqft){show("Actual sqft cannot be more than Used sqft",false);return;}
     if(!f.machine){show("Pick machine",false);return;}
+    // Confirm actual area before save — always (auto-filled OR manually typed)
+    const qtyStr=f._pickedQty?` (job sheet qty: ${f._pickedQty} pcs)`:'';
+    if(!confirm(`Confirm:\n• Actual printed area = ${f.actual_sqft} sqft${qtyStr}\n• Used (with waste) = ${f.print_sqft} sqft\n• Waste = ${((+f.print_sqft)-(+f.actual_sqft)).toFixed(2)} sqft\n\nSave this log?`)) return;
     setSaving(true);
     const id='PL'+Date.now()+Math.random().toString(36).slice(2,5);
     const data={
@@ -4969,8 +4989,9 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
 
         <div className="fg f2" style={{marginTop:6}}>
           <F l="Material * (from stock)"><select className="in" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))}><option value="">— pick material —</option>{rollMaterials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
-          <F l="Actual sqft (auto)"><input className="in mn" value={f.actual_sqft} readOnly style={{background:"#0a0f1a",color:"#8b949e"}}/></F>
+          <F l="Actual sqft *"><input className="in mn" type="number" step="0.01" value={f.actual_sqft} onChange={e=>sF(p=>({...p,actual_sqft:e.target.value,_sqftHint:''}))} placeholder="e.g. 16"/></F>
         </div>
+        {f._sqftHint&&<div style={{fontSize:9,color:f._sqftHint.includes('manually')?"#e3a008":"#10b981",marginTop:-2,marginBottom:4,paddingLeft:2}}>↳ {f._sqftHint}</div>}
 
         {f.material&&<div style={{marginTop:6,padding:"6px 10px",background:matBalance<=0?"#3b060720":matBalance<100?"#3b250620":"#05200e20",border:"1px solid "+(matBalance<=0?"#f47067":matBalance<100?"#e3a008":"#10b98140"),borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:10}}>
           <span style={{color:"#8b949e"}}>📦 <strong style={{color:"#e3a008"}}>{f.material}</strong> stock</span>
