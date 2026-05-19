@@ -1765,7 +1765,13 @@ function Ck({on,onClick,tip}){return <div className={`ck ${on?"on":""}`} onClick
 function StatusTip({j,children}){
   const [show,setShow]=useState(false);
   const sd=j.status_dates||{};
-  const entries=Object.entries(sd).filter(([k,v])=>v);
+  // 19 May 2026: parse the leading "DD Mon YYYY hh:mm am/pm" prefix from each value,
+  // sort ascending so the timeline reads oldest → newest regardless of insertion order.
+  // Also strip the cosmetic " by Unknown" suffix that survives in ~115 legacy rows
+  // where made_by was also empty (DML backfilled the other 163 on 19 May 2026).
+  const stripUnk=(s)=>typeof s==='string'?s.replace(/ by Unknown\b/i,''):s;
+  const parseTs=(s)=>{if(typeof s!=='string')return 0;const m=s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(am|pm)/i);if(!m)return 0;const mo={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11}[m[2].toLowerCase()];if(mo==null)return 0;let h=+m[4];const p=m[6].toLowerCase();if(p==='pm'&&h<12)h+=12;if(p==='am'&&h===12)h=0;return new Date(+m[3],mo,+m[1],h,+m[5]).getTime();};
+  const entries=Object.entries(sd).filter(([k,v])=>v).sort((a,b)=>parseTs(a[1])-parseTs(b[1]));
   const labels={draft:'Draft',quotation_sent:'Quotation Sent',po_pending:'PO Pending',recee:'Recee',designing_in_house:'Designing - In House',designing_outsource:'Designing - Outsource',printing_in_house:'Printing · In-House',printing_outsource:'Printing · Outsource',fabrication_in_house:'Fabrication · In-House',fabrication_outsource:'Fabrication · Outsource',delivered:'Delivered',installation_wip:'Installation WIP',billing_pending:'Billing Pending',given_for_billing:'Given for Billing',cash_pending:'Cash Pending',ic_pending:'IC Pending',dc_pending:'DC Pending',billing_done:'Billing Done',cash_received:'Cash Received',no_bill:'No Bill',cancelled:'Cancelled',
     // Legacy keys — kept so historical status_dates still render on old jobs
     active:'Active',po_received:'PO Received',recce_pending:'Recce Pending',designing:'Designing',printing:'Printing',fabrication:'Fabrication',installation:'Installation',proforma_invoice:'Proforma Invoice'};
@@ -1775,11 +1781,11 @@ function StatusTip({j,children}){
     {children}
     {show&&entries.length>0&&<div style={{position:"absolute",left:0,top:"100%",zIndex:50,background:"#161d2eee",border:"1px solid #2a3548",borderRadius:10,padding:"10px 14px",minWidth:260,maxWidth:350,boxShadow:"0 12px 32px rgba(0,0,0,.6)",backdropFilter:"blur(8px)",pointerEvents:"none"}}>
       <p style={{fontSize:9,fontWeight:700,color:"#e3a008",marginBottom:2}}>📅 Status History — {j.id}</p>
-      {lastEntry&&<p style={{fontSize:8,color:"#8b949e",marginBottom:6}}>Last: {lastEntry[1]}</p>}
+      {lastEntry&&<p style={{fontSize:8,color:"#8b949e",marginBottom:6}}>Last: {stripUnk(lastEntry[1])}</p>}
       <div style={{borderTop:"1px solid #2a3548",paddingTop:4}}>
         {entries.map(([k,v])=>{const isCurrent=k===curKey;return <div key={k} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"3px 0",borderBottom:"1px solid #1a2030",background:isCurrent?"#e3a00810":"transparent",marginLeft:-4,marginRight:-4,paddingLeft:4,paddingRight:4,borderRadius:isCurrent?4:0}}>
           <span style={{fontSize:9,fontWeight:isCurrent?700:500,color:isCurrent?"#e3a008":"#c9d1d9"}}>{isCurrent?"▸ ":""}{labels[k]||k}</span>
-          <span style={{fontSize:8,color:isCurrent?"#e3a008":"#8b949e",textAlign:"right",maxWidth:160}}>{v}</span>
+          <span style={{fontSize:8,color:isCurrent?"#e3a008":"#8b949e",textAlign:"right",maxWidth:160}}>{stripUnk(v)}</span>
         </div>;})}
       </div>
     </div>}
