@@ -4699,6 +4699,8 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     end_time:'',
     notes:'',
     ink_cyan:0,ink_magenta:0,ink_yellow:0,ink_black:0,ink_white:0,
+    _photoFile:null, // Patch G — proof photo (required for save)
+    _photoPreview:'',
   };
   const [f,sF]=useState(blankForm);
 
@@ -4751,10 +4753,19 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     if(!f.actual_sqft||+f.actual_sqft<=0){show("Enter actual printed sqft (cannot be 0)",false);return;}
     if(+f.actual_sqft>+f.print_sqft){show("Actual sqft cannot be more than Used sqft",false);return;}
     if(!f.machine){show("Pick machine",false);return;}
+    // Patch G — proof photo required to save
+    if(!f._photoFile){show("📷 Proof photo is required to save this log",false);return;}
     // Confirm actual area before save — always (auto-filled OR manually typed)
     const qtyStr=f._pickedQty?` (job sheet qty: ${f._pickedQty} pcs)`:'';
-    if(!confirm(`Confirm:\n• Actual printed area = ${f.actual_sqft} sqft${qtyStr}\n• Used (with waste) = ${f.print_sqft} sqft\n• Waste = ${((+f.print_sqft)-(+f.actual_sqft)).toFixed(2)} sqft\n\nSave this log?`)) return;
+    if(!confirm(`Confirm:\n• Actual printed area = ${f.actual_sqft} sqft${qtyStr}\n• Used (with waste) = ${f.print_sqft} sqft\n• Waste = ${((+f.print_sqft)-(+f.actual_sqft)).toFixed(2)} sqft\n• Proof photo attached ✓\n\nSave this log?`)) return;
     setSaving(true);
+    // Patch G — compress + upload proof photo first; abort save if upload fails
+    let photoUrl='';
+    try{
+      const compressed=await compressImage(f._photoFile);
+      photoUrl=await uploadFile(compressed,`print-proofs/${f.job_id}`);
+      if(!photoUrl){show('Photo upload failed — log NOT saved',false);setSaving(false);return;}
+    }catch(e){show('Photo upload error: '+(e?.message||e)+' — log NOT saved',false);setSaving(false);return;}
     const id='PL'+Date.now()+Math.random().toString(36).slice(2,5);
     const data={
       id,
@@ -4772,6 +4783,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
       start_time:f.start_time||'',
       end_time:f.end_time||'',
       notes:f.notes||'',
+      photo_url:photoUrl,
       ink_cyan:+f.ink_cyan||0,
       ink_magenta:+f.ink_magenta||0,
       ink_yellow:+f.ink_yellow||0,
@@ -4837,11 +4849,123 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   // Recent activity — last 100 logs with material/operator/waste
   const recent=logs.slice(0,100);
 
-  // Job queue + open helper (Issue #1 + #3)
-  const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project||''}`,jobId:j.id,fallback:j});
+  // Print Job View modal — opens for the chosen job (Patch F, replaces Acc-style JobDetailModal route)
+  const [viewJobId,setViewJobId]=useState(null);
+  const viewJob=viewJobId?(jobs||[]).find(j=>j.id===viewJobId):null;
+  const openPrintJobView=(jobId)=>setViewJobId(jobId);
+
+  // Compute coverage for a single line item — hybrid rule + photo gate (Patch F + Patch G):
+  //  • SqFt mode (li.sqft > 0)     → sum(actual_sqft for that line_item_id) >= li.sqft
+  //  • NOS with W×H                → sum(actual_sqft) >= computed area W×H×qty
+  //  • NOS/SET/LOT/KG without W×H  → trust mode: 1 log row = covered
+  //  PLUS (Patch G): every print_log row for this line_item MUST have a non-empty photo_url
+  const computeCoverage=(li)=>{
+    if(!li) return {covered:false,pct:0,actualSum:0,target:0,mode:'unknown',logsTotal:0,logsWithPhoto:0,photosOk:false};
+    const itemLogs=(logs||[]).filter(l=>l.line_item_id===li.id);
+    const actualSum=itemLogs.reduce((s,l)=>s+(+l.actual_sqft||0),0);
+    const logsTotal=itemLogs.length;
+    const logsWithPhoto=itemLogs.filter(l=>l.photo_url&&String(l.photo_url).trim()).length;
+    const photosOk=logsTotal>0&&logsWithPhoto===logsTotal;
+    const liSqft=+li.sqft||0;
+    if(liSqft>0){
+      const sqftOk=actualSum>=liSqft;
+      return {covered:sqftOk&&photosOk,pct:liSqft>0?(actualSum/liSqft)*100:0,actualSum,target:liSqft,mode:'sqft',logsTotal,logsWithPhoto,photosOk};
+    }
+    const W=+li.width||0, H=+li.height||0, Q=+li.qty||1;
+    if(W>0&&H>0){
+      const unit=(li.size_unit||'INCH').toUpperCase();
+      const div=unit==='INCH'?144:unit==='FOOT'||unit==='FT'?1:unit==='MM'?92903.04:unit==='MTR'||unit==='M'?(1/10.7639):144;
+      const perPiece=unit==='MTR'||unit==='M'?(W*H*10.7639):(W*H/div);
+      const target=Math.round(perPiece*Q*100)/100;
+      const sqftOk=actualSum>=target;
+      return {covered:sqftOk&&photosOk,pct:target>0?(actualSum/target)*100:0,actualSum,target,mode:'computed',logsTotal,logsWithPhoto,photosOk};
+    }
+    // Trust mode — no W×H available; still needs photos
+    const trustOk=logsTotal>=1;
+    return {covered:trustOk&&photosOk,pct:trustOk?100:0,actualSum,target:0,mode:'trust',logsTotal,logsWithPhoto,photosOk};
+  };
+
+  // Whole-job coverage check (used by Forward dropdown gate) — flags photo-missing items distinctly
+  const checkJobCoverage=(job)=>{
+    if(!job) return {ready:false,pending:[],all:[]};
+    const allItems=(job.batches||[]).flatMap(b=>b.items||[]);
+    if(allItems.length===0) return {ready:false,pending:['(no line items)'],all:allItems};
+    const pending=[];
+    for(const li of allItems){
+      const c=computeCoverage(li);
+      if(!c.covered){
+        const reason=!c.photosOk&&c.logsTotal>0?' (📷 missing)':'';
+        pending.push((li.internal_name||'Item '+li.sr)+reason);
+      }
+    }
+    return {ready:pending.length===0,pending,all:allItems};
+  };
+
+  // Open the existing Log Print Job modal pre-filled with job/batch/line_item from a row click
+  const openLogPreFilled=(job,batch,li)=>{
+    const {val,hint}=computeAreaFromJobSheet(li);
+    sF({...blankForm,
+      job_id:job?.id||'',
+      batch_id:batch?.id||'',
+      line_item_id:li?.id||'',
+      actual_sqft:val,
+      _sqftHint:hint,
+      _pickedQty:li?.qty||''
+    });
+    setShowModal(true);
+  };
+
+  // Job queue + open helper (Issue #1 + #3) — now routes to Print Job View modal (Patch F)
+  const openJob=(j)=>openPrintJobView(j.id);
   const printQueue=(jobs||[]).filter(j=>j.status==='Printing'||j.status==='Printing · In-House'||j.status==='Printing · Outsource');
   // Forward-flow only (per Jigar's call): Fabrication / Fabrication · In-House / Fabrication · Outsource / Dispatch
   const FORWARD_STATUSES=['Fabrication','Fabrication · In-House','Fabrication · Outsource','Dispatch'];
+
+  // Forward permission — username whitelist (Patch G, 19 May 2026)
+  // JIGAR, CHANDNI = admin; PRINTING = team operator; ANKIT/PRATIK/SONU = production
+  const FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU'];
+  const userCanForward=FORWARD_USERS.includes((user?.name||'').toUpperCase().trim());
+
+  // Image compression — resize to max 1600px wide, JPEG 0.8 quality (Patch G)
+  const compressImage=(file)=>new Promise((res,rej)=>{
+    if(!file){rej('No file');return;}
+    if(!file.type.startsWith('image/')){res(file);return;}
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1600;
+      let w=img.width, h=img.height;
+      if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      c.toBlob(b=>{
+        if(!b){rej('Compression failed');return;}
+        const newFile=new File([b],file.name.replace(/\.[^.]+$/,'.jpg'),{type:'image/jpeg'});
+        res(newFile);
+      },'image/jpeg',0.8);
+    };
+    img.onerror=()=>rej('Image load failed');
+    img.src=URL.createObjectURL(file);
+  });
+
+  // Update photo on an existing print_log row (Patch G — used by inline button in Print Job View modal)
+  const [uploadingPhoto,setUploadingPhoto]=useState(null); // log_id being uploaded to
+  const uploadProofPhoto=async(logId,file,jobId)=>{
+    if(!file||!logId)return;
+    setUploadingPhoto(logId);
+    try{
+      const compressed=await compressImage(file);
+      const url=await uploadFile(compressed,`print-proofs/${jobId||'unknown'}`);
+      if(!url){show('Upload failed',false);setUploadingPhoto(null);return;}
+      const {error}=await sb.from('print_logs').update({photo_url:url}).eq('id',logId);
+      if(error){show('DB update failed: '+error.message,false);setUploadingPhoto(null);return;}
+      show('📷 Proof photo added',true);
+      // Optimistically update local state — find log in logs array and update it
+      // (parent will re-fetch on next refresh; this just gives instant feedback)
+      const idx=(logs||[]).findIndex(l=>l.id===logId);
+      if(idx>=0)logs[idx].photo_url=url;
+    }catch(e){show('Error: '+(e?.message||e),false);}
+    setUploadingPhoto(null);
+  };
 
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     {/* Header */}
@@ -4859,25 +4983,44 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
       <div className="c" style={{padding:10,textAlign:"center"}}><p style={{fontSize:8,color:"#64748b"}}>JOBS TODAY</p><p style={{fontSize:18,fontWeight:800,color:"#e3a008"}}>{jobsToday}</p></div>
     </div>
 
-    {/* Job Queue — jobs currently in Printing status; status dropdown forwards to Fabrication/Dispatch (Issue #3) */}
+    {/* Job Queue — jobs currently in Printing status; Forward dropdown gated on (a) coverage 100% and (b) admin role (Issue #3 + Patch F) */}
     <div className="c" style={{padding:0}}>
       <div style={{padding:"6px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{fontSize:10,fontWeight:700,color:"#ef4444"}}>🖨️ Print Queue ({printQueue.length})</span>
-        <span style={{fontSize:9,color:"#64748b"}}>Click Job# to view · Change status to forward</span>
+        <span style={{fontSize:9,color:"#64748b"}}>Click Job# to view & log · Forward enabled only when all items logged</span>
       </div>
-      <div style={{overflowX:"auto",maxHeight:300}}><table><thead><tr><th>Job#</th><th>Client</th><th>Project</th><th>Status</th><th>Items</th><th>Forward to →</th></tr></thead><tbody>
-        {printQueue.length===0&&<tr><td colSpan={6} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No jobs in Printing status</td></tr>}
-        {printQueue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}>
-          <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td>
-          <td style={{fontSize:10}}>{(j.client_name||'').slice(0,22)}</td>
-          <td style={{fontSize:10,color:"#64748b"}}>{(j.project||'').slice(0,22)}</td>
-          <td><span className="bd" style={{fontSize:9,background:"#ef444422",color:"#ef4444"}}>{j.status}</span></td>
-          <td className="mn" style={{fontSize:10}}>{itemCount}</td>
-          <td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus&&updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:160}}>
-            <option value="">→ Forward to —</option>
-            {FORWARD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
-          </select></td>
-        </tr>;})}
+      <div style={{overflowX:"auto",maxHeight:300}}><table><thead><tr><th>Job#</th><th>Client</th><th>Project</th><th>Status</th><th>Items</th><th>Coverage</th><th>Forward to →</th></tr></thead><tbody>
+        {printQueue.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No jobs in Printing status</td></tr>}
+        {printQueue.map(j=>{
+          const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);
+          const cov=checkJobCoverage(j);
+          const covered=cov.all.length-cov.pending.length;
+          const canForward=userCanForward&&cov.ready;
+          return <tr key={j.id}>
+            <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td>
+            <td style={{fontSize:10}}>{(j.client_name||'').slice(0,22)}</td>
+            <td style={{fontSize:10,color:"#64748b"}}>{(j.project||'').slice(0,22)}</td>
+            <td><span className="bd" style={{fontSize:9,background:"#ef444422",color:"#ef4444"}}>{j.status}</span></td>
+            <td className="mn" style={{fontSize:10}}>{itemCount}</td>
+            <td className="mn" style={{fontSize:10,color:cov.ready?"#10b981":"#e3a008",fontWeight:700}}>{covered}/{cov.all.length}{cov.ready?' ✓':''}</td>
+            <td>
+              {!userCanForward&&<span style={{fontSize:9,color:"#64748b"}}>not authorized</span>}
+              {userCanForward&&<select className="in" defaultValue="" disabled={!canForward} title={canForward?'Forward to':'Log all items first ('+cov.pending.length+' pending)'} onChange={e=>{
+                const ns=e.target.value;if(!ns)return;
+                // ERP double-check: re-validate coverage at click time (Patch F gate)
+                const recheck=checkJobCoverage(j);
+                if(!recheck.ready){show('Cannot forward — '+recheck.pending.length+' item(s) still pending: '+recheck.pending.slice(0,3).join(', ')+(recheck.pending.length>3?'…':''),false);e.target.value='';return;}
+                if(confirm('Forward "'+j.id+'" from "'+j.status+'" to "'+ns+'"?\n\nAll '+recheck.all.length+' line items have been printed (verified).')){
+                  updateJobStatus&&updateJobStatus(j.id,ns);
+                }
+                e.target.value='';
+              }} style={{fontSize:9,padding:"2px 4px",width:160,opacity:canForward?1:0.4,cursor:canForward?"pointer":"not-allowed"}}>
+                <option value="">{canForward?'→ Forward to —':'🔒 Log all items first'}</option>
+                {FORWARD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>}
+            </td>
+          </tr>;
+        })}
       </tbody></table></div>
     </div>
 
@@ -4943,7 +5086,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
         {recent.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No print logs yet — click "Log Print Job" to start</td></tr>}
         {recent.map(l=><tr key={l.id}>
           <td style={{fontSize:9}}>{l.date}</td>
-          <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:l.job_id?"pointer":"default",textDecoration:l.job_id?"underline":"none",textDecorationColor:"#e3a00844"}} onClick={()=>{if(l.job_id){const j=(jobs||[]).find(x=>x.id===l.job_id);openJob(j||{id:l.job_id});}}}>{l.job_id||'—'}</td>
+          <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:l.job_id?"pointer":"default",textDecoration:l.job_id?"underline":"none",textDecorationColor:"#e3a00844"}} onClick={()=>{if(l.job_id){const j=(jobs||[]).find(x=>x.id===l.job_id);if(j)openPrintJobView(l.job_id);else show('Job '+l.job_id+' is no longer in Printing status',false);}}}>{l.job_id||'—'}</td>
           <td style={{fontSize:9}}>{l.operator||'—'}</td>
           <td style={{fontSize:9,color:"#8b949e"}}>{(l.material||'').slice(0,22)}</td>
           <td className="mn" style={{fontSize:9,color:"#8b5cf6"}}>{l.print_sqft?(+l.print_sqft).toFixed(0):'—'}</td>
@@ -5012,6 +5155,22 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
           <F l="Notes"><input className="in" value={f.notes} onChange={e=>sF(p=>({...p,notes:e.target.value}))} placeholder="Reprint reason, quality remarks..."/></F>
         </div>
 
+        {/* Proof photo — required (Patch G) */}
+        <div style={{marginTop:8,padding:8,background:f._photoFile?"#05200e":"#3b060720",border:"1px solid "+(f._photoFile?"#10b98140":"#f4706740"),borderRadius:6}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:10,fontWeight:700,color:f._photoFile?"#10b981":"#f47067"}}>📷 Proof photo of running print *</span>
+              {!f._photoFile&&<span style={{fontSize:9,color:"#8b949e"}}>(required to save)</span>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              {f._photoPreview&&<img src={f._photoPreview} alt="preview" style={{width:48,height:48,objectFit:"cover",borderRadius:4,border:"1px solid #10b98140"}}/>}
+              <label style={{cursor:"pointer",display:"inline-flex",alignItems:"center",padding:"4px 10px",border:"1px dashed "+(f._photoFile?"#10b98140":"#f4706740"),borderRadius:4,color:f._photoFile?"#10b981":"#f47067",fontSize:10,fontWeight:600}}>{f._photoFile?'🔄 Replace':'📸 Attach photo'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file){return;}const reader=new FileReader();reader.onload=ev=>{sF(p=>({...p,_photoFile:file,_photoPreview:ev.target.result}));};reader.readAsDataURL(file);}}/></label>
+              {f._photoFile&&<button className="b bs" onClick={()=>sF(p=>({...p,_photoFile:null,_photoPreview:''}))} style={{fontSize:9,padding:"2px 6px"}}>✕</button>}
+            </div>
+          </div>
+          {f._photoFile&&<div style={{fontSize:9,color:"#8b949e",marginTop:4}}>↳ Will be compressed to max 1600px wide before upload</div>}
+        </div>
+
         <div style={{marginTop:8,padding:8,background:"#0a0f1a",borderRadius:6}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowInkDetails(p=>!p)}>
             <span style={{fontSize:10,fontWeight:700,color:"#8b5cf6"}}>🧪 Ink consumption (optional)</span>
@@ -5030,6 +5189,120 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
           <button className="b" onClick={()=>{resetForm();setShowModal(false);}} disabled={saving}>Cancel</button>
           <button className="b bp" onClick={handleSave} disabled={saving} style={{background:"#ef4444",borderColor:"#ef4444"}}>{saving?"⏳ Saving...":"💾 Save Log"}</button>
         </div>
+      </div>
+    </div>}
+
+    {/* PRINT JOB VIEW MODAL — opens from Job# click; shows line items + coverage + logs; admin-only Forward (Patch F) */}
+    {viewJob&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.7)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:20,overflowY:"auto"}} onClick={e=>{if(e.target===e.currentTarget)setViewJobId(null);}}>
+      <div className="c" style={{maxWidth:1100,width:"100%",margin:"auto",padding:14,background:"#0d1118"}}>
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",borderBottom:"1px solid #1a2030",paddingBottom:8,marginBottom:10}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:"#ef4444"}}>🖨️ {viewJob.id}</div>
+            <div style={{fontSize:10,color:"#8b949e",marginTop:2}}>{viewJob.client_name||''} · {viewJob.project||''}</div>
+            <div style={{marginTop:4}}><span className="bd" style={{fontSize:9,background:"#ef444422",color:"#ef4444"}}>{viewJob.status}</span></div>
+          </div>
+          <button className="b bs" onClick={()=>setViewJobId(null)}>✕</button>
+        </div>
+
+        {/* Line items table — with coverage + per-row Log button */}
+        {(()=>{const allItems=(viewJob.batches||[]).flatMap(b=>(b.items||[]).map(li=>({li,batch:b})));return <>
+        <div style={{fontSize:10,fontWeight:700,color:"#8b5cf6",marginBottom:6}}>📦 Line Items ({allItems.length})</div>
+        <div style={{overflowX:"auto",maxHeight:380,border:"1px solid #1a2030",borderRadius:6}}>
+          <table style={{width:"100%"}}>
+            <thead><tr><th>Sr</th><th>Image</th><th>Internal Name</th><th>Media spec (user fed)</th><th>Size</th><th>Qty</th><th>Mode</th><th>Coverage</th><th>Action</th></tr></thead>
+            <tbody>
+              {allItems.length===0&&<tr><td colSpan={9} style={{textAlign:"center",color:"#64748b",padding:14,fontSize:10}}>No line items on this job</td></tr>}
+              {allItems.map(({li,batch},idx)=>{
+                const cov=computeCoverage(li);
+                const W=+li.width||0,H=+li.height||0;
+                const sizeTxt=(W>0&&H>0)?`${W}×${H} ${(li.size_unit||'').toLowerCase()}`:'—';
+                const sqftOk=cov.mode==='trust'?(cov.logsTotal>=1):(cov.actualSum>=cov.target);
+                let covIcon, covColor, covText;
+                if(cov.covered){covIcon='✅';covColor='#10b981';}
+                else if(!sqftOk){covIcon='🟡';covColor='#e3a008';}
+                else if(!cov.photosOk){covIcon='📷';covColor='#f47067';}  // sqft OK but photos missing
+                else{covIcon='⚠️';covColor='#e3a008';}
+                const sqftPart=cov.mode==='trust'
+                  ? `${cov.logsTotal} log(s) · trust`
+                  : `${cov.actualSum.toFixed(1)}/${cov.target.toFixed(1)} sqft`;
+                const photoPart=cov.logsTotal>0?` · 📷 ${cov.logsWithPhoto}/${cov.logsTotal}`:'';
+                covText=sqftPart+photoPart;
+                return <tr key={li.id}>
+                  <td className="mn" style={{fontSize:10}}>{li.sr||(idx+1)}</td>
+                  <td style={{padding:2}}>{li.img_url?<a href={li.img_url} target="_blank" rel="noopener noreferrer"><img src={li.img_url} alt="" style={{width:36,height:36,objectFit:"cover",borderRadius:4,border:"1px solid #1a2030",cursor:"zoom-in"}}/></a>:<span style={{fontSize:10,color:"#64748b"}}>—</span>}</td>
+                  <td style={{fontSize:10,fontWeight:600}}>{li.internal_name||'—'}</td>
+                  <td style={{fontSize:9,color:"#8b949e",maxWidth:260}}>{(li.media||'').slice(0,100)}{(li.media||'').length>100?'…':''}</td>
+                  <td className="mn" style={{fontSize:10}}>{sizeTxt}</td>
+                  <td className="mn" style={{fontSize:10,fontWeight:700}}>{li.qty||0}</td>
+                  <td><span className="bd" style={{fontSize:9,background:"#1a2030",color:"#8b949e"}}>{li.rate_mode||'—'}</span></td>
+                  <td style={{fontSize:10,color:covColor,fontWeight:700}}>{covIcon} {covText}</td>
+                  <td><button className="b" onClick={()=>openLogPreFilled(viewJob,batch,li)} style={{fontSize:9,padding:"2px 8px",background:"#ef4444",borderColor:"#ef4444",color:"#fff"}}>+ Log</button></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Logs so far — flat list of all print_logs for this job (Patch G: now shows Proof column with retroactive upload) */}
+        {(()=>{const jobLogs=(logs||[]).filter(l=>l.job_id===viewJob.id);return <>
+        <div style={{fontSize:10,fontWeight:700,color:"#8b5cf6",margin:"12px 0 6px"}}>📋 Logs so far ({jobLogs.length})</div>
+        <div style={{overflowX:"auto",maxHeight:240,border:"1px solid #1a2030",borderRadius:6}}>
+          <table style={{width:"100%"}}>
+            <thead><tr><th>Date</th><th>Operator</th><th>Material</th><th>Used</th><th>Actual</th><th>Waste%</th><th>Machine</th><th>Line Item</th><th>Proof</th></tr></thead>
+            <tbody>
+              {jobLogs.length===0&&<tr><td colSpan={9} style={{textAlign:"center",color:"#64748b",padding:14,fontSize:10}}>No logs yet — click + Log on any line item above</td></tr>}
+              {jobLogs.map(l=>{
+                const li=allItems.find(x=>x.li.id===l.line_item_id)?.li;
+                const hasPhoto=l.photo_url&&String(l.photo_url).trim();
+                const isUp=uploadingPhoto===l.id;
+                return <tr key={l.id}>
+                  <td className="mn" style={{fontSize:10}}>{l.date}</td>
+                  <td style={{fontSize:10}}>{l.operator||'—'}</td>
+                  <td style={{fontSize:10}}>{l.material||'—'}</td>
+                  <td className="mn" style={{fontSize:10,color:"#8b5cf6",fontWeight:700}}>{l.print_sqft||0}</td>
+                  <td className="mn" style={{fontSize:10,color:"#10b981",fontWeight:700}}>{l.actual_sqft||0}</td>
+                  <td className="mn" style={{fontSize:10,color:(+l.waste_pct>15?"#f47067":(+l.waste_pct>10?"#e3a008":"#10b981")),fontWeight:700}}>{l.waste_pct!=null?(+l.waste_pct).toFixed(1)+'%':'—'}</td>
+                  <td style={{fontSize:10,color:"#8b949e"}}>{l.machine||'—'}</td>
+                  <td style={{fontSize:10,color:"#64748b"}}>{li?.internal_name||'—'}</td>
+                  <td style={{padding:2}}>
+                    {hasPhoto&&<a href={l.photo_url} target="_blank" rel="noopener noreferrer" title="View full size"><img src={l.photo_url} alt="proof" style={{width:32,height:32,objectFit:"cover",borderRadius:4,border:"1px solid #10b98140",cursor:"zoom-in"}}/></a>}
+                    {!hasPhoto&&!isUp&&<label style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4,padding:"2px 6px",border:"1px dashed #f4706740",borderRadius:4,color:"#f47067",fontSize:9,fontWeight:600}}>📷 Add<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)uploadProofPhoto(l.id,f,viewJob.id);e.target.value='';}}/></label>}
+                    {isUp&&<span style={{fontSize:9,color:"#e3a008"}}>⏳ Uploading…</span>}
+                  </td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        </>;})()}
+
+        {/* Forward gate — authorized users only + 100% coverage required (Patch G — now also requires photos) */}
+        {(()=>{const cov=checkJobCoverage(viewJob);const canForward=userCanForward&&cov.ready;return <div style={{marginTop:12,padding:10,background:cov.ready?"#05200e":"#3b250620",border:"1px solid "+(cov.ready?"#10b98140":"#e3a00840"),borderRadius:6}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:cov.ready?"#10b981":"#e3a008"}}>{cov.ready?'✅ All items printed & photo-verified — ready to forward':'🟡 '+cov.pending.length+' item(s) still pending'}</div>
+              {!cov.ready&&<div style={{fontSize:9,color:"#8b949e",marginTop:2}}>Pending: {cov.pending.slice(0,5).join(', ')}{cov.pending.length>5?` +${cov.pending.length-5} more`:''}</div>}
+              {!userCanForward&&<div style={{fontSize:9,color:"#8b949e",marginTop:2}}>🔒 Not authorized to forward — ask JIGAR/CHANDNI</div>}
+            </div>
+            {userCanForward&&<select className="in" defaultValue="" disabled={!canForward} onChange={e=>{
+              const ns=e.target.value;if(!ns)return;
+              // ERP double-check at click time (per Jigar's spec — verify, then ask)
+              const recheck=checkJobCoverage(viewJob);
+              if(!recheck.ready){show('Cannot forward — '+recheck.pending.length+' item(s) pending: '+recheck.pending.slice(0,3).join(', ')+(recheck.pending.length>3?'…':''),false);e.target.value='';return;}
+              const summary=recheck.all.map(li=>{const c=computeCoverage(li);const ph=`📷 ${c.logsWithPhoto}/${c.logsTotal}`;return `• ${li.internal_name||'Item '+li.sr}: ${c.mode==='trust'?c.logsTotal+' log(s)':c.actualSum.toFixed(1)+'/'+c.target.toFixed(1)+' sqft'} ${ph}`;}).join('\n');
+              if(confirm(`Forward "${viewJob.id}" from "${viewJob.status}" to "${ns}"?\n\nVerified ${recheck.all.length} items (photos + sqft):\n${summary}\n\nProceed?`)){
+                updateJobStatus&&updateJobStatus(viewJob.id,ns);
+                setViewJobId(null);
+              }
+              e.target.value='';
+            }} style={{fontSize:10,padding:"4px 8px",width:220,opacity:canForward?1:0.4,cursor:canForward?"pointer":"not-allowed"}}>
+              <option value="">{canForward?'→ Forward to —':'🔒 Log all items first'}</option>
+              {FORWARD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>}
+          </div>
+        </div>;})()}
+        </>;})()}
       </div>
     </div>}
   </div>;
