@@ -1314,6 +1314,17 @@ function MainApp({user,onLogout,masterData}){
       show('⚠️ Could not read current status from DB — try again. ('+(readErr?.message||'no row')+')',false);
       return;
     }
+
+    // Patch I (19 May 2026) — global chokepoint: only authorized users can move a job OUT of Printing*.
+    // Applies everywhere (Print Queue, Print Job View modal, JobDetail dropdown, Dept Tracker, bulk ops).
+    // Whitelist matches PrintPage's FORWARD_USERS (kept in sync).
+    const PRINT_FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
+    const fromPrinting=(dbRow.status||'').startsWith('Printing');
+    if(fromPrinting && !PRINT_FORWARD_USERS.includes(String(userName).toUpperCase().trim())){
+      show('🔒 Only authorized users (JIGAR/CHANDNI/PRINTING/ANKIT/PRATIK/SONU/AMOL) can forward jobs from Printing.',false);
+      console.warn('updateJobStatus blocked (Patch I): user',userName,'tried to move job',jobId,'from',dbRow.status,'to',newStatus);
+      return;
+    }
     
     // Same status already? No-op.
     if(dbRow.status===newStatus){
@@ -4950,9 +4961,10 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   // Forward-flow only (per Jigar's call): Fabrication / Fabrication · In-House / Fabrication · Outsource / Dispatch
   const FORWARD_STATUSES=['Fabrication','Fabrication · In-House','Fabrication · Outsource','Dispatch'];
 
-  // Forward permission — username whitelist (Patch G, 19 May 2026)
-  // JIGAR, CHANDNI = admin; PRINTING = team operator; ANKIT/PRATIK/SONU = production
-  const FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU'];
+  // Forward permission — username whitelist (Patch G + Patch I, 19 May 2026)
+  // JIGAR, CHANDNI = admin; PRINTING = team operator; ANKIT/PRATIK/SONU = production; AMOL = production manager
+  // MUST stay in sync with central PRINT_FORWARD_USERS at updateJobStatus (App-level chokepoint)
+  const FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
   const userCanForward=FORWARD_USERS.includes((user?.name||'').toUpperCase().trim());
 
   // Image compression — resize to max 1600px wide, JPEG 0.8 quality (Patch G)
