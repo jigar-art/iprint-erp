@@ -11664,12 +11664,18 @@ function ReportsPage({user, jobs, prs, salesActs, firms, team, show, forceTab}){
 
   // Task counts for stat strip
   const taskCounts = React.useMemo(() => {
-    const tasks = todayTasks||[];
+    // 19 May 2026: scope to today only — `todayTasks` actually holds the full
+    // periodBounds window (up to 30 days). Without this filter the header
+    // counted manual rows across the whole window while the Today list below
+    // only renders rows where task_date===todayISO, leaving users confused.
+    // List filters at L11860/11911/11938 use the same `task_date===todayISO`
+    // predicate, so the header now matches what's visible on the Today tab.
+    const tasks = (todayTasks||[]).filter(t => t.task_date === todayISO);
     const manualDone = tasks.filter(t => t.status === 'done').length;
     const manualPending = tasks.filter(t => t.status === 'pending').length;
     const manualStuck = tasks.filter(t => t.status === 'stuck').length;
     return {auto: autoTasks.length, manualDone, manualPending, manualStuck};
-  }, [todayTasks, autoTasks]);
+  }, [todayTasks, autoTasks, todayISO]);
 
   // ── PER-USER ACTIVITY (for Standup auto-tagged badges) ──
   // Re-uses the same period-bounded arrays as outputData / billingReqs / dcs.
