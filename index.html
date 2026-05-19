@@ -5179,8 +5179,8 @@ function StockPage({stock,grn,pl,fl,materialsV2}){
   const activeMats=(materialsV2||[]).filter(m=>m.active);
   const grnByName={};(grn||[]).forEach(g=>{const k=norm(g.material);if(k)grnByName[k]=(grnByName[k]||0)+(+g.sqft||0);});
   const usedByName={};(pl||[]).forEach(l=>{const k=norm(l.material);if(k)usedByName[k]=(usedByName[k]||0)+(+l.print_sqft||0);});
-  const parseNotes=(n)=>{const o={brand:'',width:''};if(!n)return o;const bm=n.match(/Brand:\s*([^·]+)/);if(bm)o.brand=bm[1].trim();const wm=n.match(/Width\(m\):\s*([^·]+)/);if(wm)o.width=wm[1].trim();return o;};
-  const balances=activeMats.map(m=>{const k=norm(m.name);const inward=grnByName[k]||0;const used=usedByName[k]||0;const meta=parseNotes(m.notes);return{name:m.name,unit:m.unit,brand:meta.brand,width:meta.width,inward,used,remaining:inward-used};});
+  const parseNotes=(n)=>{const o={brand:'',width:'',qty:0,qtyUnit:''};if(!n)return o;const bm=n.match(/Brand:\s*([^·]+)/);if(bm)o.brand=bm[1].trim();const wm=n.match(/Width\(m\):\s*([^·]+)/);if(wm)o.width=wm[1].trim();const qm=n.match(/Opening stock[^:]*:\s*(\d+)\s*(rolls?|nos|sheets?)/i);if(qm){o.qty=+qm[1];o.qtyUnit=qm[2].toLowerCase();}return o;};
+  const balances=activeMats.map(m=>{const k=norm(m.name);const inward=grnByName[k]||0;const used=usedByName[k]||0;const meta=parseNotes(m.notes);return{name:m.name,unit:m.unit,brand:meta.brand,width:meta.width,qty:meta.qty,qtyUnit:meta.qtyUnit||m.unit,inward,used,remaining:inward-used};});
   const statusOf=(r)=>r.inward===0?'no-grn':r.remaining<=0?'out':r.remaining<100?'low':'ok';
   const ql=q.toLowerCase().trim();
   const filtered=balances.filter(r=>{
@@ -5217,16 +5217,18 @@ function StockPage({stock,grn,pl,fl,materialsV2}){
         <th style={{cursor:"pointer"}} onClick={()=>sortBy('name')}>Material{sortIcon('name')}</th>
         <th>Brand</th>
         <th>Width</th>
+        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('qty')}>Qty{sortIcon('qty')}</th>
         <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('inward')}>Inward sqft{sortIcon('inward')}</th>
         <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('used')}>Used sqft{sortIcon('used')}</th>
         <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('remaining')}>Remaining{sortIcon('remaining')}</th>
         <th>Status</th>
       </tr></thead><tbody>
-        {filtered.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No materials match filter</td></tr>}
+        {filtered.length===0&&<tr><td colSpan={8} style={{textAlign:"center",color:"#64748b",padding:12,fontSize:10}}>No materials match filter</td></tr>}
         {filtered.map(r=><tr key={r.name}>
           <td style={{fontSize:10,fontWeight:600}}>{r.name}</td>
           <td style={{fontSize:9,color:"#8b949e"}}>{r.brand||'—'}</td>
           <td style={{fontSize:9,color:"#8b949e"}}>{r.width||'—'}</td>
+          <td className="mn" style={{fontSize:10,textAlign:"right",color:"#e3a008",fontWeight:600}}>{r.qty>0?r.qty+' '+r.qtyUnit:'—'}</td>
           <td className="mn" style={{fontSize:10,textAlign:"right",color:"#10b981"}}>{r.inward.toFixed(0)}</td>
           <td className="mn" style={{fontSize:10,textAlign:"right",color:"#ef4444"}}>{r.used.toFixed(0)}</td>
           <td className="mn" style={{fontSize:11,textAlign:"right",fontWeight:700,color:r.remaining<=0?"#f47067":r.remaining<100?"#e3a008":"#4ade80"}}>{r.remaining.toFixed(0)}</td>
