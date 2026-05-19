@@ -2038,7 +2038,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   // Bundle 3 (02 May 26): Estimate PDF print presets — controls which columns appear.
   // 'internal'=full+internal_name, 'customer'=full+client_name (hide media), 'billing'=minimal, 'custom'=user toggles.
   const [pdfPreset,setPdfPreset]=useState('internal');
-  const [pdfCols,setPdfCols]=useState({sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true,remarks:false});
+  const [pdfCols,setPdfCols]=useState({sr:true,desc:true,img:true,media:true,size:true,qty:true,uom:true,rate:true,total:true,gst:true,amt:true,remarks:true});
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
   const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
   const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
@@ -3633,6 +3633,17 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           const selBatches=(j.batches||[]).filter(b=>pdfBatches[b.id]);
           if(selBatches.length===0){alert('Select at least one batch');return;}
           const selItems=selBatches.flatMap(b=>(b.items||[]));
+          // 19 May 2026: If items have remarks but the Remarks column is currently off,
+          // prompt the user to include them. Patches pdfCols immediately if confirmed.
+          (()=>{const hasRem=selItems.some(it=>it.remarks&&String(it.remarks).trim()!=='');
+            if(hasRem&&pdfCols&&pdfCols.remarks===false){
+              if(confirm('⚠️ '+selItems.filter(it=>it.remarks&&String(it.remarks).trim()!=='').length+' item(s) have Remarks but the Remarks column is currently OFF in the PDF.\n\nInclude Remarks column in the PDF?')){
+                setPdfCols(p=>({...p,remarks:true}));
+                // Mutate local snapshot so this same render uses it (state update is async)
+                pdfCols.remarks=true;
+              }
+            }
+          })();
           if(pdfMode==='estimate'){
             const totSub=selItems.reduce((s,it)=>s+(+it.total||0),0);const totGst=selItems.reduce((s,it)=>s+(+it.gst||0),0);const totAmt=selItems.reduce((s,it)=>s+(+it.amount||0),0);const totQty=selItems.reduce((s,it)=>s+(+it.qty||0),0);const totSqft=Math.round(selItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
             const hasImg=selItems.some(it=>it.img_url);
@@ -4060,7 +4071,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
   const MACH_OPT=["In-house",...(machines||[]).map(m=>m.name),"Outsource"];
   const [its,sIts]=useState([{id:uid(),sr:1,pi:0,int:products[0]?.internal_name||"",cli:products[0]?.client_name||"",m:"",w:"",h:"",qty:1,rm:"SqFt (INCH)",rate:"",sqft:0,tot:0,gst:0,amt:0,gstPct:18,mach:"In-house",imgUrl:""}]);
 
-  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||p.cemail,cgst:c.gst||'',bname:c.billing_name||c.name}));};
+  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact||'',cph:c.phone||'',cemail:c.email||'',cgst:c.gst||'',bname:c.billing_name||c.name}));};
   const doAddCli=async()=>{if(!nc.name.trim())return;const cid="CL"+uid();const cd={id:cid,name:nc.name.trim(),contact:nc.contact,phone:nc.phone,email:nc.email,gst:nc.gst,billing_name:nc.billing_name||nc.name.trim()};const ok=await addNewClient(cd);if(ok){clients.push(cd);sF(p=>({...p,cl:cid,cn:nc.name.trim(),cp:nc.contact,cph:nc.phone,cemail:nc.email,cgst:nc.gst||'',bname:nc.billing_name||nc.name.trim()}));setNc({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});setShowNewCli(false);}};
   const selP=(i,pi)=>{const pm=products[pi];if(pm)sIts(p=>{const n=[...p];n[i]={...n[i],pi,int:pm.internal_name,cli:pm.client_name};return n;});};
   const GST_OPTS=[0,5,12,18,28];
@@ -4098,7 +4109,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     setSubmitting(true);
     const poUrl=await uploadFile(poFile,'po');
     const designUrls=designFiles.length>0?await uploadMultiple(designFiles,'design-refs'):[];
-    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,billing_address:f.ba,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
+    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,billing_address:f.ba,contact_person:f.cp,contact_no:f.cph,client_email:f.cemail||'',made_by:f.mb,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
     const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
@@ -8066,7 +8077,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const [parsedItems,setParsedItems]=useState([]);
   const [its,setIts]=useState([]);
   const [fm,sfm]=useState("JXT");
-  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
+  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",cgst:"",po:"",da:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:""});
   const [su,sSu]=useState("INCH");
   const [submitting,setSubmitting]=useState(false);
   const [err,setErr]=useState("");
@@ -8505,7 +8516,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
   const curFY=useMemo(()=>{const n=new Date();const m=n.getMonth(),y=n.getFullYear();return m>=3?`${String(y).slice(2)}${String(y+1).slice(2)}`:`${String(y-1).slice(2)}${String(y).slice(2)}`;},[]); 
   const nextNum=useMemo(()=>{const fyJobs=jobs.filter(j=>j.id?.includes('-'+curFY));const nums=fyJobs.map(j=>{const p=j.id?.split('-')[0];return parseInt(p)||0;});return String(Math.max(0,...nums)+1).padStart(4,'0');},[jobs,curFY]);
   const jid=`${nextNum}-${curFY}`;
-  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact,cph:c.phone,cemail:c.email||''}));};
+  const selC=cid=>{const c=clients.find(x=>x.id===cid);if(c)sF(p=>({...p,cl:cid,cn:c.name,cp:c.contact||'',cph:c.phone||'',cemail:c.email||'',cgst:c.gst||''}));};
 
   // 20 Apr: Persist BOQ template on successful import (save new / bump use_count)
   // Wrapped in try/catch — template errors never block job creation (main flow already succeeded).
@@ -8571,7 +8582,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
         rowIdx++;
         lastNum++;
         const newJid=String(lastNum).padStart(4,'0')+'-'+curFYVal;
-        const jobData={id:newJid,firm:fm,client_id:f.cl,client_name:f.cn,project:it.int||f.pr,delivery_address:it.siteAddr||f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
+        const jobData={id:newJid,firm:fm,client_id:f.cl,client_name:f.cn,project:it.int||f.pr,delivery_address:it.siteAddr||f.da,contact_person:f.cp,contact_no:f.cph,client_email:f.cemail||"",made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:f.cgst||"",payment_terms:f.pt,status:"Active"};
         const batchId="B"+uid();
         const batchData={id:batchId,job_id:newJid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
         const lineItems=[{id:"LI"+uid(),batch_id:batchId,job_id:newJid,sr:1,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}];
@@ -8616,7 +8627,7 @@ function BOQImportPage({firms,clients,products,team,machines,createJob,sp,jobs,u
       // All items = one job
       if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr||'—'}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
       setSubmitting(true);
-      const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:"",payment_terms:f.pt,status:"Active"};
+      const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,contact_person:f.cp,contact_no:f.cph,client_email:f.cemail||"",made_by:f.mb,po_number:f.po,billing_name:f.cn,client_gst:f.cgst||"",payment_terms:f.pt,status:"Active"};
       const batchId="B"+uid();
       const batchData={id:batchId,job_id:jid,date:f.rd,note:"BOQ Import: "+fileName,bill_no:"",status:"New"};
       const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
@@ -9413,6 +9424,9 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
   // ── Dept-status filter (NEW) ───────────────────────────────
   // null = no dept filter active. Otherwise one of: 'design','printIn','printOut','fabIn','fabOut','dispatch','installed'
   const [deptFilter,setDeptFilter]=useState(null);
+  // ── Duplicate-only filter (19 May 2026) ────────────────────
+  // Toggled by clicking the duplicate banner. When true, only duplicate rows show.
+  const [dupOnly,setDupOnly]=useState(false);
   // ── Banking Job# Group modal (added 27 Apr 26) ─────────────
   // When a banking site's job_no pill is clicked AND no `jobs` row exists for
   // that job_no, this opens BankingJobGroupModal showing all sites in the
@@ -9652,8 +9666,9 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
       s.vendor_name?.toLowerCase().includes(q)||s.job_no?.toLowerCase().includes(q)||
       s.billing_status?.toLowerCase().includes(q)||s.district?.toLowerCase().includes(q)
     );}
+    if(dupOnly)f=f.filter(s=>dupIds.has(s.id));
     return f;
-  },[sites,tab,stFilter,stateFilter,search,deptFilter,siteDeptStatus]);
+  },[sites,tab,stFilter,stateFilter,search,deptFilter,siteDeptStatus,dupOnly,dupIds]);
 
   // Stats
   const stats=useMemo(()=>{
@@ -10259,9 +10274,10 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
     }}/>}
 
     {/* Sites Table */}
-    {dupIds.size>0&&<div style={{margin:'0 0 6px',padding:'6px 12px',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.35)',borderRadius:7,fontSize:11,color:'#fcd34d',display:'flex',alignItems:'center',gap:8}}>
+    {dupIds.size>0&&<div style={{margin:'0 0 6px',padding:'6px 12px',background:dupOnly?'rgba(245,158,11,0.18)':'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.35)',borderRadius:7,fontSize:11,color:'#fcd34d',display:'flex',alignItems:'center',gap:8,cursor:'pointer'}} onClick={()=>{setDupOnly(p=>!p);setPage(0);}} title={dupOnly?'Click to show all sites':'Click to filter to duplicates only'}>
       <span>⚠️</span>
-      <span><strong>{dupIds.groupCount} duplicate group{dupIds.groupCount===1?'':'s'}</strong> detected ({dupIds.extraRows} extra row{dupIds.extraRows===1?'':'s'}) — rows highlighted in amber. Use 🔀 to move or 🗑️ to delete the duplicate entry.</span>
+      <span style={{flex:1}}><strong>{dupIds.groupCount} duplicate group{dupIds.groupCount===1?'':'s'}</strong> detected ({dupIds.extraRows} extra row{dupIds.extraRows===1?'':'s'}) — rows highlighted in amber. Use 🔀 to move or 🗑️ to delete the duplicate entry. <span style={{textDecoration:'underline',fontWeight:700,marginLeft:6}}>{dupOnly?'✓ Showing duplicates only — click to show all':'Click here to view only duplicates'}</span></span>
+      {dupOnly&&<button className="b bs" onClick={e=>{e.stopPropagation();setDupOnly(false);setPage(0);}} style={{fontSize:9,padding:'2px 6px',background:'#0c1017'}}>✕ Clear</button>}
     </div>}
     <div className="c" style={{overflow:'auto',maxHeight:'calc(100vh - 340px)'}}>
       <table><thead><tr>
@@ -13563,7 +13579,7 @@ function ClientPortal({code}){
       if(jids.length>0){
         const {data:b}=await sb.from('batches').select('id,job_id,date,note,status').in('job_id',jids);
         if(b){setBatches(b);const bids=b.map(x=>x.id);
-          if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url').in('batch_id',bids);if(li)setItems(li);}}
+          if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url,remarks,sqft,total,gst,gstPct,amount,rate,rate_mode').in('batch_id',bids);if(li)setItems(li);}}
         if(allJobs[0]?.firm){const {data:f}=await sb.from('firms').select('code,name,short_name').eq('code',allJobs[0].firm).single();if(f)setFirm(f);}
       }
       try{const {data:n}=await sb.from('client_notes').select('*').in('job_id',jids).order('created_at',{ascending:false});
@@ -13707,7 +13723,7 @@ function ClientPortal({code}){
           if(jids.length>0){
             const {data:b}=await sb.from('batches').select('id,job_id,date,note,status').in('job_id',jids);
             if(b){setBatches(b);const bids=b.map(x=>x.id);
-              if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url').in('batch_id',bids);if(li)setItems(li);}}
+              if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url,remarks,sqft,total,gst,gstPct,amount,rate,rate_mode').in('batch_id',bids);if(li)setItems(li);}}
           }
         })();
       },3000);
@@ -13898,7 +13914,7 @@ function ClientPortal({code}){
         (async()=>{let allJobs=[];for(const pattern of config.match){const {data:j}=await sb.from('jobs').select('id,firm,client_name,project,delivery_address,contact_person,contact_no,client_email,po_number,status,status_dates,po_file_url,design_ref_urls,created_at').ilike('client_name','%'+pattern+'%').order('id',{ascending:false});if(j)allJobs=[...allJobs,...j];}
         const seen=new Set();allJobs=allJobs.filter(j=>{if(seen.has(j.id))return false;seen.add(j.id);return true;});setJobs(allJobs);
         const jids=allJobs.map(x=>x.id);if(jids.length>0){const {data:b}=await sb.from('batches').select('id,job_id,date,note,status').in('job_id',jids);
-        if(b){setBatches(b);const bids=b.map(x=>x.id);if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url').in('batch_id',bids);if(li)setItems(li);}}}})();
+        if(b){setBatches(b);const bids=b.map(x=>x.id);if(bids.length){const {data:li}=await sb.from('line_items').select('id,batch_id,job_id,internal_name,client_name,media,width,height,size_unit,qty,img_url,remarks,sqft,total,gst,gstPct,amount,rate,rate_mode').in('batch_id',bids);if(li)setItems(li);}}}})();
       },4000);
     }catch(ex){alert('Error: '+ex.message);}
     setBoqSubmitting(false);
