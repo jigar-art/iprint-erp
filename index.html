@@ -4730,7 +4730,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   };
   const [f,sF]=useState(blankForm);
 
-  const MACHINES=['Witcolour UV R2R','EPSON UV Flatbed','EPSON Latex'];
+  const MACHINES=['Witcolour UV R2R','EPSON UV Flatbed','EPSON Latex','Plotter Cutting Machine'];
   const rollMaterials=(materialsV2||[]).filter(m=>m.unit==='roll'&&m.active).sort((a,b)=>a.name.localeCompare(b.name));
 
   // Stock balance per material (sqft) — case-insensitive trim match.
