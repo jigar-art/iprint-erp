@@ -13,6 +13,13 @@
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- PWA: app install + status bar + iOS icon -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#060810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="iPrint ERP">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',system-ui,sans-serif;background:#060810;color:#e2e8f0;overflow:hidden}
@@ -14778,6 +14785,16 @@ function MonthlyRevenueCard({user, show, readOnly}) {
 // inside any component (would violate React hooks rules).
 const __isHealth = new URLSearchParams(window.location.search).get('health') === '1';
 ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? <HealthCheckPage/> : <RootApp/>);
+</script>
+<script>
+// PWA: register service worker (plain JS, outside Babel block)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function (err) {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}
 </script>
 </body>
 </html>
