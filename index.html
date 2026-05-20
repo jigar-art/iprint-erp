@@ -1318,9 +1318,13 @@ function MainApp({user,onLogout,masterData}){
     // Patch I (19 May 2026) — global chokepoint: only authorized users can move a job OUT of Printing*.
     // Applies everywhere (Print Queue, Print Job View modal, JobDetail dropdown, Dept Tracker, bulk ops).
     // Whitelist matches PrintPage's FORWARD_USERS (kept in sync).
+    // Patch I.2 (20 May 2026) — word-boundary match (token == name OR name starts with 'token ').
+    // Fixes "PRINTING TEAM" / "CHANDNI S" / "AMOL M" being blocked by exact match,
+    // while keeping ANKITA / PRATIKSHA out (substring match would have allowed them).
     const PRINT_FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
     const fromPrinting=(dbRow.status||'').startsWith('Printing');
-    if(fromPrinting && !PRINT_FORWARD_USERS.includes(String(userName).toUpperCase().trim())){
+    const _uname=String(userName||'').toUpperCase().trim();
+    if(fromPrinting && !PRINT_FORWARD_USERS.some(t=>_uname===t||_uname.startsWith(t+' '))){
       show('🔒 Only authorized users (JIGAR/CHANDNI/PRINTING/ANKIT/PRATIK/SONU/AMOL) can forward jobs from Printing.',false);
       console.warn('updateJobStatus blocked (Patch I): user',userName,'tried to move job',jobId,'from',dbRow.status,'to',newStatus);
       return;
@@ -4975,8 +4979,10 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   // Forward permission — username whitelist (Patch G + Patch I, 19 May 2026)
   // JIGAR, CHANDNI = admin; PRINTING = team operator; ANKIT/PRATIK/SONU = production; AMOL = production manager
   // MUST stay in sync with central PRINT_FORWARD_USERS at updateJobStatus (App-level chokepoint)
+  // Patch I.2 (20 May 2026): word-boundary match — handles "PRINTING TEAM"/"CHANDNI S"
+  // while blocking ANKITA/PRATIKSHA (substring match would have allowed them).
   const FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
-  const userCanForward=FORWARD_USERS.includes((user?.name||'').toUpperCase().trim());
+  const userCanForward=(()=>{const u=(user?.name||'').toUpperCase().trim();return FORWARD_USERS.some(t=>u===t||u.startsWith(t+' '));})();
 
   // Image compression — resize to max 1600px wide, JPEG 0.8 quality (Patch G)
   const compressImage=(file)=>new Promise((res,rej)=>{
