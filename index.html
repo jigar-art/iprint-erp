@@ -57,6 +57,34 @@ tr:hover td{background:#0a0f1a}
 .f4{grid-template-columns:1fr 1fr 1fr 1fr}
 .loader{width:24px;height:24px;border:3px solid #1a2030;border-top-color:#e3a008;border-radius:50%;animation:spin .6s linear infinite}
 @media(max-width:600px){.portal-item-grid{grid-template-columns:2fr 2fr 1fr!important}}
+
+/* ───── MOBILE LAYOUT (P1+P2 — 20 May 2026) ─────
+   Activates below 768px. Sidebar becomes off-canvas drawer.
+   Touch targets bumped to ~44px. Header reflows. */
+@media(max-width:768px){
+  /* Sidebar → fixed drawer, slides in from left */
+  aside.shell-aside{position:fixed!important;top:0;left:0;height:100vh;width:240px!important;z-index:50;transform:translateX(-100%);transition:transform .22s ease-out;box-shadow:2px 0 16px rgba(0,0,0,.4)}
+  aside.shell-aside.open{transform:translateX(0)}
+  /* Backdrop behind drawer */
+  .mnav-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:49;opacity:0;pointer-events:none;transition:opacity .18s}
+  .mnav-backdrop.open{opacity:1;pointer-events:auto}
+  /* Hamburger button — only visible on mobile */
+  .mnav-btn{display:inline-flex!important;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;border:1px solid #1a2030;background:#0c1017;color:#e3a008;font-size:16px;cursor:pointer;flex-shrink:0;margin-right:6px}
+  /* Bigger touch targets */
+  .ni{padding:10px 11px!important;font-size:13px!important;margin-bottom:2px!important}
+  .b{padding:8px 13px!important;font-size:12px!important;min-height:36px}
+  .bs{padding:5px 9px!important;font-size:11px!important;min-height:30px}
+  .in{padding:9px 10px!important;font-size:13px!important;min-height:38px}
+  .ck{width:18px!important;height:18px!important}
+  /* Header reflow — search shrinks, FY pills wrap, title trims */
+  header h2{font-size:13px!important}
+  /* Reduce padding everywhere on phone */
+  main > div[style*="padding:12"]{padding:8px!important}
+  /* Tables — let them scroll horizontally rather than crush */
+  table{min-width:max-content}
+  /* Wrapper around any overflow-x:auto table containers stays as-is */
+}
+.mnav-btn{display:none} /* hidden on desktop by default */
 </style>
 </head>
 <body>
@@ -879,8 +907,11 @@ function MainApp({user,onLogout,masterData}){
   const [toast,setToast]=useState(null);
   const [search,setSearch]=useState("");
   const [col,setCol]=useState(false);
+  const [mNav,setMNav]=useState(false); // mobile nav drawer open (P1 — 20 May 2026)
   const [loading,setLoading]=useState(true);
   const [modal,setModal]=useState(null);
+  // P1 — close mobile drawer when any central modal opens (20 May 2026)
+  useEffect(()=>{if(modal)setMNav(false);},[modal]);
   const [fyFilter,setFyFilter]=useState('2627'); // default to current FY
   const [portalAlert,setPortalAlert]=useState(null);
 
@@ -1692,13 +1723,15 @@ function MainApp({user,onLogout,masterData}){
 
   return(
     <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+      {/* MOBILE BACKDROP (P1) */}
+      <div className={`mnav-backdrop ${mNav?"open":""}`} onClick={()=>setMNav(false)}/>
       {/* SIDEBAR */}
-      <aside style={{width:col?44:180,background:"#060810",borderRight:"1px solid #1a2030",display:"flex",flexDirection:"column",transition:"width .2s",overflow:"hidden",flexShrink:0}}>
+      <aside className={`shell-aside ${mNav?"open":""}`} style={{width:col?44:180,background:"#060810",borderRight:"1px solid #1a2030",display:"flex",flexDirection:"column",transition:"width .2s",overflow:"hidden",flexShrink:0}}>
         <div style={{padding:"8px",display:"flex",alignItems:"center",gap:6,borderBottom:"1px solid #1a2030",minHeight:38}}>
           <div style={{width:24,height:24,borderRadius:5,background:"linear-gradient(135deg,#e3a008,#ca8a04)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:9,color:"#060810",flexShrink:0}}>iP</div>
           {!col&&<span style={{fontWeight:800,fontSize:11,color:"#e3a008"}}>iPrint ERP</span>}
         </div>
-        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='mytasks'?myTaskPendingCount:n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):n.id==='myprs'?(()=>{try{const uname=(user.name||'').toUpperCase();const lvKey='myprs_last_viewed_'+uname;const lv=localStorage.getItem(lvKey)||'1970-01-01T00:00:00Z';const myDept=(typeof STAFF_DEPTS!=='undefined')?Object.keys(STAFF_DEPTS).find(k=>k.toUpperCase()===uname||uname.includes(k.toUpperCase())):null;const myDeptTag=myDept?STAFF_DEPTS[myDept]:null;return (prs||[]).filter(p=>{const isMine=p.created_by&&p.created_by.toUpperCase()===uname;const isMyDept=myDeptTag&&p.requestor_dept===myDeptTag;if(!isMine&&!isMyDept)return false;const ts=p.last_status_change_at||p.created_at||'';return ts>lv&&p.status!=='Pending Approval';}).length;}catch(e){return 0;}})():0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>setPg(n.id)} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
+        <nav style={{flex:1,padding:"3px",overflowY:"auto"}}>{nav.map(n=>{const pendOs=n.id==='mytasks'?myTaskPendingCount:n.id==='rem'?((osItems||[]).filter(o=>o.po_status==='Pending').length+(reqs||[]).filter(r=>r.po_status==='Pending').length):n.id==='appr'?((prs||[]).filter(p=>p.status==='Pending Approval').length):n.id==='grn2'?((prs||[]).filter(p=>['PO Sent','PO Generated'].includes(p.status)).length):n.id==='myprs'?(()=>{try{const uname=(user.name||'').toUpperCase();const lvKey='myprs_last_viewed_'+uname;const lv=localStorage.getItem(lvKey)||'1970-01-01T00:00:00Z';const myDept=(typeof STAFF_DEPTS!=='undefined')?Object.keys(STAFF_DEPTS).find(k=>k.toUpperCase()===uname||uname.includes(k.toUpperCase())):null;const myDeptTag=myDept?STAFF_DEPTS[myDept]:null;return (prs||[]).filter(p=>{const isMine=p.created_by&&p.created_by.toUpperCase()===uname;const isMyDept=myDeptTag&&p.requestor_dept===myDeptTag;if(!isMine&&!isMyDept)return false;const ts=p.last_status_change_at||p.created_at||'';return ts>lv&&p.status!=='Pending Approval';}).length;}catch(e){return 0;}})():0;return <div key={n.id} className={`ni ${pg===n.id?"on":""}`} onClick={()=>{setPg(n.id);setMNav(false);}} style={{position:"relative"}}><span style={{fontSize:11,flexShrink:0}}>{n.e}</span>{!col&&<span>{n.l}</span>}{pendOs>0&&<span style={{background:"#f97316",color:"#fff",fontSize:7,fontWeight:800,borderRadius:8,padding:"1px 4px",marginLeft:"auto"}}>{pendOs}</span>}</div>})}</nav>
         <div style={{padding:"4px 3px",borderTop:"1px solid #1a2030"}}>
           {!col&&<div style={{padding:"6px 9px",fontSize:10,color:"#64748b",marginBottom:2}}>👤 {user.name} <span className="bd" style={{background:"#e3a00820",color:"#e3a008",marginLeft:4}}>{user.role}</span></div>}
           <div className="ni" onClick={onLogout}><span>🚪</span>{!col&&<span>Logout</span>}</div>
@@ -1709,6 +1742,7 @@ function MainApp({user,onLogout,masterData}){
       {/* MAIN */}
       <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
         <header style={{height:38,minHeight:38,background:"#060810",borderBottom:"1px solid #1a2030",display:"flex",alignItems:"center",padding:"0 12px",gap:8,flexShrink:0,position:"sticky",top:0,zIndex:10}}>
+          <button className="mnav-btn" onClick={()=>setMNav(p=>!p)} aria-label="Menu">☰</button>
           <h2 style={{fontWeight:700,fontSize:12,flex:1}}>{nav.find(n=>n.id===pg)?.l||"iPrint"}</h2>
           <div style={{display:"flex",gap:2,alignItems:"center"}}>
             {[{id:'2526',l:'FY 25-26'},{id:'2627',l:'FY 26-27'},{id:'all',l:'All Years'}].map(fy=><button key={fy.id} className={`b bs ${fyFilter===fy.id?'bp':''}`} onClick={()=>setFyFilter(fy.id)} style={{fontSize:8,padding:"2px 7px",lineHeight:"14px"}}>{fy.l}</button>)}
