@@ -6311,6 +6311,7 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   const [sortKey,setSortKey]=React.useState('remaining');
   const [sortDir,setSortDir]=React.useState('asc');
   const [statusFilter,setStatusFilter]=React.useState('all');
+  const [dateFilter,setDateFilter]=React.useState('thismonth'); // Patch AA: stat-card date filter (default 'thismonth' — FY data only starts Apr 1)
   const norm=s=>(s||'').toLowerCase().trim();
   const activeMats=(materialsV2||[]).filter(m=>m.active);
   const unitByName={};activeMats.forEach(m=>{unitByName[norm(m.name)]=m.unit||'roll';});
@@ -6352,25 +6353,74 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   const sortBy=(k)=>{if(sortKey===k)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(k);setSortDir('asc');}};
   const sortIcon=(k)=>sortKey===k?(sortDir==='asc'?' ▲':' ▼'):'';
   const legacyRows=Object.entries(stock).sort((a,b)=>a[0].localeCompare(b[0]));
-  // ── Stat-card totals (unit-aware, Patch Z 21-May-2026) ───────────────────────────
+  // ── Stat-card totals (unit-aware, Patch Z; date-filtered, Patch AA 21-May-2026) ──
   // Rolls measured in sqft; sheets/nos in their own qty. Mixing them as raw qty
   // (legacy behaviour) produced numbers like "21008.28" that meant nothing. Show
   // each unit class separately: main number = sqft total (rolls), subtitle = sheet+nos qty.
-  const rollInward=balances.filter(r=>r.unit==='roll').reduce((s,r)=>s+r.inward,0);
-  const rollUsed=balances.filter(r=>r.unit==='roll').reduce((s,r)=>s+r.used,0);
-  const nonRollInward=balances.filter(r=>r.unit!=='roll').reduce((s,r)=>s+r.inward,0);
-  const nonRollUsed=balances.filter(r=>r.unit!=='roll').reduce((s,r)=>s+r.used,0);
-  // Fab/Print used (legacy stat cards) – break down by unit at the log row level
-  const usedRollPrint=(pl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]==='roll')?(+l.print_sqft||0):0);},0);
-  const usedNonRollPrint=(pl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+l.qty_used||+l.print_sqft||0):0);},0);
-  const usedRollFab=(fl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]==='roll')?(+l.qty_used||0):0);},0);
-  const usedNonRollFab=(fl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+l.qty_used||0):0);},0);
+  // Patch AA: stat cards filter by date selection (Material Balance table remains lifetime).
+  // Date range helper — returns [from,to] YYYY-MM-DD strings (inclusive) or [null,null] for all-time.
+  const dateRange=React.useMemo(()=>{
+    const today=new Date();
+    const y=today.getFullYear(), m=today.getMonth(); // m: 0-11
+    const fmtDate=d=>d.toISOString().slice(0,10);
+    if(dateFilter==='all') return [null,null];
+    if(dateFilter==='thismonth') return [fmtDate(new Date(y,m,1)), fmtDate(today)];
+    if(dateFilter==='last30') {const d=new Date(today);d.setDate(d.getDate()-29);return [fmtDate(d), fmtDate(today)];}
+    if(dateFilter==='currentfy') {
+      // Indian FY: Apr 1 → Mar 31. If today is Jan-Mar, FY started prev year Apr 1.
+      const fyStart = m>=3 ? new Date(y,3,1) : new Date(y-1,3,1);
+      return [fmtDate(fyStart), fmtDate(today)];
+    }
+    if(dateFilter==='lastfy') {
+      const fyStart = m>=3 ? new Date(y-1,3,1) : new Date(y-2,3,1);
+      const fyEnd   = m>=3 ? new Date(y,2,31)  : new Date(y-1,2,31);
+      return [fmtDate(fyStart), fmtDate(fyEnd)];
+    }
+    return [null,null];
+  },[dateFilter]);
+  const inDateRange=(d)=>{
+    if(!dateRange[0]) return true; // all-time
+    if(!d) return false;
+    const ds=String(d).slice(0,10);
+    return ds>=dateRange[0] && ds<=dateRange[1];
+  };
+  // Filter source arrays by date
+  const grnF=(grn||[]).filter(g=>inDateRange(g.date));
+  const plF=(pl||[]).filter(l=>inDateRange(l.date));
+  const flF=(fl||[]).filter(l=>inDateRange(l.date));
+  // Stat-card aggregations on filtered arrays
+  const cardInwardRoll=grnF.reduce((s,g)=>{const k=norm(g.material);return s+((unitByName[k]==='roll')?(+g.sqft||0):0);},0);
+  const cardInwardNonRoll=grnF.reduce((s,g)=>{const k=norm(g.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+g.qty||0):0);},0);
+  const cardPrintRoll=plF.reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]==='roll')?(+l.print_sqft||0):0);},0);
+  const cardPrintNonRoll=plF.reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+l.qty_used||+l.print_sqft||0):0);},0);
+  const cardFabRoll=flF.reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]==='roll')?(+l.qty_used||0):0);},0);
+  const cardFabNonRoll=flF.reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+l.qty_used||0):0);},0);
   const fmt=n=>(+n||0).toFixed(2);
   const fmt0=n=>Math.round(+n||0).toString();
   const outOfStockCount=balances.filter(r=>r.inward>0&&r.remaining<=0).length;
+  const dateFilterOptions=[
+    {v:'all',l:'All time'},
+    {v:'thismonth',l:'This month'},
+    {v:'last30',l:'Last 30 days'},
+    {v:'currentfy',l:'Current FY'},
+    {v:'lastfy',l:'Last FY'},
+  ];
+  const dateLabel=dateFilterOptions.find(o=>o.v===dateFilter)?.l||'';
+  const dateRangeText=dateRange[0]?`${dateRange[0]} → ${dateRange[1]}`:'all time';
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    {/* Patch AA: date filter dropdown affects stat cards only */}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:"#8b949e"}}>
+        <span style={{fontWeight:600}}>📅 Stat cards period:</span>
+        <select className="in" value={dateFilter} onChange={e=>setDateFilter(e.target.value)} style={{fontSize:10,padding:"3px 6px",minWidth:130}}>
+          {dateFilterOptions.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+        </select>
+        <span style={{fontSize:9,color:"#64748b"}}>({dateRangeText})</span>
+      </div>
+      <span style={{fontSize:9,color:"#64748b",fontStyle:"italic"}}>Material Balance table below = lifetime balance</span>
+    </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
-      <SC l="Inward (sqft)" v={fmt(rollInward)} s={`+ ${fmt0(nonRollInward)} sheets/nos`} c="#10b981"/><SC l="Print Used (sqft)" v={fmt(usedRollPrint)} s={`+ ${fmt0(usedNonRollPrint)} sheets/nos`} c="#ef4444" d={30}/><SC l="Fab Used (sqft)" v={fmt(usedRollFab)} s={`+ ${fmt0(usedNonRollFab)} sheets/nos`} c="#dc2626" d={60}/><SC l="Materials" v={balances.length} s={outOfStockCount>0?`${outOfStockCount} out of stock`:'all in stock'} c="#3b82f6" d={90}/>
+      <SC l={`Inward (sqft)`} v={fmt(cardInwardRoll)} s={`+ ${fmt0(cardInwardNonRoll)} sheets/nos`} c="#10b981"/><SC l="Print Used (sqft)" v={fmt(cardPrintRoll)} s={`+ ${fmt0(cardPrintNonRoll)} sheets/nos`} c="#ef4444" d={30}/><SC l="Fab Used (sqft)" v={fmt(cardFabRoll)} s={`+ ${fmt0(cardFabNonRoll)} sheets/nos`} c="#dc2626" d={60}/><SC l="Materials" v={balances.length} s={outOfStockCount>0?`${outOfStockCount} out of stock`:'all in stock'} c="#3b82f6" d={90}/>
     </div>
     <div className="c" style={{padding:0}}>
       <div style={{padding:"8px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",flexDirection:"column",gap:6}}>
