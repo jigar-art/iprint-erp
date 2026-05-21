@@ -5684,7 +5684,13 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
   const [f,sF]=useState(blankForm);
   const ALL_ST = ALL_ST_NEW;
   const queue=(jobs||[]).filter(j=>j.status==='Fabrication'||j.status==='Fabrication · In-House'||j.status==='Fabrication · Outsource');
-  const openJob=(j)=>sm&&sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
+  // Patch AC2 (21-May-2026 evening): Job# click in fab queue now opens the Log Fab Job modal
+  // pre-filled with the chosen job, INSTEAD of opening JobDetail. This:
+  //  • Eliminates accidental commercial-detail exposure (rates, totals, GST, PO, client emails)
+  //    to fab team via JobDetail (which had no role-based redaction on line item columns).
+  //  • Removes 3 extra clicks for the fab team: previously they'd open JobDetail, close it,
+  //    click the Log Fab button, then re-select the job. Now: one click → modal ready.
+  const openJob=(j)=>{sF(p=>({...p,job_id:j.id,batch_id:'',line_item_id:'',selectedItems:{}}));setShowModal(true);};
 
   // All active masters (unit-agnostic; fab uses rolls AND sheets/nos)
   const allActiveMasters=(materialsV2||[]).filter(m=>m.active).sort((a,b)=>a.name.localeCompare(b.name));
