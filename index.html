@@ -1589,6 +1589,39 @@ function MainApp({user,onLogout,masterData}){
     return s;
   },[grnData,pLogs,fLogs,osLogs]);
 
+  // Patch P (21 May 2026) — Unit-aware stock balances, keyed by lowercase trimmed material name.
+  // Used by PR-form stock check (and reusable elsewhere). Map shape:
+  //   { "golden cotton canvas": { name: "Golden Cotton Canvas", unit: "roll", balance: 4417.5 } }
+  // Rolls aggregate grn.sqft, sheet/nos aggregate grn.qty. Deductions use print_logs.print_sqft
+  // (rolls) or print_logs.qty_used (sheet/nos) plus fab_logs.qty_used.
+  const stockBalances=useMemo(()=>{
+    const norm=s=>(s||'').toLowerCase().trim();
+    const masters=masterData.materialsV2||[];
+    const out={};
+    const unitByName={};
+    masters.filter(m=>m.active).forEach(m=>{
+      const k=norm(m.name);
+      unitByName[k]=m.unit||'roll';
+      out[k]={name:m.name, unit:m.unit||'roll', balance:0};
+    });
+    grnData.forEach(g=>{
+      const k=norm(g.material);if(!out[k])return;
+      const u=out[k].unit;
+      out[k].balance += (u==='roll')?(+g.sqft||0):(+g.qty||0);
+    });
+    pLogs.forEach(l=>{
+      const k=norm(l.material);if(!out[k])return;
+      const u=out[k].unit;
+      const used = (u==='roll')?(+l.print_sqft||0):(+l.qty_used||+l.print_sqft||0);
+      out[k].balance -= used;
+    });
+    fLogs.forEach(l=>{
+      const k=norm(l.material);if(!out[k])return;
+      out[k].balance -= (+l.qty_used||0);
+    });
+    return out;
+  },[grnData,pLogs,fLogs,masterData.materialsV2]);
+
   // Assemble jobs with batches and items — using Maps for O(1) lookup instead of O(n) filter
   const fullJobs = useMemo(()=>{
     // Build index: batch_id → items[]
@@ -1779,7 +1812,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct} stockBalances={stockBalances}/>:modal.x}</div></div>}
       {portalAlert&&portalAlert.length>0&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:250,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
         <div style={{background:"#0c1017",border:"2px solid #e3a008",borderRadius:14,width:"100%",maxWidth:550,padding:24,animation:"fi .3s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
@@ -2072,7 +2105,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs,setBatches,setItems,products,addNewProduct}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs,setBatches,setItems,products,addNewProduct,stockBalances}){
   const ALL_ST = ALL_ST_NEW;
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
@@ -2581,6 +2614,20 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const [quoteParsing,setQuoteParsing]=React.useState(false);
       const [quoteReview,setQuoteReview]=React.useState(null); // parsed items for review
       const [showQuoteUpload,setShowQuoteUpload]=React.useState(false);
+      // Patch P (21 May 2026) — Stock check on PR raise
+      const [stockConfirm,setStockConfirm]=React.useState(null);  // {summary, prRec} when waiting
+      const [allowExtraOrder,setAllowExtraOrder]=React.useState(false);
+      // Match PR free-text product → stockBalances entry. Exact first, then contains.
+      const lookupStock=React.useCallback((productText)=>{
+        if(!productText||!stockBalances)return null;
+        const q=String(productText).toLowerCase().trim();
+        if(!q)return null;
+        if(stockBalances[q])return stockBalances[q];
+        // contains-match in either direction
+        const keys=Object.keys(stockBalances);
+        const hit=keys.find(k=>k.includes(q)||q.includes(k));
+        return hit?stockBalances[hit]:null;
+      },[stockBalances]);
 
       // Load vendors on first form open
       const loadVendors=async()=>{
@@ -2741,6 +2788,27 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           show(`Select a unit for item ${missingUnit + 1} (${prf.items[missingUnit].product.slice(0,30)})`, false);
           return;
         }
+        // Patch P (21 May 2026) — Build stock summary and open confirm modal instead of saving directly.
+        const summary=prf.items.filter(x=>x.product).map(x=>{
+          const hit=lookupStock(x.product);
+          const needQty=+x.qty||0;
+          if(!hit) return {product:x.product, qty:needQty, unit:x.unit_mode||'NOS', match:false, status:'NEW'};
+          const bal=+hit.balance||0;
+          let status;
+          if(needQty<=0) status='OK';
+          else if(bal>=needQty) status='ALREADY HAVE';
+          else if(bal>0) status='PARTIAL';
+          else status='OUT';
+          return {product:x.product, qty:needQty, unit:x.unit_mode||'NOS', match:true, masterName:hit.name, masterUnit:hit.unit, balance:bal, status};
+        });
+        setAllowExtraOrder(false);
+        setStockConfirm({summary});
+      };
+
+      // Patch P (21 May 2026) — actual save executes only after user confirms in stock modal.
+      const executeSavePR=async()=>{
+        if(!stockConfirm) return;
+        setStockConfirm(null);
         setSaving(true);
         const pr_no=await genPRNo(prf.firm_code);
         const fy=getFY();
@@ -3130,7 +3198,30 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                     return {...merged,area:newArea,size:sizeStr};
                   })}));
                 };
-                return <tr key={xi}>
+                // Patch P (21 May 2026) — Compute inline stock badge for this row
+                const __stockBadge=(()=>{
+                  if(!x.product)return null;
+                  const hit=lookupStock(x.product);
+                  if(!hit){
+                    return <tr key={'sb-'+xi}><td colSpan={9} style={{padding:"0 4px 6px",fontSize:8,color:"#64748b"}}>
+                      <span style={{background:"#1a2030",padding:"2px 6px",borderRadius:3}}>ℹ "{x.product}" not in stock master — new item, will be ordered as-is</span>
+                    </td></tr>;
+                  }
+                  const needQty=+x.qty||0;
+                  const bal=+hit.balance||0;
+                  let st='OK',color='#10b981',bg='#05200e20',msg='';
+                  if(needQty<=0){st='OK';color='#64748b';bg='#1a203020';msg=`stock: ${bal.toFixed(0)} ${hit.unit==='roll'?'sqft':'pcs'}`;}
+                  else if(bal>=needQty){st='ALREADY HAVE';color='#f59e0b';bg='#3b250620';msg=`you already have ${bal.toFixed(0)} ${hit.unit==='roll'?'sqft':'pcs'} — still ordering ${needQty}?`;}
+                  else if(bal>0&&bal<needQty){st='PARTIAL';color='#06b6d4';bg='#0a3a4520';msg=`have ${bal.toFixed(0)}, need ${needQty}, short by ${(needQty-bal).toFixed(0)}`;}
+                  else {st='OUT';color='#10b981';bg='#05200e20';msg=`out of stock — order needed`;}
+                  return <tr key={'sb-'+xi}><td colSpan={9} style={{padding:"0 4px 6px"}}>
+                    <div style={{background:bg,border:"1px solid "+color+"44",borderRadius:4,padding:"3px 8px",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9}}>
+                      <span style={{color:"#8b949e"}}>📦 <strong style={{color:color}}>{hit.name}</strong> · {msg}</span>
+                      <span className="bd" style={{background:color+"20",color:color,fontSize:8}}>{st}</span>
+                    </div>
+                  </td></tr>;
+                })();
+                return <React.Fragment key={xi}><tr>
                   {/* 03 May 26: MaterialPicker on PR row — autocomplete from products,
                       prefills rate + gst_pct from the picked row, auto-adds new entries
                       via addNewProduct. All fields stay editable inline (e.g. for discounts). */}
@@ -3184,7 +3275,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
                     {x.gst_pct>0&&<span style={{fontSize:7,color:"#64748b"}}>+₹{lineGst.toFixed(0)} GST</span>}
                   </td>
                   <td>{prf.items.length>1&&<button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:10,padding:0}} onClick={()=>delItem(xi)}>✕</button>}</td>
-                </tr>;
+                </tr>{__stockBadge}</React.Fragment>;
               })}</tbody>
             </table>
           </div>
@@ -3215,6 +3306,80 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             </div>
             <button className="b bp" onClick={savePR} disabled={saving} style={{fontSize:10,padding:"5px 16px",background:"#f59e0b",borderColor:"#f59e0b",color:"#000",fontWeight:700,alignSelf:"flex-end"}}>{saving?'Saving...':'📋 Submit PR'}</button>
           </div>
+
+          {/* Patch P (21 May 2026) — Stock confirmation modal. Appears between savePR and executeSavePR. */}
+          {stockConfirm&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.8)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center",padding:20,overflowY:"auto"}} onClick={e=>{if(e.target===e.currentTarget)setStockConfirm(null);}}>
+            <div className="c" style={{maxWidth:780,width:"100%",margin:"auto",padding:14,background:"#0d1118",border:"2px solid #f59e0b"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #1a2030",paddingBottom:8,marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:800,color:"#f59e0b"}}>📦 Stock check — confirm purchase request</div>
+                  <div style={{fontSize:9,color:"#8b949e",marginTop:2}}>Reviewed against current stock levels (after print/fab consumption).</div>
+                </div>
+                <button className="b bs" onClick={()=>setStockConfirm(null)}>✕</button>
+              </div>
+              {(()=>{
+                const sum=stockConfirm.summary;
+                const anyHave=sum.some(s=>s.status==='ALREADY HAVE');
+                const allHave=sum.length>0 && sum.every(s=>s.status==='ALREADY HAVE');
+                const statusMeta={
+                  'NEW':       {color:'#64748b', bg:'#1a203020', label:'NEW ITEM'},
+                  'OUT':       {color:'#10b981', bg:'#05200e20', label:'OUT — ORDER OK'},
+                  'PARTIAL':   {color:'#06b6d4', bg:'#0a3a4520', label:'PARTIAL'},
+                  'ALREADY HAVE':{color:'#f59e0b', bg:'#3b250620', label:'⚠ ALREADY HAVE'},
+                  'OK':        {color:'#64748b', bg:'#1a203020', label:'OK'},
+                };
+                return <>
+                  <div style={{overflowX:"auto",marginBottom:10}}>
+                    <table style={{width:"100%",fontSize:10,borderCollapse:"collapse"}}>
+                      <thead>
+                        <tr style={{borderBottom:"1px solid #1a2030"}}>
+                          <th style={{textAlign:"left",padding:"5px 6px",color:"#8b949e",fontSize:9}}>Requested item</th>
+                          <th style={{textAlign:"right",padding:"5px 6px",color:"#8b949e",fontSize:9}}>Order qty</th>
+                          <th style={{textAlign:"left",padding:"5px 6px",color:"#10b981",fontSize:9}}>Stock-master match</th>
+                          <th style={{textAlign:"right",padding:"5px 6px",color:"#10b981",fontSize:9}}>In stock</th>
+                          <th style={{textAlign:"center",padding:"5px 6px",color:"#8b949e",fontSize:9}}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sum.map((s,i)=>{
+                          const m=statusMeta[s.status]||statusMeta.OK;
+                          return <tr key={i} style={{background:m.bg,borderBottom:"1px solid #1a2030"}}>
+                            <td style={{padding:"6px",fontWeight:600,color:"#e3a008"}}>{s.product}</td>
+                            <td style={{padding:"6px",textAlign:"right",color:"#8b949e",fontFamily:"monospace"}}>{s.qty} {s.unit}</td>
+                            <td style={{padding:"6px",fontSize:9,color:s.match?"#10b981":"#64748b"}}>{s.match?s.masterName:'— no match —'}</td>
+                            <td style={{padding:"6px",textAlign:"right",color:"#10b981",fontFamily:"monospace"}}>{s.match?`${s.balance.toFixed(0)} ${s.masterUnit==='roll'?'sqft':'pcs'}`:'—'}</td>
+                            <td style={{padding:"6px",textAlign:"center"}}><span className="bd" style={{background:m.bg,color:m.color,fontSize:9,border:"1px solid "+m.color+"66"}}>{m.label}</span></td>
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {allHave&&<div style={{padding:8,background:"#3b250620",border:"1px solid #f59e0b",borderRadius:4,marginBottom:8}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#f59e0b",marginBottom:4}}>⚠ You already have enough stock for ALL items</div>
+                    <div style={{fontSize:9,color:"#8b949e",marginBottom:6}}>No new stock is required. Are you sure you want to raise this PR? Maybe an item is for a specific job that needs a fresh purchase.</div>
+                    <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:10,color:"#f59e0b",fontWeight:600}}>
+                      <input type="checkbox" checked={allowExtraOrder} onChange={e=>setAllowExtraOrder(e.target.checked)} style={{cursor:"pointer"}}/>
+                      I confirm: raise PR anyway, even though stock is sufficient
+                    </label>
+                  </div>}
+                  {!allHave&&anyHave&&<div style={{padding:6,background:"#3b250620",border:"1px solid #e3a008",borderRadius:4,marginBottom:8,fontSize:9,color:"#e3a008"}}>
+                    ℹ Some items already in stock (marked above). Confirm if you still want to order them.
+                  </div>}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:8}}>
+                    <div style={{fontSize:9,color:"#64748b"}}>
+                      {sum.length} line item{sum.length>1?'s':''} · {prf.vendor_name||'(no vendor)'}
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button className="b" onClick={()=>setStockConfirm(null)}>← Back to edit</button>
+                      <button className="b bp" disabled={allHave&&!allowExtraOrder} onClick={executeSavePR} style={{background:allHave?(allowExtraOrder?"#f59e0b":"#1a2030"):"#10b981",borderColor:allHave?(allowExtraOrder?"#f59e0b":"#1a2030"):"#10b981",color:allHave?"#000":"#fff",fontWeight:700,opacity:(allHave&&!allowExtraOrder)?0.5:1}}>
+                        {allHave?'⚠ Raise PR anyway':'✓ Confirm & submit'}
+                      </button>
+                    </div>
+                  </div>
+                </>;
+              })()}
+            </div>
+          </div>}
         </div>}
       </div>;
     })()}
