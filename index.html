@@ -6354,7 +6354,7 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   const legacyRows=Object.entries(stock).sort((a,b)=>a[0].localeCompare(b[0]));
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
-      <SC l="Inward" v={grn.reduce((s,g)=>s+(+g.qty||0),0)} c="#10b981"/><SC l="Print Used" v={pl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#ef4444" d={30}/><SC l="Fab Used" v={fl.reduce((s,l)=>s+(+l.qty_used||0),0)} c="#dc2626" d={60}/><SC l="Materials" v={legacyRows.length} c="#3b82f6" d={90}/>
+      <SC l="Inward" v={(+grn.reduce((s,g)=>s+(+g.qty||0),0)).toFixed(2)} c="#10b981"/><SC l="Print Used" v={(+pl.reduce((s,l)=>s+(+l.qty_used||0),0)).toFixed(2)} c="#ef4444" d={30}/><SC l="Fab Used" v={(+fl.reduce((s,l)=>s+(+l.qty_used||0),0)).toFixed(2)} c="#dc2626" d={60}/><SC l="Materials" v={legacyRows.length} c="#3b82f6" d={90}/>
     </div>
     <div className="c" style={{padding:0}}>
       <div style={{padding:"8px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",flexDirection:"column",gap:6}}>
