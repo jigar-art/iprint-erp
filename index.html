@@ -5799,6 +5799,32 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
     setShowModal(false);
   };
 
+  // Patch U (21 May 2026 PM) — Fab job-coverage gate. Mirrors PrintPage Patch F+G:
+  // Line item is "covered" when ≥1 fab_logs row exists for it AND every row has photo_url.
+  // No qty/W×H target — fab uses W×H rarely. Trust mode for items without W×H matches Print.
+  const computeFabCoverage=(li)=>{
+    if(!li) return {covered:false,logsTotal:0,logsWithPhoto:0,photosOk:false};
+    const itemLogs=(logs||[]).filter(l=>l.line_item_id===li.id);
+    const logsTotal=itemLogs.length;
+    const logsWithPhoto=itemLogs.filter(l=>l.photo_url&&String(l.photo_url).trim()).length;
+    const photosOk=logsTotal>0&&logsWithPhoto===logsTotal;
+    return {covered:logsTotal>=1&&photosOk,logsTotal,logsWithPhoto,photosOk};
+  };
+  const checkFabJobCoverage=(job)=>{
+    if(!job) return {ready:false,pending:[],all:[]};
+    const allItems=(job.batches||[]).flatMap(b=>b.items||[]);
+    if(allItems.length===0) return {ready:false,pending:['(no line items)'],all:allItems};
+    const pending=[];
+    for(const li of allItems){
+      const c=computeFabCoverage(li);
+      if(!c.covered){
+        const reason=!c.photosOk&&c.logsTotal>0?' (📷 missing)':'';
+        pending.push((li.internal_name||li.media||'Item').slice(0,20)+reason);
+      }
+    }
+    return {ready:pending.length===0,pending,all:allItems};
+  };
+
   // Analytics (unchanged from original — kept for backwards compat)
   const today=td();
   const weekAgo=new Date();weekAgo.setDate(weekAgo.getDate()-7);const weekAgoStr=weekAgo.toISOString().slice(0,10);
@@ -5839,9 +5865,32 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
       <div style={{padding:"6px 10px",borderBottom:"2px solid #dc2626",background:"#0a0f1a",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowQ(p=>!p)}>
         <span style={{fontSize:11,fontWeight:700,color:"#dc2626"}}>🔧 Jobs in Fabrication Queue — {queue.length}</span><span style={{fontSize:9,color:"#64748b"}}>{showQ?'▾ Hide':'▸ Show'}</span>
       </div>
-      {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Items</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
-        {queue.map(j=>{const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);return <tr key={j.id}><td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td><td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td><td className="mn" style={{fontSize:10}}>{itemCount}</td><td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td><td><select className="in" defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}} style={{fontSize:9,padding:"2px 4px",width:110}}><option value="">Change →</option>{renderStatusOptions(j.status)}</select></td></tr>})}
-        {queue.length===0&&<tr><td colSpan={6} style={{textAlign:"center",color:"#64748b",padding:12}}>No jobs in Fabrication</td></tr>}
+      {showQ&&<div style={{overflowX:"auto",maxHeight:250}}><table><thead><tr><th>Job</th><th>Client</th><th>Project</th><th>Items</th><th>Coverage</th><th>Contact</th><th>Change Status</th></tr></thead><tbody>
+        {queue.map(j=>{
+          const itemCount=(j.batches||[]).reduce((s,b)=>(s+(b.items||[]).length),0);
+          const cov=checkFabJobCoverage(j);
+          const covered=cov.all.length-cov.pending.length;
+          const canChange=cov.ready;
+          return <tr key={j.id}>
+            <td className="mn" style={{fontSize:10,color:"#e3a008",fontWeight:700,cursor:"pointer",textDecoration:"underline",textDecorationColor:"#e3a00844"}} onClick={()=>openJob(j)}>{j.id}</td>
+            <td style={{fontSize:10}}>{j.client_name?.slice(0,20)}</td>
+            <td style={{fontSize:10,color:"#64748b"}}>{j.project?.slice(0,20)}</td>
+            <td className="mn" style={{fontSize:10}}>{itemCount}</td>
+            <td className="mn" style={{fontSize:10,color:cov.ready?"#10b981":"#e3a008",fontWeight:700}} title={cov.ready?'All items logged with photos':'Pending: '+cov.pending.slice(0,3).join(', ')+(cov.pending.length>3?'…':'')}>{covered}/{cov.all.length}{cov.ready?' ✓':''}</td>
+            <td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td>
+            <td><select className="in" defaultValue="" disabled={!canChange} title={canChange?'Change status':'Log all items with photo first ('+cov.pending.length+' pending)'} onChange={e=>{
+              const ns=e.target.value;if(!ns)return;
+              // Patch U — re-validate at click time (defence in depth)
+              const recheck=checkFabJobCoverage(j);
+              if(!recheck.ready){show('Cannot change status — '+recheck.pending.length+' item(s) still pending: '+recheck.pending.slice(0,3).join(', ')+(recheck.pending.length>3?'…':''),false);e.target.value='';return;}
+              if(confirm('Change "'+j.id+'" from "'+j.status+'" to "'+ns+'"?\n\nAll '+recheck.all.length+' line items have been fabbed (verified).')){updateJobStatus(j.id,ns);}
+              e.target.value='';
+            }} style={{fontSize:9,padding:"2px 4px",width:110,opacity:canChange?1:0.4,cursor:canChange?"pointer":"not-allowed"}}>
+              <option value="">{canChange?'Change →':'🔒 Log first'}</option>{renderStatusOptions(j.status)}
+            </select></td>
+          </tr>;
+        })}
+        {queue.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:12}}>No jobs in Fabrication</td></tr>}
       </tbody></table></div>}
     </div>
     {/* Analytics */}
