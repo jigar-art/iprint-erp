@@ -1527,6 +1527,23 @@ function MainApp({user,onLogout,masterData}){
     return {id,name};
   },[show]);
 
+  // ─── ADD NEW MATERIAL (v2) ─────────────────────────────────
+  // Patch R (21 May 2026) — Inserts into materials_master_v2 (canonical post-Patch P).
+  // Used by GRN form's "+" button so new masters appear in the v2-sourced dropdown immediately.
+  // Caller pushes returned row into local materialsV2 list.
+  const addNewMaterialV2 = useCallback(async (name, unit) => {
+    const cleanName = String(name||'').trim();
+    if(!cleanName) return null;
+    const safeUnit = ['roll','sheet','nos','sqft','kg','ltr','meter','pcs'].includes(unit) ? unit : 'roll';
+    const {data, error} = await sb.from('materials_master_v2')
+      .insert({name:cleanName, unit:safeUnit, active:true})
+      .select()
+      .single();
+    if(error){ show("Add material failed: "+error.message, false); return null; }
+    show("Material added to master!");
+    return data;
+  },[show]);
+
   // ─── ADD NEW SUPPLIER ──────────────────────────────────────
   const addNewSupplier = useCallback(async (name) => {
     const id='SUP'+uid();
@@ -1619,8 +1636,15 @@ function MainApp({user,onLogout,masterData}){
       const k=norm(l.material);if(!out[k])return;
       out[k].balance -= (+l.qty_used||0);
     });
+    // Patch R (21 May 2026) — Fix C: outsource deduction. When material is sent to outsource
+    // (e.g. machine breakdown) and not yet returned, it's not physically available. Unit-aware:
+    // rolls deduct outsource_logs.qty_sent (assumed sqft when unit=roll), sheet/nos deduct qty_sent.
+    osLogs.filter(l=>!l.returned).forEach(l=>{
+      const k=norm(l.material);if(!out[k])return;
+      out[k].balance -= (+l.qty_sent||0);
+    });
     return out;
-  },[grnData,pLogs,fLogs,masterData.materialsV2]);
+  },[grnData,pLogs,fLogs,osLogs,masterData.materialsV2]);
 
   // Assemble jobs with batches and items — using Maps for O(1) lookup instead of O(n) filter
   const fullJobs = useMemo(()=>{
@@ -1788,12 +1812,12 @@ function MainApp({user,onLogout,masterData}){
           {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal} items={items} osItems={osItems}/>}
-          {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewSupplier={addNewSupplier}/>}
+          {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewMaterialV2={addNewMaterialV2} addNewSupplier={addNewSupplier}/>}
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} user={user} show={show} grn={grnData}/>}
           {pg==="fab"&&<FabPage logs={fLogs} materials={materials} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy}/>}
-          {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} materialsV2={masterData.materialsV2||[]}/>}
+          {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} ol={osLogs} materialsV2={masterData.materialsV2||[]}/>}
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
           {pg==="acc"&&<AccPage jobs={filteredJobs} batches={batches} items={items} saveBill={saveBill} firms={firms} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} show={show} addBatchToJob={addBatchToJob} sm={setModal} user={user} setBatches={setBatches} updateBatchField={updateBatchField}/>}
@@ -4835,7 +4859,18 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
 }
 
 // GRN
-function GRNPage({grn,suppliers,materials,team,addGRN,updateGRN,deleteGRN,addNewMaterial,addNewSupplier}){const [sf,ssf]=useState(false);const [selGrn,setSelGrn]=useState(null);const [editGrn,setEditGrn]=useState(null);const [photoFile,setPhotoFile]=useState(null);const [poFile,setPoFile]=useState(null);const [saving,setSaving]=useState(false);const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:materials[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
+function GRNPage({grn,suppliers,materials,materialsV2,team,addGRN,updateGRN,deleteGRN,addNewMaterial,addNewMaterialV2,addNewSupplier}){const [sf,ssf]=useState(false);const [selGrn,setSelGrn]=useState(null);const [editGrn,setEditGrn]=useState(null);const [photoFile,setPhotoFile]=useState(null);const [poFile,setPoFile]=useState(null);const [saving,setSaving]=useState(false);
+  // Patch R (21 May 2026) — Material picker now sources from materials_master_v2 (174 active masters),
+  // not old materials table (68 rows). Forced <select>, no free text — prevents spelling drift that
+  // would orphan inward rows from stock balance calc. Locally-added masters merge into list until refresh.
+  const [extraV2,setExtraV2]=useState([]);
+  const activeMastersV2=React.useMemo(()=>{
+    const base=(materialsV2||[]).filter(m=>m.active);
+    const seen=new Set(base.map(m=>m.name.toLowerCase().trim()));
+    const extras=extraV2.filter(m=>!seen.has((m.name||'').toLowerCase().trim()));
+    return [...base,...extras].sort((a,b)=>a.name.localeCompare(b.name));
+  },[materialsV2,extraV2]);
+  const [f,sF]=useState({date:td(),supplier:suppliers[0]?.name||"",material:activeMastersV2[0]?.name||"",code:"",size:"",length:"",qty:1,unit:"roll",sqft:"",rate:"",invoice_no:"",job_id:"",inward_type:"Stock",received_by:team[0]?.name||"",qc:"OK"});
   const [newMat,setNewMat]=useState("");const [newSup,setNewSup]=useState("");const [showNewMat,setShowNewMat]=useState(false);const [showNewSup,setShowNewSup]=useState(false);
   const add=async()=>{setSaving(true);const photoUrl=await uploadFile(photoFile,'grn-photos');const poUrl=await uploadFile(poFile,'grn-po');await addGRN({id:"G"+uid(),...f,qty:+f.qty,rate:+f.rate,sqft:+f.sqft,photo_url:photoUrl,po_file_url:poUrl});sF(p=>({...p,qty:1,code:"",size:"",length:"",sqft:"",rate:"",invoice_no:"",job_id:""}));setPhotoFile(null);setPoFile(null);setSaving(false);};
   const doAddMat=async()=>{if(!newMat.trim())return;const r=await addNewMaterial(newMat.trim());if(r){sF(p=>({...p,material:r.name}));materials.push(r);setNewMat("");setShowNewMat(false);}};
@@ -4846,7 +4881,7 @@ function GRNPage({grn,suppliers,materials,team,addGRN,updateGRN,deleteGRN,addNew
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f4">
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
       <F l="Supplier"><div style={{display:"flex",gap:2}}><select className="in" value={f.supplier} onChange={e=>sF(p=>({...p,supplier:e.target.value}))} style={{flex:1}}>{suppliers.map(s=><option key={s.id} value={s.name}>{s.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewSup(true)}>+</button></div></F>
-      <F l="Material"><div style={{display:"flex",gap:2}}><input className="in" list="matList" value={f.material} onChange={e=>sF(p=>({...p,material:e.target.value}))} placeholder="Type or select material..." style={{flex:1}}/><datalist id="matList">{materials.map(m=><option key={m.id} value={m.name}/>)}</datalist><button className="b bs bp" style={{fontSize:10,padding:"2px 8px"}} onClick={()=>{const nm=prompt('Enter new material name:');if(nm&&nm.trim()){doAddMat2(nm.trim());}}}>+</button></div></F>
+      <F l="Material"><div style={{display:"flex",gap:2}}><select className="in" value={f.material} onChange={e=>{const v=e.target.value;const m=activeMastersV2.find(x=>x.name===v);sF(p=>({...p,material:v,unit:m?.unit||p.unit}));}} style={{flex:1}}>{activeMastersV2.length===0&&<option value="">— no masters loaded —</option>}{activeMastersV2.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select><button className="b bs bp" style={{fontSize:10,padding:"2px 8px"}} onClick={async()=>{const nm=prompt('Enter new material name (will be added to materials_master_v2):');if(!nm||!nm.trim())return;const u=prompt('Unit? Type one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs','roll');const row=await addNewMaterialV2(nm.trim(),(u||'roll').trim());if(row){setExtraV2(prev=>[...prev,row]);sF(p=>({...p,material:row.name,unit:row.unit||p.unit}));}}}>+</button></div></F>
       <F l="Code#"><input className="in mn" value={f.code} onChange={e=>sF(p=>({...p,code:e.target.value}))}/></F>
       <F l="Size"><input className="in mn" value={f.size} onChange={e=>sF(p=>({...p,size:e.target.value}))}/></F>
       <F l="Length"><input className="in mn" value={f.length} onChange={e=>sF(p=>({...p,length:e.target.value}))}/></F>
@@ -5860,22 +5895,44 @@ function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(fa
 }
 
 // STOCK
-function StockPage({stock,grn,pl,fl,materialsV2}){
-  // ── Roll Material Balance (sqft) — rebuilt 19 May 2026 v28 ─────────
-  // Computes per-material sqft balance: SUM(grn.sqft) - SUM(print_logs.print_sqft).
-  // Case-insensitive trim match between GRN raw material text and materials_master_v2 names.
-  // Shows materials_master_v2 rows where active=true (roll, nos, sheet).
-  // Adds: search box, sortable columns, brand/width from notes, status filter.
+function StockPage({stock,grn,pl,fl,ol,materialsV2}){
+  // ── Material Balance — rewritten 21 May 2026 (Patch R) for unit awareness ────────
+  // Computes per-material balance honouring unit (roll → sqft; sheet/nos/etc → qty):
+  //   inward    = SUM(grn.sqft|grn.qty by master.unit)
+  //   used      = SUM(print_logs.print_sqft|qty_used by unit) + SUM(fab_logs.qty_used) + SUM(active outsource.qty_sent)
+  //   remaining = inward − used
+  // Fix D: prior version only summed grn.sqft + print_sqft → under-counted sheet/nos items
+  // Fix E: prior version ignored fab_logs entirely → over-reported balance for fabricated items
+  // Case-insensitive trim match between log material text and materials_master_v2 names.
+  // Shows materials_master_v2 rows where active=true.
   const [q,setQ]=React.useState('');
   const [sortKey,setSortKey]=React.useState('remaining');
   const [sortDir,setSortDir]=React.useState('asc');
   const [statusFilter,setStatusFilter]=React.useState('all');
   const norm=s=>(s||'').toLowerCase().trim();
   const activeMats=(materialsV2||[]).filter(m=>m.active);
-  const grnByName={};(grn||[]).forEach(g=>{const k=norm(g.material);if(k)grnByName[k]=(grnByName[k]||0)+(+g.sqft||0);});
-  const usedByName={};(pl||[]).forEach(l=>{const k=norm(l.material);if(k)usedByName[k]=(usedByName[k]||0)+(+l.print_sqft||0);});
+  const unitByName={};activeMats.forEach(m=>{unitByName[norm(m.name)]=m.unit||'roll';});
+  const inwardByName={};(grn||[]).forEach(g=>{
+    const k=norm(g.material);if(!k||!unitByName[k])return;
+    const u=unitByName[k];
+    inwardByName[k]=(inwardByName[k]||0)+((u==='roll')?(+g.sqft||0):(+g.qty||0));
+  });
+  const usedByName={};(pl||[]).forEach(l=>{
+    const k=norm(l.material);if(!k||!unitByName[k])return;
+    const u=unitByName[k];
+    const v=(u==='roll')?(+l.print_sqft||0):(+l.qty_used||+l.print_sqft||0);
+    usedByName[k]=(usedByName[k]||0)+v;
+  });
+  (fl||[]).forEach(l=>{
+    const k=norm(l.material);if(!k||!unitByName[k])return;
+    usedByName[k]=(usedByName[k]||0)+(+l.qty_used||0);
+  });
+  (ol||[]).filter(l=>!l.returned).forEach(l=>{
+    const k=norm(l.material);if(!k||!unitByName[k])return;
+    usedByName[k]=(usedByName[k]||0)+(+l.qty_sent||0);
+  });
   const parseNotes=(n)=>{const o={brand:'',width:'',qty:0,qtyUnit:''};if(!n)return o;const bm=n.match(/Brand:\s*([^·]+)/);if(bm)o.brand=bm[1].trim();const wm=n.match(/Width\(m\):\s*([^·]+)/);if(wm)o.width=wm[1].trim();const qm=n.match(/Opening stock[^:]*:\s*(\d+)\s*(rolls?|nos|sheets?)/i);if(qm){o.qty=+qm[1];o.qtyUnit=qm[2].toLowerCase();}return o;};
-  const balances=activeMats.map(m=>{const k=norm(m.name);const inward=grnByName[k]||0;const used=usedByName[k]||0;const meta=parseNotes(m.notes);return{name:m.name,unit:m.unit,brand:meta.brand,width:meta.width,qty:meta.qty,qtyUnit:meta.qtyUnit||m.unit,inward,used,remaining:inward-used};});
+  const balances=activeMats.map(m=>{const k=norm(m.name);const inward=inwardByName[k]||0;const used=usedByName[k]||0;const meta=parseNotes(m.notes);return{name:m.name,unit:m.unit,brand:meta.brand,width:meta.width,qty:meta.qty,qtyUnit:meta.qtyUnit||m.unit,inward,used,remaining:inward-used};});
   const statusOf=(r)=>r.inward===0?'no-grn':r.remaining<=0?'out':r.remaining<100?'low':'ok';
   const ql=q.toLowerCase().trim();
   const filtered=balances.filter(r=>{
@@ -5900,7 +5957,7 @@ function StockPage({stock,grn,pl,fl,materialsV2}){
     <div className="c" style={{padding:0}}>
       <div style={{padding:"8px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",flexDirection:"column",gap:6}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
-          <span style={{fontSize:11,fontWeight:700,color:"#8b5cf6"}}>📊 Roll Material Balance (sqft) — {filtered.length} of {balances.length}</span>
+          <span style={{fontSize:11,fontWeight:700,color:"#8b5cf6"}}>📊 Material Balance (unit-aware) — {filtered.length} of {balances.length}</span>
           <span style={{fontSize:9,color:"#64748b"}}>Inward: <strong style={{color:"#10b981"}}>{totalInward.toFixed(0)}</strong> · Used: <strong style={{color:"#ef4444"}}>{totalUsed.toFixed(0)}</strong> · Remaining: <strong style={{color:"#e3a008"}}>{(totalInward-totalUsed).toFixed(0)}</strong></span>
         </div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
@@ -5913,8 +5970,8 @@ function StockPage({stock,grn,pl,fl,materialsV2}){
         <th>Brand</th>
         <th>Width</th>
         <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('qty')}>Qty{sortIcon('qty')}</th>
-        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('inward')}>Inward sqft{sortIcon('inward')}</th>
-        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('used')}>Used sqft{sortIcon('used')}</th>
+        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('inward')}>Inward{sortIcon('inward')}</th>
+        <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('used')}>Used{sortIcon('used')}</th>
         <th style={{textAlign:"right",cursor:"pointer"}} onClick={()=>sortBy('remaining')}>Remaining{sortIcon('remaining')}</th>
         <th>Status</th>
       </tr></thead><tbody>
