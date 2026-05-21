@@ -5015,6 +5015,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   };
 
   // Patch T — multi-item helpers
+  // Patch V (21 May 2026 PM) — each ticked item now holds materials:[] (1+ rows).
   const toggleItem=(itemId)=>{
     sF(p=>{
       const next={...(p.selectedItems||{})};
@@ -5023,12 +5024,30 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
       }else{
         const item=(items||[]).find(i=>i.id===itemId);
         const {val,hint}=computeAreaFromJobSheet(item);
-        next[itemId]={material:'',print_sqft:'',actual_sqft:val,_photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val,_edited:false};
+        next[itemId]={
+          materials:[{material:'',print_sqft:'',actual_sqft:val,_edited:false}],
+          _photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val
+        };
       }
       return {...p,selectedItems:next};
     });
   };
   const updateItem=(itemId,patch)=>sF(p=>({...p,selectedItems:{...(p.selectedItems||{}),[itemId]:{...(p.selectedItems?.[itemId]||{}),...patch}}}));
+  // Patch V — per-item material row helpers
+  const addMaterial=(itemId)=>sF(p=>{
+    const it=p.selectedItems?.[itemId];if(!it)return p;
+    return {...p,selectedItems:{...p.selectedItems,[itemId]:{...it,materials:[...(it.materials||[]),{material:'',print_sqft:'',actual_sqft:'',_edited:false}]}}};
+  });
+  const updateMaterial=(itemId,rowIdx,patch)=>sF(p=>{
+    const it=p.selectedItems?.[itemId];if(!it)return p;
+    const mats=(it.materials||[]).map((r,i)=>i===rowIdx?{...r,...patch}:r);
+    return {...p,selectedItems:{...p.selectedItems,[itemId]:{...it,materials:mats}}};
+  });
+  const removeMaterial=(itemId,rowIdx)=>sF(p=>{
+    const it=p.selectedItems?.[itemId];if(!it)return p;
+    const mats=(it.materials||[]).filter((_,i)=>i!==rowIdx);
+    return {...p,selectedItems:{...p.selectedItems,[itemId]:{...it,materials:mats.length?mats:[{material:'',print_sqft:'',actual_sqft:'',_edited:false}]}}};
+  });
   const selectedCount=Object.keys(f.selectedItems||{}).length;
 
   const resetForm=()=>{sF(blankForm);setShowInkDetails(false);};
@@ -5038,55 +5057,69 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     if(!f.machine){show("Pick machine",false);return;}
     const itemIds=Object.keys(f.selectedItems||{});
     if(itemIds.length===0){show("Tick at least one line item",false);return;}
+    // Patch V — validate each ticked item AND each of its material rows
+    let totalRows=0;
     for(const id of itemIds){
       const item=(items||[]).find(i=>i.id===id);
       const label=(item?.internal_name||item?.media||id).slice(0,30);
-      const r=f.selectedItems[id];
-      if(!r.material){show(`${label}: pick material`,false);return;}
-      if(!r.print_sqft||+r.print_sqft<=0){show(`${label}: enter used sqft`,false);return;}
-      if(!r.actual_sqft||+r.actual_sqft<=0){show(`${label}: enter actual sqft`,false);return;}
-      if(+r.actual_sqft>+r.print_sqft){show(`${label}: actual sqft cannot exceed used sqft`,false);return;}
-      if(!r._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      const it=f.selectedItems[id];
+      const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft);
+      if(mats.length===0){show(`${label}: add at least one material`,false);return;}
+      for(let mi=0;mi<mats.length;mi++){
+        const r=mats[mi];const tag=`${label} · Material #${mi+1}: `;
+        if(!r.material){show(tag+"pick material",false);return;}
+        if(!r.print_sqft||+r.print_sqft<=0){show(tag+"enter used sqft",false);return;}
+        if(!r.actual_sqft||+r.actual_sqft<=0){show(tag+"enter actual sqft",false);return;}
+        if(+r.actual_sqft>+r.print_sqft){show(tag+"actual sqft cannot exceed used sqft",false);return;}
+      }
+      const names=mats.map(r=>r.material);
+      if(new Set(names).size!==names.length){show(`${label}: duplicate material — combine into one row`,false);return;}
+      if(!it._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      totalRows+=mats.length;
     }
-    if(!confirm(`Save ${itemIds.length} print log${itemIds.length>1?'s':''} on machine "${f.machine}"?\nEach ticked item becomes one row with its own photo.`)) return;
+    if(!confirm(`Save ${totalRows} print log row${totalRows>1?'s':''} across ${itemIds.length} item${itemIds.length>1?'s':''} on machine "${f.machine}"?`)) return;
     setSaving(true);
     const baseId='PL'+Date.now();
     const operator=user?.name||'';
     let rowIdx=0;
     for(const id of itemIds){
-      const r=f.selectedItems[id];
-      // Per-item photo upload
+      const it=f.selectedItems[id];
+      const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft);
+      // Upload photo ONCE per ticked item; shared across that item's material rows
       let photoUrl='';
       try{
-        const compressed=await compressImage(r._photoFile);
+        const compressed=await compressImage(it._photoFile);
         photoUrl=await uploadFile(compressed,`print-proofs/${f.job_id}`);
         if(!photoUrl){show(`Photo upload failed for item ${id} — STOPPING`,false);setSaving(false);return;}
       }catch(e){show('Photo upload error: '+(e?.message||e),false);setSaving(false);return;}
-      await addLog({
-        id:baseId+'_'+(rowIdx)+Math.random().toString(36).slice(2,4),
-        date:f.date,
-        job_id:f.job_id,
-        batch_id:f.batch_id,
-        line_item_id:id,
-        machine:f.machine,
-        operator,
-        material:r.material,
-        print_sqft:+r.print_sqft||0,
-        actual_sqft:+r.actual_sqft||0,
-        qty_used:+r.print_sqft||0,
-        unit:'sqft',
-        start_time:f.start_time||'',
-        end_time:f.end_time||'',
-        notes:f.notes||'',
-        photo_url:photoUrl,
-        // Ink columns only on first row to avoid double-counting in analytics
-        ink_cyan:rowIdx===0?(+f.ink_cyan||0):0,
-        ink_magenta:rowIdx===0?(+f.ink_magenta||0):0,
-        ink_yellow:rowIdx===0?(+f.ink_yellow||0):0,
-        ink_black:rowIdx===0?(+f.ink_black||0):0,
-        ink_white:rowIdx===0?(+f.ink_white||0):0,
-      });
-      rowIdx++;
+      for(const r of mats){
+        // Ink columns only on the very first row across all items, to avoid double-counting
+        const isFirstRow=rowIdx===0;
+        await addLog({
+          id:baseId+'_'+(rowIdx)+Math.random().toString(36).slice(2,4),
+          date:f.date,
+          job_id:f.job_id,
+          batch_id:f.batch_id,
+          line_item_id:id,
+          machine:f.machine,
+          operator,
+          material:r.material,
+          print_sqft:+r.print_sqft||0,
+          actual_sqft:+r.actual_sqft||0,
+          qty_used:+r.print_sqft||0,
+          unit:'sqft',
+          start_time:f.start_time||'',
+          end_time:f.end_time||'',
+          notes:f.notes||'',
+          photo_url:photoUrl,
+          ink_cyan:isFirstRow?(+f.ink_cyan||0):0,
+          ink_magenta:isFirstRow?(+f.ink_magenta||0):0,
+          ink_yellow:isFirstRow?(+f.ink_yellow||0):0,
+          ink_black:isFirstRow?(+f.ink_black||0):0,
+          ink_white:isFirstRow?(+f.ink_white||0):0,
+        });
+        rowIdx++;
+      }
     }
     setSaving(false);
     resetForm();
@@ -5438,27 +5471,36 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
               const ticked=!!f.selectedItems?.[it.id];
               const r=f.selectedItems?.[it.id];
               const itemLabel=(it.internal_name||it.media||'item').slice(0,40);
-              const bal=ticked?balanceFor(r.material):null;
-              const rowWaste=(ticked&&r.actual_sqft&&r.print_sqft)?((+r.print_sqft)-(+r.actual_sqft)).toFixed(2):'';
-              const rowWastePct=(ticked&&r.actual_sqft&&r.print_sqft&&+r.print_sqft>0)?((((+r.print_sqft)-(+r.actual_sqft))/(+r.print_sqft))*100).toFixed(1):'';
+              const mats=ticked?(r.materials||[]):[];
               return <div key={it.id} style={{marginBottom:4,padding:ticked?"6px 8px":"4px 8px",background:ticked?"#0d2114":"transparent",border:ticked?"1px solid #10b98140":"1px solid transparent",borderRadius:4,opacity:ticked?1:0.85}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>toggleItem(it.id)}>
                   <div style={{width:14,height:14,background:ticked?"#10b981":"transparent",border:ticked?"none":"1px solid #64748b",borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>{ticked?'✓':''}</div>
-                  <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft</div>
+                  <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft{ticked&&mats.length>1?<span style={{color:"#3b82f6",marginLeft:6}}>· {mats.length} materials</span>:null}</div>
                 </div>
                 {ticked&&<div style={{paddingLeft:22,marginTop:6}}>
-                  <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
-                    <F l="Material *"><select className="in" value={r.material} onChange={e=>updateItem(it.id,{material:e.target.value})} style={{fontSize:9}}><option value="">— pick —</option>{rollMaterials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
-                    <F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={r.print_sqft} onChange={e=>updateItem(it.id,{print_sqft:e.target.value})} style={{fontSize:9}}/></F>
-                    <F l={<span>Actual sqft *{!r._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:4,fontSize:8}}>(auto)</span>}{r._edited&&<span style={{color:"#e3a008",marginLeft:4,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={r.actual_sqft} onChange={e=>updateItem(it.id,{actual_sqft:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
+                  {r._autoHint&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginBottom:4}}>↳ {r._autoHint}{!mats[0]?._edited&&r._autoVal!==''?' (auto-filled in row 1)':''}</div>}
+                  {mats.map((row,ri)=>{
+                    const bal=balanceFor(row.material);
+                    const rowWaste=(row.actual_sqft&&row.print_sqft)?((+row.print_sqft)-(+row.actual_sqft)).toFixed(2):'';
+                    const rowWastePct=(row.actual_sqft&&row.print_sqft&&+row.print_sqft>0)?((((+row.print_sqft)-(+row.actual_sqft))/(+row.print_sqft))*100).toFixed(1):'';
+                    return <div key={ri} style={{marginBottom:4,padding:4,background:"#0d1118",borderRadius:3,border:"1px solid #1a2030"}}>
+                      <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
+                        <F l={`Mat #${ri+1} *`}><select className="in" value={row.material} onChange={e=>updateMaterial(it.id,ri,{material:e.target.value})} style={{fontSize:9}}><option value="">— pick —</option>{rollMaterials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+                        <F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={row.print_sqft} onChange={e=>updateMaterial(it.id,ri,{print_sqft:e.target.value})} style={{fontSize:9}}/></F>
+                        <F l={<span>Actual sqft *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_sqft} onChange={e=>updateMaterial(it.id,ri,{actual_sqft:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
+                      </div>
+                      {row.material&&bal.balance!==null&&<div style={{marginTop:3,padding:"2px 5px",background:bal.balance<=0?"#3b060720":bal.balance<100?"#3b250620":"#05200e20",border:"1px solid "+(bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#10b98140"),borderRadius:2,fontSize:8,color:"#8b949e",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+                        <span>📦 In <strong style={{color:"#10b981"}}>{bal.inward.toFixed(0)}</strong> · Used <strong style={{color:"#ef4444"}}>{bal.used.toFixed(0)}</strong> · Rem <strong style={{color:bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#4ade80"}}>{bal.balance.toFixed(0)}</strong>{row.print_sqft&&+row.print_sqft>0&&<span style={{marginLeft:3,color:"#64748b"}}>→ <strong style={{color:(bal.balance-(+row.print_sqft))<0?"#f47067":"#8b949e"}}>{(bal.balance-(+row.print_sqft)).toFixed(0)}</strong></span>}</span>
+                        {rowWaste&&<span style={{color:"#64748b"}}>Waste: {rowWaste} sqft · {rowWastePct}%</span>}
+                      </div>}
+                      {mats.length>1&&<div style={{textAlign:"right",marginTop:2}}><button type="button" onClick={()=>removeMaterial(it.id,ri)} style={{fontSize:8,padding:"1px 6px",background:"transparent",border:"1px solid #f4706740",borderRadius:2,color:"#f47067",cursor:"pointer"}}>✕ Remove material</button></div>}
+                    </div>;
+                  })}
+                  <div style={{textAlign:"right",marginTop:2,marginBottom:6}}>
+                    <button type="button" onClick={()=>addMaterial(it.id)} style={{fontSize:9,padding:"2px 8px",background:"transparent",border:"1px solid #3b82f640",borderRadius:3,color:"#3b82f6",cursor:"pointer"}}>+ Add material to this item</button>
                   </div>
-                  {r._autoHint&&!r._edited&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginTop:2}}>↳ {r._autoHint}</div>}
-                  {r.material&&bal.balance!==null&&<div style={{marginTop:4,padding:"3px 6px",background:bal.balance<=0?"#3b060720":bal.balance<100?"#3b250620":"#05200e20",border:"1px solid "+(bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#10b98140"),borderRadius:3,fontSize:8,color:"#8b949e",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
-                    <span>📦 In <strong style={{color:"#10b981"}}>{bal.inward.toFixed(0)}</strong> · Used <strong style={{color:"#ef4444"}}>{bal.used.toFixed(0)}</strong> · Rem <strong style={{color:bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#4ade80"}}>{bal.balance.toFixed(0)}</strong>{r.print_sqft&&+r.print_sqft>0&&<span style={{marginLeft:3,color:"#64748b"}}>→ <strong style={{color:(bal.balance-(+r.print_sqft))<0?"#f47067":"#8b949e"}}>{(bal.balance-(+r.print_sqft)).toFixed(0)}</strong></span>}</span>
-                    {rowWaste&&<span style={{color:"#64748b"}}>Waste: {rowWaste} sqft · {rowWastePct}%</span>}
-                  </div>}
                   <div style={{marginTop:4,padding:"3px 6px",background:r._photoFile?"#05200e":"#3b250620",border:"1px solid "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
-                    <span style={{color:r._photoFile?"#10b981":"#e3a008"}}>📷 photo: {r._photoFile?'attached ✓':'required'}</span>
+                    <span style={{color:r._photoFile?"#10b981":"#e3a008"}}>📷 photo (shared for this item's {mats.length} material{mats.length===1?'':'s'}): {r._photoFile?'attached ✓':'required'}</span>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       {r._photoPreview&&<img src={r._photoPreview} alt="" style={{width:24,height:24,objectFit:"cover",borderRadius:2,border:"1px solid #10b98140"}}/>}
                       <label style={{cursor:"pointer",padding:"1px 6px",border:"1px dashed "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:2,color:r._photoFile?"#10b981":"#e3a008",fontSize:8,fontWeight:600}}>{r._photoFile?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>updateItem(it.id,{_photoFile:file,_photoPreview:ev.target.result});reader.readAsDataURL(file);}}/></label>
@@ -5469,7 +5511,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
               </div>;
             })}
           </div>
-          {selectedCount>0&&<div style={{fontSize:8,color:"#64748b",marginTop:6,paddingLeft:4}}>{selectedCount} ticked → {selectedCount} print_logs row{selectedCount>1?'s':''} will be saved</div>}
+          {selectedCount>0&&<div style={{fontSize:8,color:"#64748b",marginTop:6,paddingLeft:4}}>{selectedCount} item{selectedCount>1?'s':''} ticked → {Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0)} print_logs row{(Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0))>1?'s':''} will be saved</div>}
         </div>}
 
         <div className="fg f2" style={{marginTop:6}}>
@@ -5497,7 +5539,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
 
         <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end"}}>
           <button className="b" onClick={()=>{resetForm();setShowModal(false);}} disabled={saving}>Cancel</button>
-          <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#ef4444",borderColor:"#ef4444"}}>{saving?"⏳ Saving...":`💾 Save ${selectedCount||0} print log${selectedCount===1?'':'s'}`}</button>
+          <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#ef4444",borderColor:"#ef4444"}}>{(()=>{const tot=Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0);return saving?"⏳ Saving...":`💾 Save ${tot} print log${tot===1?'':'s'}`;})()}</button>
         </div>
       </div>
     </div>}
@@ -5705,6 +5747,8 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
 
   // Patch T — toggle a line item's tick. Adds an empty entry when ticking,
   // removes it entirely when unticking (clears all per-item data for that item).
+  // Patch V (21 May 2026 PM) — each ticked item now holds materials:[] (1+ rows).
+  // Photo + autoHint stay at item level. Auto value seeds row[0].actual_qty.
   const toggleItem=(itemId)=>{
     sF(p=>{
       const next={...(p.selectedItems||{})};
@@ -5713,12 +5757,30 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
       }else{
         const item=(items||[]).find(i=>i.id===itemId);
         const {val,hint}=computeAreaFromJobSheet(item);
-        next[itemId]={material:'',qty_used:'',actual_qty:val,_photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val,_edited:false};
+        next[itemId]={
+          materials:[{material:'',qty_used:'',actual_qty:val,_edited:false}],
+          _photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val
+        };
       }
       return {...p,selectedItems:next};
     });
   };
   const updateItem=(itemId,patch)=>sF(p=>({...p,selectedItems:{...(p.selectedItems||{}),[itemId]:{...(p.selectedItems?.[itemId]||{}),...patch}}}));
+  // Patch V — per-item material row helpers
+  const addMaterial=(itemId)=>sF(p=>{
+    const it=p.selectedItems?.[itemId];if(!it)return p;
+    return {...p,selectedItems:{...p.selectedItems,[itemId]:{...it,materials:[...(it.materials||[]),{material:'',qty_used:'',actual_qty:'',_edited:false}]}}};
+  });
+  const updateMaterial=(itemId,rowIdx,patch)=>sF(p=>{
+    const it=p.selectedItems?.[itemId];if(!it)return p;
+    const mats=(it.materials||[]).map((r,i)=>i===rowIdx?{...r,...patch}:r);
+    return {...p,selectedItems:{...p.selectedItems,[itemId]:{...it,materials:mats}}};
+  });
+  const removeMaterial=(itemId,rowIdx)=>sF(p=>{
+    const it=p.selectedItems?.[itemId];if(!it)return p;
+    const mats=(it.materials||[]).filter((_,i)=>i!==rowIdx);
+    return {...p,selectedItems:{...p.selectedItems,[itemId]:{...it,materials:mats.length?mats:[{material:'',qty_used:'',actual_qty:'',_edited:false}]}}};
+  });
   const selectedCount=Object.keys(f.selectedItems||{}).length;
 
   const resetForm=()=>sF(blankForm);
@@ -5746,53 +5808,66 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
     if(!f.process){show("Pick process",false);return;}
     const itemIds=Object.keys(f.selectedItems||{});
     if(itemIds.length===0){show("Tick at least one line item",false);return;}
-    // Validate each ticked item
+    // Patch V — validate each ticked item AND each of its material rows
+    let totalRows=0;
     for(const id of itemIds){
       const item=(items||[]).find(i=>i.id===id);
       const label=(item?.internal_name||item?.media||id).slice(0,30);
-      const r=f.selectedItems[id];
-      if(!r.material){show(`${label}: pick material`,false);return;}
-      if(!r.qty_used||+r.qty_used<=0){show(`${label}: enter used qty`,false);return;}
-      if(!r.actual_qty||+r.actual_qty<=0){show(`${label}: enter actual qty`,false);return;}
-      if(+r.actual_qty>+r.qty_used){show(`${label}: actual qty cannot exceed used qty`,false);return;}
-      if(!r._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      const it=f.selectedItems[id];
+      const mats=(it.materials||[]).filter(r=>r.material||r.qty_used||r.actual_qty);
+      if(mats.length===0){show(`${label}: add at least one material`,false);return;}
+      for(let mi=0;mi<mats.length;mi++){
+        const r=mats[mi];const tag=`${label} · Material #${mi+1}: `;
+        if(!r.material){show(tag+"pick material",false);return;}
+        if(!r.qty_used||+r.qty_used<=0){show(tag+"enter used qty",false);return;}
+        if(!r.actual_qty||+r.actual_qty<=0){show(tag+"enter actual qty",false);return;}
+        if(+r.actual_qty>+r.qty_used){show(tag+"actual qty cannot exceed used qty",false);return;}
+      }
+      // Duplicate material check WITHIN this item
+      const names=mats.map(r=>r.material);
+      if(new Set(names).size!==names.length){show(`${label}: duplicate material — combine into one row`,false);return;}
+      if(!it._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      totalRows+=mats.length;
     }
-    if(!confirm(`Save ${itemIds.length} fab log${itemIds.length>1?'s':''} for process "${f.process}"?\nEach ticked item becomes one row with its own photo.`)) return;
+    if(!confirm(`Save ${totalRows} fab log row${totalRows>1?'s':''} across ${itemIds.length} item${itemIds.length>1?'s':''} for process "${f.process}"?`)) return;
     setSaving(true);
     const baseId='FL'+Date.now();
     const operator=user?.name||'';
     let rowIdx=0;
     for(const id of itemIds){
-      const r=f.selectedItems[id];
-      const u=unitByName[normMat(r.material)]||'roll';
-      const waste=(+r.qty_used||0)-(+r.actual_qty||0);
-      const wastePct=(+r.qty_used>0)?(waste/(+r.qty_used)*100):0;
-      // Upload per-item photo
+      const it=f.selectedItems[id];
+      const mats=(it.materials||[]).filter(r=>r.material||r.qty_used||r.actual_qty);
+      // Upload photo ONCE per ticked item; shared across that item's material rows
       let photoUrl='';
       try{
-        const compressed=await compressImageFab(r._photoFile);
+        const compressed=await compressImageFab(it._photoFile);
         photoUrl=await uploadFile(compressed,`fab-proofs/${f.job_id}`);
         if(!photoUrl){show(`Photo upload failed for item ${id} — STOPPING`,false);setSaving(false);return;}
       }catch(e){show('Photo upload error: '+(e?.message||e),false);setSaving(false);return;}
-      await addLog({
-        id:baseId+'_'+(rowIdx++)+Math.random().toString(36).slice(2,4),
-        date:f.date,
-        job_id:f.job_id,
-        batch_id:f.batch_id,
-        line_item_id:id,
-        process:f.process,
-        operator,
-        material:r.material,
-        qty_used:+r.qty_used||0,
-        actual_qty:+r.actual_qty||0,
-        unit:u,
-        waste:Math.round(waste*100)/100,
-        waste_pct:Math.round(wastePct*10)/10,
-        start_time:f.start_time||'',
-        end_time:f.end_time||'',
-        notes:f.notes||'',
-        photo_url:photoUrl,
-      });
+      for(const r of mats){
+        const u=unitByName[normMat(r.material)]||'roll';
+        const waste=(+r.qty_used||0)-(+r.actual_qty||0);
+        const wastePct=(+r.qty_used>0)?(waste/(+r.qty_used)*100):0;
+        await addLog({
+          id:baseId+'_'+(rowIdx++)+Math.random().toString(36).slice(2,4),
+          date:f.date,
+          job_id:f.job_id,
+          batch_id:f.batch_id,
+          line_item_id:id,
+          process:f.process,
+          operator,
+          material:r.material,
+          qty_used:+r.qty_used||0,
+          actual_qty:+r.actual_qty||0,
+          unit:u,
+          waste:Math.round(waste*100)/100,
+          waste_pct:Math.round(wastePct*10)/10,
+          start_time:f.start_time||'',
+          end_time:f.end_time||'',
+          notes:f.notes||'',
+          photo_url:photoUrl,
+        });
+      }
     }
     setSaving(false);
     resetForm();
@@ -5976,28 +6051,37 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
               const ticked=!!f.selectedItems?.[it.id];
               const r=f.selectedItems?.[it.id];
               const itemLabel=(it.internal_name||it.media||'item').slice(0,40);
-              const bal=ticked?balanceFor(r.material):null;
-              const unitLabel=bal?.unit==='roll'?'sqft':bal?.unit||'qty';
-              const rowWaste=(ticked&&r.actual_qty&&r.qty_used)?((+r.qty_used)-(+r.actual_qty)).toFixed(2):'';
-              const rowWastePct=(ticked&&r.actual_qty&&r.qty_used&&+r.qty_used>0)?((((+r.qty_used)-(+r.actual_qty))/(+r.qty_used))*100).toFixed(1):'';
+              const mats=ticked?(r.materials||[]):[];
               return <div key={it.id} style={{marginBottom:4,padding:ticked?"6px 8px":"4px 8px",background:ticked?"#0d2114":"transparent",border:ticked?"1px solid #10b98140":"1px solid transparent",borderRadius:4,opacity:ticked?1:0.85}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>toggleItem(it.id)}>
                   <div style={{width:14,height:14,background:ticked?"#10b981":"transparent",border:ticked?"none":"1px solid #64748b",borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>{ticked?'✓':''}</div>
-                  <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft</div>
+                  <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft{ticked&&mats.length>1?<span style={{color:"#3b82f6",marginLeft:6}}>· {mats.length} materials</span>:null}</div>
                 </div>
                 {ticked&&<div style={{paddingLeft:22,marginTop:6}}>
-                  <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
-                    <F l="Material *"><select className="in" value={r.material} onChange={e=>updateItem(it.id,{material:e.target.value})} style={{fontSize:9}}><option value="">— pick —</option>{allActiveMasters.map(m=><option key={m.id} value={m.name}>{m.name} ({m.unit})</option>)}</select></F>
-                    <F l={`Used ${unitLabel} *`}><input className="in mn" type="number" step="0.01" value={r.qty_used} onChange={e=>updateItem(it.id,{qty_used:e.target.value})} style={{fontSize:9}}/></F>
-                    <F l={<span>Actual {unitLabel} *{!r._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:4,fontSize:8}}>(auto)</span>}{r._edited&&<span style={{color:"#e3a008",marginLeft:4,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={r.actual_qty} onChange={e=>updateItem(it.id,{actual_qty:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
+                  {r._autoHint&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginBottom:4}}>↳ {r._autoHint}{!mats[0]?._edited&&r._autoVal!==''?' (auto-filled in row 1)':''}</div>}
+                  {mats.map((row,ri)=>{
+                    const bal=balanceFor(row.material);
+                    const unitLabel=bal?.unit==='roll'?'sqft':bal?.unit||'qty';
+                    const rowWaste=(row.actual_qty&&row.qty_used)?((+row.qty_used)-(+row.actual_qty)).toFixed(2):'';
+                    const rowWastePct=(row.actual_qty&&row.qty_used&&+row.qty_used>0)?((((+row.qty_used)-(+row.actual_qty))/(+row.qty_used))*100).toFixed(1):'';
+                    return <div key={ri} style={{marginBottom:4,padding:4,background:"#0d1118",borderRadius:3,border:"1px solid #1a2030"}}>
+                      <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
+                        <F l={`Mat #${ri+1} *`}><select className="in" value={row.material} onChange={e=>updateMaterial(it.id,ri,{material:e.target.value})} style={{fontSize:9}}><option value="">— pick —</option>{allActiveMasters.map(m=><option key={m.id} value={m.name}>{m.name} ({m.unit})</option>)}</select></F>
+                        <F l={`Used ${unitLabel} *`}><input className="in mn" type="number" step="0.01" value={row.qty_used} onChange={e=>updateMaterial(it.id,ri,{qty_used:e.target.value})} style={{fontSize:9}}/></F>
+                        <F l={<span>Actual {unitLabel} *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_qty} onChange={e=>updateMaterial(it.id,ri,{actual_qty:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
+                      </div>
+                      {row.material&&bal.balance!==null&&<div style={{marginTop:3,padding:"2px 5px",background:bal.balance<=0?"#3b060720":bal.balance<10?"#3b250620":"#05200e20",border:"1px solid "+(bal.balance<=0?"#f47067":bal.balance<10?"#e3a008":"#10b98140"),borderRadius:2,fontSize:8,color:"#8b949e",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+                        <span>📦 In <strong style={{color:"#10b981"}}>{bal.inward.toFixed(0)}</strong> · Used <strong style={{color:"#ef4444"}}>{bal.used.toFixed(0)}</strong> · Rem <strong style={{color:bal.balance<=0?"#f47067":bal.balance<10?"#e3a008":"#4ade80"}}>{bal.balance.toFixed(0)}</strong>{row.qty_used&&+row.qty_used>0&&<span style={{marginLeft:3,color:"#64748b"}}>→ <strong style={{color:(bal.balance-(+row.qty_used))<0?"#f47067":"#8b949e"}}>{(bal.balance-(+row.qty_used)).toFixed(0)}</strong></span>}</span>
+                        {rowWaste&&<span style={{color:"#64748b"}}>Waste: {rowWaste} · {rowWastePct}%</span>}
+                      </div>}
+                      {mats.length>1&&<div style={{textAlign:"right",marginTop:2}}><button type="button" onClick={()=>removeMaterial(it.id,ri)} style={{fontSize:8,padding:"1px 6px",background:"transparent",border:"1px solid #f4706740",borderRadius:2,color:"#f47067",cursor:"pointer"}}>✕ Remove material</button></div>}
+                    </div>;
+                  })}
+                  <div style={{textAlign:"right",marginTop:2,marginBottom:6}}>
+                    <button type="button" onClick={()=>addMaterial(it.id)} style={{fontSize:9,padding:"2px 8px",background:"transparent",border:"1px solid #3b82f640",borderRadius:3,color:"#3b82f6",cursor:"pointer"}}>+ Add material to this item</button>
                   </div>
-                  {r._autoHint&&!r._edited&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginTop:2}}>↳ {r._autoHint}</div>}
-                  {r.material&&bal.balance!==null&&<div style={{marginTop:4,padding:"3px 6px",background:bal.balance<=0?"#3b060720":bal.balance<10?"#3b250620":"#05200e20",border:"1px solid "+(bal.balance<=0?"#f47067":bal.balance<10?"#e3a008":"#10b98140"),borderRadius:3,fontSize:8,color:"#8b949e",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
-                    <span>📦 In <strong style={{color:"#10b981"}}>{bal.inward.toFixed(0)}</strong> · Used <strong style={{color:"#ef4444"}}>{bal.used.toFixed(0)}</strong> · Rem <strong style={{color:bal.balance<=0?"#f47067":bal.balance<10?"#e3a008":"#4ade80"}}>{bal.balance.toFixed(0)}</strong>{r.qty_used&&+r.qty_used>0&&<span style={{marginLeft:3,color:"#64748b"}}>→ <strong style={{color:(bal.balance-(+r.qty_used))<0?"#f47067":"#8b949e"}}>{(bal.balance-(+r.qty_used)).toFixed(0)}</strong></span>}</span>
-                    {rowWaste&&<span style={{color:"#64748b"}}>Waste: {rowWaste} · {rowWastePct}%</span>}
-                  </div>}
                   <div style={{marginTop:4,padding:"3px 6px",background:r._photoFile?"#05200e":"#3b250620",border:"1px solid "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
-                    <span style={{color:r._photoFile?"#10b981":"#e3a008"}}>📷 photo: {r._photoFile?'attached ✓':'required'}</span>
+                    <span style={{color:r._photoFile?"#10b981":"#e3a008"}}>📷 photo (shared for this item's {mats.length} material{mats.length===1?'':'s'}): {r._photoFile?'attached ✓':'required'}</span>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       {r._photoPreview&&<img src={r._photoPreview} alt="" style={{width:24,height:24,objectFit:"cover",borderRadius:2,border:"1px solid #10b98140"}}/>}
                       <label style={{cursor:"pointer",padding:"1px 6px",border:"1px dashed "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:2,color:r._photoFile?"#10b981":"#e3a008",fontSize:8,fontWeight:600}}>{r._photoFile?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>updateItem(it.id,{_photoFile:file,_photoPreview:ev.target.result});reader.readAsDataURL(file);}}/></label>
@@ -6008,7 +6092,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
               </div>;
             })}
           </div>
-          {selectedCount>0&&<div style={{fontSize:8,color:"#64748b",marginTop:6,paddingLeft:4}}>{selectedCount} ticked → {selectedCount} fab_logs row{selectedCount>1?'s':''} will be saved</div>}
+          {selectedCount>0&&<div style={{fontSize:8,color:"#64748b",marginTop:6,paddingLeft:4}}>{selectedCount} item{selectedCount>1?'s':''} ticked → {Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0)} fab_logs row{(Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0))>1?'s':''} will be saved</div>}
         </div>}
 
         <div className="fg f2" style={{marginTop:6}}>
@@ -6022,7 +6106,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
 
         <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end"}}>
           <button className="b" onClick={()=>{resetForm();setShowModal(false);}} disabled={saving}>Cancel</button>
-          <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#dc2626",borderColor:"#dc2626"}}>{saving?'⏳ Saving...':`💾 Save ${selectedCount||0} fab log${selectedCount===1?'':'s'}`}</button>
+          <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#dc2626",borderColor:"#dc2626"}}>{(()=>{const tot=Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0);return saving?'⏳ Saving...':`💾 Save ${tot} fab log${tot===1?'':'s'}`;})()}</button>
         </div>
       </div>
     </div>}
