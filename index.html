@@ -1693,19 +1693,19 @@ function MainApp({user,onLogout,masterData}){
     // Import BOQ — admin + sales role; tier-1 + APARNA + PRIYANKA
     {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA"]},
     // Dept Tracker — tier-1 + APARNA + PRIYANKA + designers + HARISH + MURLI + ANKITA (BATUL removed)
-    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer","printing","fabrication","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","PRINTING"]},
+    {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer","printing","fabrication","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","MANOJ","PRINTING"]},
     // Material In (GRN) — tier-1 + Shreya + Murli
-    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","VIDYA","PRINTING","ANKIT","SONU","PRATIK"]},
+    {id:"grn",l:"Material In",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","MANOJ","VIDYA","PRINTING","ANKIT","SONU","PRATIK"]},
     // Printing — tier-1 + PRIYANKA + designers + Harish
     {id:"print",l:"Printing",e:"🖨️",roles:["admin","production","printing","designer","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","PRINTING","ANKIT","SONU","PRATIK"]},
     // Fabrication — tier-1 + PRIYANKA + designers + Harish + Murli (dispatch role added)
-    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication","designer","printing","sales","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","PRINTING","ANKIT","SONU","PRATIK"]},
+    {id:"fab",l:"Fabrication",e:"🔧",roles:["admin","production","fabrication","designer","printing","sales","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","MANOJ","PRINTING","ANKIT","SONU","PRATIK"]},
     // Outsource — tier-1 + PRIYANKA + SHREYA + designers + Harish (accounts role added for Shreya)
     {id:"os",l:"Outsource",e:"📤",roles:["admin","production","printing","fabrication","designer","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","SHREYA","PRAJAKTA","MEDHA","HARISH","PRINTING","ANKIT","SONU","PRATIK"]},
     // Dispatch — tier-1 + PRIYANKA + Murli + Harish (BATUL removed)
-    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch","designer","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","MURLI","HARISH","PRINTING","ANKIT","SONU","PRATIK"]},
+    {id:"disp",l:"Dispatch",e:"🚚",roles:["admin","production","sales","dispatch","designer","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","PRIYANKA","MURLI","MANOJ","HARISH","PRINTING","ANKIT","SONU","PRATIK"]},
     // Stock — tier-1 + Shreya + Murli
-    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","PRINTING","ANKIT","SONU","PRATIK"]},
+    {id:"stock",l:"Stock",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","SHREYA","MURLI","MANOJ","PRINTING","ANKIT","SONU","PRATIK"]},
     // PO Reminders — tightened to tier-1 + RUCHITA + ANKITA only (per your correction)
     {id:"rem",l:"PO Reminders",e:"⏰",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA"]},
     // Clients — tier-1 + Aparna + Priyanka + Shreya (BATUL removed)
@@ -1729,7 +1729,7 @@ function MainApp({user,onLogout,masterData}){
     // PO Generator — accounts role only (admin removed per your deliberate call). Tier-1 still sees via FULL_ACCESS.
     {id:"po",l:"PO Generator",e:"📄",roles:["accounts"],users:["SHREYA"]},
     // Receive Material — tier-1 + Shreya + Murli + Harish
-    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","HARISH","PRINTING","ANKIT","SONU","PRATIK"]},
+    {id:"grn2",l:"Receive Material",e:"📦",roles:["admin","production","dispatch","accounts","printing"],users:["JIGAR","CHANDNI","SHREYA","MURLI","MANOJ","HARISH","PRINTING","ANKIT","SONU","PRATIK"]},
     // Reports (04 May 26 — Deploy 1) — visible to everyone (My Report tab); Stalls + Output tabs gated to JIGAR + CHANDNI inside the page itself
     {id:"reports",l:"Reports",e:"📊",roles:["admin","sales","production","accounts","printing","fabrication","dispatch","designer"]},
     // Target Setter (15 May 2026 PM) — Gated to QUANTIFY_USERS + tier-1 (15 May rev2).
@@ -2599,7 +2599,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const [showPRForm,setShowPRForm]=React.useState(false);
       const [vendors,setVendors]=React.useState(null); // null=not loaded yet
       const [showAddVendor,setShowAddVendor]=React.useState(false);
-      const PR_REQUESTORS=['Amol','Murli Shetty','Harish','Priyanka','Jigar'];
+      const PR_REQUESTORS=['Amol','Murli Shetty','Manoj','Harish','Priyanka','Jigar'];
       const PR_PAYMENT_TERMS=['Advance 100%','Advance 50% + Balance on delivery','COD','15 days from invoice','30 days from invoice','45 days from invoice','60 days from invoice','Custom'];
       const PR_PER=['Sheet','SqFt','Unit','Kg','Running Ft','Pcs','Ltr','Meter','Set','Job'];
       const PR_GST=[0,5,12,18,28];
@@ -5944,6 +5944,7 @@ function StockPage({stock,grn,pl,fl,materialsV2}){
 const WA_NUMBERS = {
   'Amol':            '918433727608',
   'Murli Shetty':    '918691069121',
+  'Manoj':           '918356842202',
   'Harish':          '919326282238',
   'Priyanka':        '917400214057',
   'Jigar':           '919076270111',
@@ -5960,6 +5961,7 @@ const WA_NUMBERS = {
 const STAFF_DEPTS = {
   'Amol':          'Production',
   'Murli Shetty':  'Production',
+  'Manoj':         'Production',
   'Harish':        'Printing',
   'Priyanka':      'Office',
   'Jigar':         'Admin',
@@ -6284,7 +6286,7 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
 // PHASE D — GRN / RECEIVE MATERIAL PAGE
 // ══════════════════════════════════════════════════════════
 function GRNReceivePage({prs, setPrs, jobs, user, show}) {
-  const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
+  const GRN_RECEIVERS = ['Murli Shetty', 'Manoj', 'Shreya'];
   const STATUS_FILTERS = ['PO Generated','PO Sent','Approved','All'];
 
   const [filter, setFilter] = React.useState('PO Generated');
@@ -6310,6 +6312,7 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
     const items = Array.isArray(pr.items) ? pr.items : [];
     setGf({
       received_by: user?.name?.includes('MURLI') || user?.name?.includes('Murli') ? 'Murli Shetty'
+        : user?.name?.includes('MANOJ') || user?.name?.includes('Manoj') ? 'Manoj'
         : user?.name?.includes('SHREYA') || user?.name?.includes('Shreya') ? 'Shreya'
         : 'Murli Shetty',
       received_at: new Date().toISOString().slice(0,10),
