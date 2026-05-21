@@ -6352,9 +6352,25 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   const sortBy=(k)=>{if(sortKey===k)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(k);setSortDir('asc');}};
   const sortIcon=(k)=>sortKey===k?(sortDir==='asc'?' ▲':' ▼'):'';
   const legacyRows=Object.entries(stock).sort((a,b)=>a[0].localeCompare(b[0]));
+  // ── Stat-card totals (unit-aware, Patch Z 21-May-2026) ───────────────────────────
+  // Rolls measured in sqft; sheets/nos in their own qty. Mixing them as raw qty
+  // (legacy behaviour) produced numbers like "21008.28" that meant nothing. Show
+  // each unit class separately: main number = sqft total (rolls), subtitle = sheet+nos qty.
+  const rollInward=balances.filter(r=>r.unit==='roll').reduce((s,r)=>s+r.inward,0);
+  const rollUsed=balances.filter(r=>r.unit==='roll').reduce((s,r)=>s+r.used,0);
+  const nonRollInward=balances.filter(r=>r.unit!=='roll').reduce((s,r)=>s+r.inward,0);
+  const nonRollUsed=balances.filter(r=>r.unit!=='roll').reduce((s,r)=>s+r.used,0);
+  // Fab/Print used (legacy stat cards) – break down by unit at the log row level
+  const usedRollPrint=(pl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]==='roll')?(+l.print_sqft||0):0);},0);
+  const usedNonRollPrint=(pl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+l.qty_used||+l.print_sqft||0):0);},0);
+  const usedRollFab=(fl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]==='roll')?(+l.qty_used||0):0);},0);
+  const usedNonRollFab=(fl||[]).reduce((s,l)=>{const k=norm(l.material);return s+((unitByName[k]&&unitByName[k]!=='roll')?(+l.qty_used||0):0);},0);
+  const fmt=n=>(+n||0).toFixed(2);
+  const fmt0=n=>Math.round(+n||0).toString();
+  const outOfStockCount=balances.filter(r=>r.inward>0&&r.remaining<=0).length;
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
-      <SC l="Inward" v={(+grn.reduce((s,g)=>s+(+g.qty||0),0)).toFixed(2)} c="#10b981"/><SC l="Print Used" v={(+pl.reduce((s,l)=>s+(+l.qty_used||0),0)).toFixed(2)} c="#ef4444" d={30}/><SC l="Fab Used" v={(+fl.reduce((s,l)=>s+(+l.qty_used||0),0)).toFixed(2)} c="#dc2626" d={60}/><SC l="Materials" v={legacyRows.length} c="#3b82f6" d={90}/>
+      <SC l="Inward (sqft)" v={fmt(rollInward)} s={`+ ${fmt0(nonRollInward)} sheets/nos`} c="#10b981"/><SC l="Print Used (sqft)" v={fmt(usedRollPrint)} s={`+ ${fmt0(usedNonRollPrint)} sheets/nos`} c="#ef4444" d={30}/><SC l="Fab Used (sqft)" v={fmt(usedRollFab)} s={`+ ${fmt0(usedNonRollFab)} sheets/nos`} c="#dc2626" d={60}/><SC l="Materials" v={balances.length} s={outOfStockCount>0?`${outOfStockCount} out of stock`:'all in stock'} c="#3b82f6" d={90}/>
     </div>
     <div className="c" style={{padding:0}}>
       <div style={{padding:"8px 10px",borderBottom:"1px solid #1a2030",background:"#0a0f1a",display:"flex",flexDirection:"column",gap:6}}>
