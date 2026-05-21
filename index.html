@@ -1208,24 +1208,19 @@ function MainApp({user,onLogout,masterData}){
     const {error}=await sb.from('line_items').update({[col]:newVal, dept_audit: newAudit}).eq('id',itemId);
     if(error){show("⚠️ Failed to update dept checkbox",false);return;}
     setItems(p=>p.map(i=>i.id===itemId?{...i,[col]:newVal, dept_audit: newAudit}:i));
-    // ─── AUTO-LOG: Silently record Fabrication/Dispatch work ───
+    // ─── AUTO-LOG: Silently record Dispatch work ───
     // (Printing auto-log REMOVED 18 May 2026 — replaced by modal-based logging in PrintPage)
-    if(newVal===true && ['Fabrication','Dispatch'].includes(dept)){
+    // (Fabrication auto-log REMOVED 21 May 2026 [Patch X] — was writing line_item.media text into
+    //  fab_logs.material, polluting stock counts with job-description orphans. Replaced by Patch V
+    //  modal-based logging in FabPage which requires explicit master picks via the materials dropdown.)
+    if(newVal===true && dept==='Dispatch'){
       const item=items.find(i=>i.id===itemId);
       if(!item)return;
-      if(dept==='Fabrication'){
-        const ld={id:'FL'+Date.now()+Math.random().toString(36).slice(2,5),date:td(),job_id:item.job_id||'',
-          process:'General',operator:user?.name||'',material:item.media||'',qty_used:+item.qty||0,unit:'pcs',
-          waste:0,start_time:'',end_time:''};
-        const {error:e}=await sb.from('fab_logs').insert(ld);
-        if(!e)setFLogs(p=>[ld,...p]);
-      } else if(dept==='Dispatch'){
-        const ld={id:'DL'+Date.now()+Math.random().toString(36).slice(2,5),date:td(),job_id:item.job_id||'',
-          delivery_boy:user?.name||'',mode:'In-house',qty:+item.qty||0,vehicle_no:'',
-          notes:'Auto: '+(item.internal_name||''),created_by:user?.name||''};
-        const {error:e}=await sb.from('dispatch_logs').insert(ld);
-        if(!e)setDLogs(p=>[ld,...p]);
-      }
+      const ld={id:'DL'+Date.now()+Math.random().toString(36).slice(2,5),date:td(),job_id:item.job_id||'',
+        delivery_boy:user?.name||'',mode:'In-house',qty:+item.qty||0,vehicle_no:'',
+        notes:'Auto: '+(item.internal_name||''),created_by:user?.name||''};
+      const {error:e}=await sb.from('dispatch_logs').insert(ld);
+      if(!e)setDLogs(p=>[ld,...p]);
     }
   },[show,items,user]);
 
