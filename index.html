@@ -6368,7 +6368,7 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   const dateRange=React.useMemo(()=>{
     const today=new Date();
     const y=today.getFullYear(), m=today.getMonth(); // m: 0-11
-    const fmtDate=d=>d.toISOString().slice(0,10);
+    const fmtDate=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     if(dateFilter==='all') return [null,null];
     if(dateFilter==='thismonth') return [fmtDate(new Date(y,m,1)), fmtDate(today)];
     if(dateFilter==='last30') {const d=new Date(today);d.setDate(d.getDate()-29);return [fmtDate(d), fmtDate(today)];}
