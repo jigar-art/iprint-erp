@@ -261,6 +261,7 @@ const ALL_ST_NEW = [
   // Post-production
   'Delivered',
   'Installation WIP',
+  'Rectification',
   // Accounts
   'Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending',
   'Billing Done','Cash Received',
@@ -282,6 +283,7 @@ const STATUS_TO_LEADING = (status) => {
   if (s === 'Fabrication · Outsource') return 'fabOut';
   if (s === 'Delivered') return 'delivered';
   if (s === 'Installation WIP') return 'installation';
+  if (s === 'Rectification') return 'rectification';
   // Accounts-stage statuses return null so they fall through to the non-leading
   // ACCOUNTS card in deptCounts (via card.statuses.includes(st.status)).
   // Previously these were mapped to 'installation', which caused all accounts jobs
@@ -317,6 +319,7 @@ const STATUS_CARDS = [
   { key:'fabOut',       label:'FAB-OUT',        statuses:['Fabrication · Outsource'],                                                                                          color:'#ea580c', isLeading:true  },
   { key:'delivered',    label:'DELIVERED',      statuses:['Delivered'],                                                                                                        color:'#3b82f6', isLeading:true  },
   { key:'installation', label:'INSTALLATION',   statuses:['Installation WIP'],                                                                                                 color:'#059669', isLeading:true  },
+  { key:'rectification',label:'RECTIFICATION',  statuses:['Rectification'],                                                                                                    color:'#ec4899', isLeading:true  },
   { key:'accounts',     label:'ACCOUNTS',       statuses:['Billing Pending','Given for Billing','Cash Pending','IC Pending','DC Pending','Billing Done','Cash Received'],      color:'#06b6d4', isLeading:false },
   { key:'nobill',       label:'NO BILL',        statuses:['No Bill'],                                                                                                          color:'#64748b', isLeading:false },
   { key:'cancelled',    label:'CANCELLED',      statuses:['Cancelled'],                                                                                                        color:'#475569', isLeading:false },
@@ -1391,7 +1394,7 @@ function MainApp({user,onLogout,masterData}){
       'Designing - In House':[1,1,0,0,0,0,0,0],'Designing - Outsource':[1,1,0,0,0,0,0,0],
       'Printing · In-House':[1,1,1,1,0,0,0,0],'Printing · Outsource':[1,1,1,1,0,0,0,0],
       'Fabrication · In-House':[1,1,1,1,1,0,0,0],'Fabrication · Outsource':[1,1,1,1,1,0,0,0],
-      'Delivered':[1,1,1,1,1,1,0,0],'Installation WIP':[1,1,1,1,1,1,1,0],
+      'Delivered':[1,1,1,1,1,1,0,0],'Installation WIP':[1,1,1,1,1,1,1,0],'Rectification':[1,1,1,1,1,1,1,0],
       'Billing Pending':[1,1,1,1,1,1,1,0],'Given for Billing':[1,1,1,1,1,1,1,0],
       'Cash Pending':[1,1,1,1,1,1,1,0],'IC Pending':[1,1,1,1,1,1,1,0],'DC Pending':[1,1,1,1,1,1,1,0],
       'Billing Done':[1,1,1,1,1,1,1,1],'Cash Received':[1,1,1,1,1,1,1,1],'No Bill':[1,1,1,1,1,1,1,1],'Cancelled':[1,1,1,1,1,1,1,1]};
@@ -2027,7 +2030,7 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
       (j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q))
     ).slice(0,20);
   },[dq,jobs]);
-  const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
+  const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
   const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {!isDashViewOnly&&<div className="c" style={{padding:10}}>
@@ -2108,7 +2111,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
       <div style={{display:"flex",gap:2}}><span style={{fontSize:10,color:"#64748b",alignSelf:"center"}}>{fl.length} jobs</span><button className="b bp bs" onClick={()=>sp("new")}>➕ New Job</button></div>
     </div>
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Batches</th><th>PO</th><th>By</th></tr></thead><tbody>
-      {fl.map(j=>{const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
+      {fl.map(j=>{const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
         return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table>
     {/* 21 Apr: Empty-state hint — protects against double-FY-filter confusion (top-header FY vs this page's local FY). */}
     {fl.length===0 && <div style={{padding:"24px 16px",textAlign:"center",color:"#64748b",fontSize:11,lineHeight:1.6}}>
@@ -2493,7 +2496,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       <F l="Remark"><input className="in" value={jf.remark} onChange={e=>setJF('remark',e.target.value)} placeholder="Special instructions..." style={{fontSize:10}}/></F>
       <div><span style={{color:"#64748b",fontSize:8}}>STATUS</span>
         <div style={{display:"flex",gap:2,alignItems:"center",marginTop:2}}>
-          <StatusTip j={j}><span className="bd" style={{background:(({'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'})[j.status]||'#64748b')+'20',color:({'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'})[j.status]||'#64748b',fontSize:10,padding:"3px 8px",cursor:"help"}}>{j.status}</span></StatusTip>
+          <StatusTip j={j}><span className="bd" style={{background:(({'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'})[j.status]||'#64748b')+'20',color:({'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'})[j.status]||'#64748b',fontSize:10,padding:"3px 8px",cursor:"help"}}>{j.status}</span></StatusTip>
           <select className="in" style={{fontSize:9,padding:"2px",width:100}} defaultValue="" onChange={e=>{const ns=e.target.value;if(!ns)return;if(confirm('Change status from "'+j.status+'" to "'+ns+'"?')){updateJobStatus(j.id,ns);}e.target.value='';}}>
             <option value="">Change →</option>{renderStatusOptions(j.status)}
           </select>
@@ -4641,6 +4644,7 @@ function DeptPage({jobs,s,togDept,updateJobStatus,sm,items,osItems}){
     'Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c',
     'Delivered':'#3b82f6',
     'Installation WIP':'#059669',
+    'Rectification':'#ec4899',
     'Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80',
     'No Bill':'#64748b','Cancelled':'#64748b'
   };
@@ -14305,7 +14309,7 @@ function ClientPortal({code}){
       logo:'https://idjeniwznjiaanaxcjvg.supabase.co/storage/v1/object/public/Uploads/logos/ana-logo.jpg',
       depts:[
       {id:'design',name:'Design Team',icon:'🎨',st:['Designing - In House','Designing - Outsource','Recee','Quotation Sent','PO Pending'],seeAll:false},
-      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing · In-House','Printing · Outsource','Fabrication · In-House','Fabrication · Outsource','Installation WIP','Delivered'],seeAll:false},
+      {id:'projects',name:'Projects & Installation',icon:'🏗️',st:['Printing · In-House','Printing · Outsource','Fabrication · In-House','Fabrication · Outsource','Installation WIP','Rectification','Delivered'],seeAll:false},
       {id:'purchase',name:'Purchase Team',icon:'📦',st:null,seeAll:true,canEditPO:true},
       {id:'accounts',name:'Accounts & Billing',icon:'🧾',st:['Billing Pending','Given for Billing','Billing Done','Cash Received','Cash Pending','IC Pending','DC Pending'],seeAll:false},
     ]},
@@ -14339,7 +14343,7 @@ function ClientPortal({code}){
   },[code,dept]);
 
   const full=jobs.map(j=>({...j,batches:batches.filter(b=>b.job_id===j.id).map(b=>({...b,items:items.filter(i=>i.batch_id===b.id).sort((a,b)=>(a.id||'').localeCompare(b.id||''))}))}));
-  const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
+  const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
   const pipeline=[{k:'quotation_sent',l:'Quote',e:'📝'},{k:'designing_in_house',l:'Design',e:'🎨'},{k:'printing_in_house',l:'Print',e:'🖨️'},{k:'fabrication_in_house',l:'Fab',e:'🔧'},{k:'installation_wip',l:'Install',e:'🔩'},{k:'delivered',l:'Delivered',e:'🚚'},{k:'billing_done',l:'Billed',e:'✅'}];
   const pipeIdx=(st)=>({'Quotation Sent':0,'PO Pending':0,'Recee':0,'Designing - In House':1,'Designing - Outsource':1,'Printing · In-House':2,'Printing · Outsource':2,'Fabrication · In-House':3,'Fabrication · Outsource':3,'Delivered':4,'Installation WIP':4,'Billing Pending':5,'Given for Billing':5,'Cash Pending':5,'IC Pending':5,'DC Pending':5,'Billing Done':6,'Cash Received':6}[st]??-1);
   const deptTabs=dept?.seeAll?[{id:'all',l:'All Jobs',icon:'📋',st:null},...(config?.depts||[]).map(d=>({id:d.id,l:d.name,icon:d.icon,st:d.st}))]:[{id:dept?.id||'all',l:dept?.name||'Jobs',icon:dept?.icon||'📋',st:dept?.st||null}];
