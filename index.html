@@ -1712,8 +1712,8 @@ function MainApp({user,onLogout,masterData}){
     {id:"jobs",l:"All Jobs",e:"📋",roles:["admin","sales","production","accounts","designer"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","SHREYA"]},
     // New Job — admin role + PRIYANKA + ANKITA (sales role added so Priyanka passes role check)
     {id:"new",l:"New Job",e:"➕",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","PRIYANKA"]},
-    // Import BOQ — admin + sales role; tier-1 + APARNA + PRIYANKA
-    {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA"]},
+    // Import BOQ — admin + sales role; tier-1 + APARNA + PRIYANKA + ANKITA (22 May 26: Ankita added per accounts request)
+    {id:"boq",l:"Import BOQ",e:"📥",roles:["admin","sales"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","ANKITA"]},
     // Dept Tracker — tier-1 + APARNA + PRIYANKA + designers + HARISH + MURLI + ANKITA (BATUL removed)
     {id:"dept",l:"Dept Tracker",e:"🏭",roles:["admin","production","sales","designer","printing","fabrication","dispatch"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","ANKITA","APARNA","PRIYANKA","PRAJAKTA","MEDHA","HARISH","MURLI","MANOJ","PRINTING"]},
     // Material In (GRN) — tier-1 + Shreya + Murli
@@ -2097,7 +2097,7 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
 function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [ff,sf]=useState("All");
   const [fy,setFy]=useState("All");
-  const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q))return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;}).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();const hitsBatch=(j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q));if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q)&&!j.po_number?.toLowerCase().includes(q)&&!hitsBatch)return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;}).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
   
   const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
 
@@ -2628,7 +2628,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       const PR_URGENCY=['Normal','Urgent','Scheduled'];
       const FIRMS=[{code:'JPP',name:'Jyoti Print & Pack'},{code:'JXT',name:'Juxtapose'},{code:'VHD',name:'VersaHue Designs'}];
       const blankItem={product:'',size:'',qty:1,rate:0,per:'Sheet',gst_pct:18,hsn:'',width:'',height:'',unit_mode:'NOS',area:0};
-      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',transport:0,transport_gst_pct:0,round_off:0,notes:'',items:[{...blankItem}]};
+      const blankForm={firm_code:j.firm||'JPP',requestor:user?.name||'',request_type:'Material',vendor_id:'',vendor_name:'',vendor_gstin:'',vendor_address:'',vendor_phone:'',vendor_state:'Maharashtra',urgency:'Normal',expected_delivery:'',payment_terms:'',advance_amount:'',advance_percent:'',transport:0,transport_gst_pct:0,round_off:0,notes:'',items:[{...blankItem}]};
       const [prf,setPrf]=React.useState(blankForm);
       const [avf,setAvf]=React.useState({name:'',category:'Material',phone:'',gstin:'',contact_person:'',state:'Maharashtra'});
       const [saving,setSaving]=React.useState(false);
@@ -2852,6 +2852,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           urgency:prf.urgency,
           expected_delivery:prf.expected_delivery||null,
           payment_terms:prf.payment_terms||null,
+          advance_amount:prf.advance_amount||null,
+          advance_percent:prf.advance_percent||null,
           transport:+prf.transport||0,
           transport_gst_pct:+prf.transport_gst_pct||0,
           round_off:roundOff,
@@ -3175,6 +3177,18 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             <div>
               <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Notes / Remarks</span>
               <input className="in" value={prf.notes} onChange={e=>setPrf(p=>({...p,notes:e.target.value}))} placeholder="Optional specs, instructions..." style={{fontSize:9,padding:"3px 4px",width:"100%"}}/>
+            </div>
+          </div>
+
+          {/* Row 3b — Advance against PO (22 May 26: per accounts request, both free text) */}
+          <div className="fg f2" style={{gap:6,marginBottom:6}}>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Advance Amount <span style={{color:"#64748b",fontStyle:"italic"}}>(optional, free text)</span></span>
+              <input className="in" value={prf.advance_amount} onChange={e=>setPrf(p=>({...p,advance_amount:e.target.value}))} placeholder="e.g. ₹5,000 or 5000" style={{fontSize:9,padding:"3px 4px",width:"100%"}}/>
+            </div>
+            <div>
+              <span style={{fontSize:7,color:"#64748b",display:"block",marginBottom:2}}>Advance % <span style={{color:"#64748b",fontStyle:"italic"}}>(optional, free text)</span></span>
+              <input className="in" value={prf.advance_percent} onChange={e=>setPrf(p=>({...p,advance_percent:e.target.value}))} placeholder="e.g. 50% or 30%" style={{fontSize:9,padding:"3px 4px",width:"100%"}}/>
             </div>
           </div>
 
@@ -6757,7 +6771,7 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
   <div>State Name &nbsp;: &nbsp;${(pr.vendor_state||'Maharashtra')}, Code : ${(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'27':'—'}</div>
 </div>
 
-<div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms||'To be confirmed'}</div>
+<div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms||'To be confirmed'}${(pr.advance_amount||pr.advance_percent)?'<br><strong>Advance:</strong> '+[pr.advance_amount,pr.advance_percent].filter(Boolean).join(' / '):''}</div>
 
 <table>
   <thead>
@@ -7180,6 +7194,8 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   const [generating, setGenerating] = React.useState(null);
   const [poPreview, setPoPreview] = React.useState(null); // {pr, poNo, html}
   const [tdsByPr, setTdsByPr] = React.useState({}); // Shreya's TDS% selection per-PR, keyed by pr.id
+  // 22 May 2026: PO# search — accounts team needs to look up a PO by number
+  const [searchQ, setSearchQ] = React.useState('');
 
   const STATUS_FILTERS = ['Approved','PO Generated','Completed','All'];
   const stCol = {
@@ -7192,8 +7208,10 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
   const filtered = React.useMemo(() => {
     const list = filter === 'All' ? prs.filter(p=>['Approved','PO Generated','Completed'].includes(p.status))
       : prs.filter(p => p.status === filter);
-    return [...list].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
-  }, [prs, filter]);
+    const q = (searchQ||'').trim().toLowerCase();
+    const searched = q ? list.filter(p => (p.po_no||'').toLowerCase().includes(q)) : list;
+    return [...searched].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
+  }, [prs, filter, searchQ]);
 
   const getFY = () => {
     const n = new Date(); const m = n.getMonth(), y = n.getFullYear();
@@ -7357,7 +7375,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
     <div>State Name &nbsp;: &nbsp;${(pr.vendor_state||'Maharashtra')}, Code : ${(pr.vendor_state||'Maharashtra').toLowerCase()==='maharashtra'?'27':'—'}</div>
   </div>
 
-  <div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms||'To be confirmed'}</div>
+  <div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms||'To be confirmed'}${(pr.advance_amount||pr.advance_percent)?'<br><strong>Advance:</strong> '+[pr.advance_amount,pr.advance_percent].filter(Boolean).join(' / '):''}</div>
 
   <table>
     <thead>
@@ -7475,7 +7493,7 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
 
   const sendVendorWA = (preview) => {
     const {pr, poNo} = preview;
-    const msg = `Dear *${pr.vendor_name}*,\n\nPlease find below our Purchase Order details:\n\n*PO No:* ${poNo}\n*Date:* ${new Date().toLocaleDateString('en-IN')}\n*Items:* ${(pr.items||[]).map(x=>x.product+' x'+x.qty).join(', ')}\n*Total:* ₹${(+pr.total||0).toLocaleString('en-IN')}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n\nKindly confirm receipt and expected delivery date.\n\nRegards,\n*${FIRM_DATA[pr.firm_code]?.short||'iPrint'}*`;
+    const msg = `Dear *${pr.vendor_name}*,\n\nPlease find below our Purchase Order details:\n\n*PO No:* ${poNo}\n*Date:* ${new Date().toLocaleDateString('en-IN')}\n*Items:* ${(pr.items||[]).map(x=>x.product+' x'+x.qty).join(', ')}\n*Total:* ₹${(+pr.total||0).toLocaleString('en-IN')}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}${(pr.advance_amount||pr.advance_percent)?'\n*Advance:* '+[pr.advance_amount,pr.advance_percent].filter(Boolean).join(' / '):''}\n\nKindly confirm receipt and expected delivery date.\n\nRegards,\n*${FIRM_DATA[pr.firm_code]?.short||'iPrint'}*`;
     const phone = (pr.vendor_phone||'').replace(/\D/g,'').replace(/^0/,'91').replace(/^(?!91)/,'91');
     if (phone.length >= 10) sendWhatsApp(phone, msg, 'iprint_po_send');
     else { navigator.clipboard?.writeText(msg); show('📋 Message copied — no vendor phone on file'); }
@@ -7534,7 +7552,9 @@ function POPage({prs, setPrs, jobs, user, show, firms}) {
           <h2 style={{fontSize:14, fontWeight:800, color:'#06b6d4', margin:0}}>📄 PO Generator</h2>
           <p style={{fontSize:10, color:'#64748b', margin:'2px 0 0'}}>Generate Purchase Order PDFs for approved PRs</p>
         </div>
-        <div style={{display:'flex', gap:4}}>
+        <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
+          {/* 22 May 26: PO# search */}
+          <input className="in" value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="🔍 Search PO#" style={{fontSize:9, padding:'3px 8px', width:140}}/>
           {STATUS_FILTERS.map(f => (
             <button key={f} className={`b bs ${filter===f?'bp':''}`} onClick={() => setFilter(f)}
               style={{fontSize:9, padding:'3px 8px', ...(filter===f&&f==='Approved'?{background:'#4ade8020',borderColor:'#4ade80',color:'#4ade80'}:{})}}>
@@ -7731,6 +7751,8 @@ function MyPRsPage({prs, setPrs, jobs, user, show, firms, sm}) {
 
   const [scope, setScope] = React.useState('mine'); // 'mine' | 'dept' | 'all'
   const [statusFilter, setStatusFilter] = React.useState('Active'); // 'Active' | 'All' | specific status
+  // 22 May 2026: full search — PO#, PR#, vendor, job
+  const [searchQ, setSearchQ] = React.useState('');
 
   const lvKey = 'myprs_last_viewed_' + uname;
   // Snapshot the unread cutoff once on mount so newly-arriving status changes during viewing
@@ -7799,9 +7821,20 @@ function MyPRsPage({prs, setPrs, jobs, user, show, firms, sm}) {
     return pr.status === statusFilter;
   };
 
+  // 22 May 26: PO#, PR#, vendor, job search
+  const passesSearch = (pr) => {
+    const q = (searchQ||'').trim().toLowerCase();
+    if (!q) return true;
+    return (pr.po_no||'').toLowerCase().includes(q)
+      || (pr.pr_no||'').toLowerCase().includes(q)
+      || (pr.vendor_name||'').toLowerCase().includes(q)
+      || (pr.job_id||'').toLowerCase().includes(q);
+  };
+
   const visible = (prs || [])
     .filter(inScope)
     .filter(passesStatus)
+    .filter(passesSearch)
     .sort((a,b) => {
       const ta = a.last_status_change_at || a.created_at || '';
       const tb = b.last_status_change_at || b.created_at || '';
@@ -7909,7 +7942,9 @@ function MyPRsPage({prs, setPrs, jobs, user, show, firms, sm}) {
             Track status of your purchase requests {myDeptTag ? <span>· dept: <strong style={{color:'#8b949e'}}>{myDeptTag}</strong></span> : ''}
           </p>
         </div>
-        <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
+        <div style={{display:'flex', gap:4, flexWrap:'wrap', alignItems:'center'}}>
+          {/* 22 May 26: search by PO#, PR#, vendor, job */}
+          <input className="in" value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="🔍 Search PO# / PR# / vendor / job" style={{fontSize:9, padding:'3px 8px', width:200}}/>
           <button className={`b bs ${scope==='mine'?'bp':''}`} onClick={() => setScope('mine')}
             style={{fontSize:9, padding:'3px 8px', ...(scope==='mine'?{background:'#f59e0b20',borderColor:'#f59e0b',color:'#f59e0b'}:{})}}>
             Mine ({myCount})
@@ -8245,7 +8280,7 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
 
   const buildVendorMsg = (pr) => {
     const items = (pr.items||[]).map(x => `• ${x.product}${x.size?' ('+x.size+')':''} — Qty: ${x.qty} ${x.per} @ ₹${x.rate}`).join('\n');
-    return `Dear *${pr.vendor_name}*,\n\nThis is iPrint India. We are raising a Purchase Order for the following:\n\n${items}\n\n*PR Ref:* ${pr.pr_no}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}\n${pr.expected_delivery?'*Expected Delivery:* '+pr.expected_delivery+'\n':''}\nOur team will send you the formal PO document shortly. Please confirm availability.\n\nThank you 🙏\n*iPrint India*`;
+    return `Dear *${pr.vendor_name}*,\n\nThis is iPrint India. We are raising a Purchase Order for the following:\n\n${items}\n\n*PR Ref:* ${pr.pr_no}\n*Payment Terms:* ${pr.payment_terms||'To be confirmed'}${(pr.advance_amount||pr.advance_percent)?'\n*Advance:* '+[pr.advance_amount,pr.advance_percent].filter(Boolean).join(' / '):''}\n${pr.expected_delivery?'*Expected Delivery:* '+pr.expected_delivery+'\n':''}\nOur team will send you the formal PO document shortly. Please confirm availability.\n\nThank you 🙏\n*iPrint India*`;
   };
 
   const buildGroupMsg = (pr, action) => {
@@ -8606,7 +8641,7 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
                     {/* Notify Shreya for PO — only on approval */}
                     {isApproved && (
                       <button className="b" onClick={() => sendWhatsApp(WA_NUMBERS['Shreya'],
-                        `📄 *PO Required — ${pr.pr_no}*\n\nPlease generate a PO for:\n*Vendor:* ${pr.vendor_name}\n*Amount:* ₹${(+pr.total||0).toFixed(0)}\n*Firm:* ${pr.firm_code}\n*Payment Terms:* ${pr.payment_terms||'TBD'}\n\nApproved by Jigar ✅`, 'iprint_po_request')}
+                        `📄 *PO Required — ${pr.pr_no}*\n\nPlease generate a PO for:\n*Vendor:* ${pr.vendor_name}\n*Amount:* ₹${(+pr.total||0).toFixed(0)}\n*Firm:* ${pr.firm_code}\n*Payment Terms:* ${pr.payment_terms||'TBD'}${(pr.advance_amount||pr.advance_percent)?'\n*Advance:* '+[pr.advance_amount,pr.advance_percent].filter(Boolean).join(' / '):''}\n\nApproved by Jigar ✅`, 'iprint_po_request')}
                         style={{fontSize:9, padding:'4px 10px', background:'#3b82f620', borderColor:'#3b82f644', color:'#3b82f6'}}>
                         📄 Request PO from Shreya
                       </button>
