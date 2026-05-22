@@ -697,8 +697,8 @@ function Login({onLogin,team}){
       const data=new TextEncoder().encode(pin+':'+member.id);
       const buf=await crypto.subtle.digest('SHA-256',data);
       const hex=Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-      // Primary: hash compare. Fallback: legacy plaintext for migration safety.
-      const ok=(member.pin_hash&&member.pin_hash===hex)||(member.pin&&member.pin===pin);
+      // Hash-only authentication. Phase 2: legacy plaintext fallback removed (22 May 2026).
+      const ok=member.pin_hash&&member.pin_hash===hex;
       if(!ok){setErr('Wrong PIN');return;}
       onLogin(member);
       window.__currentUser=member;
