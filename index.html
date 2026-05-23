@@ -231,7 +231,7 @@ const DC=["#3b82f6","#8b5cf6","#f59e0b","#ef4444","#dc2626","#10b981","#059669",
 // 14 May 2026: Users authorized to enter/edit non-banking invoice numbers on batches.
 // Substring match against user.name.toUpperCase() — see canEditInvoice2() helper.
 // AMOL, RUCHITA, BATUL explicitly excluded per Jigar 14 May PM.
-const BILLING_TEAM = ['SONAM','SHREYA','APARNA','PRATIKSHA','VIDYA','JIGAR','CHANDNI'];
+const BILLING_TEAM = ['SONAM','SHREYA','APARNA','VIDYA','JIGAR','CHANDNI'];
 const canEditInvoice2 = (user) => {
   const u = (user?.name||'').toUpperCase();
   return BILLING_TEAM.some(n => u.includes(n));
@@ -1356,7 +1356,7 @@ function MainApp({user,onLogout,masterData}){
     // Whitelist matches PrintPage's FORWARD_USERS (kept in sync).
     // Patch I.2 (20 May 2026) — word-boundary match (token == name OR name starts with 'token ').
     // Fixes "PRINTING TEAM" / "CHANDNI S" / "AMOL M" being blocked by exact match,
-    // while keeping ANKITA / PRATIKSHA out (substring match would have allowed them).
+    // while keeping ANKITA out (substring match would have allowed her).
     const PRINT_FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
     const fromPrinting=(dbRow.status||'').startsWith('Printing');
     const _uname=String(userName||'').toUpperCase().trim();
@@ -1733,13 +1733,13 @@ function MainApp({user,onLogout,masterData}){
     // Clients — tier-1 + Aparna + Priyanka + Shreya (BATUL removed)
     {id:"cli",l:"Clients",e:"👥",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA"]},
     // Accounts — tier-1 + Aparna + Shreya
-    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"],users:["JIGAR","CHANDNI","APARNA","SHREYA","VIDYA","SONAM","PRATIKSHA"]},
+    {id:"acc",l:"Accounts",e:"🧾",roles:["admin","accounts","sales"],users:["JIGAR","CHANDNI","APARNA","SHREYA","VIDYA","SONAM"]},
     // Expenses — tier-1 + Shreya
-    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"],users:["JIGAR","CHANDNI","SHREYA","SONAM","PRATIKSHA"]},
+    {id:"expenses",l:"Expenses",e:"💸",roles:["admin","accounts","production"],users:["JIGAR","CHANDNI","SHREYA","SONAM"]},
     // Backup Data — admin role only (tier-1 access via FULL_ACCESS shortcut covers all 4 existing admins; Ankita as tier-2 admin is NOT in the user-gate)
     {id:"backup",l:"Backup Data",e:"💾",roles:["admin"],users:["JIGAR","RUCHITA"]},
     // Banking CRM — tier-1 + Aparna + Priyanka + Shreya (Harish/Murli removed per your correction)
-    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA","VIDYA","SONAM","PRATIKSHA"]},
+    {id:"bankcrm",l:"Banking CRM",e:"🏦",roles:["admin","sales","accounts"],users:["JIGAR","AMOL","CHANDNI","RUCHITA","APARNA","PRIYANKA","SHREYA","VIDYA","SONAM"]},
     // Sales CRM — tier-1 + Batul
     {id:"sales",l:"Sales CRM",e:"📈",roles:["admin","sales"],users:["JIGAR","CHANDNI","BATUL","POONAM"]},
     // Job Notes — tier-1 + Batul
@@ -5269,7 +5269,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   // JIGAR, CHANDNI = admin; PRINTING = team operator; ANKIT/PRATIK/SONU = production; AMOL = production manager
   // MUST stay in sync with central PRINT_FORWARD_USERS at updateJobStatus (App-level chokepoint)
   // Patch I.2 (20 May 2026): word-boundary match — handles "PRINTING TEAM"/"CHANDNI S"
-  // while blocking ANKITA/PRATIKSHA (substring match would have allowed them).
+  // while blocking ANKITA (substring match would have allowed her).
   const FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
   const userCanForward=(()=>{const u=(user?.name||'').toUpperCase().trim();return FORWARD_USERS.some(t=>u===t||u.startsWith(t+' '));})();
 
