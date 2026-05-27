@@ -6246,7 +6246,8 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
 }
 
 // DISPATCH
-function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(false);const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
+function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(false);const [dq,setDq]=useState(""); // 26 May 26: in-page search (Job#, Boy, Vehicle, Challan, LR)
+const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
   // 09 May 26: Del Boy is a typeahead combobox — autocomplete existing + add new on the fly.
   // boysLocal mirrors the delBoys prop but lets us append newly-added boys without waiting
   // for masterData to round-trip (parent state isn't accessible from here).
@@ -6276,6 +6277,21 @@ function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(fa
     await addLog(payload);
     sF(p=>({...p,job_id:"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""}));
   };
+  // 26 May 26: in-page search across job#, type, boy, vehicle, lr, challan, installer
+  const filtered=useMemo(()=>{
+    const q=dq.trim().toLowerCase();
+    if(!q) return logs;
+    return logs.filter(l=>
+      String(l.job_id||"").toLowerCase().includes(q)||
+      String(l.dispatch_type||"").toLowerCase().includes(q)||
+      String(l.delivery_boy||"").toLowerCase().includes(q)||
+      String(l.vehicle||"").toLowerCase().includes(q)||
+      String(l.lr_no||"").toLowerCase().includes(q)||
+      String(l.challan_no||"").toLowerCase().includes(q)||
+      String(l.installer||"").toLowerCase().includes(q)||
+      String(l.date||"").toLowerCase().includes(q)
+    );
+  },[dq,logs]);
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🚚 New Dispatch"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f3">
@@ -6298,9 +6314,16 @@ function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(fa
       <F l="📸 POD"><input type="file" accept="image/*" className="in" style={{padding:2}}/></F>
       {f.dispatch_type.includes("Install")&&<><F l="Installer"><input className="in" value={f.installer} onChange={e=>sF(p=>({...p,installer:e.target.value}))}/></F><F l="Install Date"><input type="date" className="in" value={f.install_date} onChange={e=>sF(p=>({...p,install_date:e.target.value}))}/></F></>}
     </div><button className="b bp" onClick={add} style={{marginTop:6}}>Save</button></div>}
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 2px"}}>
+      <input className="in" value={dq} onChange={e=>setDq(e.target.value)}
+        placeholder="🔍 Search Job#, Boy, Vehicle, Challan#, LR#, Type..."
+        style={{fontSize:11,padding:"5px 10px",flex:1,maxWidth:360,borderColor:"#1a2030"}}/>
+      {dq&&<button onClick={()=>setDq('')} className="b bs" style={{fontSize:9,padding:"3px 8px"}}>✕</button>}
+      <span style={{fontSize:10,color:"#64748b",marginLeft:"auto"}}>{dq?`${filtered.length} of ${logs.length}`:`${logs.length} dispatches`}</span>
+    </div>
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Type</th><th>Boy</th><th>Vehicle</th><th>Challan</th><th>LR</th></tr></thead><tbody>
-      {logs.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td><span className="bd" style={{background:l.dispatch_type?.includes("Install")?"#8b5cf620":"#10b98120",color:l.dispatch_type?.includes("Install")?"#c084fc":"#4ade80"}}>{l.dispatch_type}</span></td><td>{l.delivery_boy}</td><td>{l.vehicle}</td><td className="mn">{l.challan_no}</td><td className="mn">{l.lr_no}</td></tr>)}
-      {logs.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:16}}>None</td></tr>}
+      {filtered.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td><span className="bd" style={{background:l.dispatch_type?.includes("Install")?"#8b5cf620":"#10b98120",color:l.dispatch_type?.includes("Install")?"#c084fc":"#4ade80"}}>{l.dispatch_type}</span></td><td>{l.delivery_boy}</td><td>{l.vehicle}</td><td className="mn">{l.challan_no}</td><td className="mn">{l.lr_no}</td></tr>)}
+      {filtered.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:16}}>{dq?`No matches for "${dq}"`:"None"}</td></tr>}
     </tbody></table></div></div></div>;
 }
 
