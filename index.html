@@ -6824,6 +6824,9 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
 
   const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
+  const [searchQ, setSearchQ] = React.useState(''); // 26 May 26: in-page search (PR#/PO#/Vendor/Item/Job#)
+  const grnPanelRef = React.useRef(null);
+  const invoiceInputRef = React.useRef(null);
   const [gf, setGf] = React.useState({
     received_by: user?.name || 'Murli Shetty',
     received_at: new Date().toISOString().slice(0,10),
@@ -6838,8 +6841,27 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
     const list = filter === 'All'
       ? prs.filter(p => ['Approved','PO Generated','PO Sent'].includes(p.status))
       : prs.filter(p => p.status === filter);
-    return [...list].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
-  },[prs, filter]);
+    const q = (searchQ||'').trim().toLowerCase();
+    const searched = q ? list.filter(p => {
+      const itemsStr = Array.isArray(p.items) ? p.items.map(x => x?.product||'').join(' ').toLowerCase() : '';
+      return (p.pr_no||'').toLowerCase().includes(q)
+        || (p.po_no||'').toLowerCase().includes(q)
+        || (p.vendor_name||'').toLowerCase().includes(q)
+        || (p.job_id||'').toLowerCase().includes(q)
+        || itemsStr.includes(q);
+    }) : list;
+    return [...searched].sort((a,b) => b.created_at > a.created_at ? 1 : -1);
+  },[prs, filter, searchQ]);
+
+  // 26 May 26: when GRN panel opens, scroll it into view and focus Invoice field
+  React.useEffect(() => {
+    if (receiving && grnPanelRef.current) {
+      try {
+        grnPanelRef.current.scrollIntoView({behavior:'smooth', block:'start'});
+        setTimeout(() => { try { invoiceInputRef.current && invoiceInputRef.current.focus(); } catch(e){} }, 250);
+      } catch(e){}
+    }
+  }, [receiving]);
 
   const openReceive = (pr) => {
     const items = Array.isArray(pr.items) ? pr.items : [];
@@ -6980,7 +7002,11 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
               : <span style={{color:'#4ade80'}}>✓ All POs received</span>}
           </p>
         </div>
-        <div style={{display:'flex', gap:4, flexWrap:'wrap'}}>
+        <div style={{display:'flex', gap:6, flexWrap:'wrap', alignItems:'center'}}>
+          <input className="in" value={searchQ} onChange={e=>setSearchQ(e.target.value)}
+            placeholder="🔍 PR#, PO#, Vendor, Job#, Item..."
+            style={{fontSize:10, padding:'4px 8px', width:240, borderColor:'#1a2030'}}/>
+          {searchQ && <button onClick={()=>setSearchQ('')} className="b bs" style={{fontSize:9, padding:'3px 8px'}}>✕</button>}
           {STATUS_FILTERS.map(f => (
             <button key={f} className={`b bs ${filter===f?'bp':''}`} onClick={() => setFilter(f)}
               style={{fontSize:9, padding:'3px 8px',
@@ -6993,7 +7019,7 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
 
       {/* GRN Entry Panel */}
       {receiving && (
-        <div style={{background:'#0a0f1a', border:'1px solid #8b5cf644', borderRadius:8, padding:12, marginBottom:12}}>
+        <div ref={grnPanelRef} style={{background:'#0a0f1a', border:'1px solid #8b5cf644', borderRadius:8, padding:12, marginBottom:12}}>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10, flexWrap:'wrap', gap:6}}>
             <div>
               <span style={{fontWeight:800, color:'#8b5cf6', fontSize:12}}>Recording GRN — {receiving.pr_no}</span>
@@ -7020,7 +7046,7 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
             </div>
             <div>
               <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Vendor Invoice No.</span>
-              <input className="in" value={gf.invoice_no}
+              <input ref={invoiceInputRef} className="in" value={gf.invoice_no}
                 onChange={e=>setGf(p=>({...p,invoice_no:e.target.value}))}
                 placeholder="e.g. INV-2024-456"
                 style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
@@ -7112,7 +7138,7 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
       {/* PR List */}
       {filtered.length === 0 && (
         <div style={{textAlign:'center', padding:40, color:'#64748b', fontSize:11}}>
-          {filter === 'PO Sent' ? '✅ No POs pending receipt' : `No ${filter} PRs`}
+          {searchQ ? `No matches for "${searchQ}"` : filter === 'PO Sent' ? '✅ No POs pending receipt' : `No ${filter} PRs`}
         </div>
       )}
 
