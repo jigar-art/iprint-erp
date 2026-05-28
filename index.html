@@ -4433,8 +4433,8 @@ function NewJobPage({firms,clients,products,team,machines,leadSources,createJob,
         ):(
           <div style={{display:"flex",gap:4}}>
             <input className="in" autoFocus value={newLs} onChange={e=>setNewLs(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addLeadSource();}if(e.key==='Escape'){setShowAddLs(false);setNewLs("");}}} placeholder="New source name…" style={{flex:1}}/>
-            <button type="button" className="b" disabled={savingLs} onClick={addLeadSource} style={{padding:"0 8px"}}>{savingLs?"…":"\u2713"}</button>
-            <button type="button" className="b bs" onClick={()=>{setShowAddLs(false);setNewLs("");}} style={{padding:"0 8px"}}>\u2715</button>
+            <button type="button" className="b" disabled={savingLs} onClick={addLeadSource} style={{padding:"0 8px"}}>{savingLs?"…":"✓"}</button>
+            <button type="button" className="b bs" onClick={()=>{setShowAddLs(false);setNewLs("");}} style={{padding:"0 8px"}}>✕</button>
           </div>
         )}</F>
         <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
