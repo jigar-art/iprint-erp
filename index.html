@@ -11112,7 +11112,7 @@ function BankCRMPage({show,jobs,sm,sp,firms,clients,user,items,osItems}){
           <td className="mn" style={{fontSize:9,color:'#e3a008',cursor:s.job_no?'pointer':'default',fontWeight:600}} onClick={()=>{
             if(!s.job_no) return;
             // Try to open Non-Banking JobDetail first (existing behavior)
-            const j=jobs.find(j=>j.id?.includes(s.job_no));
+            const j=jobs.find(j=>String(j.id||'').split('-')[0]===String(s.job_no));
             if(j){sm({t:`Job ${j.id}`,jobId:j.id,fallback:j});return;}
             // Banking-only job# (no jobs row) — open group modal (added 27 Apr 26)
             const sitesInGroup=sites.filter(x=>x.job_no===s.job_no);
