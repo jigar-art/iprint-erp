@@ -8410,6 +8410,76 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
   const job = (jobId) => (jobs||[]).find(j => j.id === jobId);
   const firmColor = (code) => ({JPP:'#e3a008',JXT:'#3b82f6',VHD:'#8b5cf6'}[code]||'#64748b');
 
+  // Printable PR preview — opens a clean A4 HTML quote in a new tab for review / Save-as-PDF
+  const previewPR = (pr) => {
+    const firm = (typeof FIRM_DATA !== 'undefined' && (FIRM_DATA[pr.firm_code] || FIRM_DATA.JXT)) || {short: pr.firm_code || 'iPrint', name: pr.firm_code || 'iPrint India'};
+    const esc = (s) => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const inr = (n) => '\u20B9' + (+n||0).toLocaleString('en-IN',{maximumFractionDigits:2});
+    const jb = job(pr.job_id);
+    const rItems = Array.isArray(pr.items) ? pr.items : [];
+    const rows = rItems.map((x,i) => {
+      const amt = (+x.qty||0)*(+x.rate||0);
+      return '<tr><td style="text-align:center">'+(i+1)+'</td>'+
+        '<td>'+esc(x.product)+(x.size?' <span style="color:#666;font-size:11px">('+esc(x.size)+')</span>':'')+'</td>'+
+        '<td style="text-align:right">'+esc(x.qty)+' '+esc(x.unit_mode||x.per||'Unit')+'</td>'+
+        '<td style="text-align:right">'+inr(x.rate)+'</td>'+
+        '<td style="text-align:center">'+esc(x.gst_pct)+'%</td>'+
+        '<td style="text-align:right">'+inr(amt)+'</td></tr>';
+    }).join('');
+    const html = '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(pr.pr_no)+'</title>'+
+      '<style>'+
+      '*{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}'+
+      'body{margin:0;padding:24px;color:#111;font-size:13px}'+
+      '.wrap{max-width:760px;margin:0 auto}'+
+      '.hd{border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:14px}'+
+      '.hd h1{margin:0;font-size:20px}'+
+      '.hd .sub{color:#555;font-size:12px;margin-top:2px}'+
+      '.tag{display:inline-block;padding:2px 8px;border:1px solid #999;border-radius:4px;font-size:11px;margin-left:6px}'+
+      '.meta{display:flex;flex-wrap:wrap;gap:6px 28px;margin-bottom:14px;font-size:12px}'+
+      '.meta div span{color:#666}'+
+      'table{width:100%;border-collapse:collapse;margin-bottom:12px}'+
+      'th,td{border:1px solid #ccc;padding:6px 8px;font-size:12px}'+
+      'th{background:#f3f3f3;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.3px}'+
+      '.tot{width:280px;margin-left:auto}'+
+      '.tot td{border:none;padding:3px 8px}'+
+      '.tot .g{border-top:2px solid #111;font-weight:700;font-size:15px}'+
+      '.notes{background:#fafafa;border:1px solid #eee;border-radius:4px;padding:8px 10px;font-size:12px;color:#444;margin-bottom:12px}'+
+      '.ft{margin-top:24px;color:#888;font-size:11px;border-top:1px solid #eee;padding-top:8px}'+
+      '@media print{body{padding:0}.noprint{display:none}}'+
+      '</style></head><body><div class="wrap">'+
+      '<div class="hd"><h1>'+esc(firm.short)+'<span class="tag">'+esc(pr.firm_code)+'</span></h1>'+
+      '<div class="sub">'+esc(firm.name)+(firm.gstin?' &middot; GSTIN: '+esc(firm.gstin):'')+'</div></div>'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">'+
+      '<div><div style="font-size:16px;font-weight:700">Purchase Request</div>'+
+      '<div style="color:#555;font-size:12px">'+esc(pr.pr_no)+' &middot; '+esc(pr.status)+(pr.urgency==='Urgent'?' &middot; <b style="color:#c00">URGENT</b>':'')+'</div></div>'+
+      '<div style="text-align:right;color:#555;font-size:11px">'+esc(new Date(pr.created_at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+'</div></div>'+
+      '<div class="meta">'+
+      '<div><span>Vendor:</span> <b>'+esc(pr.vendor_name)+'</b>'+(pr.vendor_gstin?'<br><span>GSTIN:</span> '+esc(pr.vendor_gstin):'')+'</div>'+
+      '<div><span>Requested by:</span> '+esc(pr.created_by)+'</div>'+
+      (jb?'<div><span>Job:</span> '+esc(pr.job_id)+' &mdash; '+esc(jb.client_name||'')+(jb.project?'<br>'+esc(jb.project):'')+'</div>':'')+
+      (pr.expected_delivery?'<div><span>Expected Delivery:</span> '+esc(pr.expected_delivery)+'</div>':'')+
+      (pr.payment_terms?'<div><span>Payment Terms:</span> '+esc(pr.payment_terms)+'</div>':'')+
+      ((pr.advance_amount||pr.advance_percent)?'<div><span>Advance:</span> '+esc([pr.advance_amount,pr.advance_percent].filter(Boolean).join(' / '))+'</div>':'')+
+      '</div>'+
+      '<table><thead><tr><th style="width:32px;text-align:center">#</th><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Rate</th><th style="text-align:center">GST</th><th style="text-align:right">Amount</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table>'+
+      '<table class="tot">'+
+      '<tr><td>Subtotal</td><td style="text-align:right">'+inr(pr.subtotal)+'</td></tr>'+
+      ((+pr.transport>0)?'<tr><td>Transport</td><td style="text-align:right">'+inr(pr.transport)+'</td></tr>':'')+
+      '<tr><td>GST</td><td style="text-align:right">'+inr(pr.gst_total)+'</td></tr>'+
+      ((+pr.round_off)?'<tr><td>Round Off</td><td style="text-align:right">'+inr(pr.round_off)+'</td></tr>':'')+
+      '<tr class="g"><td>Total</td><td style="text-align:right">'+inr(pr.total)+'</td></tr>'+
+      '</table>'+
+      (pr.notes?'<div class="notes"><b>Notes:</b> '+esc(pr.notes)+'</div>':'')+
+      '<div class="ft">This is an internal Purchase Request for approval &mdash; not a tax invoice. Generated from iPrint ERP.</div>'+
+      '<div class="noprint" style="text-align:center;margin-top:16px"><button onclick="window.print()" style="padding:8px 20px;font-size:13px;cursor:pointer">Print / Save as PDF</button></div>'+
+      '</div></body></html>';
+    const w = window.open('','_blank','width=900,height=700');
+    if (!w) { show('Allow pop-ups to preview the PR', false); return; }
+    w.document.write(html);
+    w.document.close();
+  };
+
   const approveBillingRequest = async (req, note) => {
     setProcessingBR(req.id);
     const nowIso = new Date().toISOString();
@@ -8642,6 +8712,10 @@ function ApprovalsPage({prs, setPrs, jobs, user, show, firms}) {
               {/* Action buttons — Pending Approval */}
               {isPending && rejecting !== pr.id && (
                 <div style={{display:'flex', gap:6, alignItems:'center', flexWrap:'wrap'}}>
+                  <button className="b" onClick={() => previewPR(pr)}
+                    style={{fontSize:10, padding:'5px 14px', borderColor:'#3b82f6', color:'#3b82f6'}}>
+                    📄 Preview
+                  </button>
                   <button className="b bp" onClick={() => approvePR(pr)} disabled={processing===pr.id}
                     style={{fontSize:10, padding:'5px 16px', background:'#4ade80', borderColor:'#4ade80', color:'#000', fontWeight:700}}>
                     {processing===pr.id ? '...' : '✅ Approve'}
