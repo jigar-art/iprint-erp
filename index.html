@@ -1807,7 +1807,7 @@ function MainApp({user,onLogout,masterData}){
         <div style={{flex:1,overflow:"auto",padding:12}} key={pg}>
           {pg==="dash"&&<DashPage s={stats} stock={stock} sp={setPg} jobs={filteredJobs} fullJobs={fullJobs} fyFilter={fyFilter} firms={firms} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user}/>}
           {pg==="jobs"&&<JobsPage jobs={filteredJobs} s={search} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} sp={setPg} sm={setModal} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile}/>}
-          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
+          {pg==="new"&&<NewJobPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} leadSources={masterData.leadSources||[]} createJob={createJob} addNewClient={addNewClient} addNewProduct={addNewProduct} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal} items={items} osItems={osItems}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewMaterialV2={addNewMaterialV2} addNewSupplier={addNewSupplier}/>}
@@ -2507,6 +2507,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       <div><span style={{color:"#64748b",fontSize:8}}>FIRM</span><select className="in" value={jf.firm||j.firm} onChange={e=>setJF('firm',e.target.value)} style={{fontSize:10,padding:"3px 4px",marginTop:2}}>{firms.map(f=><option key={f.code} value={f.code}>{f.short_name} — {f.name}</option>)}</select></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BILLING</span><p style={{fontWeight:600,fontSize:10}}>{(j.batches||[]).map(b=>b.bill_no).filter(Boolean).join(', ')||"—"}</p></div>
       <div><span style={{color:"#64748b",fontSize:8}}>BY</span><p style={{fontWeight:600,fontSize:10}}>{j.made_by||'—'}</p></div>
+      <div><span style={{color:"#64748b",fontSize:8}}>LEAD RECEIVED BY</span><p style={{fontWeight:600,fontSize:10}}>{j.lead_source||'—'}</p></div>
       {jfDirty&&<div style={{gridColumn:"span 3"}}><button className="b bg" onClick={saveJF} style={{width:"100%",justifyContent:"center",padding:6}}>💾 Save Changes</button></div>}
     </div>
     {/* ─── Multi-PO Section (job-level client POs) ─────────────────────────── */}
@@ -3987,7 +3988,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             const totQty=selItems.reduce((s,it)=>s+(+it.qty||0),0);const totSqft=Math.round(selItems.reduce((s,it)=>s+(+it.sqft||0),0)*100)/100;
             const psHtml=`<html><head><title>Production Sheet ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}@media print{body{padding:10px}}</style></head><body>`+
               `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${fm.short_name||''} · ${fm.address||''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${j.id}</p><p style="font-size:10px">Date: ${td()}</p></div></div>`+
-              `<div class="meta"><b>Client:</b><span>${j.client_name||''}</span><b>Project:</b><span>${j.project||''}</span><b>PO No:</b><span>${j.po_number||'Pending'}</span><b>Delivery:</b><span>${j.delivery_address||''}</span>${j.billing_address?'<b>Billing Addr:</b><span>'+j.billing_address+'</span>':''}<b>Firm:</b><span>${fm.name||''}</span><b>Made By:</b><span>${j.made_by||''}</span><b>Status:</b><span>${j.status||''}</span></div>`+
+              `<div class="meta"><b>Client:</b><span>${j.client_name||''}</span><b>Project:</b><span>${j.project||''}</span><b>PO No:</b><span>${j.po_number||'Pending'}</span><b>Delivery:</b><span>${j.delivery_address||''}</span>${j.billing_address?'<b>Billing Addr:</b><span>'+j.billing_address+'</span>':''}<b>Firm:</b><span>${fm.name||''}</span><b>Made By:</b><span>${j.made_by||''}</span><b>Lead Source:</b><span>${j.lead_source||'—'}</span><b>Status:</b><span>${j.status||''}</span></div>`+
               selBatches.map((b,bi)=>{const bItems=(b.items||[]);if(!bItems.length)return '';const hasImg=bItems.some(it=>it.img_url);
                 return `<div class="batch-hdr">Batch ${bi+1} · ${b.date||''} · ${b.note||''}</div>`+
                   `<table><thead><tr><th>#</th><th>Description</th>${hasImg?'<th>Image</th>':''}<th>Material / Media Make</th><th>Size (W×H)</th><th>Unit</th><th>Qty</th><th>${resolveUomHeader(bItems)}</th><th>Machine</th></tr></thead><tbody>`+
@@ -4303,10 +4304,29 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
 // ═══════════════════════════════════════════════════════════
 // NEW JOB
 // ═══════════════════════════════════════════════════════════
-function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient,addNewProduct,sp,jobs,user}){
+function NewJobPage({firms,clients,products,team,machines,leadSources,createJob,addNewClient,addNewProduct,sp,jobs,user}){
   const [fm,sfm]=useState("JXT");
-  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",ba:"",pr:"",rd:td(),mb:team[0]?.name||"",pt:"50% Advance. Rest within 30 days.",remark:"",cgst:"",bname:""});
+  const [f,sF]=useState({cl:"",cn:"",cp:"",cph:"",cemail:"",po:"",da:"",ba:"",pr:"",rd:td(),mb:team[0]?.name||"",ls:"",pt:"50% Advance. Rest within 30 days.",remark:"",cgst:"",bname:""});
   const [su,sSu]=useState("INCH");
+  const [lsList,setLsList]=useState(()=>(leadSources||[]).map(x=>x.name));
+  useEffect(()=>{setLsList((leadSources||[]).map(x=>x.name));},[leadSources]);
+  const [showAddLs,setShowAddLs]=useState(false);
+  const [newLs,setNewLs]=useState("");
+  const [savingLs,setSavingLs]=useState(false);
+  const addLeadSource=async()=>{
+    const nm=newLs.trim();
+    if(!nm){setShowAddLs(false);return;}
+    const dup=lsList.find(x=>x.toLowerCase()===nm.toLowerCase());
+    if(dup){sF(p=>({...p,ls:dup}));setShowAddLs(false);setNewLs("");return;}
+    setSavingLs(true);
+    const id="LS_"+uid();
+    const {error}=await sb.from('lead_sources').insert({id,name:nm,active:true});
+    setSavingLs(false);
+    if(error){alert("Could not add source: "+error.message);return;}
+    setLsList(p=>[...p,nm].sort((a,b)=>a.localeCompare(b)));
+    sF(p=>({...p,ls:nm}));
+    setShowAddLs(false);setNewLs("");
+  };
   const [showNewCli,setShowNewCli]=useState(false);
   const [nc,setNc]=useState({name:"",contact:"",phone:"",email:"",gst:"",billing_name:""});
   const [poFile,setPoFile]=useState(null);
@@ -4350,6 +4370,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       if(!f.da.trim())missing.push("Delivery Address");
       if(!f.cgst.trim())missing.push("Client GST Number");
       if(!f.bname.trim())missing.push("Billing Entity");
+      if(!f.ls.trim())missing.push("Lead Received By");
       if(missing.length>0){alert("⚠️ Please fill all mandatory fields:\n\n• "+missing.join("\n• "));return;}
       if(its.length===0){alert("Add at least one item before creating a job.");return;}
       if(!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr}\nBilling: ${f.bname}\nGST: ${f.cgst}\nItems: ${its.length}\n\nClick OK to proceed.`))return;
@@ -4357,7 +4378,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
     setSubmitting(true);
     const poUrl=await uploadFile(poFile,'po');
     const designUrls=designFiles.length>0?await uploadMultiple(designFiles,'design-refs'):[];
-    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,billing_address:f.ba,contact_person:f.cp,contact_no:f.cph,client_email:f.cemail||'',made_by:f.mb,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
+    const jobData={id:jid,firm:fm,client_id:f.cl,client_name:f.cn,project:f.pr,delivery_address:f.da,billing_address:f.ba,contact_person:f.cp,contact_no:f.cph,client_email:f.cemail||'',made_by:f.mb,lead_source:f.ls,po_number:f.po,billing_name:f.bname||f.cn,client_gst:f.cgst,payment_terms:f.pt,status:isDraft?"Draft":"Active",po_file_url:poUrl?[poUrl]:[],design_ref_urls:designUrls};
     const batchId="B"+uid();
     const batchData={id:batchId,job_id:jid,date:f.rd,note:"Initial",bill_no:"",status:"New"};
     const lineItems=its.map(it=>({id:"LI"+uid(),batch_id:batchId,job_id:jid,sr:it.sr,product_id:"",internal_name:it.int,client_name:it.cli,media:it.m,width:it.w,height:it.h,size_unit:getUnitMode(it.rm).dimUnit||'INCH',qty:+it.qty||1,rate_mode:it.rm,rate:+it.rate||0,sqft:it.sqft,total:it.tot,gst:it.gst,gstPct:(it.gstPct===''||it.gstPct==null)?18:+it.gstPct,amount:it.amt,area:it.mach||"In-house",dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false,img_url:it.imgUrl||""}));
@@ -4401,6 +4422,21 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div><p style={{fontSize:8,color:"#64748b"}}>NEW JOB</p><p className="mn" style={{fontSize:16,fontWeight:800,color:"#e3a008"}}>{jid}</p></div><FB f={fm} firms={firms}/></div>
       <div className="fg f3">
         <F l="Made By"><select className="in" value={f.mb} onChange={e=>sF(p=>({...p,mb:e.target.value}))}>{team.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></F>
+        <F l="Lead Received By *">{!showAddLs?(
+          <div style={{display:"flex",gap:4}}>
+            <select className="in" value={f.ls} onChange={e=>sF(p=>({...p,ls:e.target.value}))} style={{flex:1}}>
+              <option value="" disabled>Select source…</option>
+              {lsList.map(n=><option key={n} value={n}>{n}</option>)}
+            </select>
+            <button type="button" className="b bs" title="Add new source" onClick={()=>{setNewLs("");setShowAddLs(true);}} style={{padding:"0 8px",fontWeight:700}}>+</button>
+          </div>
+        ):(
+          <div style={{display:"flex",gap:4}}>
+            <input className="in" autoFocus value={newLs} onChange={e=>setNewLs(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addLeadSource();}if(e.key==='Escape'){setShowAddLs(false);setNewLs("");}}} placeholder="New source name…" style={{flex:1}}/>
+            <button type="button" className="b" disabled={savingLs} onClick={addLeadSource} style={{padding:"0 8px"}}>{savingLs?"…":"\u2713"}</button>
+            <button type="button" className="b bs" onClick={()=>{setShowAddLs(false);setNewLs("");}} style={{padding:"0 8px"}}>\u2715</button>
+          </div>
+        )}</F>
         <F l="Date"><input type="date" className="in" value={f.rd} onChange={e=>sF(p=>({...p,rd:e.target.value}))}/></F>
         <F l="Client *"><div style={{display:"flex",gap:2}}><select className="in" value={f.cl} onChange={e=>selC(e.target.value)} style={{flex:1}}><option value="">Select...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className="b bs bp" onClick={()=>setShowNewCli(true)}>+</button></div></F>
         <F l="Project / Site Name *"><input className="in" value={f.pr} onChange={e=>sF(p=>({...p,pr:e.target.value}))} placeholder="Required"/></F>
@@ -4469,7 +4505,7 @@ function NewJobPage({firms,clients,products,team,machines,createJob,addNewClient
       const totQty=its.reduce((a,x)=>a+(+x.qty||0),0);const totSqft=Math.round(its.reduce((a,x)=>a+(+x.sqft||0),0)*100)/100;
       const psHtml=`<html><head><title>Production Sheet ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}@media print{body{padding:10px}}</style></head><body>`+
         `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${firmData.short_name||''} · ${firmData.address||''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div>`+
-        `<div class="meta"><b>Client:</b><span>${f.cn||''}</span><b>Project:</b><span>${f.pr||''}</span><b>PO No:</b><span>${f.po||'Pending'}</span><b>Delivery:</b><span>${f.da||''}</span>${f.ba?'<b>Billing Addr:</b><span>'+f.ba+'</span>':''}<b>Firm:</b><span>${firmData.name||''}</span><b>Made By:</b><span>${f.mb||''}</span></div>`+
+        `<div class="meta"><b>Client:</b><span>${f.cn||''}</span><b>Project:</b><span>${f.pr||''}</span><b>PO No:</b><span>${f.po||'Pending'}</span><b>Delivery:</b><span>${f.da||''}</span>${f.ba?'<b>Billing Addr:</b><span>'+f.ba+'</span>':''}<b>Firm:</b><span>${firmData.name||''}</span><b>Made By:</b><span>${f.mb||''}</span><b>Lead Source:</b><span>${f.ls||'—'}</span></div>`+
         (()=>{const hasImg=its.some(it=>it.imgUrl);return `<table><thead><tr><th>#</th><th>Description</th>${hasImg?'<th>Image</th>':''}<th>Material / Media Make</th><th>Size (W×H ${su})</th><th>Qty</th><th>SqFt</th><th>Machine</th></tr></thead><tbody>`+
         its.map((it,i)=>`<tr><td>${i+1}</td><td style="font-weight:600">${it.int||''}</td>${hasImg?'<td>'+(it.imgUrl?'<img src="'+it.imgUrl+'"/>':'—')+'</td>':''}<td style="font-size:9px;color:#555">${it.m||''}</td><td class="r">${it.w&&it.h?it.w+'×'+it.h:'—'}</td><td class="r" style="font-weight:700">${it.qty}</td><td class="r">${it.sqft?it.sqft.toFixed(2):'—'}</td><td>${it.mach||'In-house'}</td></tr>`).join('')+
         `<tr class="total"><td colspan="${hasImg?5:4}" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td></tr></tbody></table>`;})() +
@@ -9925,7 +9961,7 @@ function RootApp(){
 
   useEffect(()=>{
     async function loadMaster(){
-      const [f,c,s,p,m,mac,ag,db,tm,mv2] = await Promise.all([
+      const [f,c,s,p,m,mac,ag,db,tm,mv2,ls] = await Promise.all([
         sb.from('firms').select('*'),
         sb.from('clients').select('*').order('name'),
         sb.from('suppliers').select('*').order('name'),
@@ -9936,12 +9972,14 @@ function RootApp(){
         sb.from('delivery_boys').select('*'),
         sb.from('team_members').select('*').eq('active',true),
         sb.from('materials_master_v2').select('*').eq('active',true).order('name'),
+        sb.from('lead_sources').select('*').eq('active',true).order('name'),
       ]);
       setMasterData({
         firms:f.data||[], clients:c.data||[], suppliers:s.data||[],
         products:p.data||[], materials:m.data||[], machines:mac.data||[],
         agencies:ag.data||[], delBoys:db.data||[], team:tm.data||[],
         materialsV2:mv2.data||[],
+        leadSources:ls.data||[],
       });
       // Validate stored session — auto-logout if user not in team OR session older than 24h
       try{
