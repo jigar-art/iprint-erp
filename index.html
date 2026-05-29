@@ -5023,6 +5023,9 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
 
   const MACHINES=['Witcolour UV R2R','EPSON UV Flatbed','EPSON Latex','Plotter Cutting Machine'];
   const rollMaterials=(materialsV2||[]).filter(m=>m.unit==='roll'&&m.active).sort((a,b)=>a.name.localeCompare(b.name));
+  // Patch (29 May 2026) — #2: material picker now lists ALL active materials (not just rolls), searchable.
+  const allActiveMasters=(materialsV2||[]).filter(m=>m.active).sort((a,b)=>a.name.localeCompare(b.name));
+  const matPickerList=allActiveMasters.map(m=>({id:m.id,internal_name:m.name}));
 
   // Stock balance per material (sqft) — case-insensitive trim match.
   // Same math as StockPage Roll Material Balance section.
@@ -5536,7 +5539,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
                     const rowWastePct=(row.actual_sqft&&row.print_sqft&&+row.print_sqft>0)?((((+row.print_sqft)-(+row.actual_sqft))/(+row.print_sqft))*100).toFixed(1):'';
                     return <div key={ri} style={{marginBottom:4,padding:4,background:"#0d1118",borderRadius:3,border:"1px solid #1a2030"}}>
                       <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
-                        <F l={`Mat #${ri+1} *`}><select className="in" value={row.material} onChange={e=>updateMaterial(it.id,ri,{material:e.target.value})} style={{fontSize:9}}><option value="">— pick —</option>{rollMaterials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}</select></F>
+                        <F l={`Mat #${ri+1} *`}><MaterialPicker value={row.material} products={matPickerList} compact={true} placeholder="Search material..." onPick={(picked)=>updateMaterial(it.id,ri,{material:picked.internal_name})}/></F>
                         <F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={row.print_sqft} onChange={e=>updateMaterial(it.id,ri,{print_sqft:e.target.value})} style={{fontSize:9}}/></F>
                         <F l={<span>Actual sqft *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_sqft} onChange={e=>updateMaterial(it.id,ri,{actual_sqft:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
                       </div>
