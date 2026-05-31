@@ -10026,6 +10026,7 @@ function RootApp(){
   });
   const [masterData,setMasterData]=useState(null);
   const [loading,setLoading]=useState(true);
+  const [mastersError,setMastersError]=useState(false);
 
   const handleLogin=(member)=>{
     setUser(member);
@@ -10037,8 +10038,8 @@ function RootApp(){
   };
 
   useEffect(()=>{
-    async function loadMaster(){
-      const [f,c,s,p,m,mac,ag,db,tm,mv2,ls] = await Promise.all([
+    async function fetchMasters(){
+      return Promise.all([
         sb.from('firms').select('*'),
         sb.from('clients').select('*').order('name'),
         sb.from('suppliers').select('*').order('name'),
@@ -10051,6 +10052,16 @@ function RootApp(){
         sb.from('materials_master_v2').select('*').eq('active',true).order('name'),
         sb.from('lead_sources').select('*').eq('active',true).order('name'),
       ]);
+    }
+    async function loadMaster(){
+      // index 9 = materials_master_v2. It is never legitimately empty (201 active),
+      // so an empty/errored result means the fetch was unreliable (e.g. transient DB
+      // degradation). Retry once before giving up; surface a reload banner if it sticks.
+      const mastersBad=(r)=>{const mv2=r&&r[9];return !mv2||mv2.error||!(mv2.data&&mv2.data.length);};
+      let res=await fetchMasters();
+      if(mastersBad(res)){await new Promise(r=>setTimeout(r,1500));res=await fetchMasters();}
+      const [f,c,s,p,m,mac,ag,db,tm,mv2,ls]=res;
+      setMastersError(mastersBad(res));
       setMasterData({
         firms:f.data||[], clients:c.data||[], suppliers:s.data||[],
         products:p.data||[], materials:m.data||[], machines:mac.data||[],
@@ -10095,7 +10106,13 @@ function RootApp(){
   if(cCode) return <ClientPortal code={cCode}/>;
 
   if(!user) return <Login onLogin={handleLogin} team={masterData.team}/>;
-  return <MainApp user={user} onLogout={handleLogout} masterData={masterData}/>;
+  return <>
+    {mastersError&&<div style={{position:"fixed",top:0,left:0,right:0,zIndex:99999,background:"#7f1d1d",color:"#fff",fontSize:12,padding:"6px 12px",display:"flex",alignItems:"center",justifyContent:"center",gap:10,flexWrap:"wrap"}}>
+      <span>⚠️ Materials list failed to load — dropdowns may be empty.</span>
+      <button onClick={()=>window.location.reload()} style={{background:"#fff",color:"#7f1d1d",border:"none",borderRadius:4,padding:"2px 10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reload</button>
+    </div>}
+    <MainApp user={user} onLogout={handleLogout} masterData={masterData}/>
+  </>;
 }
 
 
