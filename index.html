@@ -1811,8 +1811,8 @@ function MainApp({user,onLogout,masterData}){
           {pg==="boq"&&<BOQImportPage firms={firms} clients={clients} products={products} team={masterData.team} machines={machines} createJob={createJob} sp={setPg} jobs={fullJobs} user={user}/>}
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal} items={items} osItems={osItems}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewMaterialV2={addNewMaterialV2} addNewSupplier={addNewSupplier}/>}
-          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} user={user} show={show} grn={grnData}/>}
-          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} user={user} show={show} grn={grnData}/>}
+          {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
+          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} ol={osLogs} materialsV2={masterData.materialsV2||[]}/>}
@@ -5000,7 +5000,7 @@ function GRNPage({grn,suppliers,materials,materialsV2,team,addGRN,updateGRN,dele
 }
 
 // PRINTING — Rebuilt 18 May 2026 — modal-based logging + 5 dashboard cards
-function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,user,show,grn}){
+function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,updateLineItem,addNewMaterialV2,user,show,grn}){
   const [showModal,setShowModal]=useState(false);
   const [showInkDetails,setShowInkDetails]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -5024,7 +5024,13 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   const MACHINES=['Witcolour UV R2R','EPSON UV Flatbed','EPSON Latex','Plotter Cutting Machine'];
   const rollMaterials=(materialsV2||[]).filter(m=>m.unit==='roll'&&m.active).sort((a,b)=>a.name.localeCompare(b.name));
   // Patch (29 May 2026) — #2: material picker now lists ALL active materials (not just rolls), searchable.
-  const allActiveMasters=(materialsV2||[]).filter(m=>m.active).sort((a,b)=>a.name.localeCompare(b.name));
+  // Patch AD (03 Jun 2026) — extraV2: materials added on-the-fly from the Log Print Job picker,
+  // merged in instantly (deduped by name) so they're selectable before the next masters refresh.
+  const [extraV2,setExtraV2]=useState([]);
+  const _seenMat=new Set();
+  const allActiveMasters=[...(materialsV2||[]).filter(m=>m.active),...extraV2]
+    .filter(m=>{const k=(m.name||'').toLowerCase().trim();if(_seenMat.has(k))return false;_seenMat.add(k);return true;})
+    .sort((a,b)=>a.name.localeCompare(b.name));
   const matPickerList=allActiveMasters.map(m=>({id:m.id,internal_name:m.name}));
 
   // Stock balance per material (sqft) — case-insensitive trim match.
@@ -5245,6 +5251,8 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   //  PLUS (Patch G): every print_log row for this line_item MUST have a non-empty photo_url
   const computeCoverage=(li)=>{
     if(!li) return {covered:false,pct:0,actualSum:0,target:0,mode:'unknown',logsTotal:0,logsWithPhoto:0,photosOk:false};
+    // Patch AD (03 Jun 2026) — outsourced line items satisfy coverage without an in-house print_log.
+    if(li.outsourced) return {covered:true,pct:100,actualSum:0,target:0,mode:'outsourced',logsTotal:0,logsWithPhoto:0,photosOk:true};
     const itemLogs=(logs||[]).filter(l=>l.line_item_id===li.id);
     const actualSum=itemLogs.reduce((s,l)=>s+(+l.actual_sqft||0),0);
     const logsTotal=itemLogs.length;
@@ -5313,6 +5321,15 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   // while blocking ANKITA (substring match would have allowed her).
   const FORWARD_USERS=['JIGAR','CHANDNI','PRINTING','ANKIT','PRATIK','SONU','AMOL'];
   const userCanForward=(()=>{const u=(user?.name||'').toUpperCase().trim();return FORWARD_USERS.some(t=>u===t||u.startsWith(t+' '));})();
+
+  // Patch AD (03 Jun 2026) — toggle a line item as Outsourced (forward-users only).
+  // Stamps who/when; clears on un-toggle. updateLineItem persists + refreshes flat items,
+  // which re-derives fullJobs.batches[].items so coverage/forward unlock immediately.
+  const toggleOutsourced=(li)=>{
+    if(!userCanForward||!li||typeof updateLineItem!=='function')return;
+    const now=!li.outsourced;
+    updateLineItem(li.id,{outsourced:now,outsourced_by:now?(user?.name||''):null,outsourced_at:now?new Date().toISOString():null});
+  };
 
   // Image compression — resize to max 1600px wide, JPEG 0.8 quality (Patch G)
   const compressImage=(file)=>new Promise((res,rej)=>{
@@ -5539,7 +5556,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
                     const rowWastePct=(row.actual_sqft&&row.print_sqft&&+row.print_sqft>0)?((((+row.print_sqft)-(+row.actual_sqft))/(+row.print_sqft))*100).toFixed(1):'';
                     return <div key={ri} style={{marginBottom:4,padding:4,background:"#0d1118",borderRadius:3,border:"1px solid #1a2030"}}>
                       <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
-                        <F l={`Mat #${ri+1} *`}><MaterialPicker value={row.material} products={matPickerList} compact={true} placeholder="Search material..." onPick={(picked)=>updateMaterial(it.id,ri,{material:picked.internal_name})}/></F>
+                        <F l={`Mat #${ri+1} *`}><MaterialPicker value={row.material} products={matPickerList} compact={true} placeholder="Search material or type new..." onPick={(picked)=>updateMaterial(it.id,ri,{material:picked.internal_name})} onAddNew={async(name)=>{if(typeof addNewMaterialV2!=='function'){updateMaterial(it.id,ri,{material:name});return;}const u=(prompt('Unit for new material "'+name+'"?\nType one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs','roll')||'roll').trim();const row2=await addNewMaterialV2(name,u);if(row2){setExtraV2(prev=>[...prev,row2]);updateMaterial(it.id,ri,{material:row2.name});}}}/></F>
                         <F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={row.print_sqft} onChange={e=>updateMaterial(it.id,ri,{print_sqft:e.target.value})} style={{fontSize:9}}/></F>
                         <F l={<span>Actual sqft *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_sqft} onChange={e=>updateMaterial(it.id,ri,{actual_sqft:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
                       </div>
@@ -5643,7 +5660,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
                   <td className="mn" style={{fontSize:10,fontWeight:700}}>{li.qty||0}</td>
                   <td><span className="bd" style={{fontSize:9,background:"#1a2030",color:"#8b949e"}}>{li.rate_mode||'—'}</span></td>
                   <td style={{fontSize:10,color:covColor,fontWeight:700}}>{covIcon} {covText}</td>
-                  <td><button className="b" onClick={()=>openLogPreFilled(viewJob,batch,li)} style={{fontSize:9,padding:"2px 8px",background:"#ef4444",borderColor:"#ef4444",color:"#fff"}}>+ Log</button></td>
+                  <td><div style={{display:"flex",gap:4,alignItems:"center"}}><button className="b" onClick={()=>openLogPreFilled(viewJob,batch,li)} style={{fontSize:9,padding:"2px 8px",background:"#ef4444",borderColor:"#ef4444",color:"#fff"}}>+ Log</button>{userCanForward&&<button className="b" type="button" onClick={()=>toggleOutsourced(li)} title={li.outsourced?'Outsourced — click to undo':'Mark this item as outsourced (counts as done; no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:li.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:li.outsourced?"#fff":"#f97316",cursor:"pointer"}}>{li.outsourced?'🌐 ✓':'🌐 OS'}</button>}</div></td>
                 </tr>;
               })}
             </tbody>
@@ -5715,7 +5732,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
 }
 
 // FABRICATION — Analytics Dashboard (auto-logged via dept checkboxes)
-function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,user,show,grn}){
+function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,updateLineItem,addNewMaterialV2,user,show,grn}){
   // ── Patch S (21 May 2026 PM) — FabPage now mirrors PrintPage's full logging flow.
   // Header button opens modal: job → batch → line item → repeatable material rows (all units)
   // with live stock check, used vs actual qty (waste% computed), required proof photo.
@@ -5752,7 +5769,20 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
   const openJob=(j)=>{sF(p=>({...p,job_id:j.id,batch_id:'',line_item_id:'',selectedItems:{}}));setShowModal(true);};
 
   // All active masters (unit-agnostic; fab uses rolls AND sheets/nos)
-  const allActiveMasters=(materialsV2||[]).filter(m=>m.active).sort((a,b)=>a.name.localeCompare(b.name));
+  // Patch AD (03 Jun 2026) — extraV2: on-the-fly materials added from the Log Fab Job picker.
+  const [extraV2,setExtraV2]=useState([]);
+  const _seenMatF=new Set();
+  const allActiveMasters=[...(materialsV2||[]).filter(m=>m.active),...extraV2]
+    .filter(m=>{const k=(m.name||'').toLowerCase().trim();if(_seenMatF.has(k))return false;_seenMatF.add(k);return true;})
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  // Patch AD — Outsourced toggle (forward-users only), mirrors PrintPage.
+  const FAB_FORWARD_USERS=['JIGAR','CHANDNI','AMOL','PRATIK','SONU','ANKIT'];
+  const userCanForward=(()=>{const u=(user?.name||'').toUpperCase().trim();return FAB_FORWARD_USERS.some(t=>u===t||u.startsWith(t+' '));})();
+  const toggleOutsourced=(li)=>{
+    if(!userCanForward||!li||typeof updateLineItem!=='function')return;
+    const now=!li.outsourced;
+    updateLineItem(li.id,{outsourced:now,outsourced_by:now?(user?.name||''):null,outsourced_at:now?new Date().toISOString():null});
+  };
 
   // Live stock balance per material (unit-aware) — mirrors stockBalances logic.
   // Includes opening (grn rows) − all print usage − all fab usage − active outsource.
@@ -5939,6 +5969,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
   // No qty/W×H target — fab uses W×H rarely. Trust mode for items without W×H matches Print.
   const computeFabCoverage=(li)=>{
     if(!li) return {covered:false,logsTotal:0,logsWithPhoto:0,photosOk:false};
+    if(li.outsourced) return {covered:true,logsTotal:0,logsWithPhoto:0,photosOk:true};
     const itemLogs=(logs||[]).filter(l=>l.line_item_id===li.id);
     const logsTotal=itemLogs.length;
     const logsWithPhoto=itemLogs.filter(l=>l.photo_url&&String(l.photo_url).trim()).length;
@@ -6116,6 +6147,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
                 <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>toggleItem(it.id)}>
                   <div style={{width:14,height:14,background:ticked?"#10b981":"transparent",border:ticked?"none":"1px solid #64748b",borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>{ticked?'✓':''}</div>
                   <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft{ticked&&mats.length>1?<span style={{color:"#3b82f6",marginLeft:6}}>· {mats.length} materials</span>:null}</div>
+                  {userCanForward&&<button className="b" type="button" onClick={(e)=>{e.stopPropagation();toggleOutsourced(it);}} title={it.outsourced?'Outsourced — click to undo':'Mark outsourced (counts as done; no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:it.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:it.outsourced?"#fff":"#f97316",cursor:"pointer",flexShrink:0}}>{it.outsourced?'🌐 ✓':'🌐 OS'}</button>}
                 </div>
                 {ticked&&<div style={{paddingLeft:22,marginTop:6}}>
                   {r._autoHint&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginBottom:4}}>↳ {r._autoHint}{!mats[0]?._edited&&r._autoVal!==''?' (auto-filled in row 1)':''}</div>}
@@ -6126,7 +6158,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
                     const rowWastePct=(row.actual_qty&&row.qty_used&&+row.qty_used>0)?((((+row.qty_used)-(+row.actual_qty))/(+row.qty_used))*100).toFixed(1):'';
                     return <div key={ri} style={{marginBottom:4,padding:4,background:"#0d1118",borderRadius:3,border:"1px solid #1a2030"}}>
                       <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
-                        <F l={`Mat #${ri+1} *`}><select className="in" value={row.material} onChange={e=>updateMaterial(it.id,ri,{material:e.target.value})} style={{fontSize:9}}><option value="">— pick —</option>{allActiveMasters.map(m=><option key={m.id} value={m.name}>{m.name} ({m.unit})</option>)}</select></F>
+                        <F l={`Mat #${ri+1} *`}><div style={{display:"flex",gap:2}}><select className="in" value={row.material} onChange={e=>updateMaterial(it.id,ri,{material:e.target.value})} style={{fontSize:9,flex:1}}><option value="">— pick —</option>{allActiveMasters.map(m=><option key={m.id} value={m.name}>{m.name} ({m.unit})</option>)}</select><button className="b bs bp" type="button" style={{fontSize:10,padding:"2px 7px"}} title="Add new material to master" onClick={async()=>{if(typeof addNewMaterialV2!=='function')return;const nm=(prompt('New material name (added to materials_master_v2):')||'').trim();if(!nm)return;const u=(prompt('Unit?\nType one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs','roll')||'roll').trim();const row2=await addNewMaterialV2(nm,u);if(row2){setExtraV2(prev=>[...prev,row2]);updateMaterial(it.id,ri,{material:row2.name});}}}>+</button></div></F>
                         <F l={`Used ${unitLabel} *`}><input className="in mn" type="number" step="0.01" value={row.qty_used} onChange={e=>updateMaterial(it.id,ri,{qty_used:e.target.value})} style={{fontSize:9}}/></F>
                         <F l={<span>Actual {unitLabel} *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_qty} onChange={e=>updateMaterial(it.id,ri,{actual_qty:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
                       </div>
