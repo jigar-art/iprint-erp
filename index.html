@@ -5253,6 +5253,8 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     if(!li) return {covered:false,pct:0,actualSum:0,target:0,mode:'unknown',logsTotal:0,logsWithPhoto:0,photosOk:false};
     // Patch AD (03 Jun 2026) — outsourced line items satisfy coverage without an in-house print_log.
     if(li.outsourced) return {covered:true,pct:100,actualSum:0,target:0,mode:'outsourced',logsTotal:0,logsWithPhoto:0,photosOk:true};
+    // Patch AE (03 Jun 2026) — N/A charge / non-production lines (e.g. Transportation, Recce) satisfy coverage.
+    if(li.no_production) return {covered:true,pct:100,actualSum:0,target:0,mode:'na',logsTotal:0,logsWithPhoto:0,photosOk:true};
     const itemLogs=(logs||[]).filter(l=>l.line_item_id===li.id);
     const actualSum=itemLogs.reduce((s,l)=>s+(+l.actual_sqft||0),0);
     const logsTotal=itemLogs.length;
@@ -5329,6 +5331,12 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     if(!userCanForward||!li||typeof updateLineItem!=='function')return;
     const now=!li.outsourced;
     updateLineItem(li.id,{outsourced:now,outsourced_by:now?(user?.name||''):null,outsourced_at:now?new Date().toISOString():null});
+  };
+  // Patch AE (03 Jun 2026) — mark a charge / non-production line as N/A (forward-users only).
+  const toggleNoProd=(li)=>{
+    if(!userCanForward||!li||typeof updateLineItem!=='function')return;
+    const now=!li.no_production;
+    updateLineItem(li.id,{no_production:now,no_production_by:now?(user?.name||''):null,no_production_at:now?new Date().toISOString():null});
   };
 
   // Image compression — resize to max 1600px wide, JPEG 0.8 quality (Patch G)
@@ -5660,7 +5668,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
                   <td className="mn" style={{fontSize:10,fontWeight:700}}>{li.qty||0}</td>
                   <td><span className="bd" style={{fontSize:9,background:"#1a2030",color:"#8b949e"}}>{li.rate_mode||'—'}</span></td>
                   <td style={{fontSize:10,color:covColor,fontWeight:700}}>{covIcon} {covText}</td>
-                  <td><div style={{display:"flex",gap:4,alignItems:"center"}}><button className="b" onClick={()=>openLogPreFilled(viewJob,batch,li)} style={{fontSize:9,padding:"2px 8px",background:"#ef4444",borderColor:"#ef4444",color:"#fff"}}>+ Log</button>{userCanForward&&<button className="b" type="button" onClick={()=>toggleOutsourced(li)} title={li.outsourced?'Outsourced — click to undo':'Mark this item as outsourced (counts as done; no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:li.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:li.outsourced?"#fff":"#f97316",cursor:"pointer"}}>{li.outsourced?'🌐 ✓':'🌐 OS'}</button>}</div></td>
+                  <td><div style={{display:"flex",gap:4,alignItems:"center"}}><button className="b" onClick={()=>openLogPreFilled(viewJob,batch,li)} style={{fontSize:9,padding:"2px 8px",background:"#ef4444",borderColor:"#ef4444",color:"#fff"}}>+ Log</button>{userCanForward&&<button className="b" type="button" onClick={()=>toggleOutsourced(li)} title={li.outsourced?'Outsourced — click to undo':'Mark this item as outsourced (counts as done; no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:li.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:li.outsourced?"#fff":"#f97316",cursor:"pointer"}}>{li.outsourced?'🌐 ✓':'🌐 OS'}</button>}{userCanForward&&<button className="b" type="button" onClick={()=>toggleNoProd(li)} title={li.no_production?'Charge / non-production line — click to undo':'Mark as charge / non-production line (counts as done, no log needed)'} style={{fontSize:9,padding:"2px 6px",background:li.no_production?"#64748b":"transparent",border:"1px solid #64748b",borderRadius:3,color:li.no_production?"#fff":"#94a3b8",cursor:"pointer"}}>{li.no_production?'N/A ✓':'N/A'}</button>}</div></td>
                 </tr>;
               })}
             </tbody>
@@ -5782,6 +5790,12 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
     if(!userCanForward||!li||typeof updateLineItem!=='function')return;
     const now=!li.outsourced;
     updateLineItem(li.id,{outsourced:now,outsourced_by:now?(user?.name||''):null,outsourced_at:now?new Date().toISOString():null});
+  };
+  // Patch AE — mark a charge / non-production line as N/A (forward-users only).
+  const toggleNoProd=(li)=>{
+    if(!userCanForward||!li||typeof updateLineItem!=='function')return;
+    const now=!li.no_production;
+    updateLineItem(li.id,{no_production:now,no_production_by:now?(user?.name||''):null,no_production_at:now?new Date().toISOString():null});
   };
 
   // Live stock balance per material (unit-aware) — mirrors stockBalances logic.
@@ -5970,6 +5984,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
   const computeFabCoverage=(li)=>{
     if(!li) return {covered:false,logsTotal:0,logsWithPhoto:0,photosOk:false};
     if(li.outsourced) return {covered:true,logsTotal:0,logsWithPhoto:0,photosOk:true};
+    if(li.no_production) return {covered:true,logsTotal:0,logsWithPhoto:0,photosOk:true};
     const itemLogs=(logs||[]).filter(l=>l.line_item_id===li.id);
     const logsTotal=itemLogs.length;
     const logsWithPhoto=itemLogs.filter(l=>l.photo_url&&String(l.photo_url).trim()).length;
@@ -6147,7 +6162,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
                 <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>toggleItem(it.id)}>
                   <div style={{width:14,height:14,background:ticked?"#10b981":"transparent",border:ticked?"none":"1px solid #64748b",borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>{ticked?'✓':''}</div>
                   <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft{ticked&&mats.length>1?<span style={{color:"#3b82f6",marginLeft:6}}>· {mats.length} materials</span>:null}</div>
-                  {userCanForward&&<button className="b" type="button" onClick={(e)=>{e.stopPropagation();toggleOutsourced(it);}} title={it.outsourced?'Outsourced — click to undo':'Mark outsourced (counts as done; no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:it.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:it.outsourced?"#fff":"#f97316",cursor:"pointer",flexShrink:0}}>{it.outsourced?'🌐 ✓':'🌐 OS'}</button>}
+                  {userCanForward&&<button className="b" type="button" onClick={(e)=>{e.stopPropagation();toggleOutsourced(it);}} title={it.outsourced?'Outsourced — click to undo':'Mark outsourced (counts as done; no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:it.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:it.outsourced?"#fff":"#f97316",cursor:"pointer",flexShrink:0}}>{it.outsourced?'🌐 ✓':'🌐 OS'}</button>}{userCanForward&&<button className="b" type="button" onClick={(e)=>{e.stopPropagation();toggleNoProd(it);}} title={it.no_production?'Charge / non-production line — click to undo':'Mark as charge / non-production line (counts as done, no log needed)'} style={{fontSize:9,padding:"2px 6px",background:it.no_production?"#64748b":"transparent",border:"1px solid #64748b",borderRadius:3,color:it.no_production?"#fff":"#94a3b8",cursor:"pointer",flexShrink:0}}>{it.no_production?'N/A ✓':'N/A'}</button>}
                 </div>
                 {ticked&&<div style={{paddingLeft:22,marginTop:6}}>
                   {r._autoHint&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginBottom:4}}>↳ {r._autoHint}{!mats[0]?._edited&&r._autoVal!==''?' (auto-filled in row 1)':''}</div>}
