@@ -5542,6 +5542,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
             <div style={{display:"flex",gap:4}}>
               <button className="b bs" type="button" onClick={()=>sF(p=>{const next={};batchItems.forEach(it=>{const old=p.selectedItems?.[it.id];if(old){next[it.id]=old;}else{const {val,hint}=computeAreaFromJobSheet(it);next[it.id]={material:'',print_sqft:'',actual_sqft:val,_photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val,_edited:false};}});return {...p,selectedItems:next};})} style={{fontSize:9,padding:"2px 6px",color:"#3b82f6",borderColor:"#3b82f640"}}>Select all</button>
               <button className="b bs" type="button" onClick={()=>sF(p=>({...p,selectedItems:{}}))} style={{fontSize:9,padding:"2px 6px",color:"#64748b",borderColor:"#1a2030"}}>Clear</button>
+              {userCanForward&&<button className="b bs" type="button" onClick={()=>{if(!batchItems.length)return;if(!confirm('Mark ALL '+batchItems.length+' items in this batch as OUTSOURCED?\nThey will count as done (no printing needed).'))return;batchItems.forEach(it=>{if(!it.outsourced)toggleOutsourced(it);});}} style={{fontSize:9,padding:"2px 6px",color:"#f97316",borderColor:"#f9731640"}}>🌐 All outsourced</button>}
             </div>
           </div>
           <div style={{maxHeight:280,overflowY:"auto",background:"#060810",borderRadius:4,padding:4}}>
@@ -5554,7 +5555,8 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
               return <div key={it.id} style={{marginBottom:4,padding:ticked?"6px 8px":"4px 8px",background:ticked?"#0d2114":"transparent",border:ticked?"1px solid #10b98140":"1px solid transparent",borderRadius:4,opacity:ticked?1:0.85}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>toggleItem(it.id)}>
                   <div style={{width:14,height:14,background:ticked?"#10b981":"transparent",border:ticked?"none":"1px solid #64748b",borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:10,flexShrink:0}}>{ticked?'✓':''}</div>
-                  <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft{ticked&&mats.length>1?<span style={{color:"#3b82f6",marginLeft:6}}>· {mats.length} materials</span>:null}</div>
+                  <div style={{flex:1,fontSize:10,color:"#e6e6e6"}}>{itemLabel} · {it.qty||1}× · {it.sqft||0}sqft{ticked&&mats.length>1?<span style={{color:"#3b82f6",marginLeft:6}}>· {mats.length} materials</span>:null}{it.outsourced?<span style={{color:"#f97316",marginLeft:6,fontWeight:700}}>· 🌐 OUTSOURCED</span>:null}</div>
+                  {userCanForward&&<button className="b" type="button" onClick={(e)=>{e.stopPropagation();toggleOutsourced(it);}} title={it.outsourced?'Outsourced — click to undo':'Mark this item outsourced (counts as done, no in-house log needed)'} style={{fontSize:9,padding:"2px 6px",background:it.outsourced?"#f97316":"transparent",border:"1px solid #f97316",borderRadius:3,color:it.outsourced?"#fff":"#f97316",cursor:"pointer",flexShrink:0}}>{it.outsourced?'🌐 ✓':'🌐 OS'}</button>}
                 </div>
                 {ticked&&<div style={{paddingLeft:22,marginTop:6}}>
                   {r._autoHint&&<div style={{fontSize:8,color:r._autoHint.includes('manually')?"#e3a008":"#10b981",marginBottom:4}}>↳ {r._autoHint}{!mats[0]?._edited&&r._autoVal!==''?' (auto-filled in row 1)':''}</div>}
@@ -5616,7 +5618,8 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
           </div>}
         </div>
 
-        <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end"}}>
+        <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end",alignItems:"center"}}>
+          {(()=>{const job=(jobs||[]).find(j=>j.id===f.job_id);if(!job||!userCanForward)return null;const cov=checkJobCoverage(job);const canFwd=cov&&cov.ready;return <button className="b" type="button" disabled={!canFwd||saving} title={canFwd?'Forward this job to Fabrication':'Pending: '+(cov?cov.pending.slice(0,4).join(', '):'')} onClick={()=>{if(!canFwd)return;if(confirm('Move job "'+job.id+'" to Fabrication?\nAll '+cov.all.length+' items are logged or outsourced.')){updateJobStatus&&updateJobStatus(job.id,'Fabrication');resetForm();setShowModal(false);}}} style={{marginRight:"auto",background:canFwd?"#16a34a":"transparent",borderColor:"#16a34a",color:canFwd?"#fff":"#16a34a80",opacity:canFwd?1:0.5,cursor:canFwd?"pointer":"not-allowed"}}>{canFwd?'→ Move to Fabrication':'🔒 Log/outsource all first'}</button>;})()}
           <button className="b" onClick={()=>{resetForm();setShowModal(false);}} disabled={saving}>Cancel</button>
           <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#ef4444",borderColor:"#ef4444"}}>{(()=>{const tot=Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0);return saving?"⏳ Saving...":`💾 Save ${tot} print log${tot===1?'':'s'}`;})()}</button>
         </div>
