@@ -2152,6 +2152,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const LIM_ROUTES=[['inhouse','In-house'],['material','OS / material'],['work','OS / work']];
   const canRaiseOsPR=(()=>{const u=(user?.name||'').toUpperCase();return ['AMOL','SHREYA','MURLI','JIGAR'].some(t=>u===t||u.startsWith(t+' '));})();
   const [prFromBom,setPrFromBom]=useState([]);
+  const [osPrSignal,setOsPrSignal]=useState(null);
   const bomPickerList=(materialsV2||[]).map(m=>({id:m.id,internal_name:m.name}));
   React.useEffect(()=>{let alive=true;(async()=>{try{const {data}=await sb.from('line_item_materials').select('*').eq('job_id',j.id);if(alive&&data)setLiMats(data);}catch(e){}})();return()=>{alive=false;};},[j.id]);
   const OS_TASKS=['Installation Charges','Coating Works','Router Cutting','Laser Cutting','Printing Charges','Frames','Signages (Internal)','Signages (External)'];
@@ -2927,13 +2928,15 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         setShowPRForm(false);
       };
 
-      const raiseOsPR=(rows)=>{
-        if(!rows||!rows.length)return;
+      React.useEffect(()=>{
+        if(!osPrSignal||!osPrSignal.length)return;
+        const rows=osPrSignal;
         setPrf({...blankForm,request_type:'Outsource',vendor_name:rows[0].suggested_vendor||'',items:rows.map(r=>({...blankItem,product:r.material,qty:r.qty||1}))});
         setPrFromBom(rows.map(r=>r.id));
         loadVendors();
         setShowPRForm(true);
-      };
+        setOsPrSignal(null);
+      },[osPrSignal]);
 
       const saveNewVendor=async()=>{
         if(!avf.name.trim()){show('Vendor name required',false);return;}
@@ -3510,7 +3513,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           return <React.Fragment key={it.id}><tr className={dn?"done":""}><td className="mn" style={{fontSize:9}}>{ii+1}</td><td style={{fontSize:10,fontWeight:600}}>{vm==="internal"?it.internal_name:it.client_name}</td>
             <td style={{padding:"2px",minWidth:40}}>{it.img_url?<div style={{position:"relative",display:"inline-block"}}><a href={it.img_url} target="_blank" rel="noopener noreferrer"><img src={it.img_url} style={{width:28,height:28,objectFit:"cover",borderRadius:3,border:"1px solid #1a2030"}}/></a><button style={{position:"absolute",top:-4,right:-4,background:"#f47067",border:"none",borderRadius:8,color:"#fff",cursor:"pointer",fontSize:7,width:14,height:14,lineHeight:"14px",padding:0,textAlign:"center"}} onClick={()=>{if(confirm('Remove this image?'))updateLineItem(it.id,{img_url:''})}}>✕</button></div>:<label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:28,height:28,borderRadius:3,border:"1px dashed #3b82f633",color:"#3b82f6",fontSize:10}}>+<input type="file" accept=".jpg,.png,.jpeg" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(file){const url=await uploadFile(file,'item-images');if(url&&updateLineItem)await updateLineItem(it.id,{img_url:url});}}}/></label>}</td>
             <td style={{fontSize:9.5,color:"#8b949e",cursor:"pointer",maxWidth:120}} title={it.media||''} data-edit-item={it.id}>{it.media?.slice(0,25)}{it.media?.length>25?'…':''}</td><td className="mn" style={{fontSize:9}}>{it.width&&it.height?it.width+'×'+it.height:''}{it.size_unit&&it.width?<span style={{fontSize:7,color:"#475569",marginLeft:1}}>{it.size_unit}</span>:''}</td><td className="mn" style={{fontSize:10}}>{it.qty}</td><td style={{fontSize:8,color:"#64748b"}}>{it.rate_mode||'UNIT'}</td><td className="mn" style={{fontSize:9,color:"#64748b",lineHeight:1.3}}>{(()=>{const um=getUnitMode(it.rate_mode);const d=um.displayFn(it.sqft);return d!=="—"?<span style={{color:"#06b6d4",fontWeight:600}}>{d}</span>:<span style={{color:"#475569"}}>—</span>;})()}</td>{canSeeRates&&<><td className="mn" style={{fontSize:10}}>₹{(+it.rate||0).toFixed(2)}</td><td className="mn" style={{fontSize:10,fontWeight:700,color:"#e3a008"}}>{fmt(it.amount)}</td></>}<td style={{display:"flex",gap:2}}><button className="b bs" data-edit-item={it.id} style={{fontSize:8,padding:"1px 4px"}}>✏️</button><button style={{background:"none",border:"none",color:"#f47067",cursor:"pointer",fontSize:9,padding:"1px 3px"}} onClick={()=>deleteLineItem(it.id)}>✕</button></td>
-            <td style={{textAlign:"center",padding:"2px 1px"}}>{(()=>{const bm=liMats.filter(m=>m.line_item_id===it.id&&m.route&&m.route!=='inhouse');if(!bm.length)return <span style={{color:"#334155",fontSize:9}}>—</span>;const need=bm.filter(m=>!m.pr_id);if(need.length){return canRaiseOsPR?<button title="Raise Outsource PR for this line" onClick={()=>raiseOsPR(need)} style={{background:"#f9731622",border:"1px solid #f97316",borderRadius:4,color:"#f97316",cursor:"pointer",fontSize:8,padding:"1px 4px",fontWeight:700}}>PR?</button>:<span title="Awaiting PR" style={{color:"#f97316",fontSize:8,fontWeight:700}}>PR?</span>;}return <span title="PR raised" style={{color:"#3b82f6",fontSize:8,fontWeight:700}}>PR ✓</span>;})()}</td>
+            <td style={{textAlign:"center",padding:"2px 1px"}}>{(()=>{const bm=liMats.filter(m=>m.line_item_id===it.id&&m.route&&m.route!=='inhouse');if(!bm.length)return <span style={{color:"#334155",fontSize:9}}>—</span>;const need=bm.filter(m=>!m.pr_id);if(need.length){return canRaiseOsPR?<button title="Raise Outsource PR for this line" onClick={()=>setOsPrSignal(need)} style={{background:"#f9731622",border:"1px solid #f97316",borderRadius:4,color:"#f97316",cursor:"pointer",fontSize:8,padding:"1px 4px",fontWeight:700}}>PR?</button>:<span title="Awaiting PR" style={{color:"#f97316",fontSize:8,fontWeight:700}}>PR?</span>;}return <span title="PR raised" style={{color:"#3b82f6",fontSize:8,fontWeight:700}}>PR ✓</span>;})()}</td>
             {DEPTS.map(d=>{
               const col='dept_'+d.toLowerCase();
               const on=it[col];
