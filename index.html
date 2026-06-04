@@ -1252,6 +1252,11 @@ function MainApp({user,onLogout,masterData}){
     if(!error){setPLogs(p=>[data,...p]);show("Print log saved!");}
     else show("Error: "+error.message,false);
   },[show]);
+  const updatePrintLog = useCallback(async (id, patch) => {
+    const {error} = await sb.from('print_logs').update(patch).eq('id',id);
+    if(!error){setPLogs(p=>p.map(r=>r.id===id?{...r,...patch}:r));show("Receipt saved!");}
+    else show("Error: "+error.message,false);
+  },[show]);
 
   // ─── ADD FAB LOG ──────────────────────────────────────────
   const addFabLog = useCallback(async (data) => {
@@ -1812,7 +1817,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="dept"&&<DeptPage jobs={filteredJobs} s={search} togDept={togDept} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} sm={setModal} items={items} osItems={osItems}/>}
           {pg==="grn"&&<GRNPage grn={grnData} suppliers={suppliers} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} addGRN={addGRN} updateGRN={updateGRN} deleteGRN={deleteGRN} addNewMaterial={addNewMaterial} addNewMaterialV2={addNewMaterialV2} addNewSupplier={addNewSupplier}/>}
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
-          {pg==="fab"&&<FabPage logs={fLogs} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
+          {pg==="fab"&&<FabPage logs={fLogs} pLogs={pLogs} updatePrintLog={updatePrintLog} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
           {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} ol={osLogs} materialsV2={masterData.materialsV2||[]}/>}
@@ -5143,18 +5148,24 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
       const item=(items||[]).find(i=>i.id===id);
       const label=(item?.internal_name||item?.media||id).slice(0,30);
       const it=f.selectedItems[id];
-      const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft);
+      const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft||r.outsourced);
       if(mats.length===0){show(`${label}: add at least one material`,false);return;}
       for(let mi=0;mi<mats.length;mi++){
         const r=mats[mi];const tag=`${label} · Material #${mi+1}: `;
+        if(r.outsourced){
+          if((r.os_type==='material')&&!r.material){show(tag+"pick the material that was sent out",false);return;}
+          if(!r.os_sqft||+r.os_sqft<=0){show(tag+"enter sqft sent",false);return;}
+          continue;
+        }
         if(!r.material){show(tag+"pick material",false);return;}
         if(!r.print_sqft||+r.print_sqft<=0){show(tag+"enter used sqft",false);return;}
         if(!r.actual_sqft||+r.actual_sqft<=0){show(tag+"enter actual sqft",false);return;}
         if(+r.actual_sqft>+r.print_sqft){show(tag+"actual sqft cannot exceed used sqft",false);return;}
       }
-      const names=mats.map(r=>r.material);
+      const names=mats.map(r=>r.material).filter(Boolean);
       if(new Set(names).size!==names.length){show(`${label}: duplicate material — combine into one row`,false);return;}
-      if(!it._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      const hasInhouse=mats.some(r=>!r.outsourced);
+      if(hasInhouse&&!it._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
       totalRows+=mats.length;
     }
     if(!confirm(`Save ${totalRows} print log row${totalRows>1?'s':''} across ${itemIds.length} item${itemIds.length>1?'s':''} on machine "${f.machine}"?`)) return;
@@ -5164,15 +5175,21 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     let rowIdx=0;
     for(const id of itemIds){
       const it=f.selectedItems[id];
-      const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft);
+      const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft||r.outsourced);
       // Upload photo ONCE per ticked item; shared across that item's material rows
       let photoUrl='';
-      try{
-        const compressed=await compressImage(it._photoFile);
-        photoUrl=await uploadFile(compressed,`print-proofs/${f.job_id}`);
-        if(!photoUrl){show(`Photo upload failed for item ${id} — STOPPING`,false);setSaving(false);return;}
-      }catch(e){show('Photo upload error: '+(e?.message||e),false);setSaving(false);return;}
+      if(it._photoFile){
+        try{
+          const compressed=await compressImage(it._photoFile);
+          photoUrl=await uploadFile(compressed,`print-proofs/${f.job_id}`);
+          if(!photoUrl){show(`Photo upload failed for item ${id} — STOPPING`,false);setSaving(false);return;}
+        }catch(e){show('Photo upload error: '+(e?.message||e),false);setSaving(false);return;}
+      }
       for(const r of mats){
+        if(r.outsourced){
+          await addLog({id:baseId+'_os'+(rowIdx)+Math.random().toString(36).slice(2,4),date:f.date,job_id:f.job_id,batch_id:f.batch_id,line_item_id:id,machine:f.machine,operator,material:r.material||'',print_sqft:0,actual_sqft:(r.os_type==='material')?0:(+r.os_sqft||0),qty_used:0,unit:'sqft',start_time:f.start_time||'',end_time:f.end_time||'',notes:((r.os_type==='material')?'OUTSOURCED MATERIAL (sent)':'OUTSOURCED WORK (sent)')+(f.notes?': '+f.notes:''),photo_url:'',is_outsourced:true,os_type:(r.os_type==='material')?'material':'work',os_status:'pending',os_sent_sqft:+r.os_sqft||0,ink_cyan:0,ink_magenta:0,ink_yellow:0,ink_black:0,ink_white:0});
+          rowIdx++;continue;
+        }
         // Ink columns only on the very first row across all items, to avoid double-counting
         const isFirstRow=rowIdx===0;
         await addLog({
@@ -5586,12 +5603,16 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
                     const rowWaste=(row.actual_sqft&&row.print_sqft)?((+row.print_sqft)-(+row.actual_sqft)).toFixed(2):'';
                     const rowWastePct=(row.actual_sqft&&row.print_sqft&&+row.print_sqft>0)?((((+row.print_sqft)-(+row.actual_sqft))/(+row.print_sqft))*100).toFixed(1):'';
                     return <div key={ri} style={{marginBottom:4,padding:4,background:"#0d1118",borderRadius:3,border:"1px solid #1a2030"}}>
+                      <div style={{display:"flex",marginBottom:4,border:"1px solid #1a2030",borderRadius:5,overflow:"hidden",width:"fit-content"}}><button type="button" onClick={()=>updateMaterial(it.id,ri,{outsourced:false})} style={{fontSize:8,padding:"2px 8px",background:!row.outsourced?"#1e293b":"transparent",color:!row.outsourced?"#e6e6e6":"#64748b",border:"none",cursor:"pointer"}}>In-house</button><button type="button" onClick={()=>updateMaterial(it.id,ri,{outsourced:true,os_type:row.os_type||'work'})} style={{fontSize:8,padding:"2px 8px",background:row.outsourced?"#f97316":"transparent",color:row.outsourced?"#fff":"#64748b",border:"none",cursor:"pointer"}}>🌐 Outsourced</button></div>
                       <div className="fg f3" style={{alignItems:"flex-end",gap:4}}>
                         <F l={`Mat #${ri+1} *`}><MaterialPicker value={row.material} products={matPickerList} compact={true} placeholder="Search material or type new..." onPick={(picked)=>updateMaterial(it.id,ri,{material:picked.internal_name})} onAddNew={async(name)=>{if(typeof addNewMaterialV2!=='function'){updateMaterial(it.id,ri,{material:name});return;}const u=(prompt('Unit for new material "'+name+'"?\nType one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs','roll')||'roll').trim();const row2=await addNewMaterialV2(name,u);if(row2){setExtraV2(prev=>[...prev,row2]);updateMaterial(it.id,ri,{material:row2.name});}}}/></F>
-                        <F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={row.print_sqft} onChange={e=>updateMaterial(it.id,ri,{print_sqft:e.target.value})} style={{fontSize:9}}/></F>
-                        <F l={<span>Actual sqft *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_sqft} onChange={e=>updateMaterial(it.id,ri,{actual_sqft:e.target.value,_edited:true})} style={{fontSize:9}}/></F>
+                        {!row.outsourced&&<F l="Used sqft *"><input className="in mn" type="number" step="0.01" value={row.print_sqft} onChange={e=>updateMaterial(it.id,ri,{print_sqft:e.target.value})} style={{fontSize:9}}/></F>}
+                        {!row.outsourced&&<F l={<span>Actual sqft *{ri===0&&!row._edited&&r._autoVal!==''&&<span style={{color:"#10b981",marginLeft:3,fontSize:8}}>(auto)</span>}{row._edited&&<span style={{color:"#e3a008",marginLeft:3,fontSize:8}}>(edited)</span>}</span>}><input className="in mn" type="number" step="0.01" value={row.actual_sqft} onChange={e=>updateMaterial(it.id,ri,{actual_sqft:e.target.value,_edited:true})} style={{fontSize:9}}/></F>}
+                        {row.outsourced&&<F l="Sqft sent *"><input className="in mn" type="number" step="0.01" value={row.os_sqft||''} onChange={e=>updateMaterial(it.id,ri,{os_sqft:e.target.value})} style={{fontSize:9}}/></F>}
                       </div>
-                      {row.material&&bal.balance!==null&&<div style={{marginTop:3,padding:"2px 5px",background:bal.balance<=0?"#3b060720":bal.balance<100?"#3b250620":"#05200e20",border:"1px solid "+(bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#10b98140"),borderRadius:2,fontSize:8,color:"#8b949e",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
+                      {row.outsourced&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:3}}><span style={{fontSize:8,color:"#94a3b8"}}>Type</span><div style={{display:"flex",border:"1px solid #1a2030",borderRadius:5,overflow:"hidden"}}><button type="button" onClick={()=>updateMaterial(it.id,ri,{os_type:'work'})} style={{fontSize:8,padding:"2px 8px",background:row.os_type!=='material'?"#1d4ed8":"transparent",color:row.os_type!=='material'?"#fff":"#64748b",border:"none",cursor:"pointer"}}>Work / print</button><button type="button" onClick={()=>updateMaterial(it.id,ri,{os_type:'material'})} style={{fontSize:8,padding:"2px 8px",background:row.os_type==='material'?"#1d4ed8":"transparent",color:row.os_type==='material'?"#fff":"#64748b",border:"none",cursor:"pointer"}}>Material</button></div></div>}
+                      {row.outsourced&&<div style={{marginTop:3,fontSize:8,color:"#94a3b8",lineHeight:1.4}}>{row.os_type==='material'?'⏳ Material sent out — fabrication confirms receipt + proof. Print it in-house as a separate row.':'⏳ Sent to vendor — fabrication confirms receipt + proof. No stock or photo here.'}</div>}
+                      {!row.outsourced&&row.material&&bal.balance!==null&&<div style={{marginTop:3,padding:"2px 5px",background:bal.balance<=0?"#3b060720":bal.balance<100?"#3b250620":"#05200e20",border:"1px solid "+(bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#10b98140"),borderRadius:2,fontSize:8,color:"#8b949e",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
                         <span>📦 In <strong style={{color:"#10b981"}}>{bal.inward.toFixed(0)}</strong> · Used <strong style={{color:"#ef4444"}}>{bal.used.toFixed(0)}</strong> · Rem <strong style={{color:bal.balance<=0?"#f47067":bal.balance<100?"#e3a008":"#4ade80"}}>{bal.balance.toFixed(0)}</strong>{row.print_sqft&&+row.print_sqft>0&&<span style={{marginLeft:3,color:"#64748b"}}>→ <strong style={{color:(bal.balance-(+row.print_sqft))<0?"#f47067":"#8b949e"}}>{(bal.balance-(+row.print_sqft)).toFixed(0)}</strong></span>}</span>
                         {rowWaste&&<span style={{color:"#64748b"}}>Waste: {rowWaste} sqft · {rowWastePct}%</span>}
                       </div>}
@@ -5613,7 +5634,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
               </div>;
             })}
           </div>
-          {selectedCount>0&&f.entryMode!=='lumpsum'&&<div style={{fontSize:8,color:"#64748b",marginTop:6,paddingLeft:4}}>{selectedCount} item{selectedCount>1?'s':''} ticked → {Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0)} print_logs row{(Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0))>1?'s':''} will be saved</div>}
+          {selectedCount>0&&f.entryMode!=='lumpsum'&&<div style={{fontSize:8,color:"#64748b",marginTop:6,paddingLeft:4}}>{selectedCount} item{selectedCount>1?'s':''} ticked → {Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material||r.outsourced).length||0),0)} print_logs row{(Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material||r.outsourced).length||0),0))>1?'s':''} will be saved</div>}
         </div>}
 
         {f.batch_id&&f.entryMode==='lumpsum'&&<div style={{marginTop:8,padding:8,background:"#0a1228",border:"1px solid #1d4ed840",borderRadius:6}}>
@@ -5660,7 +5681,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
         <div style={{display:"flex",gap:6,marginTop:12,justifyContent:"flex-end",alignItems:"center"}}>
           {(()=>{const job=(jobs||[]).find(j=>j.id===f.job_id);if(!job||!userCanForward)return null;const cov=checkJobCoverage(job);const canFwd=cov&&cov.ready;return <button className="b" type="button" disabled={!canFwd||saving} title={canFwd?'Forward this job to Fabrication':'Pending: '+(cov?cov.pending.slice(0,4).join(', '):'')} onClick={()=>{if(!canFwd)return;if(confirm('Move job "'+job.id+'" to Fabrication?\nAll '+cov.all.length+' items are logged or outsourced.')){updateJobStatus&&updateJobStatus(job.id,'Fabrication');resetForm();setShowModal(false);}}} style={{marginRight:"auto",background:canFwd?"#16a34a":"transparent",borderColor:"#16a34a",color:canFwd?"#fff":"#16a34a80",opacity:canFwd?1:0.5,cursor:canFwd?"pointer":"not-allowed"}}>{canFwd?'→ Move to Fabrication':'🔒 Log/outsource all first'}</button>;})()}
           <button className="b" onClick={()=>{resetForm();setShowModal(false);}} disabled={saving}>Cancel</button>
-          <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#ef4444",borderColor:"#ef4444"}}>{(()=>{if(saving)return"⏳ Saving...";if(f.entryMode==='lumpsum')return"💾 Save roll log";const tot=Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material).length||0),0);return `💾 Save ${tot} print log${tot===1?'':'s'}`;})()}</button>
+          <button className="b bp" onClick={handleSave} disabled={saving||selectedCount===0} style={{background:"#ef4444",borderColor:"#ef4444"}}>{(()=>{if(saving)return"⏳ Saving...";if(f.entryMode==='lumpsum')return"💾 Save roll log";const tot=Object.values(f.selectedItems||{}).reduce((s,it)=>s+((it.materials||[]).filter(r=>r.material||r.outsourced).length||0),0);return `💾 Save ${tot} print log${tot===1?'':'s'}`;})()}</button>
         </div>
       </div>
     </div>}
@@ -5782,7 +5803,31 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
 }
 
 // FABRICATION — Analytics Dashboard (auto-logged via dept checkboxes)
-function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,updateLineItem,addNewMaterialV2,user,show,grn}){
+function OsReceiptRow({row,items,compress,updatePrintLog,user,show}){
+  const [sq,setSq]=useState(row.os_sent_sqft||'');
+  const [pf,setPf]=useState(null);const [pv,setPv]=useState('');const [busy,setBusy]=useState(false);
+  const itLabel=(()=>{const it=(items||[]).find(i=>i.id===row.line_item_id);return (it?.internal_name||it?.media||row.line_item_id||'item').slice(0,32);})();
+  const doReceive=async()=>{
+    if(!sq||+sq<=0){show('Enter received sqft',false);return;}
+    if(!pf){show('Attach proof photo',false);return;}
+    setBusy(true);let url='';
+    try{const c=await compress(pf);url=await uploadFile(c,'outsource-proofs/'+row.job_id);if(!url){show('Photo upload failed',false);setBusy(false);return;}}catch(e){show('Upload error: '+(e?.message||e),false);setBusy(false);return;}
+    await updatePrintLog(row.id,{os_status:'received',os_proof_url:url,os_received_by:user?.name||'',os_received_at:new Date().toISOString(),os_sent_sqft:+sq,actual_sqft:(row.os_type==='material')?0:(+sq)});
+    setBusy(false);
+  };
+  return <div style={{border:"1px solid #f9731640",borderRadius:5,padding:6,marginBottom:6,background:"#1a0f05"}}>
+    <div style={{fontSize:10,fontWeight:700,color:"#e6e6e6",marginBottom:4}}>{itLabel} · <span style={{color:"#3b82f6"}}>{row.os_type==='material'?'material':'work'}</span> · sent {row.os_sent_sqft||0}</div>
+    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+      <input className="in mn" type="number" step="0.01" value={sq} onChange={e=>setSq(e.target.value)} placeholder="Received sqft" style={{fontSize:9,width:90}}/>
+      <label style={{cursor:"pointer",padding:"3px 8px",border:"1px dashed "+(pf?"#10b98140":"#e3a00840"),borderRadius:3,color:pf?"#10b981":"#e3a008",fontSize:9,fontWeight:600}}>{pf?'🔄 photo':'📸 Proof photo'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file)return;setPf(file);const rd=new FileReader();rd.onload=ev=>setPv(ev.target.result);rd.readAsDataURL(file);}}/></label>
+      {pv&&<img src={pv} alt="" style={{width:24,height:24,objectFit:"cover",borderRadius:2}}/>}
+      <button type="button" disabled={busy} onClick={doReceive} style={{fontSize:9,padding:"3px 10px",background:"#10b981",border:"none",borderRadius:3,color:"#fff",fontWeight:700,cursor:busy?"wait":"pointer"}}>{busy?'\u2026':'✓ Mark received'}</button>
+    </div>
+    <div style={{fontSize:8,color:"#94a3b8",marginTop:3}}>{row.os_type==='material'?'Documents the material receipt; in-house print log covers printing.':'Counts toward print coverage when received.'}</div>
+  </div>;
+}
+
+function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,items,sm,updateJobStatus,updateLineItem,addNewMaterialV2,user,show,grn,pLogs,updatePrintLog}){
   // ── Patch S (21 May 2026 PM) — FabPage now mirrors PrintPage's full logging flow.
   // Header button opens modal: job → batch → line item → repeatable material rows (all units)
   // with live stock check, used vs actual qty (waste% computed), required proof photo.
@@ -6103,6 +6148,8 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
             <td style={{fontSize:10}}>{j.contact_person?.slice(0,15)}</td>
             <td><select className="in" defaultValue="" disabled={!canChange} title={canChange?'Change status':'Log all items with photo first ('+cov.pending.length+' pending)'} onChange={e=>{
               const ns=e.target.value;if(!ns)return;
+              const _osPend=(pLogs||[]).filter(l=>l.job_id===j.id&&l.is_outsourced&&l.os_status==='pending');
+              if(/dispatch/i.test(ns)&&_osPend.length>0){show('Cannot move to Dispatch \u2014 '+_osPend.length+' outsourced part(s) not yet received. Confirm receipt + proof in the Log Fab modal first.',false);e.target.value='';return;}
               // Patch U — re-validate at click time (defence in depth)
               const recheck=checkFabJobCoverage(j);
               if(!recheck.ready){show('Cannot change status — '+recheck.pending.length+' item(s) still pending: '+recheck.pending.slice(0,3).join(', ')+(recheck.pending.length>3?'…':''),false);e.target.value='';return;}
@@ -6185,6 +6232,11 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
           </select></F>
         </div>}
 
+        {f.job_id&&(()=>{const pend=(pLogs||[]).filter(l=>l.job_id===f.job_id&&l.is_outsourced&&l.os_status==='pending');if(pend.length===0)return null;return <div style={{marginTop:8,padding:8,background:"#1a0f05",border:"1px solid #f9731640",borderRadius:6}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#f97316",marginBottom:6}}>🌐 Pending outsource receipts · {pend.length}</div>
+          {pend.map(row=><OsReceiptRow key={row.id} row={row} items={items} compress={compressImageFab} updatePrintLog={updatePrintLog} user={user} show={show}/>)}
+          <div style={{fontSize:8,color:"#94a3b8",marginTop:2}}>Dispatch stays locked until all are received.</div>
+        </div>;})()}
         {f.batch_id&&<div style={{marginTop:8,padding:8,background:"#0a0f1a",borderRadius:6}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:4}}>
             <span style={{fontSize:10,fontWeight:700,color:"#dc2626"}}>🧱 Tick line items to log · {selectedCount} of {batchItems.length} selected</span>
