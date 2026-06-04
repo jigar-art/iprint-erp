@@ -1839,7 +1839,7 @@ function MainApp({user,onLogout,masterData}){
         </div>
       </main>
 
-      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct} stockBalances={stockBalances}/>:modal.x}</div></div>}
+      {modal&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:100,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"10px",overflowY:"auto"}} onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}><div style={{background:"#0c1017",border:"1px solid #1a2030",borderRadius:12,width:"100%",maxWidth:1100,padding:16,margin:"10px 0",maxHeight:"calc(100vh - 20px)",overflowY:"auto",animation:"fi .2s"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,position:"sticky",top:-16,background:"#0c1017",zIndex:2,padding:"8px 0",marginTop:-8}}><h3 style={{fontSize:13,fontWeight:700}}>{modal.t}</h3><button className="b bs" onClick={()=>{if(window._jfDirty&&!confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.'))return;setModal(null);}}>✕</button></div>{modal.jobId?<JobDetail j={fullJobs.find(x=>x.id===modal.jobId)||modal.fallback} firms={firms} togDept={togDept} addBatchToJob={addBatchToJob} show={show} updateJobStatus={updateJobStatus} updateJobFields={updateJobFields} updateLineItem={updateLineItem} addLineItem={addLineItem} deleteLineItem={deleteLineItem} importBatches={importBatches} updateJobFile={updateJobFile} appendJobFiles={appendJobFiles} removeJobFile={removeJobFile} user={user} saveBill={saveBill} deleteBatch={deleteBatch} updateBatchNote={updateBatchNote} osItems={osItems} setOsItems={setOsItems} agencies={agencies} reqs={reqs} setReqs={setReqs} prs={prs} setPrs={setPrs} setBatches={setBatches} setItems={setItems} products={products} addNewProduct={addNewProduct} stockBalances={stockBalances} materialsV2={masterData.materialsV2||[]}/>:modal.x}</div></div>}
       {portalAlert&&portalAlert.length>0&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:250,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
         <div style={{background:"#0c1017",border:"2px solid #e3a008",borderRadius:14,width:"100%",maxWidth:550,padding:24,animation:"fi .3s"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
@@ -2132,7 +2132,7 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
 }
 
 // JOB DETAIL
-function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs,setBatches,setItems,products,addNewProduct,stockBalances}){
+function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile,user,saveBill,deleteBatch,updateBatchNote,osItems,setOsItems,agencies,reqs,setReqs,prs,setPrs,setBatches,setItems,products,addNewProduct,stockBalances,materialsV2}){
   const ALL_ST = ALL_ST_NEW;
   const [vm,svm]=useState("internal");
   const [sa,ssa]=useState(false);const [nn,snn]=useState("");
@@ -2147,6 +2147,11 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
   const [ni,setNi]=useState({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
   const [osOpen,setOsOpen]=useState(null); // line_item_id whose OS panel is open
   const [osForm,setOsForm]=useState({task_type:'',vendor_name:'',rate:0,rate_mode:'UNIT',notes:''});
+  const [niMats,setNiMats]=useState([]);
+  const [liMats,setLiMats]=useState([]);
+  const LIM_ROUTES=[['inhouse','In-house'],['material','OS / material'],['work','OS / work']];
+  const bomPickerList=(materialsV2||[]).map(m=>({id:m.id,internal_name:m.name}));
+  React.useEffect(()=>{let alive=true;(async()=>{try{const {data}=await sb.from('line_item_materials').select('*').eq('job_id',j.id);if(alive&&data)setLiMats(data);}catch(e){}})();return()=>{alive=false;};},[j.id]);
   const OS_TASKS=['Installation Charges','Coating Works','Router Cutting','Laser Cutting','Printing Charges','Frames','Signages (Internal)','Signages (External)'];
   const [jobPos,setJobPos]=useState([]);
   const [jobPosLoading,setJobPosLoading]=useState(true);
@@ -2481,6 +2486,9 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       dept_estimate:false,dept_design:false,dept_production:false,dept_printing:false,
       dept_fabrication:false,dept_dispatch:false,dept_installation:false,dept_accounts:false};
     await addLineItem(itemData);
+    const bomRows=(niMats||[]).filter(m=>m.material&&m.material.trim()).map((m,mi)=>({id:'LM'+uid()+mi,line_item_id:itemData.id,job_id:j.id,batch_id:batchId,sr:mi+1,material:m.material.trim(),route:m.route||'inhouse',suggested_vendor:m.suggested_vendor||'',qty:(m.qty===''||m.qty==null)?null:+m.qty,created_by:user?.name||'',created_at:new Date().toISOString()}));
+    if(bomRows.length){const {error:bErr}=await sb.from('line_item_materials').insert(bomRows);if(bErr){show('Item saved, but materials failed: '+bErr.message,false);}else{setLiMats(p=>[...p,...bomRows]);}}
+    setNiMats([]);
     setNi({internal_name:'',client_name:'',media:'',width:'',height:'',qty:1,rate:0,size_unit:'MM',rate_mode:'SqFt (INCH)',gstPct:18});
     setAddingToBatch(null);
   };
@@ -3523,6 +3531,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               <button className="b bs" onClick={()=>setOsOpen(null)} style={{fontSize:9,padding:"3px 6px"}}>Close</button>
             </div>
           </div></td></tr>}
+          {(()=>{const bm=liMats.filter(x=>x.line_item_id===it.id);if(!bm.length)return null;return <tr><td colSpan={100} style={{padding:"0 0 6px"}}><div style={{display:"flex",flexWrap:"wrap",gap:4,padding:"4px 8px",background:"#0a0f17",borderRadius:4}}><span style={{fontSize:8,color:"#64748b",marginRight:2}}>BOM:</span>{bm.map((m,mi)=>{const os=m.route&&m.route!=='inhouse';return <span key={mi} style={{fontSize:8,padding:"2px 7px",borderRadius:4,background:os?"#3b82f618":"#16a34a18",border:os?"1px solid #3b82f644":"1px solid #16a34a44",color:os?"#93c5fd":"#86efac"}}>{m.material}{m.route==='inhouse'?' / In-house':m.route==='material'?' / OS-material':' / OS-work'}{m.suggested_vendor?' / '+m.suggested_vendor:''}{m.pr_id?' / PR '+m.pr_id:''}</span>;})}</div></td></tr>;})()}
           </React.Fragment>})}</tbody></table></div>
       {addingToBatch===b.id?<div style={{padding:8,borderTop:"1px solid #1a2030",background:"#060810"}}>
         <p style={{fontSize:9,color:"#e3a008",fontWeight:700,marginBottom:6}}>➕ ADD ITEM TO BATCH {bi+1}</p>
@@ -3537,6 +3546,20 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           <F l="Unit"><select className="in" value={ni.rate_mode} onChange={e=>setNi(p=>({...p,rate_mode:e.target.value}))} style={{minWidth:120}}>{UNIT_MODES.map(u=><option key={u.value} value={u.value}>{u.label}</option>)}</select></F>
           <F l="Rate ₹"><input className="in mn" type="number" value={ni.rate} onChange={e=>setNi(p=>({...p,rate:+e.target.value}))}/></F>
           <F l="GST%"><select className="in" value={ni.gstPct} onChange={e=>setNi(p=>({...p,gstPct:+e.target.value}))}>{[0,5,12,18,28].map(g=><option key={g} value={g}>{g}%</option>)}</select></F>
+        </div>
+        <div style={{marginTop:8,padding:8,background:"#0d1520",border:"1px solid #1a2030",borderRadius:6}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:9,fontWeight:700,color:"#93c5fd"}}>Materials (internal BOM)</span>
+            <button className="b bs" onClick={()=>setNiMats(p=>[...p,{material:'',route:'inhouse',suggested_vendor:'',qty:''}])} style={{fontSize:8,padding:"2px 8px"}}>+ Add material</button>
+          </div>
+          {niMats.length===0&&<p style={{fontSize:8,color:"#64748b",margin:0}}>Optional — list the materials in this item and how each is sourced.</p>}
+          {niMats.map((m,mi)=><div key={mi} style={{display:"flex",gap:4,alignItems:"flex-end",flexWrap:"wrap",borderTop:mi>0?"1px solid #1a2030":"none",paddingTop:mi>0?6:0,marginTop:mi>0?6:0}}>
+            <div style={{flex:"1 1 150px"}}><span style={{fontSize:7,color:"#64748b"}}>Material</span><MaterialPicker value={m.material} products={bomPickerList} compact={true} placeholder="Search material..." onPick={(picked)=>setNiMats(p=>p.map((x,i)=>i===mi?{...x,material:picked.internal_name}:x))} onAddNew={(name)=>setNiMats(p=>p.map((x,i)=>i===mi?{...x,material:name}:x))}/></div>
+            <div><span style={{fontSize:7,color:"#64748b"}}>Route</span><div style={{display:"flex",gap:2}}>{LIM_ROUTES.map(([rv,rl])=><button key={rv} className="b bs" onClick={()=>setNiMats(p=>p.map((x,i)=>i===mi?{...x,route:rv}:x))} style={{fontSize:8,padding:"3px 6px",background:m.route===rv?(rv==='inhouse'?"#16a34a22":"#3b82f622"):"none",border:m.route===rv?(rv==='inhouse'?"1px solid #16a34a":"1px solid #3b82f6"):"1px solid #333",color:m.route===rv?(rv==='inhouse'?"#16a34a":"#3b82f6"):"#64748b"}}>{rl}</button>)}</div></div>
+            {m.route!=='inhouse'&&<div><span style={{fontSize:7,color:"#64748b"}}>Suggested vendor</span><select className="in" value={m.suggested_vendor} onChange={e=>setNiMats(p=>p.map((x,i)=>i===mi?{...x,suggested_vendor:e.target.value}:x))} style={{fontSize:9,padding:"3px 4px",width:130}}><option value="">(optional)</option>{(agencies||[]).map(a=><option key={a.id} value={a.name}>{a.name}</option>)}</select></div>}
+            <div><span style={{fontSize:7,color:"#64748b"}}>Qty</span><input className="in mn" value={m.qty} onChange={e=>setNiMats(p=>p.map((x,i)=>i===mi?{...x,qty:e.target.value}:x))} placeholder="qty" style={{fontSize:9,padding:"3px 4px",width:50}}/></div>
+            <button className="b bs" onClick={()=>setNiMats(p=>p.filter((_,i)=>i!==mi))} style={{fontSize:8,padding:"3px 7px",color:"#f47067"}}>✕</button>
+          </div>)}
         </div>
         <div style={{display:"flex",gap:4,marginTop:6}}><button className="b bg" onClick={()=>saveNewItem(b.id)}>✓ Save Item</button><button className="b" onClick={()=>setAddingToBatch(null)}>Cancel</button></div>
       </div>:<div style={{padding:"4px 8px",borderTop:"1px solid #0c1017",display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
