@@ -5055,7 +5055,9 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   const [showInkDetails,setShowInkDetails]=useState(false);
   const [saving,setSaving]=useState(false);
   // ── Patch T (21 May 2026 PM) — multi-item logging ──
-  // selectedItems: { [line_item_id]: { material, print_sqft, actual_sqft, _photoFile, _photoPreview, _autoHint, _autoVal, _edited } }
+  // selectedItems: { [line_item_id]: { materials:[...], _photoUrl, _photoPreview, _uploading, _autoHint, _autoVal } }
+  // Patch (06 Jun 2026) — proof photos upload on ATTACH (stored as _photoUrl), and the whole draft autosaves to
+  // localStorage (DRAFT_KEY) so a mobile camera-intent page reload can be resumed instead of redone.
   // Each ticked line item becomes one print_logs row on save. Photo required PER ITEM.
   // Shared across rows: date, machine, job_id, batch_id, start_time, end_time, notes, ink_*.
   const blankForm={
@@ -5065,7 +5067,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     machine:'',
     selectedItems:{},
     entryMode:'item',
-    lump:{material:'',print_sqft:'',_photoFile:null,_photoPreview:''},
+    lump:{material:'',print_sqft:'',_photoUrl:'',_photoPreview:'',_uploading:false},
     start_time:'',
     end_time:'',
     notes:'',
@@ -5138,7 +5140,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
         const {val,hint}=computeAreaFromJobSheet(item);
         next[itemId]={
           materials:[{material:'',print_sqft:'',actual_sqft:val,_edited:false}],
-          _photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val
+          _photoUrl:'',_photoPreview:'',_uploading:false,_autoHint:hint,_autoVal:val
         };
       }
       return {...p,selectedItems:next};
@@ -5162,7 +5164,17 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
   });
   const selectedCount=Object.keys(f.selectedItems||{}).length;
 
-  const resetForm=()=>{sF(blankForm);setShowInkDetails(false);};
+  // Patch (06 Jun 2026) — DRAFT RESUME. Proof photos upload on attach (→ _photoUrl), so the whole draft is
+  // JSON-serialisable. We autosave it to localStorage; if a mobile camera intent forces a page reload, we
+  // restore the draft (items, sqft, attached photos) and re-open the modal instead of making the user redo it.
+  const DRAFT_KEY='iprint_printlog_draft_v1';
+  const [draftRestored,setDraftRestored]=useState(false);
+  const resetForm=()=>{sF(blankForm);setShowInkDetails(false);setDraftRestored(false);try{localStorage.removeItem(DRAFT_KEY);}catch(e){}};
+  React.useEffect(()=>{try{if(showModal&&f.job_id){localStorage.setItem(DRAFT_KEY,JSON.stringify({f,ts:Date.now()}));}}catch(e){}},[f,showModal]);
+  React.useEffect(()=>{try{const raw=localStorage.getItem(DRAFT_KEY);if(!raw)return;const saved=JSON.parse(raw);const fresh=saved&&saved.ts&&(Date.now()-saved.ts<6*60*60*1000);const hasContent=saved&&saved.f&&saved.f.job_id&&Object.keys(saved.f.selectedItems||{}).length>0;if(fresh&&hasContent){const sf=saved.f;const si={};Object.keys(sf.selectedItems||{}).forEach(k=>{si[k]={...sf.selectedItems[k],_uploading:false};});sf.selectedItems=si;if(sf.lump)sf.lump={...sf.lump,_uploading:false};sF(sf);setShowModal(true);setDraftRestored(true);}else{localStorage.removeItem(DRAFT_KEY);}}catch(e){try{localStorage.removeItem(DRAFT_KEY);}catch(_){}}},[]);
+  // Upload proof photo IMMEDIATELY on attach (was: held in memory as a File until Save → lost on a camera-intent reload).
+  const uploadItemPhoto=async(itemId,file)=>{if(!file)return;if(!f.job_id){show("Pick a job first",false);return;}updateItem(itemId,{_uploading:true});try{const c=await compressImage(file);const url=await uploadFile(c,`print-proofs/${f.job_id}`);if(!url){show("Photo upload failed — retry",false);updateItem(itemId,{_uploading:false});return;}updateItem(itemId,{_photoUrl:url,_photoPreview:url,_uploading:false});}catch(e){show("Photo upload error: "+(e?.message||e),false);updateItem(itemId,{_uploading:false});}};
+  const uploadLumpPhoto=async(file)=>{if(!file)return;if(!f.job_id){show("Pick a job first",false);return;}sF(p=>({...p,lump:{...p.lump,_uploading:true}}));try{const c=await compressImage(file);const url=await uploadFile(c,`print-proofs/${f.job_id}`);if(!url){show("Photo upload failed — retry",false);sF(p=>({...p,lump:{...p.lump,_uploading:false}}));return;}sF(p=>({...p,lump:{...p.lump,_photoUrl:url,_photoPreview:url,_uploading:false}}));}catch(e){show("Photo upload error: "+(e?.message||e),false);sF(p=>({...p,lump:{...p.lump,_uploading:false}}));}};
 
   const handleSave=async()=>{
     if(!f.job_id||!f.batch_id){show("Pick job and batch",false);return;}
@@ -5173,11 +5185,11 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
     if(f.entryMode==='lumpsum'){
       if(!f.lump.material){show("Lumpsum: pick the roll material",false);return;}
       if(!f.lump.print_sqft||+f.lump.print_sqft<=0){show("Lumpsum: enter total used sqft",false);return;}
-      if(!f.lump._photoFile){show("Lumpsum: attach one photo for the roll",false);return;}
+      if(f.lump._uploading){show("Lumpsum: photo still uploading…",false);return;}
+      if(!f.lump._photoUrl){show("Lumpsum: attach one photo for the roll",false);return;}
       if(!confirm("Save ONE roll entry covering "+itemIds.length+" item(s) on machine \""+f.machine+"\"?\nStock will deduct "+(+f.lump.print_sqft)+" sqft once.")) return;
       setSaving(true);
-      let lumpPhoto='';
-      try{const c=await compressImage(f.lump._photoFile);lumpPhoto=await uploadFile(c,`print-proofs/${f.job_id}`);if(!lumpPhoto){show("Photo upload failed — STOPPING",false);setSaving(false);return;}}catch(e){show("Photo upload error: "+(e?.message||e),false);setSaving(false);return;}
+      const lumpPhoto=f.lump._photoUrl||'';
       const lbase='PL'+Date.now();const lop=user?.name||'';let lidx=0;
       for(const id of itemIds){
         const item=(items||[]).find(i=>i.id===id)||{};
@@ -5210,7 +5222,8 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
       const names=mats.map(r=>r.material).filter(Boolean);
       if(new Set(names).size!==names.length){show(`${label}: duplicate material — combine into one row`,false);return;}
       const hasInhouse=mats.some(r=>!r.outsourced);
-      if(hasInhouse&&!it._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      if(hasInhouse&&it._uploading){show(`${label}: 📷 photo still uploading…`,false);return;}
+      if(hasInhouse&&!it._photoUrl){show(`${label}: 📷 proof photo required`,false);return;}
       totalRows+=mats.length;
     }
     if(!confirm(`Save ${totalRows} print log row${totalRows>1?'s':''} across ${itemIds.length} item${itemIds.length>1?'s':''} on machine "${f.machine}"?`)) return;
@@ -5222,14 +5235,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
       const it=f.selectedItems[id];
       const mats=(it.materials||[]).filter(r=>r.material||r.print_sqft||r.actual_sqft||r.outsourced);
       // Upload photo ONCE per ticked item; shared across that item's material rows
-      let photoUrl='';
-      if(it._photoFile){
-        try{
-          const compressed=await compressImage(it._photoFile);
-          photoUrl=await uploadFile(compressed,`print-proofs/${f.job_id}`);
-          if(!photoUrl){show(`Photo upload failed for item ${id} — STOPPING`,false);setSaving(false);return;}
-        }catch(e){show('Photo upload error: '+(e?.message||e),false);setSaving(false);return;}
-      }
+      const photoUrl=it._photoUrl||'';
       for(const r of mats){
         if(r.outsourced){
           await addLog({id:baseId+'_os'+(rowIdx)+Math.random().toString(36).slice(2,4),date:f.date,job_id:f.job_id,batch_id:f.batch_id,line_item_id:id,machine:f.machine,operator,material:r.material||'',print_sqft:0,actual_sqft:(r.os_type==='material')?0:(+r.os_sqft||0),qty_used:0,unit:'sqft',start_time:f.start_time||'',end_time:f.end_time||'',notes:((r.os_type==='material')?'OUTSOURCED MATERIAL (sent)':'OUTSOURCED WORK (sent)')+(f.notes?': '+f.notes:''),photo_url:'',is_outsourced:true,os_type:(r.os_type==='material')?'material':'work',os_status:'pending',os_sent_sqft:+r.os_sqft||0,ink_cyan:0,ink_magenta:0,ink_yellow:0,ink_black:0,ink_white:0});
@@ -5598,6 +5604,10 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
           <h3 style={{fontSize:14,fontWeight:700,color:"#ef4444",margin:0}}>➕ Log Print Job</h3>
           <button className="b bs" onClick={()=>{resetForm();setShowModal(false);}}>✕</button>
         </div>
+        {draftRestored&&<div style={{margin:"0 0 8px",padding:"5px 8px",background:"#05200e",border:"1px solid #10b98140",borderRadius:4,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:"#10b981",gap:8}}>
+          <span>↩ Restored your in-progress entry — finish &amp; Save, or discard.</span>
+          <button type="button" onClick={()=>{resetForm();setShowModal(false);}} style={{fontSize:8,padding:"2px 8px",background:"transparent",border:"1px solid #10b98140",borderRadius:3,color:"#10b981",cursor:"pointer",flexShrink:0}}>Discard</button>
+        </div>}
 
         <div className="fg f2">
           <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
@@ -5622,7 +5632,7 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:4}}>
             <span style={{fontSize:10,fontWeight:700,color:"#ef4444"}}>🎨 Tick line items to log · {selectedCount} of {batchItems.length} selected</span>
             <div style={{display:"flex",gap:4}}>
-              <button className="b bs" type="button" onClick={()=>sF(p=>{const next={};batchItems.forEach(it=>{const old=p.selectedItems?.[it.id];if(old){next[it.id]=old;}else{const {val,hint}=computeAreaFromJobSheet(it);next[it.id]={material:'',print_sqft:'',actual_sqft:val,_photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val,_edited:false};}});return {...p,selectedItems:next};})} style={{fontSize:9,padding:"2px 6px",color:"#3b82f6",borderColor:"#3b82f640"}}>Select all</button>
+              <button className="b bs" type="button" onClick={()=>sF(p=>{const next={};batchItems.forEach(it=>{const old=p.selectedItems?.[it.id];if(old){next[it.id]=old;}else{const {val,hint}=computeAreaFromJobSheet(it);next[it.id]={material:'',print_sqft:'',actual_sqft:val,_photoUrl:'',_photoPreview:'',_uploading:false,_autoHint:hint,_autoVal:val,_edited:false};}});return {...p,selectedItems:next};})} style={{fontSize:9,padding:"2px 6px",color:"#3b82f6",borderColor:"#3b82f640"}}>Select all</button>
               <button className="b bs" type="button" onClick={()=>sF(p=>({...p,selectedItems:{}}))} style={{fontSize:9,padding:"2px 6px",color:"#64748b",borderColor:"#1a2030"}}>Clear</button>
               {userCanForward&&<button className="b bs" type="button" onClick={()=>{if(!batchItems.length)return;if(!confirm('Mark ALL '+batchItems.length+' items in this batch as OUTSOURCED?\nThey will count as done (no printing needed).'))return;batchItems.forEach(it=>{if(!it.outsourced)toggleOutsourced(it);});}} style={{fontSize:9,padding:"2px 6px",color:"#f97316",borderColor:"#f9731640"}}>🌐 All outsourced</button>}
             </div>
@@ -5667,12 +5677,12 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
                   <div style={{textAlign:"right",marginTop:2,marginBottom:6}}>
                     <button type="button" onClick={()=>addMaterial(it.id)} style={{fontSize:9,padding:"2px 8px",background:"transparent",border:"1px solid #3b82f640",borderRadius:3,color:"#3b82f6",cursor:"pointer"}}>+ Add material to this item</button>
                   </div>
-                  <div style={{marginTop:4,padding:"3px 6px",background:r._photoFile?"#05200e":"#3b250620",border:"1px solid "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
-                    <span style={{color:r._photoFile?"#10b981":"#e3a008"}}>📷 photo (shared for this item's {mats.length} material{mats.length===1?'':'s'}): {r._photoFile?'attached ✓':'required'}</span>
+                  <div style={{marginTop:4,padding:"3px 6px",background:r._photoUrl?"#05200e":"#3b250620",border:"1px solid "+(r._photoUrl?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
+                    <span style={{color:r._uploading?"#3b82f6":r._photoUrl?"#10b981":"#e3a008"}}>📷 photo (shared for this item's {mats.length} material{mats.length===1?'':'s'}): {r._uploading?'uploading…':r._photoUrl?'attached ✓':'required'}</span>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       {r._photoPreview&&<img src={r._photoPreview} alt="" style={{width:24,height:24,objectFit:"cover",borderRadius:2,border:"1px solid #10b98140"}}/>}
-                      <label style={{cursor:"pointer",padding:"1px 6px",border:"1px dashed "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:2,color:r._photoFile?"#10b981":"#e3a008",fontSize:8,fontWeight:600}}>{r._photoFile?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>updateItem(it.id,{_photoFile:file,_photoPreview:ev.target.result});reader.readAsDataURL(file);}}/></label>
-                      {r._photoFile&&<button type="button" onClick={()=>updateItem(it.id,{_photoFile:null,_photoPreview:''})} style={{fontSize:8,padding:"1px 4px",background:"transparent",border:"1px solid #1a2030",borderRadius:2,color:"#64748b",cursor:"pointer"}}>✕</button>}
+                      <label style={{cursor:r._uploading?"wait":"pointer",padding:"1px 6px",border:"1px dashed "+(r._photoUrl?"#10b98140":"#e3a00840"),borderRadius:2,color:r._photoUrl?"#10b981":"#e3a008",fontSize:8,fontWeight:600,opacity:r._uploading?0.5:1}}>{r._uploading?'⏳':r._photoUrl?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" disabled={r._uploading} style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];e.target.value='';uploadItemPhoto(it.id,file);}}/></label>
+                      {r._photoUrl&&!r._uploading&&<button type="button" onClick={()=>updateItem(it.id,{_photoUrl:'',_photoPreview:''})} style={{fontSize:8,padding:"1px 4px",background:"transparent",border:"1px solid #1a2030",borderRadius:2,color:"#64748b",cursor:"pointer"}}>✕</button>}
                     </div>
                   </div>
                 </div>}
@@ -5689,12 +5699,12 @@ function PrintPage({logs,machines,materials,materialsV2,team,stock,addLog,jobs,b
             <F l="Total used sqft * (stock)"><input className="in mn" type="number" step="0.01" value={f.lump.print_sqft} onChange={e=>sF(p=>({...p,lump:{...p.lump,print_sqft:e.target.value}}))} style={{fontSize:9}}/></F>
           </div>
           {f.lump.material&&(()=>{const bal=balanceFor(f.lump.material);return bal.balance!==null?<div style={{marginTop:4,fontSize:8,color:"#8b949e"}}>📦 Rem <strong style={{color:bal.balance<=0?"#f47067":"#4ade80"}}>{bal.balance.toFixed(0)}</strong>{f.lump.print_sqft&&+f.lump.print_sqft>0?<span> → <strong style={{color:(bal.balance-(+f.lump.print_sqft))<0?"#f47067":"#8b949e"}}>{(bal.balance-(+f.lump.print_sqft)).toFixed(0)}</strong></span>:null}</div>:null;})()}
-          <div style={{marginTop:6,padding:"3px 6px",background:f.lump._photoFile?"#05200e":"#3b250620",border:"1px solid "+(f.lump._photoFile?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
-            <span style={{color:f.lump._photoFile?"#10b981":"#e3a008"}}>📷 one photo for the whole roll: {f.lump._photoFile?'attached ✓':'required'}</span>
+          <div style={{marginTop:6,padding:"3px 6px",background:f.lump._photoUrl?"#05200e":"#3b250620",border:"1px solid "+(f.lump._photoUrl?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
+            <span style={{color:f.lump._uploading?"#3b82f6":f.lump._photoUrl?"#10b981":"#e3a008"}}>📷 one photo for the whole roll: {f.lump._uploading?'uploading…':f.lump._photoUrl?'attached ✓':'required'}</span>
             <div style={{display:"flex",alignItems:"center",gap:4}}>
               {f.lump._photoPreview&&<img src={f.lump._photoPreview} alt="" style={{width:24,height:24,objectFit:"cover",borderRadius:2}}/>}
-              <label style={{cursor:"pointer",padding:"1px 6px",border:"1px dashed "+(f.lump._photoFile?"#10b98140":"#e3a00840"),borderRadius:2,color:f.lump._photoFile?"#10b981":"#e3a008",fontSize:8,fontWeight:600}}>{f.lump._photoFile?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>sF(p=>({...p,lump:{...p.lump,_photoFile:file,_photoPreview:ev.target.result}}));reader.readAsDataURL(file);}}/></label>
-              {f.lump._photoFile&&<button type="button" onClick={()=>sF(p=>({...p,lump:{...p.lump,_photoFile:null,_photoPreview:''}}))} style={{fontSize:8,padding:"1px 4px",background:"transparent",border:"1px solid #1a2030",borderRadius:2,color:"#64748b",cursor:"pointer"}}>✕</button>}
+              <label style={{cursor:f.lump._uploading?"wait":"pointer",padding:"1px 6px",border:"1px dashed "+(f.lump._photoUrl?"#10b98140":"#e3a00840"),borderRadius:2,color:f.lump._photoUrl?"#10b981":"#e3a008",fontSize:8,fontWeight:600,opacity:f.lump._uploading?0.5:1}}>{f.lump._uploading?'⏳':f.lump._photoUrl?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" disabled={f.lump._uploading} style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];e.target.value='';uploadLumpPhoto(file);}}/></label>
+              {f.lump._photoUrl&&!f.lump._uploading&&<button type="button" onClick={()=>sF(p=>({...p,lump:{...p.lump,_photoUrl:'',_photoPreview:''}}))} style={{fontSize:8,padding:"1px 4px",background:"transparent",border:"1px solid #1a2030",borderRadius:2,color:"#64748b",cursor:"pointer"}}>✕</button>}
             </div>
           </div>
           <div style={{fontSize:8,color:"#60a5fa",marginTop:6}}>✓ Covers {selectedCount} ticked item{selectedCount===1?'':'s'} · stock deducts once</div>
