@@ -5894,7 +5894,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
   const [showModal,setShowModal]=useState(false);
   const [saving,setSaving]=useState(false);
   // ── Patch T (21 May 2026 PM) — multi-item logging ──
-  // selectedItems: { [line_item_id]: { material, qty_used, actual_qty, _photoFile, _photoPreview, _autoHint } }
+  // selectedItems: { [line_item_id]: { materials:[...], _photoUrl, _photoPreview, _uploading, _autoHint, _autoVal } }
   // Each ticked line item becomes one fab_logs row on save. Photo required PER ITEM.
   // Shared across rows: date, process, job_id, batch_id, start_time, end_time, notes.
   const blankForm={
@@ -6005,7 +6005,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
         const {val,hint}=computeAreaFromJobSheet(item);
         next[itemId]={
           materials:[{material:'',qty_used:'',actual_qty:val,_edited:false}],
-          _photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val
+          _photoUrl:'',_photoPreview:'',_uploading:false,_autoHint:hint,_autoVal:val
         };
       }
       return {...p,selectedItems:next};
@@ -6029,7 +6029,15 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
   });
   const selectedCount=Object.keys(f.selectedItems||{}).length;
 
-  const resetForm=()=>sF(blankForm);
+  // Patch (08 Jun 2026) — DRAFT RESUME (mirrors PrintPage). Proof photos upload on attach (→ _photoUrl),
+  // so the whole draft is serialisable and autosaves to localStorage; a mobile camera-intent page reload
+  // can be resumed instead of redone. Key is FabPage-specific.
+  const DRAFT_KEY='iprint_fablog_draft_v1';
+  const [draftRestored,setDraftRestored]=useState(false);
+  const resetForm=()=>{sF(blankForm);setDraftRestored(false);try{localStorage.removeItem(DRAFT_KEY);}catch(e){}};
+  React.useEffect(()=>{try{if(showModal&&f.job_id){localStorage.setItem(DRAFT_KEY,JSON.stringify({f,ts:Date.now()}));}}catch(e){}},[f,showModal]);
+  React.useEffect(()=>{try{const raw=localStorage.getItem(DRAFT_KEY);if(!raw)return;const saved=JSON.parse(raw);const fresh=saved&&saved.ts&&(Date.now()-saved.ts<6*60*60*1000);const hasContent=saved&&saved.f&&saved.f.job_id&&Object.keys(saved.f.selectedItems||{}).length>0;if(fresh&&hasContent){const sf=saved.f;const si={};Object.keys(sf.selectedItems||{}).forEach(k=>{si[k]={...sf.selectedItems[k],_uploading:false};});sf.selectedItems=si;sF(sf);setShowModal(true);setDraftRestored(true);}else{localStorage.removeItem(DRAFT_KEY);}}catch(e){try{localStorage.removeItem(DRAFT_KEY);}catch(_){}}},[]);
+  const uploadItemPhoto=async(itemId,file)=>{if(!file)return;if(!f.job_id){show("Pick a job first",false);return;}updateItem(itemId,{_uploading:true});try{const c=await compressImageFab(file);const url=await uploadFile(c,`fab-proofs/${f.job_id}`);if(!url){show("Photo upload failed — retry",false);updateItem(itemId,{_uploading:false});return;}updateItem(itemId,{_photoUrl:url,_photoPreview:url,_uploading:false});}catch(e){show("Photo upload error: "+(e?.message||e),false);updateItem(itemId,{_uploading:false});}};
 
   const compressImageFab=async(file)=>new Promise((res,rej)=>{
     const img=new Image();
@@ -6072,7 +6080,8 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
       // Duplicate material check WITHIN this item
       const names=mats.map(r=>r.material);
       if(new Set(names).size!==names.length){show(`${label}: duplicate material — combine into one row`,false);return;}
-      if(!it._photoFile){show(`${label}: 📷 proof photo required`,false);return;}
+      if(it._uploading){show(`${label}: 📷 photo still uploading…`,false);return;}
+      if(!it._photoUrl){show(`${label}: 📷 proof photo required`,false);return;}
       totalRows+=mats.length;
     }
     if(!confirm(`Save ${totalRows} fab log row${totalRows>1?'s':''} across ${itemIds.length} item${itemIds.length>1?'s':''} for process "${f.process}"?`)) return;
@@ -6083,13 +6092,8 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
     for(const id of itemIds){
       const it=f.selectedItems[id];
       const mats=(it.materials||[]).filter(r=>r.material||r.qty_used||r.actual_qty);
-      // Upload photo ONCE per ticked item; shared across that item's material rows
-      let photoUrl='';
-      try{
-        const compressed=await compressImageFab(it._photoFile);
-        photoUrl=await uploadFile(compressed,`fab-proofs/${f.job_id}`);
-        if(!photoUrl){show(`Photo upload failed for item ${id} — STOPPING`,false);setSaving(false);return;}
-      }catch(e){show('Photo upload error: '+(e?.message||e),false);setSaving(false);return;}
+      // Photo already uploaded on attach (Patch 08-Jun) — use the stored URL.
+      const photoUrl=it._photoUrl||'';
       for(const r of mats){
         const u=unitByName[normMat(r.material)]||'roll';
         const waste=(+r.qty_used||0)-(+r.actual_qty||0);
@@ -6268,6 +6272,11 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
           <button className="b bs" onClick={()=>{resetForm();setShowModal(false);}}>✕</button>
         </div>
 
+        {draftRestored&&<div style={{margin:"0 0 8px",padding:"5px 8px",background:"#05200e",border:"1px solid #10b98140",borderRadius:4,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:9,color:"#10b981",gap:8}}>
+          <span>↩ Restored your in-progress entry — finish &amp; Save, or discard.</span>
+          <button type="button" onClick={()=>{resetForm();setShowModal(false);}} style={{fontSize:8,padding:"2px 8px",background:"transparent",border:"1px solid #10b98140",borderRadius:3,color:"#10b981",cursor:"pointer",flexShrink:0}}>Discard</button>
+        </div>}
+
         <div className="fg f2">
           <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
           <F l="Process *"><select className="in" value={f.process} onChange={e=>sF(p=>({...p,process:e.target.value}))}><option value="">— pick —</option>{(FAB_P||[]).map(p=><option key={p} value={p}>{p}</option>)}</select></F>
@@ -6296,7 +6305,7 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:4}}>
             <span style={{fontSize:10,fontWeight:700,color:"#dc2626"}}>🧱 Tick line items to log · {selectedCount} of {batchItems.length} selected</span>
             <div style={{display:"flex",gap:4}}>
-              <button className="b bs" type="button" onClick={()=>sF(p=>{const next={};batchItems.forEach(it=>{const old=p.selectedItems?.[it.id];if(old){next[it.id]=old;}else{const {val,hint}=computeAreaFromJobSheet(it);next[it.id]={material:'',qty_used:'',actual_qty:val,_photoFile:null,_photoPreview:'',_autoHint:hint,_autoVal:val,_edited:false};}});return {...p,selectedItems:next};})} style={{fontSize:9,padding:"2px 6px",color:"#3b82f6",borderColor:"#3b82f640"}}>Select all</button>
+              <button className="b bs" type="button" onClick={()=>sF(p=>{const next={};batchItems.forEach(it=>{const old=p.selectedItems?.[it.id];if(old){next[it.id]=old;}else{const {val,hint}=computeAreaFromJobSheet(it);next[it.id]={material:'',qty_used:'',actual_qty:val,_photoUrl:'',_photoPreview:'',_uploading:false,_autoHint:hint,_autoVal:val,_edited:false};}});return {...p,selectedItems:next};})} style={{fontSize:9,padding:"2px 6px",color:"#3b82f6",borderColor:"#3b82f640"}}>Select all</button>
               <button className="b bs" type="button" onClick={()=>sF(p=>({...p,selectedItems:{}}))} style={{fontSize:9,padding:"2px 6px",color:"#64748b",borderColor:"#1a2030"}}>Clear</button>
             </div>
           </div>
@@ -6336,12 +6345,12 @@ function FabPage({logs,materials,materialsV2,team,stock,addLog,jobs,batches,item
                   <div style={{textAlign:"right",marginTop:2,marginBottom:6}}>
                     <button type="button" onClick={()=>addMaterial(it.id)} style={{fontSize:9,padding:"2px 8px",background:"transparent",border:"1px solid #3b82f640",borderRadius:3,color:"#3b82f6",cursor:"pointer"}}>+ Add material to this item</button>
                   </div>
-                  <div style={{marginTop:4,padding:"3px 6px",background:r._photoFile?"#05200e":"#3b250620",border:"1px solid "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
-                    <span style={{color:r._photoFile?"#10b981":"#e3a008"}}>📷 photo (shared for this item's {mats.length} material{mats.length===1?'':'s'}): {r._photoFile?'attached ✓':'required'}</span>
+                  <div style={{marginTop:4,padding:"3px 6px",background:r._photoUrl?"#05200e":"#3b250620",border:"1px solid "+(r._photoUrl?"#10b98140":"#e3a00840"),borderRadius:3,display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:8,gap:6}}>
+                    <span style={{color:r._uploading?"#3b82f6":r._photoUrl?"#10b981":"#e3a008"}}>📷 photo (shared for this item's {mats.length} material{mats.length===1?'':'s'}): {r._uploading?'uploading…':r._photoUrl?'attached ✓':'required'}</span>
                     <div style={{display:"flex",alignItems:"center",gap:4}}>
                       {r._photoPreview&&<img src={r._photoPreview} alt="" style={{width:24,height:24,objectFit:"cover",borderRadius:2,border:"1px solid #10b98140"}}/>}
-                      <label style={{cursor:"pointer",padding:"1px 6px",border:"1px dashed "+(r._photoFile?"#10b98140":"#e3a00840"),borderRadius:2,color:r._photoFile?"#10b981":"#e3a008",fontSize:8,fontWeight:600}}>{r._photoFile?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>updateItem(it.id,{_photoFile:file,_photoPreview:ev.target.result});reader.readAsDataURL(file);}}/></label>
-                      {r._photoFile&&<button type="button" onClick={()=>updateItem(it.id,{_photoFile:null,_photoPreview:''})} style={{fontSize:8,padding:"1px 4px",background:"transparent",border:"1px solid #1a2030",borderRadius:2,color:"#64748b",cursor:"pointer"}}>✕</button>}
+                      <label style={{cursor:r._uploading?"wait":"pointer",padding:"1px 6px",border:"1px dashed "+(r._photoUrl?"#10b98140":"#e3a00840"),borderRadius:2,color:r._photoUrl?"#10b981":"#e3a008",fontSize:8,fontWeight:600,opacity:r._uploading?0.5:1}}>{r._uploading?'⏳':r._photoUrl?'🔄':'📸 Attach'}<input type="file" accept="image/*" capture="environment" disabled={r._uploading} style={{display:"none"}} onChange={e=>{const file=e.target.files?.[0];e.target.value='';uploadItemPhoto(it.id,file);}}/></label>
+                      {r._photoUrl&&!r._uploading&&<button type="button" onClick={()=>updateItem(it.id,{_photoUrl:'',_photoPreview:''})} style={{fontSize:8,padding:"1px 4px",background:"transparent",border:"1px solid #1a2030",borderRadius:2,color:"#64748b",cursor:"pointer"}}>✕</button>}
                     </div>
                   </div>
                 </div>}
