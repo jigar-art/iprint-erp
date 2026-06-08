@@ -1819,7 +1819,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
           {pg==="fab"&&<FabPage logs={fLogs} pLogs={pLogs} updatePrintLog={updatePrintLog} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
-          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy}/>}
+          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy} jobs={jobs}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} ol={osLogs} materialsV2={masterData.materialsV2||[]}/>}
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
@@ -6490,7 +6490,7 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
 }
 
 // DISPATCH
-function DispPage({logs,delBoys,addLog,addNewDelBoy}){const [sf,ssf]=useState(false);const [dq,setDq]=useState(""); // 26 May 26: in-page search (Job#, Boy, Vehicle, Challan, LR)
+function DispPage({logs,delBoys,addLog,addNewDelBoy,jobs}){const [sf,ssf]=useState(false);const [dq,setDq]=useState(""); // 26 May 26: in-page search (Job#, Boy, Vehicle, Challan, LR)
 const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
   // 09 May 26: Del Boy is a typeahead combobox — autocomplete existing + add new on the fly.
   // boysLocal mirrors the delBoys prop but lets us append newly-added boys without waiting
@@ -6517,7 +6517,17 @@ const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",deliver
   };
   const add=async()=>{
     if(!f.job_id){alert("Enter Job#");return;}
-    const payload={id:"D"+uid(),...f,install_date:f.install_date||null};
+    // Normalize-on-save (08 Jun 2026): dispatch Job# is free-text. Expand a bare number
+    // (e.g. "10118") to its canonical id ("10118-2627") when exactly one job matches;
+    // block ambiguous (multi-FY) entries; confirm before logging an unknown number.
+    let jid=String(f.job_id).trim();
+    if(jid && !(jobs||[]).some(j=>j.id===jid)){
+      const m=(jobs||[]).filter(j=>j.id.startsWith(jid+'-'));
+      if(m.length===1){jid=m[0].id;}
+      else if(m.length>1){alert(`Job# "${jid}" is ambiguous — matches ${m.map(x=>x.id).join(', ')}. Enter the full Job# (with -FY).`);return;}
+      else if(!confirm(`Job# "${jid}" doesn't match any job. Log dispatch anyway?`)){return;}
+    }
+    const payload={id:"D"+uid(),...f,job_id:jid,install_date:f.install_date||null};
     await addLog(payload);
     sF(p=>({...p,job_id:"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""}));
   };
