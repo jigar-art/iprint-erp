@@ -2623,7 +2623,7 @@ function JobDetail({j,firms,togDept,addBatchToJob,show,updateJobStatus,updateJob
       </div>
     </div>:null;})()}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-      {[{l:"📊 PPT",field:"ppt_urls",folder:"job-ppt",icon:"📊"},{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄",batchField:"dc_urls"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"},{l:"📑 INVOICE DOCS",field:"invoice_docs_urls",folder:"invoice-docs",icon:"📑",batchField:"invoice_docs_urls"}].map(sec=>{
+      {[{l:"📊 PPT",field:"ppt_urls",folder:"job-ppt",icon:"📊"},{l:"📎 PO COPIES",field:"po_file_url",folder:"po",icon:"📄"},{l:"📎 DELIVERY CHALLANS",field:"dc_file_url",folder:"dc",icon:"📄",batchField:"dc_urls"},{l:"⚖️ WEIGHT PHOTO",field:"weight_photo_urls",folder:"weight-photos",icon:"⚖️"},{l:"📎 INSTALLATION CERTS",field:"ic_file_url",folder:"ic",icon:"📄"},{l:"📸 WORK PHOTOS",field:"work_photos",folder:"photos",icon:"📸"},{l:"📑 INVOICE DOCS",field:"invoice_docs_urls",folder:"invoice-docs",icon:"📑",batchField:"invoice_docs_urls"}].map(sec=>{
         const raw=j[sec.field];const jobUrls=Array.isArray(raw)?raw:raw?[raw]:[];
         // 26 Apr 26: generalized DC-only aggregation to any section with batchField.
         // DC and INVOICE DOCS roll up job-level + per-batch entries so everyone sees everything.
