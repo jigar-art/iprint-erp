@@ -7213,7 +7213,7 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
 // ══════════════════════════════════════════════════════════
 function GRNReceivePage({prs, setPrs, jobs, user, show}) {
   const GRN_RECEIVERS = ['Murli Shetty', 'Manoj', 'Shreya'];
-  const STATUS_FILTERS = ['PO Generated','PO Sent','Approved','All'];
+  const STATUS_FILTERS = ['PO Generated','Partially Received','PO Sent','Approved','All'];
 
   const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
@@ -7229,10 +7229,16 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
     items_received: []
   });
   const [saving, setSaving] = React.useState(false);
+  const [mats, setMats] = React.useState([]);
+  React.useEffect(() => { let on=true; sb.from('materials_master_v2').select('name,unit').eq('active',true).order('name').then(({data})=>{ if(on) setMats(data||[]); }); return ()=>{on=false;}; }, []);
+  const SERVICE_RE = /install|transport|on[ -]?pole|lollipop|lollypop|charge|recce|labour|labor|fitting/i;
+  const isServiceName = n => SERVICE_RE.test(n||'');
+  const matUnit = nm => { const m = mats.find(z => z.name===nm); return m ? (m.unit||'nos') : 'nos'; };
+  const suggestMat = name => { const n=(name||'').toLowerCase().split('(')[0].trim(); if(!n) return ''; let hit=''; for(const m of mats){ const mn=(m.name||'').toLowerCase(); if(n===mn||n.includes(mn)||mn.includes(n)){ hit=m.name; break; } } return hit; };
 
   const filtered = React.useMemo(() => {
     const list = filter === 'All'
-      ? prs.filter(p => ['Approved','PO Generated','PO Sent'].includes(p.status))
+      ? prs.filter(p => ['Approved','PO Generated','Partially Received','PO Sent'].includes(p.status))
       : prs.filter(p => p.status === filter);
     const q = (searchQ||'').trim().toLowerCase();
     const searched = q ? list.filter(p => {
@@ -7273,6 +7279,9 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
         // For area-mode lines we display the computed area as the "ordered amount"
         // (e.g. 850 ft²), but we still keep raw qty for legacy/per-roll/per-piece lines.
         const isAreaMode = um && um.needsWH && area > 0 && um.value !== 'Roll M×M (per roll)';
+        const orderedAmt = isAreaMode ? area : (+x.qty || 0);
+        const already = +x.received_qty || 0;
+        const svc = (typeof x.is_service === 'boolean') ? x.is_service : isServiceName(x.product);
         return {
           index: i,
           product: x.product,
@@ -7281,10 +7290,12 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
           height: x.height || '',
           area: area,
           ordered_qty: +x.qty || 0,
-          ordered_display: isAreaMode ? area : (+x.qty || 0),
+          ordered_display: orderedAmt,
           per: isAreaMode ? (um.displayFn(area).split(' ')[1] || um.dimUnit || 'nos') : (x.per || (um ? um.value : 'nos')),
-          received_qty: isAreaMode ? area : (+x.qty || 0),
-          ok: true
+          received_so_far: already,
+          received_now: Math.max(0, orderedAmt - already),
+          is_service: svc,
+          stock_material: x.stock_material || (svc ? '' : suggestMat(x.product))
         };
       })
     });
@@ -7296,92 +7307,96 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
     setSaving(true);
     const grn_id = 'GRN' + Date.now();
     const nowIso = new Date().toISOString();
+    const lines = gf.items_received || [];
+    const ordOf = x => (x.ordered_display !== undefined && x.ordered_display !== null) ? +x.ordered_display : +x.ordered_qty;
+    const allComplete = lines.every(x => x.is_service || ((+x.received_so_far||0) + (+x.received_now||0)) >= ordOf(x));
+    const newStatus = allComplete ? 'Completed' : 'Partially Received';
+    const origItems = Array.isArray(receiving.items) ? receiving.items : [];
+    const newItems = origItems.map((it, i) => {
+      const ln = lines.find(l => l.index === i);
+      if (!ln) return it;
+      return { ...it, received_qty: (+ln.received_so_far||0) + (+ln.received_now||0), stock_material: ln.is_service ? null : (ln.stock_material||null), is_service: !!ln.is_service };
+    });
+    const variances = lines.filter(x => !x.is_service && ((+x.received_so_far||0)+(+x.received_now||0)) !== ordOf(x));
     const updates = {
-      status: gf.partial_delivery ? 'PO Sent' : 'Completed',
+      status: newStatus,
       received_by: gf.received_by,
       received_at: new Date(gf.received_at).toISOString(),
       grn_id,
+      invoice_no: gf.invoice_no || null,
+      partial_delivery: !allComplete,
+      items: newItems,
       received_notes: [
         gf.invoice_no ? 'Invoice: ' + gf.invoice_no : '',
         gf.received_notes || '',
-        gf.partial_delivery ? 'PARTIAL DELIVERY' : '',
-        gf.items_received.some(x => +x.received_qty !== +(x.ordered_display ?? x.ordered_qty))
-          ? 'Qty variances: ' + gf.items_received.filter(x => +x.received_qty !== +(x.ordered_display ?? x.ordered_qty))
-              .map(x => x.product + ' (ordered ' + (x.ordered_display ?? x.ordered_qty) + ', received ' + x.received_qty + ')').join('; ')
-          : ''
+        allComplete ? '' : 'PARTIAL - balance pending',
+        variances.length ? 'Variances: ' + variances.map(x=>x.product+' (ord '+ordOf(x)+', recv '+((+x.received_so_far||0)+(+x.received_now||0))+')').join('; ') : ''
       ].filter(Boolean).join(' | ') || null,
-      invoice_no: gf.invoice_no || null,
-      partial_delivery: gf.partial_delivery,
       last_status_change_at: nowIso
     };
     const {error} = await sb.from('purchase_requests').update(updates).eq('id', receiving.id);
     if (error) { show('Save failed: ' + error.message, false); setSaving(false); return; }
-
-    // P0-1 (Fix C): mirror per-item rows into grn table so future GRN-table
-    // queries can find this material receipt. Failure here logs only — the
-    // PR itself is already updated, no rollback needed.
     try {
-      const grnRows = (gf.items_received || []).map((x, i) => ({
-        id: grn_id + '-' + i,
+      const grnRows = lines.filter(x => !x.is_service && x.stock_material && (+x.received_now||0) > 0).map((x) => ({
+        id: grn_id + '-' + x.index,
         date: gf.received_at,
         supplier: receiving.vendor_name || null,
-        material: x.product || null,
-        qty: +x.received_qty || 0,
-        unit: x.per || null,
+        material: x.stock_material,
+        qty: +x.received_now || 0,
+        unit: matUnit(x.stock_material),
         invoice_no: gf.invoice_no || null,
         job_id: receiving.job_id || null,
         inward_type: 'PR',
         received_by: gf.received_by
       }));
-      if (grnRows.length) {
-        const {error: grnErr} = await sb.from('grn').insert(grnRows);
-        if (grnErr) console.warn('[P0-1] grn insert failed:', grnErr.message);
-      }
-    } catch (e) {
-      console.warn('[P0-1] grn insert exception:', e);
-    }
-
+      if (grnRows.length) { const {error: grnErr} = await sb.from('grn').insert(grnRows); if (grnErr) console.warn('[GRN] insert failed:', grnErr.message); }
+    } catch (e) { console.warn('[GRN] insert exception:', e); }
     const updated = {...receiving, ...updates};
     setPrs(p => p.map(x => x.id === receiving.id ? updated : x));
-
-    // WhatsApp notify Jigar + group
-    const itemsSummary = gf.items_received.map(x => x.product + ' x' + x.received_qty + ' ' + x.per).join(', ');
-    const waMsg = (gf.partial_delivery
-      ? 'PARTIAL DELIVERY recorded'
-      : 'Material RECEIVED and GRN recorded') +
-      ' — ' + receiving.pr_no +
-      '\nVendor: ' + receiving.vendor_name +
-      '\nItems: ' + itemsSummary +
-      '\nGRN: ' + grn_id +
-      (gf.invoice_no ? '\nInvoice: ' + gf.invoice_no : '') +
-      (gf.received_notes ? '\nNotes: ' + gf.received_notes : '') +
-      '\nReceived by: ' + gf.received_by +
-      '\nStatus: ' + (gf.partial_delivery ? 'Partial — balance pending' : 'COMPLETED');
+    const itemsSummary = lines.map(x => x.product + ' x' + ((+x.received_so_far||0)+(+x.received_now||0))).join(', ');
+    const waMsg = (allComplete ? 'Material RECEIVED - GRN recorded' : 'PARTIAL DELIVERY recorded') +
+      ' - ' + receiving.pr_no + '\nVendor: ' + receiving.vendor_name + '\nItems: ' + itemsSummary +
+      '\nGRN: ' + grn_id + (gf.invoice_no ? '\nInvoice: ' + gf.invoice_no : '') +
+      '\nReceived by: ' + gf.received_by + '\nStatus: ' + newStatus;
     sendWhatsApp(WA_NUMBERS['Jigar'], waMsg, 'iprint_grn_received');
-
-    // Auto-notify the original requestor
     const reqPhone = WA_NUMBERS[receiving.created_by];
     if (reqPhone && receiving.created_by !== 'Jigar') {
-      const reqMsg = (gf.partial_delivery
-        ? `📦 *PARTIAL DELIVERY* received for your PR *${receiving.pr_no}*.\n\nVendor: ${receiving.vendor_name}\nGRN: ${grn_id}\nReceived by: ${gf.received_by}\n\nBalance still pending. Track status in *My PRs* tab.`
-        : `✅ *Material RECEIVED* for your PR *${receiving.pr_no}* — status now COMPLETED.\n\nVendor: ${receiving.vendor_name}\nGRN: ${grn_id}\nReceived by: ${gf.received_by}\n\nView details in *My PRs* tab.`);
+      const reqMsg = (allComplete
+        ? `\u2705 *Material RECEIVED* for your PR *${receiving.pr_no}* - status now COMPLETED.\n\nVendor: ${receiving.vendor_name}\nGRN: ${grn_id}\nReceived by: ${gf.received_by}`
+        : `\ud83d\udce6 *PARTIAL DELIVERY* received for your PR *${receiving.pr_no}*.\n\nVendor: ${receiving.vendor_name}\nGRN: ${grn_id}\nBalance still pending - track in *My PRs*.`);
       sendWhatsApp(reqPhone, reqMsg, 'iprint_grn_requestor');
     }
-
     setSaving(false);
     setReceiving(null);
-    show('✅ GRN ' + grn_id + ' recorded! Status → ' + (gf.partial_delivery ? 'PO Sent (partial)' : 'Completed'));
+    show('GRN ' + grn_id + ' saved. Status -> ' + newStatus);
   };
+
+  const closeNoMaterial = async () => {
+    if (!receiving) return;
+    setSaving(true);
+    const nowIso = new Date().toISOString();
+    const updates = { status:'Completed', received_by: gf.received_by, received_at: new Date(gf.received_at).toISOString(),
+      grn_id: 'NOMAT'+Date.now(), partial_delivery:false, last_status_change_at: nowIso,
+      received_notes: ['Closed - no material (service/charge PO)', gf.received_notes||''].filter(Boolean).join(' | ') };
+    const {error} = await sb.from('purchase_requests').update(updates).eq('id', receiving.id);
+    setSaving(false);
+    if (error) { show('Close failed: '+error.message, false); return; }
+    setPrs(p => p.map(x => x.id===receiving.id ? {...receiving,...updates} : x));
+    setReceiving(null);
+    show('PO closed (no material). Status -> Completed');
+  };
+
 
   const stCol = {
     'Approved':     {bg:'#4ade8020',c:'#4ade80'},
     'PO Generated': {bg:'#06b6d420',c:'#06b6d4'},
     'PO Sent':      {bg:'#3b82f620',c:'#3b82f6'},
+    'Partially Received': {bg:'#f59e0b20',c:'#f59e0b'},
     'Completed':    {bg:'#8b5cf620',c:'#8b5cf6'},
   };
   const firmColor = code => ({JPP:'#e3a008',JXT:'#3b82f6',VHD:'#8b5cf6'})[code]||'#64748b';
 
-  const pendingCount = prs.filter(p => ['PO Sent','PO Generated'].includes(p.status)).length;
+  const pendingCount = prs.filter(p => ['PO Sent','PO Generated','Partially Received'].includes(p.status)).length;
 
   return (
     <div style={{padding:12, overflowY:'auto', height:'100%'}}>
@@ -7446,84 +7461,67 @@ function GRNReceivePage({prs, setPrs, jobs, user, show}) {
             </div>
           </div>
 
-          {/* Items received — qty check */}
+          {/* Items received - map to stock + partial balance */}
           <p style={{fontSize:8, color:'#8b5cf6', fontWeight:700, marginBottom:6}}>ITEMS RECEIVED</p>
-          <div style={{background:'#060810', borderRadius:6, padding:'6px 8px', marginBottom:8}}>
-            <table style={{width:'100%'}}>
-              <thead><tr>
-                <th style={{fontSize:7, color:'#64748b', textAlign:'left', paddingBottom:4}}>Item</th>
-                <th style={{fontSize:7, color:'#64748b', textAlign:'right', width:70}}>Ordered</th>
-                <th style={{fontSize:7, color:'#64748b', textAlign:'right', width:90}}>Received Qty</th>
-                <th style={{fontSize:7, color:'#64748b', textAlign:'center', width:50}}>OK?</th>
-              </tr></thead>
-              <tbody>
-                {gf.items_received.map((x, i) => {
-                  const orderedRef = (x.ordered_display !== undefined && x.ordered_display !== null) ? +x.ordered_display : +x.ordered_qty;
-                  const variance = +x.received_qty !== orderedRef;
-                  const dimHint = x.unit_mode && x.width && x.height ? ` (${x.width}×${x.height} ${x.unit_mode.includes('M×M')?'m':''})` : '';
-                  return (
-                    <tr key={i}>
-                      <td style={{fontSize:9, color:'#c9d1d9', paddingRight:8, paddingTop:4}}>{x.product}<span style={{fontSize:7,color:'#64748b'}}>{dimHint}</span></td>
-                      <td style={{fontSize:9, color:'#64748b', textAlign:'right', paddingTop:4}}>{orderedRef} {x.per}</td>
-                      <td style={{textAlign:'right', paddingTop:2}}>
-                        <input className="in mn" type="number" min="0" value={x.received_qty}
-                          onChange={e => setGf(p => ({...p, items_received: p.items_received.map((it,xi) => xi===i ? {...it, received_qty: e.target.value} : it)}))}
-                          style={{fontSize:9, padding:'2px 4px', width:70, textAlign:'right',
-                            borderColor: variance ? '#f59e0b' : '#1a2030',
-                            color: variance ? '#f59e0b' : 'inherit'}}/>
-                        <span style={{fontSize:8, color:'#64748b', marginLeft:3}}>{x.per}</span>
-                      </td>
-                      <td style={{textAlign:'center', paddingTop:4}}>
-                        {variance
-                          ? <span style={{fontSize:9, color:'#f59e0b', fontWeight:700}}>⚠️</span>
-                          : <span style={{fontSize:9, color:'#4ade80'}}>✓</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {gf.items_received.some(x => +x.received_qty !== +(x.ordered_display ?? x.ordered_qty)) && (
-              <div style={{marginTop:6, fontSize:8, color:'#f59e0b'}}>
-                ⚠️ Quantity variance detected — will be noted in GRN
-              </div>
-            )}
+          <div style={{display:'flex', flexDirection:'column', gap:6, marginBottom:8}}>
+            {gf.items_received.map((x, i) => {
+              const ordered = (x.ordered_display!=null)?+x.ordered_display:+x.ordered_qty;
+              const recvNow = +x.received_now||0;
+              const remaining = Math.max(0, ordered - (+x.received_so_far||0) - recvNow);
+              const setIt = patch => setGf(p=>({...p, items_received: p.items_received.map((it,xi)=>xi===i?{...it,...patch}:it)}));
+              return (
+                <div key={i} style={{background:'#060810', border:'1px solid #1a2030', borderRadius:6, padding:'8px 10px'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+                    <span style={{fontSize:10, color:'#c9d1d9', fontWeight:600}}>{x.product}</span>
+                    <span style={{display:'inline-flex', border:'1px solid #1a2030', borderRadius:5, overflow:'hidden', fontSize:8}}>
+                      <span onClick={()=>setIt({is_service:false})} style={{padding:'2px 8px', cursor:'pointer', background:!x.is_service?'#06b6d420':'transparent', color:!x.is_service?'#06b6d4':'#64748b'}}>Material</span>
+                      <span onClick={()=>setIt({is_service:true})} style={{padding:'2px 8px', cursor:'pointer', background:x.is_service?'#f59e0b20':'transparent', color:x.is_service?'#f59e0b':'#64748b'}}>Service</span>
+                    </span>
+                  </div>
+                  {x.is_service
+                    ? <div style={{fontSize:8, color:'#64748b', marginTop:4}}>Service line - not posted to stock. Counts as received.</div>
+                    : <div style={{marginTop:6}}>
+                        <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Map to stock material</span>
+                        <select className="in" value={x.stock_material||''} onChange={e=>setIt({stock_material:e.target.value})} style={{fontSize:9, padding:'3px 4px', width:'100%', borderColor:x.stock_material?'#1a2030':'#f59e0b'}}>
+                          <option value="">- select material (else not added to stock) -</option>
+                          {mats.map(m=><option key={m.name} value={m.name}>{m.name} ({m.unit||'nos'})</option>)}
+                        </select>
+                        <div style={{display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:6, marginTop:6, alignItems:'end'}}>
+                          <div><span style={{fontSize:7,color:'#64748b',display:'block'}}>Ordered</span><span style={{fontSize:10,color:'#8b949e'}}>{ordered} {x.per}</span></div>
+                          <div><span style={{fontSize:7,color:'#64748b',display:'block'}}>Already</span><span style={{fontSize:10,color:'#8b949e'}}>{+x.received_so_far||0}</span></div>
+                          <div><span style={{fontSize:7,color:'#64748b',display:'block'}}>Received now</span><input className="in mn" type="number" min="0" value={x.received_now} onChange={e=>setIt({received_now:e.target.value})} style={{fontSize:9,padding:'2px 4px',width:'100%',textAlign:'right',borderColor:'#06b6d4'}}/></div>
+                          <div><span style={{fontSize:7,color:'#64748b',display:'block'}}>Remaining</span><span style={{fontSize:10,fontWeight:700,color:remaining>0?'#f59e0b':'#4ade80'}}>{remaining}</span></div>
+                        </div>
+                      </div>}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Notes + Partial */}
-          <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:8, marginBottom:10, alignItems:'center'}}>
-            <div>
-              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Notes / Remarks</span>
-              <input className="in" value={gf.received_notes}
-                onChange={e=>setGf(p=>({...p,received_notes:e.target.value}))}
-                placeholder="Any observations, quality issues, damage notes..."
-                style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+          {/* Notes */}
+          <div style={{marginBottom:10}}>
+            <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:2}}>Notes / Remarks</span>
+            <input className="in" value={gf.received_notes} onChange={e=>setGf(p=>({...p,received_notes:e.target.value}))} placeholder="Quality issues, damage, etc." style={{fontSize:9, padding:'3px 4px', width:'100%'}}/>
+          </div>
+
+          {/* Computed status preview */}
+          {(() => {
+            const ordOf = x => (x.ordered_display!=null)?+x.ordered_display:+x.ordered_qty;
+            const allComplete = gf.items_received.every(x => x.is_service || ((+x.received_so_far||0)+(+x.received_now||0)) >= ordOf(x));
+            return <div style={{background: allComplete?'#4ade8015':'#f59e0b15', border:'1px solid '+(allComplete?'#4ade8044':'#f59e0b44'), borderRadius:6, padding:'6px 10px', marginBottom:10, fontSize:9}}>
+              {allComplete
+                ? <span style={{color:'#4ade80'}}>Full receipt - PR will be marked <strong>Completed</strong>. Mapped material lines post to stock.</span>
+                : <span style={{color:'#f59e0b'}}>Partial - PR stays <strong>Partially Received</strong>, balance kept. Finish on next delivery.</span>}
+            </div>;
+          })()}
+
+          {/* Actions */}
+          <div style={{display:'flex', justifyContent:'space-between', gap:6, flexWrap:'wrap'}}>
+            <button className="b bs" onClick={closeNoMaterial} disabled={saving} style={{fontSize:9, padding:'5px 12px', color:'#f47067', borderColor:'#f4706744'}}>Close PO - no material</button>
+            <div style={{display:'flex', gap:6}}>
+              <button className="b bs" onClick={() => setReceiving(null)} style={{fontSize:9, padding:'4px 12px'}}>Cancel</button>
+              <button className="b bp" onClick={saveGRN} disabled={saving} style={{fontSize:11, padding:'6px 20px', background:'#8b5cf6', borderColor:'#8b5cf6', fontWeight:700}}>{saving ? 'Saving...' : 'Save receipt'}</button>
             </div>
-            <div style={{textAlign:'center', padding:'0 8px'}}>
-              <span style={{fontSize:7, color:'#64748b', display:'block', marginBottom:4}}>Partial Delivery?</span>
-              <input type="checkbox" checked={gf.partial_delivery}
-                onChange={e=>setGf(p=>({...p,partial_delivery:e.target.checked}))}
-                style={{width:16, height:16, cursor:'pointer'}}/>
-              {gf.partial_delivery && <div style={{fontSize:7, color:'#f59e0b', marginTop:2}}>Balance pending</div>}
-            </div>
-          </div>
-
-          {/* Status indicator */}
-          <div style={{background: gf.partial_delivery ? '#f59e0b15' : '#4ade8015',
-            border: '1px solid ' + (gf.partial_delivery ? '#f59e0b44' : '#4ade8044'),
-            borderRadius:6, padding:'6px 10px', marginBottom:10, fontSize:9}}>
-            {gf.partial_delivery
-              ? <span style={{color:'#f59e0b'}}>⚠️ <strong>Partial delivery</strong> — status will stay at "PO Sent". Record again when balance arrives.</span>
-              : <span style={{color:'#4ade80'}}>✅ <strong>Full delivery</strong> — PR status will be marked <strong>Completed</strong>.</span>}
-          </div>
-
-          {/* Save button */}
-          <div style={{display:'flex', justifyContent:'flex-end', gap:6}}>
-            <button className="b bs" onClick={() => setReceiving(null)} style={{fontSize:9, padding:'4px 12px'}}>Cancel</button>
-            <button className="b bp" onClick={saveGRN} disabled={saving}
-              style={{fontSize:11, padding:'6px 20px', background:'#8b5cf6', borderColor:'#8b5cf6', fontWeight:700}}>
-              {saving ? '⏳ Saving...' : '📦 Confirm Receipt & Save GRN'}
-            </button>
           </div>
         </div>
       )}
