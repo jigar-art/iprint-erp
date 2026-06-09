@@ -6582,11 +6582,18 @@ const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",deliver
 }
 
 // STOCK
-function BankingComponentsView({rows,loaded,grn}){
+function BankingComponentsView({grn}){
   const [prog,setProg]=React.useState('PNB');
+  const [rows,setRows]=React.useState([]);
+  const [loaded,setLoaded]=React.useState(false);
+  const [vendors,setVendors]=React.useState([]);
+  const me=(()=>{try{return (JSON.parse(localStorage.getItem('erp_user')||'{}').name)||'';}catch(e){return '';}})();
+  const load=React.useCallback(()=>{sb.from('bank_component_dispatch').select('*').order('created_at',{ascending:false}).then(({data})=>{setRows(data||[]);setLoaded(true);});},[]);
+  React.useEffect(()=>{load();},[load]);
+  React.useEffect(()=>{let on=true;sb.from('vendors').select('name').eq('active',true).order('name').then(({data})=>{if(on)setVendors((data||[]).map(v=>v.name).filter(Boolean));});return()=>{on=false;};},[]);
   const norm=s=>(s||'').toLowerCase().trim();
-  const programs=Array.from(new Set((rows||[]).map(r=>r.program).filter(Boolean))).sort();
-  const view=(rows||[]).filter(r=>prog==='all'||r.program===prog);
+  const programs=Array.from(new Set(rows.map(r=>r.program).filter(Boolean))).sort();
+  const view=rows.filter(r=>prog==='all'||r.program===prog);
   const sum=(arr,f)=>arr.reduce((s,r)=>s+(+f(r)||0),0);
   const led=sum(view,r=>r.led_qty);
   const ps100=sum(view.filter(r=>r.ps_type==='100W'),r=>r.ps_qty);
@@ -6596,16 +6603,63 @@ function BankingComponentsView({rows,loaded,grn}){
   const ledDispAll=sum((rows||[]),r=>r.led_qty);
   const ledBal=ledInward-ledDispAll;
   const pill=(t,c)=><span className="bd" style={{background:c+'22',color:c,fontSize:8}}>{t}</span>;
+  const blank={job_no:'',program:(prog!=='all'?prog:'PNB'),sign_type:'Main',size:'',led_qty:'',ps_type:'100W',ps_qty:1,vendor_name:'',courier_name:'',courier_ref:'',status:'Dispatched',dispatch_date:''};
+  const [form,setForm]=React.useState(null);
+  const [saving,setSaving]=React.useState(false);
+  const [jobHint,setJobHint]=React.useState('');
+  const setF=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const openAdd=()=>{setJobHint('');setForm({...blank,program:(prog!=='all'?prog:'PNB')});};
+  const openEdit=(r)=>{setJobHint('');setForm({_id:r.id,job_no:r.job_no||'',program:r.program||'PNB',sign_type:r.sign_type||'Main',size:r.size||'',led_qty:r.led_qty,ps_type:r.ps_type||'100W',ps_qty:r.ps_qty||1,vendor_name:r.vendor_name||'',courier_name:r.courier_name||'',courier_ref:r.courier_ref||'',status:r.status||'Dispatched',dispatch_date:r.dispatch_date||''});};
+  const lookupJob=(jn)=>{const id=(jn||'').trim();if(!id){setJobHint('');return;}const full=id+'-2627';sb.from('jobs').select('id,project').eq('id',full).maybeSingle().then(({data})=>{setJobHint(data?('✓ '+full+' — '+String(data.project||'').slice(0,38)):('⚠ '+full+' not in jobs'));});};
+  const save=async()=>{
+    if(!form)return;
+    if(!String(form.job_no||'').trim()){alert('Enter a Job No.');return;}
+    if(!form.program){alert('Pick a program.');return;}
+    setSaving(true);
+    const jn=String(form.job_no).trim();
+    const payload={job_no:jn,job_id:jn+'-2627',program:form.program,sign_type:form.sign_type||'Main',size:form.size||null,material:'Osram LED',led_qty:+form.led_qty||0,ps_type:form.ps_type||null,ps_qty:+form.ps_qty||1,vendor_name:form.vendor_name||null,courier_name:form.courier_name||null,courier_ref:form.courier_ref||null,status:form.status||'Dispatched',dispatch_date:form.dispatch_date||null};
+    let err;
+    if(form._id){const r=await sb.from('bank_component_dispatch').update(payload).eq('id',form._id);err=r.error;}
+    else{payload.created_by=me||'web';const r=await sb.from('bank_component_dispatch').insert(payload);err=r.error;}
+    setSaving(false);
+    if(err){alert('Save failed: '+err.message);return;}
+    setForm(null);setJobHint('');load();
+  };
+  const markDispatched=async(r)=>{const x=await sb.from('bank_component_dispatch').update({status:'Dispatched'}).eq('id',r.id);if(x.error){alert(x.error.message);return;}load();};
+  const lbl={fontSize:8,color:'#64748b',display:'block',marginBottom:2};
   if(!loaded) return <div className="c" style={{padding:12,fontSize:10,color:'#8b949e'}}>Loading banking components…</div>;
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     <div className="c a" style={{padding:10,borderColor:'#06b6d433'}}>
       <p style={{fontSize:11,fontWeight:700,color:'#06b6d4',marginBottom:4}}>🏦 BANKING COMPONENTS — DISPATCH</p>
       <p style={{fontSize:9,color:'#8b949e'}}>LED and power-supply dispatch by program. Shared stock pool; balance = inward − dispatch.</p>
     </div>
-    <div style={{display:"flex",gap:4,flexWrap:'wrap'}}>
+    <div style={{display:"flex",gap:4,flexWrap:'wrap',alignItems:'center'}}>
       <button className={"b bs "+(prog==='all'?'bp':'')} onClick={()=>setProg('all')}>All</button>
       {programs.map(p=><button key={p} className={"b bs "+(prog===p?'bp':'')} onClick={()=>setProg(p)}>{p}</button>)}
+      <button className="b bp" style={{marginLeft:'auto'}} onClick={openAdd}>+ Add dispatch</button>
     </div>
+    {form&&<div className="c" style={{padding:10,borderColor:'#06b6d455'}}>
+      <p style={{fontSize:10,fontWeight:700,color:'#06b6d4',marginBottom:6}}>{form._id?'Edit dispatch':'New dispatch'}</p>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:6}}>
+        <div><label style={lbl}>Job No</label><input className="in" value={form.job_no} onChange={e=>setF('job_no',e.target.value)} onBlur={e=>lookupJob(e.target.value)} placeholder="e.g. 10661" style={{fontSize:10}}/></div>
+        <div><label style={lbl}>Program</label><select className="in" value={form.program} onChange={e=>setF('program',e.target.value)} style={{fontSize:10}}>{['PNB','HDFC','SBI','BOB'].map(p=><option key={p}>{p}</option>)}</select></div>
+        <div><label style={lbl}>Sign type</label><select className="in" value={form.sign_type} onChange={e=>setF('sign_type',e.target.value)} style={{fontSize:10}}>{['Main','Lollipop'].map(p=><option key={p}>{p}</option>)}</select></div>
+        <div><label style={lbl}>Size</label><input className="in" value={form.size} onChange={e=>setF('size',e.target.value)} placeholder="8x3" style={{fontSize:10}}/></div>
+        <div><label style={lbl}>LED qty</label><input className="in mn" type="number" value={form.led_qty} onChange={e=>setF('led_qty',e.target.value)} style={{fontSize:10}}/></div>
+        <div><label style={lbl}>PS type</label><select className="in" value={form.ps_type} onChange={e=>setF('ps_type',e.target.value)} style={{fontSize:10}}>{['100W','60W',''].map(p=><option key={p} value={p}>{p||'—'}</option>)}</select></div>
+        <div><label style={lbl}>PS qty</label><input className="in mn" type="number" value={form.ps_qty} onChange={e=>setF('ps_qty',e.target.value)} style={{fontSize:10}}/></div>
+        <div><label style={lbl}>Vendor</label><select className="in" value={form.vendor_name} onChange={e=>setF('vendor_name',e.target.value)} style={{fontSize:10}}><option value="">— (pending)</option>{vendors.map(v=><option key={v} value={v}>{v}</option>)}</select></div>
+        <div><label style={lbl}>Courier</label><input className="in" value={form.courier_name} onChange={e=>setF('courier_name',e.target.value)} style={{fontSize:10}}/></div>
+        <div><label style={lbl}>Courier ref</label><input className="in" value={form.courier_ref} onChange={e=>setF('courier_ref',e.target.value)} placeholder="optional" style={{fontSize:10}}/></div>
+        <div><label style={lbl}>Status</label><select className="in" value={form.status} onChange={e=>setF('status',e.target.value)} style={{fontSize:10}}>{['Dispatched','Pending'].map(p=><option key={p}>{p}</option>)}</select></div>
+        <div><label style={lbl}>Dispatch date</label><input className="in" type="date" value={form.dispatch_date||''} onChange={e=>setF('dispatch_date',e.target.value)} style={{fontSize:10}}/></div>
+      </div>
+      {jobHint&&<p style={{fontSize:9,marginTop:4,color:jobHint.charAt(0)==='✓'?'#10b981':'#f59e0b'}}>{jobHint}</p>}
+      <div style={{display:'flex',gap:6,marginTop:8,justifyContent:'flex-end'}}>
+        <button className="b" onClick={()=>{setForm(null);setJobHint('');}}>Cancel</button>
+        <button className="b bp" disabled={saving} onClick={save}>{saving?'Saving…':'💾 Save'}</button>
+      </div>
+    </div>}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:6}}>
       <div className="c" style={{padding:8}}><div style={{fontSize:8,color:'#64748b'}}>OSRAM LED dispatched</div><div style={{fontSize:18,fontWeight:700,color:'#e2e8f0'}}>{led}</div></div>
       <div className="c" style={{padding:8}}><div style={{fontSize:8,color:'#64748b'}}>PS 100W</div><div style={{fontSize:18,fontWeight:700,color:'#e2e8f0'}}>{ps100}</div></div>
@@ -6616,7 +6670,7 @@ function BankingComponentsView({rows,loaded,grn}){
     <div className="c" style={{padding:0}}>
       <div style={{overflowX:'auto'}}>
         <table>
-          <thead><tr><th>Job</th><th>Sign</th><th>Size</th><th>LED</th><th>PS</th><th>Vendor</th><th>Courier</th><th>Status</th></tr></thead>
+          <thead><tr><th>Job</th><th>Sign</th><th>Size</th><th>LED</th><th>PS</th><th>Vendor</th><th>Courier</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {view.map(r=><tr key={r.id}>
               <td style={{fontSize:9}}>{r.job_id||r.job_no}</td>
@@ -6627,8 +6681,9 @@ function BankingComponentsView({rows,loaded,grn}){
               <td style={{fontSize:9}}>{r.vendor_name||'—'}</td>
               <td style={{fontSize:9}}>{(r.courier_name||'—')}{r.courier_ref?(' ('+r.courier_ref+')'):''}</td>
               <td>{r.status==='Pending'?pill('Pending','#f59e0b'):pill('Dispatched','#10b981')}</td>
+              <td style={{whiteSpace:'nowrap'}}><button className="b bs" style={{fontSize:8,padding:'1px 5px'}} onClick={()=>openEdit(r)}>Edit</button>{r.status==='Pending'?<button className="b bs" style={{fontSize:8,padding:'1px 5px',marginLeft:3}} onClick={()=>markDispatched(r)}>✓ Disp</button>:null}</td>
             </tr>)}
-            {view.length===0&&<tr><td colSpan={8} style={{fontSize:9,color:'#64748b',padding:10,textAlign:'center'}}>No dispatch rows for this program.</td></tr>}
+            {view.length===0&&<tr><td colSpan={9} style={{fontSize:9,color:'#64748b',padding:10,textAlign:'center'}}>No dispatch rows for this program.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -6747,14 +6802,11 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   const dateLabel=dateFilterOptions.find(o=>o.v===dateFilter)?.l||'';
   const dateRangeText=dateRange[0]?`${dateRange[0]} → ${dateRange[1]}`:'all time';
   const [bcView,setBcView]=React.useState('materials');
-  const [bcRows,setBcRows]=React.useState([]);
-  const [bcLoaded,setBcLoaded]=React.useState(false);
-  React.useEffect(()=>{let on=true;sb.from('bank_component_dispatch').select('*').then(({data})=>{if(on){setBcRows(data||[]);setBcLoaded(true);}});return()=>{on=false;};},[]);
   const bcToggle=<div style={{display:"flex",gap:4,marginBottom:2}}>
     <button className={"b bs "+(bcView==='materials'?'bp':'')} onClick={()=>setBcView('materials')}>📦 Printing materials</button>
     <button className={"b bs "+(bcView==='banking'?'bp':'')} onClick={()=>setBcView('banking')}>🏦 Banking components</button>
   </div>;
-  if(bcView==='banking') return <div style={{display:"flex",flexDirection:"column",gap:8}}>{bcToggle}<BankingComponentsView rows={bcRows} loaded={bcLoaded} grn={grn}/></div>;
+  if(bcView==='banking') return <div style={{display:"flex",flexDirection:"column",gap:8}}>{bcToggle}<BankingComponentsView grn={grn}/></div>;
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
     {bcToggle}
     {/* Patch AA: date filter dropdown affects stat cards only */}
