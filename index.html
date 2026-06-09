@@ -1392,6 +1392,23 @@ function MainApp({user,onLogout,masterData}){
       return;
     }
     
+    // ─── Weighment / dispatch gate (09 Jun 2026) — a job cannot move to "Delivered"
+    // until it has at least one weighment_logs row (outgoing courier OR Local own-delivery —
+    // Local still logs a row, so it counts). Stops jobs being marked delivered before the
+    // parcel is actually weighed & dispatched. Matched on weighment_logs.job_no.
+    if(newStatus==='Delivered'){
+      const {data:wRows,error:wErr}=await sb.from('weighment_logs').select('id').eq('job_no',jobId).limit(1);
+      if(wErr){
+        show('⚠️ Could not verify weighment log — try again. ('+wErr.message+')',false);
+        return;
+      }
+      if(!wRows||wRows.length===0){
+        show('🔒 Cannot mark "'+jobId+'" Delivered — no weighment/courier entry yet. Log it under Dispatch → 📦 Courier / Weighment first (Local own-delivery counts).',false);
+        console.warn('updateJobStatus blocked (Weighment gate): job',jobId,'has no weighment_logs row');
+        return;
+      }
+    }
+    
     // Build the merged history. timeStr uses local IST.
     const now=new Date();
     const timeStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true});
@@ -1824,7 +1841,7 @@ function MainApp({user,onLogout,masterData}){
           {pg==="print"&&<PrintPage logs={pLogs} machines={machines} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addPrintLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
           {pg==="fab"&&<FabPage logs={fLogs} pLogs={pLogs} updatePrintLog={updatePrintLog} materials={materials} materialsV2={masterData.materialsV2||[]} team={masterData.team} stock={stock} addLog={addFabLog} jobs={filteredJobs} batches={batches} items={items} sm={setModal} updateJobStatus={updateJobStatus} updateLineItem={updateLineItem} addNewMaterialV2={addNewMaterialV2} user={user} show={show} grn={grnData}/>}
           {pg==="os"&&<OsPage logs={osLogs} agencies={agencies} materials={materials} addLog={addOsLog} markReturn={markOsReturn} jobs={filteredJobs} sm={setModal} updateJobStatus={updateJobStatus} osItems={osItems} setOsItems={setOsItems} sp={setPg}/>}
-          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy} jobs={jobs}/>}
+          {pg==="disp"&&<DispPage logs={dLogs} delBoys={delBoys} addLog={addDispatch} addNewDelBoy={addNewDelBoy} jobs={jobs} show={show}/>}
           {pg==="stock"&&<StockPage stock={stock} grn={grnData} pl={pLogs} fl={fLogs} ol={osLogs} materialsV2={masterData.materialsV2||[]}/>}
           {pg==="rem"&&<RemPage jobs={filteredJobs} osItems={osItems} setOsItems={setOsItems} items={items} reqs={reqs} setReqs={setReqs}/>}
           {pg==="cli"&&<CliPage clients={clients} jobs={filteredJobs} s={search}/>}
@@ -6496,8 +6513,131 @@ function OsPage({logs,agencies,materials,addLog,markReturn,jobs,sm,updateJobStat
   </div>;
 }
 
+// WEIGHMENT / COURIER  (MARKER:WEIGHMENT_MODULE_v1 — 09 Jun 2026)
+// Outgoing parcels only. Logs courier / own-delivery dispatches with dimensional weight.
+// Volumetric = L×W×H÷5000; chargeable = max(actual, volumetric); flags a billing mismatch
+// when |courier invoice_kg − chargeable| ≥ 0.2 kg. Writes to public.weighment_logs.
+function WeighmentView({jobs,show}){
+  const WMODES=["Train","Air Cargo","Air Courier","Surface","WeFast","Local — own delivery"];
+  const blank={weigh_date:td(),job_no:"",delivery_mode:WMODES[0],vendor_name:"",invoice_no:"",delivered_by:"",destination_area:"",received_by:"",parcel_desc:"",package_count:"",length_cm:"",width_cm:"",height_cm:"",weighed_kg:"",invoice_kg:"",remark:""};
+  const [sf,ssf]=useState(false);
+  const [f,sF]=useState(blank);
+  const [rowId,setRowId]=useState(()=>"W"+uid());
+  const [photos,setPhotos]=useState([]);
+  const [upBusy,setUpBusy]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [list,setList]=useState([]);
+  const [dq,setDq]=useState("");
+  const me=(()=>{try{return (JSON.parse(localStorage.getItem('erp_user')||'{}').name)||'';}catch(e){return '';}})();
+  useEffect(()=>{(async()=>{const {data,error}=await sb.from('weighment_logs').select('*').order('created_at',{ascending:false}).limit(500);if(!error&&data)setList(data);})();},[]);
+  const isLocal=String(f.delivery_mode||"").startsWith("Local");
+  const num=(v)=>{const n=parseFloat(v);return Number.isFinite(n)?n:null;};
+  const L=num(f.length_cm),W=num(f.width_cm),H=num(f.height_cm);
+  const volumetric=(L&&W&&H)?(L*W*H)/5000:null;
+  const actual=num(f.weighed_kg);
+  const chargeable=(volumetric!=null||actual!=null)?Math.max(actual||0,volumetric||0):null;
+  const invKg=num(f.invoice_kg);
+  const delta=(invKg!=null&&chargeable!=null)?Math.abs(invKg-chargeable):null;
+  const mismatch=delta!=null&&delta>=0.2;
+  const onPhotos=async(e)=>{
+    const files=Array.from(e.target.files||[]);
+    if(!files.length)return;
+    setUpBusy(true);
+    try{const urls=await uploadMultiple(files,'weighment-proofs/'+rowId);setPhotos(p=>[...p,...urls]);}
+    catch(err){show?.('Photo upload error: '+(err?.message||err),false);}
+    setUpBusy(false);
+    e.target.value="";
+  };
+  const save=async()=>{
+    if(saving)return;
+    let jid=String(f.job_no||"").trim();
+    if(!jid){show?.('Enter Job#',false);return;}
+    // Normalize-on-save: expand a bare number to its canonical id when exactly one job matches.
+    if(!(jobs||[]).some(j=>j.id===jid)){
+      const m=(jobs||[]).filter(j=>j.id.startsWith(jid+'-'));
+      if(m.length===1){jid=m[0].id;}
+      else if(m.length>1){show?.('Job# "'+jid+'" is ambiguous — matches '+m.map(x=>x.id).join(', ')+'. Enter the full Job# (with -FY).',false);return;}
+      else if(!confirm('Job# "'+jid+'" doesn\'t match any job. Log weighment anyway?')){return;}
+    }
+    setSaving(true);
+    const row={
+      id:rowId,
+      weigh_date:f.weigh_date||td(),
+      job_no:jid,
+      delivery_mode:f.delivery_mode||null,
+      vendor_name:(f.vendor_name||"").trim()||null,
+      invoice_no:(f.invoice_no||"").trim()||null,
+      delivered_by:(f.delivered_by||"").trim()||null,
+      destination_area:(f.destination_area||"").trim()||null,
+      received_by:(f.received_by||"").trim()||null,
+      parcel_desc:(f.parcel_desc||"").trim()||null,
+      package_count:num(f.package_count),
+      length_cm:L,width_cm:W,height_cm:H,
+      weighed_kg:actual,
+      invoice_kg:invKg,
+      photo_urls:photos,
+      remark:(f.remark||"").trim()||null,
+      entered_by:me||null,
+    };
+    const {error}=await sb.from('weighment_logs').insert(row);
+    setSaving(false);
+    if(error){show?.('Save failed: '+error.message,false);return;}
+    show?.('Weighment saved!');
+    setList(p=>[{...row,created_at:new Date().toISOString()},...p]);
+    sF(blank);setPhotos([]);setRowId("W"+uid());
+  };
+  const filtered=useMemo(()=>{
+    const q=dq.trim().toLowerCase();
+    if(!q)return list;
+    return list.filter(l=>String(l.job_no||"").toLowerCase().includes(q)||String(l.delivery_mode||"").toLowerCase().includes(q)||String(l.vendor_name||"").toLowerCase().includes(q)||String(l.invoice_no||"").toLowerCase().includes(q)||String(l.destination_area||"").toLowerCase().includes(q)||String(l.delivered_by||"").toLowerCase().includes(q));
+  },[dq,list]);
+  const rowVol=(l)=>{const a=parseFloat(l.length_cm),b=parseFloat(l.width_cm),c=parseFloat(l.height_cm);return (a&&b&&c)?(a*b*c)/5000:null;};
+  const rowCharge=(l)=>{const v=rowVol(l);const w=parseFloat(l.weighed_kg);const wk=Number.isFinite(w)?w:null;return (v!=null||wk!=null)?Math.max(wk||0,v||0):null;};
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"📦 New Weighment / Courier"}</button>
+    {sf&&<div className="c a" style={{padding:10}}>
+      <div className="fg f3">
+        <F l="Date"><input type="date" className="in" value={f.weigh_date} onChange={e=>sF(p=>({...p,weigh_date:e.target.value}))}/></F>
+        <F l="Job#"><input className="in mn" list="wm-jobs" value={f.job_no} onChange={e=>sF(p=>({...p,job_no:e.target.value}))}/><datalist id="wm-jobs">{(jobs||[]).slice(0,800).map(j=><option key={j.id} value={j.id}/>)}</datalist></F>
+        <F l="Mode"><select className="in" value={f.delivery_mode} onChange={e=>sF(p=>({...p,delivery_mode:e.target.value}))}>{WMODES.map(m=><option key={m}>{m}</option>)}</select></F>
+        {!isLocal&&<F l="Courier / Vendor"><input className="in" value={f.vendor_name} onChange={e=>sF(p=>({...p,vendor_name:e.target.value}))}/></F>}
+        {!isLocal&&<F l="Invoice / Docket#"><input className="in mn" value={f.invoice_no} onChange={e=>sF(p=>({...p,invoice_no:e.target.value}))}/></F>}
+        <F l="Destination Area"><input className="in" value={f.destination_area} onChange={e=>sF(p=>({...p,destination_area:e.target.value}))}/></F>
+        <F l="Delivered By"><input className="in" value={f.delivered_by} onChange={e=>sF(p=>({...p,delivered_by:e.target.value}))}/></F>
+        <F l="Received By"><input className="in" value={f.received_by} onChange={e=>sF(p=>({...p,received_by:e.target.value}))}/></F>
+        <F l="Parcel Desc"><input className="in" value={f.parcel_desc} onChange={e=>sF(p=>({...p,parcel_desc:e.target.value}))}/></F>
+        <F l="# Packages"><input type="number" className="in" value={f.package_count} onChange={e=>sF(p=>({...p,package_count:e.target.value}))}/></F>
+        <F l="Length (cm)"><input type="number" className="in" value={f.length_cm} onChange={e=>sF(p=>({...p,length_cm:e.target.value}))}/></F>
+        <F l="Width (cm)"><input type="number" className="in" value={f.width_cm} onChange={e=>sF(p=>({...p,width_cm:e.target.value}))}/></F>
+        <F l="Height (cm)"><input type="number" className="in" value={f.height_cm} onChange={e=>sF(p=>({...p,height_cm:e.target.value}))}/></F>
+        <F l="Weighed (kg)"><input type="number" className="in" value={f.weighed_kg} onChange={e=>sF(p=>({...p,weighed_kg:e.target.value}))}/></F>
+        {!isLocal&&<F l="Invoice (kg)"><input type="number" className="in" value={f.invoice_kg} onChange={e=>sF(p=>({...p,invoice_kg:e.target.value}))}/></F>}
+        <F l="📸 Proof Photos"><input type="file" accept="image/*" multiple className="in" style={{padding:2}} onChange={onPhotos}/></F>
+        <F l="Remark"><input className="in" value={f.remark} onChange={e=>sF(p=>({...p,remark:e.target.value}))}/></F>
+      </div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center",marginTop:6,fontSize:11}}>
+        <span style={{color:"#64748b"}}>Volumetric: <b style={{color:"#c9d1d9"}}>{volumetric!=null?volumetric.toFixed(2):"—"} kg</b></span>
+        <span style={{color:"#64748b"}}>Chargeable: <b style={{color:"#e3a008"}}>{chargeable!=null?chargeable.toFixed(2):"—"} kg</b></span>
+        {invKg!=null&&chargeable!=null&&<span className="bd" style={{background:mismatch?"#dc262620":"#10b98120",color:mismatch?"#f47067":"#4ade80",fontWeight:700}}>{mismatch?("⚠ Mismatch Δ "+delta.toFixed(2)+" kg"):"✓ Invoice matches"}</span>}
+        {upBusy&&<span style={{color:"#e3a008"}}>Uploading photos…</span>}
+        {photos.length>0&&<span style={{color:"#4ade80"}}>{photos.length} photo(s) attached</span>}
+      </div>
+      <button className="b bp" onClick={save} disabled={saving||upBusy} style={{marginTop:8}}>{saving?"Saving…":"Save Weighment"}</button>
+    </div>}
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 2px"}}>
+      <input className="in" value={dq} onChange={e=>setDq(e.target.value)} placeholder="🔍 Search Job#, Mode, Courier, Invoice#, Destination..." style={{fontSize:11,padding:"5px 10px",flex:1,maxWidth:380,borderColor:"#1a2030"}}/>
+      {dq&&<button onClick={()=>setDq('')} className="b bs" style={{fontSize:9,padding:"3px 8px"}}>✕</button>}
+      <span style={{fontSize:10,color:"#64748b",marginLeft:"auto"}}>{dq?(filtered.length+" of "+list.length):(list.length+" weighments")}</span>
+    </div>
+    <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Mode</th><th>Courier</th><th>Invoice#</th><th>Dest</th><th>Weighed</th><th>Charge</th><th>Inv kg</th><th>Photos</th></tr></thead><tbody>
+      {filtered.map(l=>{const ch=rowCharge(l);const ik=parseFloat(l.invoice_kg);const mm=Number.isFinite(ik)&&ch!=null&&Math.abs(ik-ch)>=0.2;const ph=Array.isArray(l.photo_urls)?l.photo_urls:[];return <tr key={l.id}><td>{l.weigh_date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_no}</td><td>{l.delivery_mode}</td><td>{l.vendor_name||"—"}</td><td className="mn">{l.invoice_no||"—"}</td><td>{l.destination_area||"—"}</td><td className="mn">{l.weighed_kg!=null?l.weighed_kg:"—"}</td><td className="mn" style={{color:"#e3a008"}}>{ch!=null?ch.toFixed(2):"—"}</td><td className="mn" style={{color:mm?"#f47067":"#c9d1d9"}}>{Number.isFinite(ik)?(ik+(mm?" ⚠":"")):"—"}</td><td>{ph.length>0?<a href={ph[0]} target="_blank" rel="noopener" style={{color:"#3b82f6"}}>{ph.length} 📸</a>:"—"}</td></tr>;})}
+      {filtered.length===0&&<tr><td colSpan={10} style={{textAlign:"center",color:"#64748b",padding:16}}>{dq?('No matches for "'+dq+'"'):"No weighments logged yet"}</td></tr>}
+    </tbody></table></div></div>
+  </div>;
+}
+
 // DISPATCH
-function DispPage({logs,delBoys,addLog,addNewDelBoy,jobs}){const [sf,ssf]=useState(false);const [dq,setDq]=useState(""); // 26 May 26: in-page search (Job#, Boy, Vehicle, Challan, LR)
+function DispPage({logs,delBoys,addLog,addNewDelBoy,jobs,show}){const [sf,ssf]=useState(false);const [view,setView]=useState('dc');const [dq,setDq]=useState(""); // 26 May 26: in-page search (Job#, Boy, Vehicle, Challan, LR)
 const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",delivery_boy:delBoys[0]?.name||"",vehicle:"",lr_no:"",challan_no:"",installer:"",install_date:""});
   // 09 May 26: Del Boy is a typeahead combobox — autocomplete existing + add new on the fly.
   // boysLocal mirrors the delBoys prop but lets us append newly-added boys without waiting
@@ -6554,6 +6694,11 @@ const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",deliver
     );
   },[dq,logs]);
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      <button className={"b "+(view==='dc'?'bp':'bs')} onClick={()=>setView('dc')}>📋 Delivery Challans</button>
+      <button className={"b "+(view==='weigh'?'bp':'bs')} onClick={()=>setView('weigh')}>📦 Courier / Weighment</button>
+    </div>
+    {view==='weigh'?<WeighmentView jobs={jobs} show={show}/>:<>
     <button className="b bp" onClick={()=>ssf(p=>!p)}>{sf?"▾":"🚚 New Dispatch"}</button>
     {sf&&<div className="c a" style={{padding:10}}><div className="fg f3">
       <F l="Date"><input type="date" className="in" value={f.date} onChange={e=>sF(p=>({...p,date:e.target.value}))}/></F>
@@ -6585,7 +6730,7 @@ const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",deliver
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto"}}><table><thead><tr><th>Date</th><th>Job</th><th>Type</th><th>Boy</th><th>Vehicle</th><th>Challan</th><th>LR</th></tr></thead><tbody>
       {filtered.map(l=><tr key={l.id}><td>{l.date}</td><td className="mn" style={{color:"#e3a008"}}>{l.job_id}</td><td><span className="bd" style={{background:l.dispatch_type?.includes("Install")?"#8b5cf620":"#10b98120",color:l.dispatch_type?.includes("Install")?"#c084fc":"#4ade80"}}>{l.dispatch_type}</span></td><td>{l.delivery_boy}</td><td>{l.vehicle}</td><td className="mn">{l.challan_no}</td><td className="mn">{l.lr_no}</td></tr>)}
       {filtered.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:"#64748b",padding:16}}>{dq?`No matches for "${dq}"`:"None"}</td></tr>}
-    </tbody></table></div></div></div>;
+    </tbody></table></div></div></>}</div>;
 }
 
 // STOCK
