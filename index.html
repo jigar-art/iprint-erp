@@ -6582,6 +6582,60 @@ const [f,sF]=useState({date:td(),job_id:"",dispatch_type:"Delivery Only",deliver
 }
 
 // STOCK
+function BankingComponentsView({rows,loaded,grn}){
+  const [prog,setProg]=React.useState('PNB');
+  const norm=s=>(s||'').toLowerCase().trim();
+  const programs=Array.from(new Set((rows||[]).map(r=>r.program).filter(Boolean))).sort();
+  const view=(rows||[]).filter(r=>prog==='all'||r.program===prog);
+  const sum=(arr,f)=>arr.reduce((s,r)=>s+(+f(r)||0),0);
+  const led=sum(view,r=>r.led_qty);
+  const ps100=sum(view.filter(r=>r.ps_type==='100W'),r=>r.ps_qty);
+  const ps60=sum(view.filter(r=>r.ps_type==='60W'),r=>r.ps_qty);
+  const pending=view.filter(r=>r.status==='Pending').length;
+  const ledInward=(grn||[]).filter(g=>norm(g.material)===norm('Osram LED')).reduce((s,g)=>s+(+g.qty||0),0);
+  const ledDispAll=sum((rows||[]),r=>r.led_qty);
+  const ledBal=ledInward-ledDispAll;
+  const pill=(t,c)=><span className="bd" style={{background:c+'22',color:c,fontSize:8}}>{t}</span>;
+  if(!loaded) return <div className="c" style={{padding:12,fontSize:10,color:'#8b949e'}}>Loading banking components…</div>;
+  return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div className="c a" style={{padding:10,borderColor:'#06b6d433'}}>
+      <p style={{fontSize:11,fontWeight:700,color:'#06b6d4',marginBottom:4}}>🏦 BANKING COMPONENTS — DISPATCH</p>
+      <p style={{fontSize:9,color:'#8b949e'}}>LED and power-supply dispatch by program. Shared stock pool; balance = inward − dispatch.</p>
+    </div>
+    <div style={{display:"flex",gap:4,flexWrap:'wrap'}}>
+      <button className={"b bs "+(prog==='all'?'bp':'')} onClick={()=>setProg('all')}>All</button>
+      {programs.map(p=><button key={p} className={"b bs "+(prog===p?'bp':'')} onClick={()=>setProg(p)}>{p}</button>)}
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:6}}>
+      <div className="c" style={{padding:8}}><div style={{fontSize:8,color:'#64748b'}}>OSRAM LED dispatched</div><div style={{fontSize:18,fontWeight:700,color:'#e2e8f0'}}>{led}</div></div>
+      <div className="c" style={{padding:8}}><div style={{fontSize:8,color:'#64748b'}}>PS 100W</div><div style={{fontSize:18,fontWeight:700,color:'#e2e8f0'}}>{ps100}</div></div>
+      <div className="c" style={{padding:8}}><div style={{fontSize:8,color:'#64748b'}}>PS 60W</div><div style={{fontSize:18,fontWeight:700,color:'#e2e8f0'}}>{ps60}</div></div>
+      <div className="c" style={{padding:8}}><div style={{fontSize:8,color:'#64748b'}}>Pending</div><div style={{fontSize:18,fontWeight:700,color:pending?'#f59e0b':'#e2e8f0'}}>{pending}</div></div>
+    </div>
+    <div className="c" style={{padding:8,fontSize:9,color:'#8b949e'}}>OSRAM LED shared stock: inward <strong style={{color:'#e2e8f0'}}>{ledInward}</strong> − dispatched <strong style={{color:'#e2e8f0'}}>{ledDispAll}</strong> = balance <strong style={{color:ledBal<0?'#ef4444':'#10b981'}}>{ledBal}</strong> <span style={{color:'#64748b'}}>(PS balance pending class grouping)</span></div>
+    <div className="c" style={{padding:0}}>
+      <div style={{overflowX:'auto'}}>
+        <table>
+          <thead><tr><th>Job</th><th>Sign</th><th>Size</th><th>LED</th><th>PS</th><th>Vendor</th><th>Courier</th><th>Status</th></tr></thead>
+          <tbody>
+            {view.map(r=><tr key={r.id}>
+              <td style={{fontSize:9}}>{r.job_id||r.job_no}</td>
+              <td style={{fontSize:9}}>{r.sign_type}</td>
+              <td style={{fontSize:9}}>{r.size}</td>
+              <td style={{fontSize:9}}>{r.led_qty}</td>
+              <td style={{fontSize:9}}>{r.ps_type}{r.ps_qty>1?(' x'+r.ps_qty):''}</td>
+              <td style={{fontSize:9}}>{r.vendor_name||'—'}</td>
+              <td style={{fontSize:9}}>{(r.courier_name||'—')}{r.courier_ref?(' ('+r.courier_ref+')'):''}</td>
+              <td>{r.status==='Pending'?pill('Pending','#f59e0b'):pill('Dispatched','#10b981')}</td>
+            </tr>)}
+            {view.length===0&&<tr><td colSpan={8} style={{fontSize:9,color:'#64748b',padding:10,textAlign:'center'}}>No dispatch rows for this program.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>;
+}
+
 function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   // ── Material Balance — rewritten 21 May 2026 (Patch R) for unit awareness ────────
   // Computes per-material balance honouring unit (roll → sqft; sheet/nos/etc → qty):
@@ -6692,7 +6746,17 @@ function StockPage({stock,grn,pl,fl,ol,materialsV2}){
   ];
   const dateLabel=dateFilterOptions.find(o=>o.v===dateFilter)?.l||'';
   const dateRangeText=dateRange[0]?`${dateRange[0]} → ${dateRange[1]}`:'all time';
+  const [bcView,setBcView]=React.useState('materials');
+  const [bcRows,setBcRows]=React.useState([]);
+  const [bcLoaded,setBcLoaded]=React.useState(false);
+  React.useEffect(()=>{let on=true;sb.from('bank_component_dispatch').select('*').then(({data})=>{if(on){setBcRows(data||[]);setBcLoaded(true);}});return()=>{on=false;};},[]);
+  const bcToggle=<div style={{display:"flex",gap:4,marginBottom:2}}>
+    <button className={"b bs "+(bcView==='materials'?'bp':'')} onClick={()=>setBcView('materials')}>📦 Printing materials</button>
+    <button className={"b bs "+(bcView==='banking'?'bp':'')} onClick={()=>setBcView('banking')}>🏦 Banking components</button>
+  </div>;
+  if(bcView==='banking') return <div style={{display:"flex",flexDirection:"column",gap:8}}>{bcToggle}<BankingComponentsView rows={bcRows} loaded={bcLoaded} grn={grn}/></div>;
   return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+    {bcToggle}
     {/* Patch AA: date filter dropdown affects stat cards only */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
       <div style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:"#8b949e"}}>
