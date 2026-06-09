@@ -1140,6 +1140,7 @@ function MainApp({user,onLogout,masterData}){
     batchData = {...batchData, created_by: batchData.created_by || user?.name || ''};
     const {error} = await sb.from('batches').insert(batchData);
     if(!error) {setBatches(p=>[batchData,...p]); show("Batch added!");}
+    else show("⚠️ Batch save FAILED: "+error.message+". It was NOT saved — please retry.",false);
   },[show, user]);
 
   const deleteBatch = useCallback(async (batchId) => {
@@ -1178,22 +1179,26 @@ function MainApp({user,onLogout,masterData}){
 
   // ─── IMPORT MULTIPLE BATCHES + ITEMS (from Excel) ─────────
   const importBatches = useCallback(async (batchesWithItems) => {
-    let imported=0;
+    let imported=0, failBatch=0, failItems=0, firstErr='';
     for(const {batch,items:lineItems} of batchesWithItems){
       // SB-4: stamp created_by on batches insert
       const stampedBatch = {...batch, created_by: batch.created_by || user?.name || ''};
       const {error:be}=await sb.from('batches').insert(stampedBatch);
-      if(be){console.error('Batch insert error:',be);continue;}
+      if(be){console.error('Batch insert error:',be);failBatch++;if(!firstErr)firstErr=be.message;continue;}
       if(lineItems.length>0){
         const {error:le}=await sb.from('line_items').insert(lineItems);
-        if(le)console.error('Items insert error:',le);
+        if(le){console.error('Items insert error:',le);failItems++;if(!firstErr)firstErr=le.message;}
       }
       setBatches(p=>[stampedBatch,...p]);
       setItems(p=>[...lineItems,...p]);
       imported++;
     }
+    // Surface silent failures instead of dropping rows quietly
+    if(failBatch||failItems){
+      show("⚠️ Import: "+imported+" saved, "+failBatch+" batch(es) and "+failItems+" item-set(s) FAILED. First error: "+firstErr+" (see console).",false);
+    }
     return imported;
-  },[user]);
+  },[user,show]);
 
   // ─── TOGGLE DEPT ──────────────────────────────────────────
   const togDept = useCallback(async (itemId, dept, newVal) => {
@@ -2102,6 +2107,7 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
 function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus,updateJobFields,updateLineItem,addLineItem,deleteLineItem,importBatches,updateJobFile,appendJobFiles,removeJobFile}){
   const [ff,sf]=useState("All");
   const [fy,setFy]=useState("All");
+  const [limit,setLimit]=useState(200); // F-3: cap rendered rows to avoid renderer freeze on large lists
   const fl=jobs.filter(j=>{if(s){const q=s.toLowerCase();const hitsBatch=(j.batches||[]).some(b=>b.bill_no?.toLowerCase().includes(q));if(!j.id?.toLowerCase().includes(q)&&!j.client_name?.toLowerCase().includes(q)&&!j.project?.toLowerCase().includes(q)&&!j.po_number?.toLowerCase().includes(q)&&!hitsBatch)return false;}if(ff!=="All"&&j.firm!==ff)return false;if(fy==="25-26"&&!j.id?.includes("2526"))return false;if(fy==="26-27"&&!j.id?.includes("2627"))return false;return true;}).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
   
   const openJob=(j)=>sm({t:`Job ${j.id} — ${j.project}`,jobId:j.id,fallback:j});
@@ -2116,8 +2122,9 @@ function JobsPage({jobs,s,firms,togDept,addBatchToJob,show,sp,sm,updateJobStatus
       <div style={{display:"flex",gap:2}}><span style={{fontSize:10,color:"#64748b",alignSelf:"center"}}>{fl.length} jobs</span><button className="b bp bs" onClick={()=>sp("new")}>➕ New Job</button></div>
     </div>
     <div className="c" style={{padding:0}}><div style={{overflowX:"auto",maxHeight:"calc(100vh-130px)"}}><table><thead><tr><th>Job</th><th>Firm</th><th>Client</th><th>Project</th><th>Status</th><th>Batches</th><th>PO</th><th>By</th></tr></thead><tbody>
-      {fl.map(j=>{const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
+      {fl.slice(0,limit).map(j=>{const sc={'Draft':'#64748b','Quotation Sent':'#3b82f6','PO Pending':'#f47067','Recee':'#f59e0b','Designing - In House':'#8b5cf6','Designing - Outsource':'#c084fc','Printing · In-House':'#06b6d4','Printing · Outsource':'#f97316','Fabrication · In-House':'#dc2626','Fabrication · Outsource':'#ea580c','Delivered':'#3b82f6','Installation WIP':'#059669','Rectification':'#ec4899','Billing Pending':'#06b6d4','Given for Billing':'#06b6d4','Cash Pending':'#e3a008','IC Pending':'#f59e0b','DC Pending':'#f59e0b','Billing Done':'#4ade80','Cash Received':'#4ade80','No Bill':'#64748b','Cancelled':'#64748b'};
         return <tr key={j.id} style={{cursor:"pointer"}} onClick={()=>openJob(j)}><td className="mn" style={{fontWeight:700,fontSize:10,color:"#e3a008"}}><StatusTip j={j}>{j.id}</StatusTip></td><td><FB f={j.firm} firms={firms}/></td><td style={{fontSize:10.5,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.client_name}</td><td style={{fontSize:10,color:"#64748b"}}>{j.project}</td><td><StatusTip j={j}><span className="bd" style={{background:(sc[j.status]||'#64748b')+'20',color:sc[j.status]||'#64748b'}}>{j.status}</span></StatusTip></td><td className="mn" style={{fontSize:10}}>{j.batches?.length||0}</td><td>{j.po_number?<span style={{color:"#4ade80",fontSize:8}}>✓</span>:<span style={{color:"#f47067",fontSize:8}}>⚠️</span>}</td><td style={{fontSize:10}}>{j.made_by}</td></tr>;})}</tbody></table>
+    {fl.length>limit && <div style={{padding:"10px 12px",textAlign:"center",fontSize:11,color:"#94a3b8",borderTop:"1px solid #1a2030"}}>Showing first {limit} of {fl.length} jobs (capped for speed). <button className="b bs" style={{marginLeft:6}} onClick={()=>setLimit(l=>l+200)}>Show 200 more</button> <span style={{color:"#64748b"}}>— or search above to jump to a specific job.</span></div>}
     {/* 21 Apr: Empty-state hint — protects against double-FY-filter confusion (top-header FY vs this page's local FY). */}
     {fl.length===0 && <div style={{padding:"24px 16px",textAlign:"center",color:"#64748b",fontSize:11,lineHeight:1.6}}>
       <div style={{fontSize:24,marginBottom:6}}>📭</div>
