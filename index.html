@@ -1056,30 +1056,38 @@ function MainApp({user,onLogout,masterData}){
         }
       }catch(e){console.log('Portal notification check error:',e);}
       
-      // Phase 2: Load batches + line items for current FY jobs
-      const curJobIds=j.map(x=>x.id);
-      const [b,li,osi,rq,pr] = await Promise.all([
-        fetchAll('batches','id'),
-        fetchAll('line_items','id'),
-        fetchAll('outsource_items','id'),
-        fetchAll('requisitions','id'),
-        fetchAll('purchase_requests','created_at'),
-      ]);
-      setBatches(b); setItems(li); setOsItems(osi); setReqs(rq); setPrs(pr);
-      console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',osi.length,'outsource',rq.length,'requisitions');
+      // Phases 2 & 3 deferred off the first-paint path (2026-06-10 load hotfix):
+      // run AFTER the Phase-1 dashboard paints so the heavy table loads
+      // (line_items ~17k, batches ~6.4k + logs) no longer block first render.
+      // Same data is still loaded — just streamed in behind a usable UI.
+      setTimeout(async()=>{
+       try{
+        // Phase 2: Load batches + line items for current FY jobs
+        const curJobIds=j.map(x=>x.id);
+        const [b,li,osi,rq,pr] = await Promise.all([
+          fetchAll('batches','id'),
+          fetchAll('line_items','id'),
+          fetchAll('outsource_items','id'),
+          fetchAll('requisitions','id'),
+          fetchAll('purchase_requests','created_at'),
+        ]);
+        setBatches(b); setItems(li); setOsItems(osi); setReqs(rq); setPrs(pr);
+        console.log('Phase 2: Loaded',b.length,'batches',li.length,'items',osi.length,'outsource',rq.length,'requisitions');
 
-      // Phase 3: Load older FY jobs + logs + sales in background
-      const [oldJ,pl,fl,ol,dl,sa] = await Promise.all([
-        fetchAll('jobs','id',q=>q.not('id','like','%-'+curFYSuffix)),
-        fetchAll('print_logs','id'),
-        fetchAll('fab_logs','id'),
-        fetchAll('outsource_logs','id'),
-        fetchAll('dispatch_logs','id'),
-        fetchAll('sales_activities','id'),
-      ]);
-      setJobs(prev=>[...prev,...oldJ]); setPLogs(pl); setFLogs(fl);
-      setOsLogs(ol); setDLogs(dl); setSalesActs(sa);
-      console.log('Phase 3: Loaded',oldJ.length,'older jobs + logs');
+        // Phase 3: Load older FY jobs + logs + sales in background
+        const [oldJ,pl,fl,ol,dl,sa] = await Promise.all([
+          fetchAll('jobs','id',q=>q.not('id','like','%-'+curFYSuffix)),
+          fetchAll('print_logs','id'),
+          fetchAll('fab_logs','id'),
+          fetchAll('outsource_logs','id'),
+          fetchAll('dispatch_logs','id'),
+          fetchAll('sales_activities','id'),
+        ]);
+        setJobs(prev=>[...prev,...oldJ]); setPLogs(pl); setFLogs(fl);
+        setOsLogs(ol); setDLogs(dl); setSalesActs(sa);
+        console.log('Phase 3: Loaded',oldJ.length,'older jobs + logs');
+       }catch(e){console.warn('Deferred bootstrap (Phase 2/3) error:',e);}
+      },0);
     }
     load();
   },[]);
@@ -1978,7 +1986,7 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
   // Item #6 — Site counts per status card (banking sites rolled up via parent-job status)
   const [sitesByJobNo,setSitesByJobNo]=useState(null); // Map<job_no, site_count_with_uid>
   useEffect(()=>{
-    (async()=>{
+    setTimeout(async()=>{
       // Pull just job_no + site_unique_id — minimal columns for speed
       let all=[],from=0,sz=1000;
       while(true){
@@ -1995,7 +2003,7 @@ function DashPage({s,stock,sp,jobs,fullJobs,fyFilter,firms,sm,updateJobStatus,up
         map[s.job_no]=(map[s.job_no]||0)+1;
       }
       setSitesByJobNo(map);
-    })();
+    },3000);
   },[]);
   const sitesPerCard=useMemo(()=>{
     if(!sitesByJobNo)return null;
