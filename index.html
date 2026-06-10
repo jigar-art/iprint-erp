@@ -16213,14 +16213,47 @@ const __isHealth = new URLSearchParams(window.location.search).get('health') ===
 ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? <HealthCheckPage/> : <RootApp/>);
 </script>
 <script>
-// PWA: register service worker (plain JS, outside Babel block)
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function () {
-    navigator.serviceWorker.register('/sw.js').catch(function (err) {
-      console.warn('SW registration failed:', err);
-    });
+/* MARKER:BOOT_WATCHDOG_v1 — plain JS, outside Babel block. Replaces former SW registration. */
+(function () {
+  var LIMIT_MS = 45000;
+  var IPRINT_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
+  var errs = [];
+  function mounted() { var r = document.getElementById('root'); return !!(r && r.children.length > 0); }
+  window.addEventListener('error', function (e) {
+    errs.push((e.message || 'script load failed') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    try { errs.push('promise: ' + String(e.reason && e.reason.message || e.reason).slice(0, 200)); } catch (x) {}
   });
-}
+  function clearAndReload() {
+    var p = [];
+    if (navigator.serviceWorker) p.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+    if (window.caches) p.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+    Promise.all(p).catch(function () {}).then(function () { location.reload(); });
+  }
+  window.__iprintClearAndReload = clearAndReload;
+  function report(kind) {
+    try {
+      fetch('https://idjeniwznjiaanaxcjvg.supabase.co/rest/v1/client_errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': IPRINT_ANON_KEY, 'Authorization': 'Bearer ' + IPRINT_ANON_KEY, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ kind: kind, errors: errs.slice(0, 10), ua: navigator.userAgent, url: location.href })
+      }).catch(function () {});
+    } catch (x) {}
+  }
+  setTimeout(function () {
+    if (mounted()) return;
+    report(errs.length ? 'boot_error' : 'boot_timeout');
+    document.body.innerHTML =
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0e17;color:#dde3f0;font-family:sans-serif;padding:24px">' +
+      '<div style="max-width:560px;text-align:center"><div style="font-size:42px">\u26A0\uFE0F</div>' +
+      '<h2 style="margin:12px 0">iPrint ERP couldn\u2019t start</h2>' +
+      '<p style="color:#8a93a8;font-size:14px;word-break:break-word">' + (errs[0] ? errs[0].replace(/</g, '&lt;') : 'The app did not load within 45 seconds. Your internet may be slow, or there may be a problem with the latest update.') + '</p>' +
+      '<button onclick="location.reload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px">\uD83D\uDD04 Retry</button>' +
+      '<button onclick="__iprintClearAndReload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#374151;color:#fff;font-size:15px">\uD83E\uDDF9 Clear cache &amp; retry</button>' +
+      '<p style="color:#566;font-size:12px">This error was reported automatically.</p></div></div>';
+  }, LIMIT_MS);
+})();
 </script>
 </body>
 </html>
