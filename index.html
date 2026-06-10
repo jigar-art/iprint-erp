@@ -9,10 +9,10 @@
 <script src="/react.production.min.js"></script>
 <script src="/react-dom.production.min.js"></script>
 <script src="/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="/supabase.js"></script><!-- supabase-js 2.107.0, self-hosted (HR-15) -->
+<script src="/xlsx.full.min.js"></script><!-- xlsx 0.20.3, self-hosted (HR-15) -->
+<script src="/exceljs.min.js"></script><!-- exceljs 4.4.0, self-hosted (HR-15) -->
+<script src="/jszip.min.js"></script><!-- jszip 3.10.1, self-hosted (HR-15) -->
 <!-- PWA: app install + status bar + iOS icon -->
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#060810">
@@ -16253,6 +16253,49 @@ ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? <Health
       '<button onclick="__iprintClearAndReload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#374151;color:#fff;font-size:15px">\uD83E\uDDF9 Clear cache &amp; retry</button>' +
       '<p style="color:#566;font-size:12px">This error was reported automatically.</p></div></div>';
   }, LIMIT_MS);
+
+  /* DATA_WATCHDOG_v1 (1C) — post-mount data-path probe. Catches "app mounted but database dead"
+     (evening 2026-06-10 class: bad supabase-js / DB unreachable / key revoked). Probes through
+     the real supabase-js client, retries once after 8s, then reports kind=data_dead and overlays
+     a recovery screen. Reporting uses raw fetch, independent of supabase-js. */
+  function dataProbe() {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; reject(new Error('data probe timeout (15s)')); } }, 15000);
+      try {
+        if (!window.supabase || typeof window.supabase.createClient !== 'function') throw new Error('supabase-js global missing/broken');
+        var c = window.supabase.createClient('https://idjeniwznjiaanaxcjvg.supabase.co', IPRINT_ANON_KEY);
+        c.from('team_members').select('id', { head: true, count: 'exact' }).limit(1).then(function (r) {
+          if (done) return; done = true; clearTimeout(t);
+          if (r && r.error) { reject(new Error('data probe error: ' + (r.error.message || 'unknown'))); } else { resolve(); }
+        }, function (e) { if (done) return; done = true; clearTimeout(t); reject(e); });
+      } catch (e) { if (!done) { done = true; clearTimeout(t); reject(e); } }
+    });
+  }
+  function dataDead(msg) {
+    try { errs.unshift('data: ' + String(msg).slice(0, 200)); } catch (x) {}
+    report('data_dead');
+    if (document.getElementById('iprint-data-dead')) return;
+    var d = document.createElement('div');
+    d.id = 'iprint-data-dead';
+    d.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#0b0e17;color:#dde3f0;font-family:sans-serif;padding:24px';
+    d.innerHTML = '<div style="max-width:560px;text-align:center"><div style="font-size:42px">\u26A0\uFE0F</div>' +
+      '<h2 style="margin:12px 0">iPrint ERP loaded, but can\u2019t reach the database</h2>' +
+      '<p style="color:#8a93a8;font-size:14px">Data cannot be read or saved right now. Please do not enter data \u2014 it will not save. Try again in a minute.</p>' +
+      '<button onclick="location.reload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px">\uD83D\uDD04 Retry</button>' +
+      '<button onclick="__iprintClearAndReload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#374151;color:#fff;font-size:15px">\uD83E\uDDF9 Clear cache &amp; retry</button>' +
+      '<p style="color:#566;font-size:12px">This error was reported automatically.</p></div>';
+    document.body.appendChild(d);
+  }
+  (function waitMount(n) {
+    if (new URLSearchParams(location.search).get('health') === '1') return;
+    if (!mounted()) { if (n < 60) { setTimeout(function () { waitMount(n + 1); }, 1000); } return; }
+    dataProbe().catch(function (e1) {
+      setTimeout(function () {
+        dataProbe().catch(function (e2) { dataDead((e2 && e2.message) || (e1 && e1.message) || 'unknown'); });
+      }, 8000);
+    });
+  })(0);
 })();
 </script>
 </body>
