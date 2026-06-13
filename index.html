@@ -226,7 +226,7 @@ const validInvDate = (d, show) => {
   }
   return s;
 };
-const ALL_ST_NEW = ['Draft', 'Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
+const ALL_ST_NEW = ['Draft', 'Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
   if (!status) return null;
   const s = String(status).trim();
@@ -236,6 +236,7 @@ const STATUS_TO_LEADING = status => {
   if (s === 'Printing · Outsource') return 'printOut';
   if (s === 'Fabrication · In-House') return 'fabIn';
   if (s === 'Fabrication · Outsource') return 'fabOut';
+  if (s === 'In Transit') return 'in_transit';
   if (s === 'Delivered') return 'delivered';
   if (s === 'Installation WIP') return 'installation';
   if (s === 'Rectification') return 'rectification';
@@ -300,6 +301,12 @@ const STATUS_CARDS = [{
   label: 'FAB-OUT',
   statuses: ['Fabrication · Outsource'],
   color: '#ea580c',
+  isLeading: true
+}, {
+  key: 'in_transit',
+  label: 'IN TRANSIT',
+  statuses: ['In Transit'],
+  color: '#f59e0b',
   isLeading: true
 }, {
   key: 'delivered',
@@ -1998,6 +2005,19 @@ function MainApp({
       return;
     }
     if (newStatus === 'Delivered') {
+      if (dbRow.status !== 'In Transit') {
+        show('🔒 Mark "' + jobId + '" as In Transit first — a job must be dispatched (In Transit) before it can be Delivered.', false);
+        console.warn('updateJobStatus blocked (Delivered needs In Transit): job', jobId, 'current', dbRow.status);
+        return;
+      }
+      const DELIVER_USERS = ['JIGAR', 'CHANDNI', 'AMOL', 'MURLI', 'MANOJ'];
+      if (!DELIVER_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
+        show('🔒 Only Murli or Manoj (or admin) can mark a job Delivered.', false);
+        console.warn('updateJobStatus blocked (Deliver actor gate): user', userName, 'job', jobId);
+        return;
+      }
+    }
+    if (newStatus === 'In Transit' || newStatus === 'Delivered') {
       const {
         data: wRows,
         error: wErr
@@ -2007,7 +2027,7 @@ function MainApp({
         return;
       }
       if (!wRows || wRows.length === 0) {
-        show('🔒 Cannot mark "' + jobId + '" Delivered — no weighment/courier entry yet. Log it under Dispatch → 📦 Courier / Weighment first (Local own-delivery counts).', false);
+        show('🔒 Cannot mark "' + jobId + '" ' + newStatus + ' — no weighment/courier entry yet. Log it under Dispatch → 📦 Courier / Weighment first (Local own-delivery counts).', false);
         console.warn('updateJobStatus blocked (Weighment gate): job', jobId, 'has no weighment_logs row');
         return;
       }
@@ -2039,6 +2059,7 @@ function MainApp({
       'Printing · Outsource': [1, 1, 1, 1, 0, 0, 0, 0],
       'Fabrication · In-House': [1, 1, 1, 1, 1, 0, 0, 0],
       'Fabrication · Outsource': [1, 1, 1, 1, 1, 0, 0, 0],
+      'In Transit': [1, 1, 1, 1, 1, 1, 0, 0],
       'Delivered': [1, 1, 1, 1, 1, 1, 0, 0],
       'Installation WIP': [1, 1, 1, 1, 1, 1, 1, 0],
       'Rectification': [1, 1, 1, 1, 1, 1, 1, 0],
@@ -3477,6 +3498,7 @@ function StatusTip({
     printing_outsource: 'Printing · Outsource',
     fabrication_in_house: 'Fabrication · In-House',
     fabrication_outsource: 'Fabrication · Outsource',
+    in_transit: 'In Transit',
     delivered: 'Delivered',
     installation_wip: 'Installation WIP',
     billing_pending: 'Billing Pending',
@@ -3771,6 +3793,7 @@ function DashPage({
     'Printing · Outsource': '#f97316',
     'Fabrication · In-House': '#dc2626',
     'Fabrication · Outsource': '#ea580c',
+    'In Transit': '#f59e0b',
     'Delivered': '#3b82f6',
     'Installation WIP': '#059669',
     'Rectification': '#ec4899',
@@ -4451,6 +4474,7 @@ function JobsPage({
       'Printing · Outsource': '#f97316',
       'Fabrication · In-House': '#dc2626',
       'Fabrication · Outsource': '#ea580c',
+      'In Transit': '#f59e0b',
       'Delivered': '#3b82f6',
       'Installation WIP': '#059669',
       'Rectification': '#ec4899',
@@ -5521,6 +5545,7 @@ function JobDetail({
         'Printing · Outsource': '#f97316',
         'Fabrication · In-House': '#dc2626',
         'Fabrication · Outsource': '#ea580c',
+        'In Transit': '#f59e0b',
         'Delivered': '#3b82f6',
         'Installation WIP': '#059669',
         'Rectification': '#ec4899',
@@ -5545,6 +5570,7 @@ function JobDetail({
         'Printing · Outsource': '#f97316',
         'Fabrication · In-House': '#dc2626',
         'Fabrication · Outsource': '#ea580c',
+        'In Transit': '#f59e0b',
         'Delivered': '#3b82f6',
         'Installation WIP': '#059669',
         'Rectification': '#ec4899',
@@ -6008,10 +6034,15 @@ function JobDetail({
       c: '#ea580c',
       e: '🔧'
     }, {
+      k: 'in_transit',
+      l: 'In Transit',
+      c: '#f59e0b',
+      e: '🚚'
+    }, {
       k: 'delivered',
       l: 'Delivered',
       c: '#3b82f6',
-      e: '🚚'
+      e: '✅'
     }, {
       k: 'installation_wip',
       l: 'Install WIP',
@@ -14281,6 +14312,7 @@ function DeptPage({
     'Printing · Outsource': '#f97316',
     'Fabrication · In-House': '#dc2626',
     'Fabrication · Outsource': '#ea580c',
+    'In Transit': '#f59e0b',
     'Delivered': '#3b82f6',
     'Installation WIP': '#059669',
     'Rectification': '#ec4899',
@@ -14300,6 +14332,7 @@ function DeptPage({
     printOut: '#f97316',
     fabIn: '#06b6d4',
     fabOut: '#f97316',
+    in_transit: '#f59e0b',
     delivered: '#3b82f6',
     installation: '#4ade80'
   })[k] || '#64748b';
@@ -14309,6 +14342,7 @@ function DeptPage({
     printOut: 'P·Out',
     fabIn: 'F·In',
     fabOut: 'F·Out',
+    in_transit: 'In Transit',
     delivered: 'Delivered',
     installation: 'Inst WIP'
   })[k] || k;
@@ -42209,7 +42243,7 @@ function ClientPortal({
         id: 'projects',
         name: 'Projects & Installation',
         icon: '🏗️',
-        st: ['Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'Installation WIP', 'Rectification', 'Delivered'],
+        st: ['Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'Installation WIP', 'Rectification', 'In Transit', 'Delivered'],
         seeAll: false
       }, {
         id: 'purchase',
@@ -42307,6 +42341,7 @@ function ClientPortal({
     'Printing · Outsource': '#f97316',
     'Fabrication · In-House': '#dc2626',
     'Fabrication · Outsource': '#ea580c',
+    'In Transit': '#f59e0b',
     'Delivered': '#3b82f6',
     'Installation WIP': '#059669',
     'Rectification': '#ec4899',
@@ -42359,6 +42394,7 @@ function ClientPortal({
     'Printing · Outsource': 2,
     'Fabrication · In-House': 3,
     'Fabrication · Outsource': 3,
+    'In Transit': 4,
     'Delivered': 4,
     'Installation WIP': 4,
     'Billing Pending': 5,
