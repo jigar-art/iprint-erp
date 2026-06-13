@@ -31538,7 +31538,7 @@ function BankCRMPage({
   const [newInvoiceAmount, setNewInvoiceAmount] = useState('');
   const canAddInvoice = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA'].some(u => uN.includes(u));
+    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA', 'SHREYA', 'SONAM'].some(u => uN.includes(u));
   })();
   const togglePmtStatus = async (site, newStatus, note = '') => {
     const oldStatus = site.payment_status || 'Not Started';
