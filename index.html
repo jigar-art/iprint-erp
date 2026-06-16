@@ -2466,7 +2466,7 @@ function MainApp({
     l: "All Jobs",
     e: "📋",
     roles: ["admin", "sales", "production", "accounts", "designer"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "SHREYA"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "SHREYA", "POONAM"]
   }, {
     id: "new",
     l: "New Job",
@@ -2508,7 +2508,7 @@ function MainApp({
     l: "Outsource",
     e: "📤",
     roles: ["admin", "production", "printing", "fabrication", "designer", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "SHREYA", "PRAJAKTA", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "SHREYA", "PRAJAKTA", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK", "POONAM"]
   }, {
     id: "disp",
     l: "Dispatch",
@@ -2556,7 +2556,7 @@ function MainApp({
     l: "Banking CRM",
     e: "🏦",
     roles: ["admin", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "SHREYA", "VIDYA", "SONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "SHREYA", "VIDYA", "SONAM", "POONAM"]
   }, {
     id: "sales",
     l: "Sales CRM",
@@ -4677,7 +4677,7 @@ function JobDetail({
   const LIM_ROUTES = [['inhouse', 'In-house'], ['material', 'OS / material'], ['work', 'OS / work']];
   const canRaiseOsPR = (() => {
     const u = (user?.name || '').toUpperCase();
-    return ['AMOL', 'SHREYA', 'MURLI', 'JIGAR'].some(t => u === t || u.startsWith(t + ' '));
+    return ['AMOL', 'SHREYA', 'MURLI', 'JIGAR', 'POONAM'].some(t => u === t || u.startsWith(t + ' '));
   })();
   const [prFromBom, setPrFromBom] = useState([]);
   const [osPrSignal, setOsPrSignal] = useState(null);
