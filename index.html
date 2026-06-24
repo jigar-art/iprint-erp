@@ -2010,9 +2010,9 @@ function MainApp({
         console.warn('updateJobStatus blocked (Delivered needs In Transit): job', jobId, 'current', dbRow.status);
         return;
       }
-      const DELIVER_USERS = ['JIGAR', 'CHANDNI', 'AMOL', 'MURLI', 'MANOJ'];
+      const DELIVER_USERS = ['JIGAR', 'CHANDNI', 'AMOL', 'MURLI', 'MANOJ', 'HARISH'];
       if (!DELIVER_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
-        show('🔒 Only Murli or Manoj (or admin) can mark a job Delivered.', false);
+        show('🔒 Only Murli, Manoj or Harish (or admin) can mark a job Delivered.', false);
         console.warn('updateJobStatus blocked (Deliver actor gate): user', userName, 'job', jobId);
         return;
       }
