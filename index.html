@@ -20946,7 +20946,7 @@ function WeighmentView({
   jobs,
   show
 }) {
-  const WMODES = ["Train", "Air Cargo", "Air Courier", "Surface", "WeFast", "Local — own delivery"];
+  const WMODES = ["Train", "Air Cargo", "Air Courier", "Surface", "WeFast", "Ola", "Uber", "Porter", "Borzo", "Own delivery person", "Others"];
   const blank = {
     weigh_date: td(),
     job_no: "",
@@ -20991,7 +20991,7 @@ function WeighmentView({
       if (!error && data) setList(data);
     })();
   }, []);
-  const isLocal = String(f.delivery_mode || "").startsWith("Local");
+  const isLocal = (m => m === 'Own delivery person' || m === 'Others')(String(f.delivery_mode || "").trim());
   const num = v => {
     const n = parseFloat(v);
     return Number.isFinite(n) ? n : null;
@@ -21036,6 +21036,25 @@ function WeighmentView({
         return;
       }
     }
+    const M = String(f.delivery_mode || "").trim();
+    const relaxed = M === 'Own delivery person' || M === 'Others';
+    const miss = [];
+    const needT = (v, lbl) => { if (!String(v || "").trim()) miss.push(lbl); };
+    const needN = (v, lbl) => { if (num(v) == null) miss.push(lbl); };
+    if (!M) miss.push('Mode');
+    needT(f.delivered_by, 'Delivered By');
+    needT(f.received_by, 'Received By');
+    needT(f.destination_area, 'Destination Area');
+    needT(f.parcel_desc, 'Parcel Desc');
+    needN(f.package_count, '# Packages');
+    needN(f.weighed_kg, 'Weighed (kg)');
+    if (!relaxed) {
+      needT(f.vendor_name, 'Courier / Vendor');
+      needT(f.invoice_no, 'Invoice / Docket#');
+      needN(f.invoice_kg, 'Invoice (kg)');
+      if (!(photos && photos.length)) miss.push('Proof Photo');
+    }
+    if (miss.length) { show?.('Please fill all required fields: ' + miss.join(', '), false); return; }
     setSaving(true);
     const row = {
       id: rowId,
