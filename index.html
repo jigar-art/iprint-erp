@@ -578,7 +578,7 @@ const resolveUomHeader = items => {
 const SIZES = ["MM", "INCH", "FOOT"];
 const RATES = ["SQFT", "SQMTR", "UNIT", "RFT", "NOS", "SET", "LOT"];
 const MUNITS = ["roll", "nos", "sheet", "pcs", "sqft", "mtr", "kg", "box", "set", "lot"];
-const FAB_P = ["Laser Cutting", "Router Cutting", "CNC Cutting", "Bending", "Welding", "PU Coating", "Painting", "Polishing", "Assembly", "Carpentry", "3D Cutting"];
+const FAB_P = ["XL Jet Lamination Machine", "Latex", "Epson", "UV Flatbed", "UV Roll to Roll", "Plotter Cut Machine", "Outsource"];
 function MaterialPicker({
   value,
   products,
@@ -18668,6 +18668,7 @@ function FabPage({
   const [showDetail, setShowDetail] = useState(null);
   const [df, setDf] = useState({
     process: 'General',
+    outsource_name: '',
     waste: 0
   });
   const [showModal, setShowModal] = useState(false);
@@ -18677,6 +18678,7 @@ function FabPage({
     job_id: '',
     batch_id: '',
     process: '',
+    outsource_name: '',
     selectedItems: {},
     start_time: '',
     end_time: '',
@@ -19069,6 +19071,7 @@ function FabPage({
       }
       totalRows += mats.length;
     }
+    if (f.process === 'Outsource' && !(f.outsource_name || '').trim()) { show('Vendor / Machine name required for Outsource', false); return; }
     if (!confirm(`Save ${totalRows} fab log row${totalRows > 1 ? 's' : ''} across ${itemIds.length} item${itemIds.length > 1 ? 's' : ''} for process "${f.process}"?`)) return;
     setSaving(true);
     const baseId = 'FL' + Date.now();
@@ -19088,7 +19091,7 @@ function FabPage({
           job_id: f.job_id,
           batch_id: f.batch_id,
           line_item_id: id,
-          process: f.process,
+          process: f.process === 'Outsource' ? ('Outsource — ' + (f.outsource_name || '').trim()) : f.process,
           operator,
           material: r.material,
           qty_used: +r.qty_used || 0,
@@ -19182,10 +19185,11 @@ function FabPage({
   });
   const opRows = Object.entries(byOp).sort((a, b) => b[1] - a[1]);
   const saveDetail = async logId => {
+    if (df.process === 'Outsource' && !(df.outsource_name || '').trim()) { alert('Vendor / Machine name required for Outsource'); return; }
     const {
       error
     } = await sb.from('fab_logs').update({
-      process: df.process,
+      process: df.process === 'Outsource' ? ('Outsource — ' + (df.outsource_name || '').trim()) : df.process,
       waste: +df.waste || 0
     }).eq('id', logId);
     if (error) {
@@ -19576,10 +19580,7 @@ function FabPage({
     },
     onClick: () => {
       setShowDetail(l.id);
-      setDf({
-        process: l.process || 'General',
-        waste: l.waste || 0
-      });
+      { const _p = l.process || 'General'; const _os = _p.indexOf('Outsource') === 0; setDf({ process: _os ? 'Outsource' : _p, outsource_name: _os ? _p.replace(/^Outsource\s*(—\s*)?/, '') : '', waste: l.waste || 0 }); }
     }
   }, React.createElement("td", {
     style: {
@@ -19714,7 +19715,7 @@ function FabPage({
     }
   }, (FAB_P || ['General', 'Cutting', 'Mounting', 'Lamination', 'Assembly', 'Finishing']).map(p => React.createElement("option", {
     key: p
-  }, p)))), React.createElement("div", null, React.createElement("label", {
+  }, p)))), df.process === 'Outsource' && React.createElement("div", null, React.createElement("label", { style: { fontSize: 8, color: "#64748b" } }, "Vendor / Machine"), React.createElement("input", { className: "in", value: df.outsource_name || '', onChange: e => setDf(p => ({ ...p, outsource_name: e.target.value })), style: { fontSize: 10 } })), React.createElement("div", null, React.createElement("label", {
     style: {
       fontSize: 8,
       color: "#64748b"
@@ -19846,7 +19847,7 @@ function FabPage({
   }, "\u2014 pick \u2014"), (FAB_P || []).map(p => React.createElement("option", {
     key: p,
     value: p
-  }, p))))), React.createElement("div", {
+  }, p))))), f.process === 'Outsource' && React.createElement("div", { style: { marginTop: 6 } }, React.createElement(F, { l: "Vendor / Machine *" }, React.createElement("input", { className: "in", placeholder: "vendor name / machine", value: f.outsource_name || '', onChange: e => sF(p => ({ ...p, outsource_name: e.target.value })) }))), React.createElement("div", {
     style: {
       marginTop: 6
     }
