@@ -20972,6 +20972,10 @@ function WeighmentView({
       if (!error && data) setList(data);
     })();
   }, []);
+  const canWeigh = (() => {
+    const t = String(me || '').trim().toUpperCase();
+    return ['MANOJ', 'MURLI'].some(n => t === n || t.startsWith(n + ' '));
+  })();
   const isLocal = (m => m === 'Own delivery person' || m === 'Others')(String(f.delivery_mode || "").trim());
   const num = v => {
     const n = parseFloat(v);
@@ -21001,6 +21005,10 @@ function WeighmentView({
   };
   const save = async () => {
     if (saving) return;
+    if (!canWeigh) {
+      show?.('Only Manoj / Murli can log weighments.', false);
+      return;
+    }
     let jid = String(f.job_no || "").trim();
     if (!jid) {
       show?.('Enter Job#', false);
@@ -21098,10 +21106,10 @@ function WeighmentView({
       flexDirection: "column",
       gap: 6
     }
-  }, React.createElement("button", {
+  }, canWeigh && React.createElement("button", {
     className: "b bp",
     onClick: () => ssf(p => !p)
-  }, sf ? "▾" : "📦 New Weighment / Courier"), sf && React.createElement("div", {
+  }, sf ? "▾" : "📦 New Weighment / Courier"), canWeigh && sf && React.createElement("div", {
     className: "c a",
     style: {
       padding: 10
