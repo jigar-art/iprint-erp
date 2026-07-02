@@ -15122,7 +15122,6 @@ function GRNPage({
   }, React.createElement("input", {
     type: "file",
     accept: "image/*",
-    capture: "environment",
     className: "in",
     style: {
       padding: 2
@@ -15892,6 +15891,20 @@ function PrintPage({
       } catch (_) {}
     }
   }, []);
+  const verifyPhotoAI = async photoUrl => {
+    try {
+      const {
+        data
+      } = await sb.functions.invoke('verify-print-photo', {
+        body: {
+          job_id: f.job_id,
+          photo_url: photoUrl,
+          uploaded_by: typeof user !== 'undefined' && user ? user.name || '' : ''
+        }
+      });
+      if (data && data.verdict === 'mismatch') show('⚠️ AI check: this photo may not match the job artwork' + (data.reason ? ' — ' + data.reason : '') + '. Admins notified. You can still save.', false);
+    } catch (_) {}
+  };
   const uploadItemPhoto = async (itemId, file) => {
     if (!file) return;
     if (!f.job_id) {
@@ -15916,6 +15929,7 @@ function PrintPage({
         _photoPreview: url,
         _uploading: false
       });
+      verifyPhotoAI(url);
     } catch (e) {
       show("Photo upload error: " + (e?.message || e), false);
       updateItem(itemId, {
@@ -15959,6 +15973,7 @@ function PrintPage({
           _uploading: false
         }
       }));
+      verifyPhotoAI(url);
     } catch (e) {
       show("Photo upload error: " + (e?.message || e), false);
       sF(p => ({
@@ -17638,10 +17653,33 @@ function PrintPage({
         fontWeight: 600,
         opacity: r._uploading ? 0.5 : 1
       }
-    }, r._uploading ? '⏳' : r._photoUrl ? '🔄' : '📸 Attach', React.createElement("input", {
+    }, r._uploading ? '⏳' : r._photoUrl ? '🔄📷' : '📷 Cam', React.createElement("input", {
       type: "file",
       accept: "image/*",
       capture: "environment",
+      disabled: r._uploading,
+      style: {
+        display: "none"
+      },
+      onChange: e => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        uploadItemPhoto(it.id, file);
+      }
+    })), React.createElement("label", {
+      style: {
+        cursor: r._uploading ? "wait" : "pointer",
+        padding: "1px 6px",
+        border: "1px dashed " + (r._photoUrl ? "#10b98140" : "#3b82f640"),
+        borderRadius: 2,
+        color: r._photoUrl ? "#10b981" : "#3b82f6",
+        fontSize: 8,
+        fontWeight: 600,
+        opacity: r._uploading ? 0.5 : 1
+      }
+    }, r._uploading ? '⏳' : r._photoUrl ? '🔄🖼️' : '🖼️ Gallery', React.createElement("input", {
+      type: "file",
+      accept: "image/*",
       disabled: r._uploading,
       style: {
         display: "none"
@@ -17786,10 +17824,33 @@ function PrintPage({
       fontWeight: 600,
       opacity: f.lump._uploading ? 0.5 : 1
     }
-  }, f.lump._uploading ? '⏳' : f.lump._photoUrl ? '🔄' : '📸 Attach', React.createElement("input", {
+  }, f.lump._uploading ? '⏳' : f.lump._photoUrl ? '🔄📷' : '📷 Cam', React.createElement("input", {
     type: "file",
     accept: "image/*",
     capture: "environment",
+    disabled: f.lump._uploading,
+    style: {
+      display: "none"
+    },
+    onChange: e => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      uploadLumpPhoto(file);
+    }
+  })), React.createElement("label", {
+    style: {
+      cursor: f.lump._uploading ? "wait" : "pointer",
+      padding: "1px 6px",
+      border: "1px dashed " + (f.lump._photoUrl ? "#10b98140" : "#3b82f640"),
+      borderRadius: 2,
+      color: f.lump._photoUrl ? "#10b981" : "#3b82f6",
+      fontSize: 8,
+      fontWeight: 600,
+      opacity: f.lump._uploading ? 0.5 : 1
+    }
+  }, f.lump._uploading ? '⏳' : f.lump._photoUrl ? '🔄🖼️' : '🖼️ Gallery', React.createElement("input", {
+    type: "file",
+    accept: "image/*",
     disabled: f.lump._uploading,
     style: {
       display: "none"
@@ -18345,10 +18406,35 @@ function PrintPage({
             fontSize: 9,
             fontWeight: 600
           }
-        }, "\uD83D\uDCF7 Add", React.createElement("input", {
+        }, "\uD83D\uDCF7 Cam", React.createElement("input", {
           type: "file",
           accept: "image/*",
           capture: "environment",
+          style: {
+            display: "none"
+          },
+          onChange: e => {
+            const f = e.target.files?.[0];
+            if (f) uploadProofPhoto(l.id, f, viewJob.id);
+            e.target.value = '';
+          }
+        })), !hasPhoto && !isUp && React.createElement("label", {
+          style: {
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "2px 6px",
+            border: "1px dashed #3b82f640",
+            borderRadius: 4,
+            color: "#3b82f6",
+            fontSize: 9,
+            fontWeight: 600,
+            marginLeft: 4
+          }
+        }, "\uD83D\uDDBC\uFE0F Gallery", React.createElement("input", {
+          type: "file",
+          accept: "image/*",
           style: {
             display: "none"
           },
@@ -18538,10 +18624,34 @@ function OsReceiptRow({
       fontSize: 9,
       fontWeight: 600
     }
-  }, pf ? '🔄 photo' : '📸 Proof photo', React.createElement("input", {
+  }, pf ? '🔄📷' : '📷 Cam', React.createElement("input", {
     type: "file",
     accept: "image/*",
     capture: "environment",
+    style: {
+      display: "none"
+    },
+    onChange: e => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setPf(file);
+      const rd = new FileReader();
+      rd.onload = ev => setPv(ev.target.result);
+      rd.readAsDataURL(file);
+    }
+  })), React.createElement("label", {
+    style: {
+      cursor: "pointer",
+      padding: "3px 8px",
+      border: "1px dashed " + (pf ? "#10b98140" : "#3b82f640"),
+      borderRadius: 3,
+      color: pf ? "#10b981" : "#3b82f6",
+      fontSize: 9,
+      fontWeight: 600
+    }
+  }, pf ? '🔄🖼️' : '🖼️ Gallery', React.createElement("input", {
+    type: "file",
+    accept: "image/*",
     style: {
       display: "none"
     },
@@ -18893,6 +19003,20 @@ function FabPage({
       } catch (_) {}
     }
   }, []);
+  const verifyPhotoAI = async photoUrl => {
+    try {
+      const {
+        data
+      } = await sb.functions.invoke('verify-print-photo', {
+        body: {
+          job_id: f.job_id,
+          photo_url: photoUrl,
+          uploaded_by: typeof user !== 'undefined' && user ? user.name || '' : ''
+        }
+      });
+      if (data && data.verdict === 'mismatch') show('⚠️ AI check: this photo may not match the job artwork' + (data.reason ? ' — ' + data.reason : '') + '. Admins notified. You can still save.', false);
+    } catch (_) {}
+  };
   const uploadItemPhoto = async (itemId, file) => {
     if (!file) return;
     if (!f.job_id) {
@@ -18917,6 +19041,7 @@ function FabPage({
         _photoPreview: url,
         _uploading: false
       });
+      verifyPhotoAI(url);
     } catch (e) {
       show("Photo upload error: " + (e?.message || e), false);
       updateItem(itemId, {
@@ -20247,10 +20372,33 @@ function FabPage({
         fontWeight: 600,
         opacity: r._uploading ? 0.5 : 1
       }
-    }, r._uploading ? '⏳' : r._photoUrl ? '🔄' : '📸 Attach', React.createElement("input", {
+    }, r._uploading ? '⏳' : r._photoUrl ? '🔄📷' : '📷 Cam', React.createElement("input", {
       type: "file",
       accept: "image/*",
       capture: "environment",
+      disabled: r._uploading,
+      style: {
+        display: "none"
+      },
+      onChange: e => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        uploadItemPhoto(it.id, file);
+      }
+    })), React.createElement("label", {
+      style: {
+        cursor: r._uploading ? "wait" : "pointer",
+        padding: "1px 6px",
+        border: "1px dashed " + (r._photoUrl ? "#10b98140" : "#3b82f640"),
+        borderRadius: 2,
+        color: r._photoUrl ? "#10b981" : "#3b82f6",
+        fontSize: 8,
+        fontWeight: 600,
+        opacity: r._uploading ? 0.5 : 1
+      }
+    }, r._uploading ? '⏳' : r._photoUrl ? '🔄🖼️' : '🖼️ Gallery', React.createElement("input", {
+      type: "file",
+      accept: "image/*",
       disabled: r._uploading,
       style: {
         display: "none"
@@ -30494,7 +30642,6 @@ function ExpensesPage({
   }, React.createElement("input", {
     type: "file",
     accept: "image/*,.pdf",
-    capture: "environment",
     className: "in",
     style: {
       padding: 2
