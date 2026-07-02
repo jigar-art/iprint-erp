@@ -15012,27 +15012,7 @@ function GRNPage({
   }, "\u2014 no masters loaded \u2014"), activeMastersV2.map(m => React.createElement("option", {
     key: m.id,
     value: m.name
-  }, m.name))), React.createElement("button", {
-    className: "b bs bp",
-    style: {
-      fontSize: 10,
-      padding: "2px 8px"
-    },
-    onClick: async () => {
-      const nm = prompt('Enter new material name (will be added to materials_master_v2):');
-      if (!nm || !nm.trim()) return;
-      const u = prompt('Unit? Type one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs', 'roll');
-      const row = await addNewMaterialV2(nm.trim(), (u || 'roll').trim());
-      if (row) {
-        setExtraV2(prev => [...prev, row]);
-        sF(p => ({
-          ...p,
-          material: row.name,
-          unit: row.unit || p.unit
-        }));
-      }
-    }
-  }, "+"))), React.createElement(F, {
+  }, m.name))))), React.createElement(F, {
     l: "Code#"
   }, React.createElement("input", {
     className: "in mn",
