@@ -17411,26 +17411,10 @@ function PrintPage({
         value: row.material,
         products: matPickerList,
         compact: true,
-        placeholder: "Search material or type new...",
+        placeholder: "Search material...",
         onPick: picked => updateMaterial(it.id, ri, {
           material: picked.internal_name
-        }),
-        onAddNew: async name => {
-          if (typeof addNewMaterialV2 !== 'function') {
-            updateMaterial(it.id, ri, {
-              material: name
-            });
-            return;
-          }
-          const u = (prompt('Unit for new material "' + name + '"?\nType one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs', 'roll') || 'roll').trim();
-          const row2 = await addNewMaterialV2(name, u);
-          if (row2) {
-            setExtraV2(prev => [...prev, row2]);
-            updateMaterial(it.id, ri, {
-              material: row2.name
-            });
-          }
-        }
+        })
       })), !row.outsourced && React.createElement(F, {
         l: "Used sqft *"
       }, React.createElement("input", {
@@ -17724,31 +17708,7 @@ function PrintPage({
         ...p.lump,
         material: picked.internal_name
       }
-    })),
-    onAddNew: async name => {
-      if (typeof addNewMaterialV2 !== 'function') {
-        sF(p => ({
-          ...p,
-          lump: {
-            ...p.lump,
-            material: name
-          }
-        }));
-        return;
-      }
-      const u = (prompt('Unit for new material "' + name + '"? (roll, sheet, nos, sqft, kg, ltr, meter, pcs)', 'roll') || 'roll').trim();
-      const row2 = await addNewMaterialV2(name, u);
-      if (row2) {
-        setExtraV2(prev => [...prev, row2]);
-        sF(p => ({
-          ...p,
-          lump: {
-            ...p.lump,
-            material: row2.name
-          }
-        }));
-      }
-    }
+    }))
   })), React.createElement(F, {
     l: "Total used sqft * (stock)"
   }, React.createElement("input", {
@@ -20129,28 +20089,7 @@ function FabPage({
       }, "\u2014 pick \u2014"), allActiveMasters.map(m => React.createElement("option", {
         key: m.id,
         value: m.name
-      }, m.name, " (", m.unit, ")"))), React.createElement("button", {
-        className: "b bs bp",
-        type: "button",
-        style: {
-          fontSize: 10,
-          padding: "2px 7px"
-        },
-        title: "Add new material to master",
-        onClick: async () => {
-          if (typeof addNewMaterialV2 !== 'function') return;
-          const nm = (prompt('New material name (added to materials_master_v2):') || '').trim();
-          if (!nm) return;
-          const u = (prompt('Unit?\nType one of: roll, sheet, nos, sqft, kg, ltr, meter, pcs', 'roll') || 'roll').trim();
-          const row2 = await addNewMaterialV2(nm, u);
-          if (row2) {
-            setExtraV2(prev => [...prev, row2]);
-            updateMaterial(it.id, ri, {
-              material: row2.name
-            });
-          }
-        }
-      }, "+"))), React.createElement(F, {
+      }, m.name, " (", m.unit, ")"))))), React.createElement(F, {
         l: `Used ${unitLabel} *`
       }, React.createElement("input", {
         className: "in mn",
