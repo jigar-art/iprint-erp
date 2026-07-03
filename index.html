@@ -2017,7 +2017,9 @@ function MainApp({
         return;
       }
     }
-    if (newStatus === 'In Transit' || newStatus === 'Delivered') {
+    const WEIGHMENT_EXEMPT_INTRANSIT = ['HARISH'];
+    const fabHandover = newStatus === 'In Transit' && WEIGHMENT_EXEMPT_INTRANSIT.some(t => _uname === t || _uname.startsWith(t + ' '));
+    if ((newStatus === 'In Transit' || newStatus === 'Delivered') && !fabHandover) {
       const {
         data: wRows,
         error: wErr
