@@ -21617,7 +21617,104 @@ function DispPage({
   }, "\uD83D\uDCCB Delivery Challans"), React.createElement("button", {
     className: "b " + (view === 'weigh' ? 'bp' : 'bs'),
     onClick: () => setView('weigh')
-  }, "\uD83D\uDCE6 Courier / Weighment")), view === 'weigh' ? React.createElement(WeighmentView, {
+  }, "\uD83D\uDCE6 Courier / Weighment"), React.createElement("button", {
+    className: "b " + (view === 'pending' ? 'bp' : 'bs'),
+    onClick: () => setView('pending')
+  }, "\uD83D\uDCCB DC / IC Pending (" + (jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').length + ")")), view === 'pending' ? (() => {
+    const q = dq.trim().toLowerCase();
+    const pendJobs = (jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').filter(j => !q || String(j.id || '').toLowerCase().includes(q) || String(j.client_name || '').toLowerCase().includes(q) || String(j.project || '').toLowerCase().includes(q) || String(j.delivery_address || '').toLowerCase().includes(q));
+    const daysIn = j => {
+      const sd = j.status_dates || {};
+      const raw = sd[j.status === 'DC Pending' ? 'dc_pending' : 'ic_pending'];
+      if (!raw) return null;
+      const d = new Date(String(raw).replace(/\s+by\s+.*$/i, ''));
+      if (isNaN(d.getTime())) return null;
+      return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+    };
+    const sorted = [...pendJobs].sort((a, b) => {
+      const da = daysIn(a), db = daysIn(b);
+      return (db === null ? -1 : db) - (da === null ? -1 : da);
+    });
+    return React.createElement("div", {
+      className: "c a",
+      style: {
+        padding: 10
+      }
+    }, React.createElement("div", {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+        flexWrap: 'wrap',
+        gap: 6
+      }
+    }, React.createElement("p", {
+      style: {
+        fontSize: 12,
+        fontWeight: 700
+      }
+    }, "\uD83D\uDCCB Jobs awaiting DC / Installation Certificate \u2014 ", sorted.length), React.createElement("input", {
+      className: "in",
+      placeholder: "Search job#, client, site...",
+      value: dq,
+      onChange: e => setDq(e.target.value),
+      style: {
+        width: 220,
+        fontSize: 10
+      }
+    })), React.createElement("div", {
+      style: {
+        overflowX: 'auto'
+      }
+    }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job#"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Site / Address"), React.createElement("th", null, "Status"), React.createElement("th", null, "Days"))), React.createElement("tbody", null, sorted.map(j => {
+      const dys = daysIn(j);
+      const col = j.status === 'DC Pending' ? '#f59e0b' : '#f47067';
+      return React.createElement("tr", {
+        key: j.id
+      }, React.createElement("td", {
+        className: "mn",
+        style: {
+          fontSize: 10,
+          fontWeight: 700
+        }
+      }, j.id), React.createElement("td", {
+        style: {
+          fontSize: 10
+        }
+      }, j.client_name || '\u2014'), React.createElement("td", {
+        style: {
+          fontSize: 10,
+          color: '#94a3b8'
+        }
+      }, (j.project || '').slice(0, 30)), React.createElement("td", {
+        style: {
+          fontSize: 9,
+          color: '#64748b'
+        }
+      }, (j.delivery_address || '').slice(0, 45)), React.createElement("td", null, React.createElement("span", {
+        className: "bd",
+        style: {
+          background: col + '20',
+          color: col,
+          fontSize: 9
+        }
+      }, j.status)), React.createElement("td", {
+        style: {
+          fontSize: 10,
+          fontWeight: 700,
+          color: dys !== null && dys > 15 ? '#f47067' : '#e2e8f0'
+        }
+      }, dys !== null ? dys + 'd' : '\u2014'));
+    }), sorted.length === 0 && React.createElement("tr", null, React.createElement("td", {
+      colSpan: 6,
+      style: {
+        textAlign: 'center',
+        color: '#4ade80',
+        padding: 16
+      }
+    }, "\uD83C\uDF89 Nothing pending \u2014 all DCs & ICs collected!"))))));
+  })() : view === 'weigh' ? React.createElement(WeighmentView, {
     jobs: jobs,
     show: show
   }) : React.createElement(React.Fragment, null, React.createElement("button", {
