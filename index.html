@@ -32040,6 +32040,30 @@ function BankCRMPage({
         }).eq('id', jid);
       }
     }
+    if (field === 'po_number' || field === 'vendor_po') {
+      const t = (value || '').trim();
+      const junkPO = ['duplicate', 'po pending', 'pending', 'na', 'n/a', '-'];
+      const isRealPO = t.length >= 4 && !junkPO.includes(t.toLowerCase());
+      const site = sites.find(x => x.id === siteId);
+      const st = (site?.billing_status || '').trim().toLowerCase();
+      if (isRealPO && st === 'po pending') {
+        const adv = {
+          billing_status: 'Pending',
+          billing_category: ''
+        };
+        const {
+          error: advErr
+        } = await sb.from('banking_sites').update(adv).eq('id', siteId);
+        if (!advErr) {
+          setSites(p => p.map(x => x.id === siteId ? {
+            ...x,
+            ...adv
+          } : x));
+          show('✅ PO saved — billing status advanced to Pending');
+          return;
+        }
+      }
+    }
     show('Updated & synced!');
   };
   const exportExcel = () => {
@@ -34449,7 +34473,7 @@ function BankCRMPage({
           vendor_po: v
         } : x));
       },
-      onBlur: e => updateSite(s.id, 'vendor_po', e.target.value),
+      onBlur: e => updateSiteWithJobSync(s.id, s.job_no, 'vendor_po', e.target.value),
       style: {
         fontSize: 8,
         padding: '2px 3px',
