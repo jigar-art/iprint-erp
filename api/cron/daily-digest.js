@@ -261,6 +261,17 @@ export default async function handler(req, res) {
   const traits = buildTraits(digestData);
   const textBody = buildTextBody(digestData, sections);
 
+  // Preview mode (?preview=1): return the composed text and exit. Never sends,
+  // never writes history — used by the "Post to WhatsApp Groups" copy button.
+  const isPreview = (req.query?.preview === '1') || (req.url || '').includes('preview=1');
+  if (isPreview) {
+    return res.status(200).json({
+      ok: true,
+      status: 'preview',
+      preview: { traits, text: textBody },
+    });
+  }
+
   // 3. If kill-switch is off, log skip and exit (audit trail still records
   //    what *would* have been sent — handy for dry-run review).
   if (!enabled) {
