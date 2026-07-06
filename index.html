@@ -37907,6 +37907,12 @@ function ReportsPage({
   const [savingDigest, setSavingDigest] = React.useState(false);
   const [testingDigest, setTestingDigest] = React.useState(false);
   const [digestPreview, setDigestPreview] = React.useState(null);
+  const [digestGroups, setDigestGroups] = React.useState([]);
+  const [newGroupName, setNewGroupName] = React.useState('');
+  const [newGroupLink, setNewGroupLink] = React.useState('');
+  const [savingGroups, setSavingGroups] = React.useState(false);
+  const [postingDigest, setPostingDigest] = React.useState(false);
+  const [postText, setPostText] = React.useState(null);
   const [billingReqs, setBillingReqs] = React.useState([]);
   const [bankSites, setBankSites] = React.useState([]);
   const [siteInvoices, setSiteInvoices] = React.useState([]);
@@ -38182,6 +38188,12 @@ function ReportsPage({
         setDigestCfg(merged);
         setDraftDigest(merged);
       }
+    });
+    sb.from('app_settings').select('value').eq('key', 'digest_groups').single().then(({
+      data,
+      error
+    }) => {
+      if (!error && Array.isArray(data?.value)) setDigestGroups(data.value);
     });
   }, []);
   React.useEffect(() => {
@@ -38527,6 +38539,76 @@ function ReportsPage({
     setDigestCfg(v);
     setEditDigest(false);
     show?.(v.enabled ? 'Digest enabled · sends Mon-Sat 8 PM' : 'Digest config saved (currently disabled)');
+  };
+  const saveDigestGroups = async list => {
+    setSavingGroups(true);
+    const {
+      error
+    } = await sb.from('app_settings').update({
+      value: list,
+      updated_at: new Date().toISOString(),
+      updated_by: uname
+    }).eq('key', 'digest_groups');
+    setSavingGroups(false);
+    if (error) {
+      show?.('Failed to save groups: ' + error.message, false);
+      return false;
+    }
+    setDigestGroups(list);
+    return true;
+  };
+  const addDigestGroup = async () => {
+    const name = (newGroupName || '').trim();
+    const link = (newGroupLink || '').trim();
+    if (!name) {
+      show?.('Enter a group name', false);
+      return;
+    }
+    if (!/^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]+$/.test(link)) {
+      show?.('Link must be a chat.whatsapp.com invite URL', false);
+      return;
+    }
+    if (digestGroups.some(g => g.link === link)) {
+      show?.('Group already added', false);
+      return;
+    }
+    const ok = await saveDigestGroups([...digestGroups, {
+      name,
+      link
+    }]);
+    if (ok) {
+      setNewGroupName('');
+      setNewGroupLink('');
+      show?.('Group added');
+    }
+  };
+  const removeDigestGroup = async link => {
+    const ok = await saveDigestGroups(digestGroups.filter(g => g.link !== link));
+    if (ok) show?.('Group removed');
+  };
+  const fetchOpsDigestText = async () => {
+    setPostingDigest(true);
+    setPostText(null);
+    try {
+      const res = await fetch('/api/cron/daily-digest?manual=1&preview=1');
+      const data = await res.json().catch(() => ({}));
+      const text = data?.preview?.text;
+      if (!text) {
+        show?.('No digest text returned (status=' + (data.status || '?') + ')', false);
+        return;
+      }
+      setPostText(text);
+      try {
+        await navigator.clipboard.writeText(text);
+        show?.('Digest copied — open a group & paste');
+      } catch (_) {
+        show?.('Copy blocked — long-press the text below to copy', false);
+      }
+    } catch (e) {
+      show?.('Fetch failed: ' + e.message, false);
+    } finally {
+      setPostingDigest(false);
+    }
   };
   const testDigest = async () => {
     setTestingDigest(true);
@@ -39324,6 +39406,117 @@ function ReportsPage({
       }))
     }), l);
   }))), React.createElement("div", {
+    style: {
+      marginTop: 10,
+      padding: '10px 12px',
+      background: '#0d2818',
+      border: '1px solid #25d36633',
+      borderRadius: 6
+    }
+  }, React.createElement("p", {
+    style: {
+      fontSize: 10,
+      color: '#25d366',
+      fontWeight: 700,
+      margin: '0 0 4px'
+    }
+  }, "\uD83D\uDCE4 Post to WhatsApp Groups (manual)"), React.createElement("p", {
+    style: {
+      fontSize: 9,
+      color: '#64748b',
+      margin: '0 0 8px'
+    }
+  }, "WhatsApp API cannot post into existing groups. Tap Copy, then open a group below and paste."), React.createElement("button", {
+    className: "b",
+    onClick: fetchOpsDigestText,
+    disabled: postingDigest,
+    style: {
+      width: '100%',
+      fontSize: 11,
+      background: '#25d36620',
+      borderColor: '#25d36644',
+      color: '#25d366',
+      marginBottom: 8,
+      opacity: postingDigest ? 0.5 : 1
+    }
+  }, postingDigest ? 'Building\u2026' : "\uD83D\uDCCB Copy Today's Ops Digest"), postText && React.createElement("textarea", {
+    readOnly: true,
+    value: postText,
+    onFocus: e => e.target.select(),
+    style: {
+      width: '100%',
+      height: 90,
+      fontSize: 9,
+      background: '#0f1419',
+      color: '#c9d1d9',
+      border: '1px solid #2a3548',
+      borderRadius: 4,
+      padding: 6,
+      marginBottom: 8,
+      boxSizing: 'border-box'
+    }
+  }), digestGroups.map(g => React.createElement("div", {
+    key: g.link,
+    style: {
+      display: 'flex',
+      gap: 6,
+      alignItems: 'center',
+      marginBottom: 4
+    }
+  }, React.createElement("button", {
+    className: "b",
+    onClick: () => window.open(g.link, '_blank'),
+    style: {
+      flex: 1,
+      fontSize: 10,
+      textAlign: 'left'
+    }
+  }, "\uD83D\uDCAC ", g.name), React.createElement("button", {
+    className: "b",
+    onClick: () => removeDigestGroup(g.link),
+    disabled: savingGroups,
+    style: {
+      fontSize: 10,
+      color: '#f47067'
+    }
+  }, "\u2715"))), digestGroups.length === 0 && React.createElement("p", {
+    style: {
+      fontSize: 9,
+      color: '#64748b',
+      margin: '0 0 6px'
+    }
+  }, "No groups yet \u2014 add invite links below."), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 4,
+      marginTop: 6
+    }
+  }, React.createElement("input", {
+    placeholder: "Group name",
+    value: newGroupName,
+    onChange: e => setNewGroupName(e.target.value),
+    style: {
+      flex: 1,
+      fontSize: 10,
+      minWidth: 0
+    }
+  }), React.createElement("input", {
+    placeholder: "https://chat.whatsapp.com/\u2026",
+    value: newGroupLink,
+    onChange: e => setNewGroupLink(e.target.value),
+    style: {
+      flex: 2,
+      fontSize: 10,
+      minWidth: 0
+    }
+  }), React.createElement("button", {
+    className: "b",
+    onClick: addDigestGroup,
+    disabled: savingGroups,
+    style: {
+      fontSize: 10
+    }
+  }, savingGroups ? '\u2026' : '+ Add'))), React.createElement("div", {
     style: {
       marginTop: 10,
       padding: '6px 10px',
