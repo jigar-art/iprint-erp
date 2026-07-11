@@ -37862,6 +37862,173 @@ function JobNotesPage({
     }
   }, n.text))))));
 }
+function WorkLogView({ jobs, prs, salesActs, team, user }) {
+  const h = React.createElement;
+  const pad2 = n => (n < 10 ? '0' : '') + n;
+  const dayStrOf = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  const todayStr = dayStrOf(new Date());
+  const addDays = (str, n) => { const d = new Date(str + 'T00:00:00'); d.setDate(d.getDate() + n); return dayStrOf(d); };
+  const normName = s => String(s || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  const prettyName = s => { const u = normName(s); return u; };
+
+  const [view, setView] = React.useState('daily');
+  const [day, setDay] = React.useState(todayStr);
+  const [fromD, setFromD] = React.useState(addDays(todayStr, -6));
+  const [toD, setToD] = React.useState(todayStr);
+
+  // Parse a status_dates value "11 Jul 2026 09:30 AM by NAME"
+  const parseStamp = v => {
+    if (!v || typeof v !== 'string') return null;
+    const i = v.lastIndexOf(' by ');
+    if (i < 0) return null;
+    const by = v.slice(i + 4).trim();
+    if (!by) return null;
+    const at = new Date(v.slice(0, i).trim());
+    if (isNaN(at.getTime())) return null;
+    return { by, at };
+  };
+  // Map a status_dates key to a work group + label
+  const stageOf = key => {
+    const k = String(key || '');
+    if (k.indexOf('quotation') === 0) return { group: 'Estimating', label: 'Quotation sent' };
+    if (k.indexOf('recee') === 0) return { group: 'Estimating', label: 'Recee' };
+    if (k.indexOf('po_pending') === 0) return { group: 'Estimating', label: 'PO pending' };
+    if (k.indexOf('designing') === 0) return { group: 'Design', label: 'Moved to Design' };
+    if (k.indexOf('printing') === 0) return { group: 'Printing', label: 'Moved to Printing' };
+    if (k.indexOf('fabrication') === 0) return { group: 'Fabrication', label: 'Moved to Fabrication' };
+    if (k === 'in_transit') return { group: 'Dispatch', label: 'Dispatched' };
+    if (k === 'delivered') return { group: 'Dispatch', label: 'Delivered' };
+    if (k.indexOf('installation') === 0) return { group: 'Install', label: 'Installation' };
+    if (k.indexOf('rectification') === 0) return { group: 'Install', label: 'Rectification' };
+    if (k.indexOf('billing') === 0 || k.indexOf('given_for_billing') === 0 || k.indexOf('cash') === 0 || k.indexOf('ic_pending') === 0 || k.indexOf('dc_pending') === 0 || k === 'no_bill') return { group: 'Billing', label: 'Billing step' };
+    return null;
+  };
+
+  const GROUPS = ['Estimating', 'Design', 'Printing', 'Fabrication', 'Dispatch', 'Install', 'Billing', 'Purchase', 'Sales'];
+  const GROUP_COLOR = {
+    Estimating: '#e3a008', Design: '#8b5cf6', Printing: '#3b82f6', Fabrication: '#dc2626',
+    Dispatch: '#10b981', Install: '#06b6d4', Billing: '#f59e0b', Purchase: '#64748b', Sales: '#ec4899'
+  };
+
+  // Build the full event list once
+  const events = React.useMemo(() => {
+    const out = [];
+    (jobs || []).forEach(j => {
+      const sd = j && j.status_dates && typeof j.status_dates === 'object' ? j.status_dates : null;
+      if (!sd) return;
+      const stamps = [];
+      Object.keys(sd).forEach(k => { const p = parseStamp(sd[k]); if (p) stamps.push({ key: k, by: p.by, at: p.at }); });
+      stamps.sort((a, b) => a.at - b.at);
+      stamps.forEach((s, idx) => {
+        const st = stageOf(s.key);
+        if (!st) return;
+        const turnaround = idx > 0 ? (s.at - stamps[idx - 1].at) / 3600000 : null;
+        out.push({ by: normName(s.by), at: s.at, day: dayStrOf(s.at), group: st.group, label: st.label, job: j.id, turn: turnaround });
+      });
+    });
+    (prs || []).forEach(p => {
+      if (p.created_by && p.created_at) { const d = new Date(p.created_at); if (!isNaN(d.getTime())) out.push({ by: normName(p.created_by), at: d, day: dayStrOf(d), group: 'Purchase', label: 'PR raised', job: p.job_id || '', turn: null }); }
+      if (p.approved_by && p.approved_at) { const d = new Date(p.approved_at); if (!isNaN(d.getTime())) out.push({ by: normName(p.approved_by), at: d, day: dayStrOf(d), group: 'Purchase', label: 'PR approved', job: p.job_id || '', turn: null }); }
+    });
+    (salesActs || []).forEach(a => {
+      const who = a.rep_name || a.created_by;
+      const when = a.created_at || (a.date ? a.date + 'T09:00:00' : null);
+      if (who && when) { const d = new Date(when); if (!isNaN(d.getTime())) out.push({ by: normName(who), at: d, day: dayStrOf(d), group: 'Sales', label: (a.activity_type === 'project' ? 'Pipeline update' : 'Sales visit'), job: '', turn: null }); }
+    });
+    return out;
+  }, [jobs, prs, salesActs]);
+
+  // Aggregate events within a [from,to] day range (inclusive) into per-person stats
+  const aggregate = (from, to) => {
+    const perStay = {};
+    const inRange = e => e.day >= from && e.day <= to;
+    events.forEach(e => {
+      if (!inRange(e) || !e.by) return;
+      if (!perStay[e.by]) perStay[e.by] = { by: e.by, total: 0, groups: {}, turnSum: 0, turnN: 0, byDay: {} };
+      const rec = perStay[e.by];
+      rec.total += 1;
+      rec.groups[e.group] = (rec.groups[e.group] || 0) + 1;
+      if (e.turn != null && e.turn >= 0 && e.turn < 24 * 30) { rec.turnSum += e.turn; rec.turnN += 1; }
+      rec.byDay[e.day] = (rec.byDay[e.day] || 0) + 1;
+    });
+    return Object.values(perStay).sort((a, b) => b.total - a.total);
+  };
+
+  const fmtTurn = hrs => {
+    if (hrs == null) return '—';
+    if (hrs < 1) return Math.round(hrs * 60) + 'm';
+    if (hrs < 48) return hrs.toFixed(1) + 'h';
+    return (hrs / 24).toFixed(1) + 'd';
+  };
+
+  const dayList = React.useMemo(() => { const out = []; let c = fromD; let guard = 0; while (c <= toD && guard < 400) { out.push(c); c = addDays(c, 1); guard++; } return out; }, [fromD, toD]);
+
+  // ---- shared bits ----
+  const groupChips = g => GROUPS.filter(gr => g.groups[gr]).map(gr => h('span', {
+    key: gr, style: { fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, marginRight: 4, marginBottom: 4, display: 'inline-block', color: GROUP_COLOR[gr], background: GROUP_COLOR[gr] + '18', border: '1px solid ' + GROUP_COLOR[gr] + '44' }
+  }, gr + ' ' + g.groups[gr]));
+
+  const blindNote = h('p', { style: { fontSize: 9, color: '#64748b', margin: '8px 2px 0', fontStyle: 'italic' } },
+    '⚠️ Not tracked in ERP (done outside the app): quote emails, approval follow-ups, reminders, phone calls.');
+
+  const tabBar = h('div', { style: { display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' } },
+    ['daily', 'board'].map(v => h('button', {
+      key: v, onClick: () => setView(v),
+      style: { fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 7, cursor: 'pointer', border: '1px solid ' + (view === v ? '#e3a008' : '#1a2030'), background: view === v ? '#e3a00815' : 'transparent', color: view === v ? '#e3a008' : '#8b949e' }
+    }, v === 'daily' ? '📅 Daily Scorecard' : '🏆 Leaderboard & Trend')));
+
+  // ---- DAILY view ----
+  const dailyRows = React.useMemo(() => aggregate(day, day), [events, day]);
+  const dailyView = h('div', null,
+    h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' } },
+      h('button', { onClick: () => setDay(addDays(day, -1)), style: { fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #1a2030', background: 'transparent', color: '#8b949e', cursor: 'pointer' } }, '◀'),
+      h('input', { type: 'date', value: day, max: todayStr, onChange: e => setDay(e.target.value || todayStr), className: 'in', style: { fontSize: 11, padding: '4px 8px', width: 150 } }),
+      h('button', { onClick: () => setDay(day < todayStr ? addDays(day, 1) : day), disabled: day >= todayStr, style: { fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #1a2030', background: 'transparent', color: day >= todayStr ? '#334155' : '#8b949e', cursor: day >= todayStr ? 'default' : 'pointer' } }, '▶'),
+      h('button', { onClick: () => setDay(todayStr), style: { fontSize: 10, padding: '4px 10px', borderRadius: 6, border: '1px solid #1a2030', background: 'transparent', color: '#8b949e', cursor: 'pointer' } }, 'Today'),
+      h('span', { style: { fontSize: 10, color: '#64748b', marginLeft: 'auto' } }, dailyRows.length + ' people active')),
+    dailyRows.length === 0 ? h('p', { style: { fontSize: 11, color: '#64748b', padding: 20, textAlign: 'center' } }, 'No tracked activity on this day.') :
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 } },
+        dailyRows.map(g => h('div', { key: g.by, style: { background: '#161d2e', border: '1px solid #1a2030', borderRadius: 8, padding: '10px 12px' } },
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 } },
+            h('span', { style: { fontSize: 12, fontWeight: 800, color: '#c9d1d9' } }, prettyName(g.by)),
+            h('span', { style: { fontSize: 18, fontWeight: 800, color: '#e3a008' } }, g.total)),
+          h('div', { style: { marginBottom: 6 } }, groupChips(g)),
+          h('div', { style: { fontSize: 9, color: '#64748b' } }, 'Avg turnaround: ', h('span', { style: { color: '#10b981', fontWeight: 700 } }, g.turnN ? fmtTurn(g.turnSum / g.turnN) : '—'), g.turnN ? ' (' + g.turnN + ' steps)' : ''))))
+  );
+
+  // ---- BOARD view ----
+  const boardRows = React.useMemo(() => aggregate(fromD, toD), [events, fromD, toD]);
+  const maxDayCount = React.useMemo(() => { let m = 1; boardRows.forEach(g => dayList.forEach(d => { if ((g.byDay[d] || 0) > m) m = g.byDay[d] || 0; })); return m; }, [boardRows, dayList]);
+  const spark = g => h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 1, height: 22 } },
+    dayList.map(d => { const c = g.byDay[d] || 0; return h('div', { key: d, title: d + ': ' + c, style: { width: Math.max(2, Math.floor(120 / Math.max(1, dayList.length))), height: Math.max(1, Math.round((c / maxDayCount) * 22)), background: c ? '#e3a008' : '#1a2030', borderRadius: 1 } }); }));
+  const boardView = h('div', null,
+    h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' } },
+      h('span', { style: { fontSize: 10, color: '#64748b' } }, 'From'),
+      h('input', { type: 'date', value: fromD, max: toD, onChange: e => setFromD(e.target.value || fromD), className: 'in', style: { fontSize: 11, padding: '4px 8px', width: 140 } }),
+      h('span', { style: { fontSize: 10, color: '#64748b' } }, 'To'),
+      h('input', { type: 'date', value: toD, min: fromD, max: todayStr, onChange: e => setToD(e.target.value || toD), className: 'in', style: { fontSize: 11, padding: '4px 8px', width: 140 } }),
+      h('div', { style: { display: 'flex', gap: 4 } }, [['7d', 6], ['30d', 29]].map(o => h('button', { key: o[0], onClick: () => { setFromD(addDays(todayStr, -o[1])); setToD(todayStr); }, style: { fontSize: 10, padding: '4px 8px', borderRadius: 6, border: '1px solid #1a2030', background: 'transparent', color: '#8b949e', cursor: 'pointer' } }, o[0]))),
+      h('span', { style: { fontSize: 10, color: '#64748b', marginLeft: 'auto' } }, boardRows.length + ' people')),
+    boardRows.length === 0 ? h('p', { style: { fontSize: 11, color: '#64748b', padding: 20, textAlign: 'center' } }, 'No tracked activity in this range.') :
+      h('div', { style: { overflowX: 'auto' } }, h('table', { style: { width: '100%', borderCollapse: 'collapse' } },
+        h('thead', null, h('tr', { style: { borderBottom: '1px solid #1a2030' } },
+          h('th', { style: { textAlign: 'left', fontSize: 9, color: '#64748b', padding: '4px 6px' } }, '#'),
+          h('th', { style: { textAlign: 'left', fontSize: 9, color: '#64748b', padding: '4px 6px' } }, 'Person'),
+          h('th', { style: { textAlign: 'right', fontSize: 9, color: '#64748b', padding: '4px 6px' } }, 'Actions'),
+          h('th', { style: { textAlign: 'left', fontSize: 9, color: '#64748b', padding: '4px 6px' } }, 'Breakdown'),
+          h('th', { style: { textAlign: 'right', fontSize: 9, color: '#64748b', padding: '4px 6px' } }, 'Avg turn'),
+          h('th', { style: { textAlign: 'left', fontSize: 9, color: '#64748b', padding: '4px 6px' } }, 'Daily trend'))),
+        h('tbody', null, boardRows.map((g, i) => h('tr', { key: g.by, style: { borderBottom: '1px solid #0f1420' } },
+          h('td', { style: { fontSize: 11, color: '#64748b', padding: '6px' } }, i + 1),
+          h('td', { style: { fontSize: 11, fontWeight: 700, color: '#c9d1d9', padding: '6px' } }, prettyName(g.by)),
+          h('td', { style: { fontSize: 13, fontWeight: 800, color: '#e3a008', textAlign: 'right', padding: '6px' } }, g.total),
+          h('td', { style: { padding: '6px' } }, groupChips(g)),
+          h('td', { style: { fontSize: 10, fontWeight: 700, color: '#10b981', textAlign: 'right', padding: '6px' } }, g.turnN ? fmtTurn(g.turnSum / g.turnN) : '—'),
+          h('td', { style: { padding: '6px' } }, spark(g)))))))
+  );
+
+  return h('div', null, tabBar, view === 'daily' ? dailyView : boardView, blindNote);
+}
 function ReportsPage({
   user,
   jobs,
@@ -39116,7 +39283,7 @@ function ReportsPage({
       alignItems: 'center',
       gap: 4
     }
-  }, tabBtn('me', '👤 My Report'), isTeamViewer && tabBtn('stalls', '🚨 Stalls'), isTeamViewer && tabBtn('output', '📈 Output'), isTeamViewer && tabBtn('standup', '📋 Standup'), isTeamViewer && tabBtn('duties', '⚙️ Duties'), isTeamViewer && tabBtn('team', '👥 Team')), React.createElement("div", {
+  }, tabBtn('me', '👤 My Report'), isTeamViewer && tabBtn('stalls', '🚨 Stalls'), isTeamViewer && tabBtn('output', '📈 Output'), isTeamViewer && tabBtn('standup', '📋 Standup'), isTeamViewer && tabBtn('duties', '⚙️ Duties'), isTeamViewer && tabBtn('worklog', '📅 Work Log'), isTeamViewer && tabBtn('team', '👥 Team')), React.createElement("div", {
     style: {
       flex: 1
     }
@@ -41808,7 +41975,7 @@ function ReportsPage({
         }
       }, "\uD83D\uDDD1")));
     })));
-  })()), !loading && tab === 'team' && isTeamViewer && React.createElement("div", null, React.createElement("div", {
+  })()), !loading && tab === 'worklog' && isTeamViewer && React.createElement(WorkLogView, { jobs: jobs, prs: prs, salesActs: salesActs, team: team, user: user }), !loading && tab === 'team' && isTeamViewer && React.createElement("div", null, React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'baseline',
