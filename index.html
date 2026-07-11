@@ -2928,7 +2928,8 @@ function MainApp({
     deleteGRN: deleteGRN,
     addNewMaterial: addNewMaterial,
     addNewMaterialV2: addNewMaterialV2,
-    addNewSupplier: addNewSupplier
+    addNewSupplier: addNewSupplier,
+    search: search
   }), pg === "print" && React.createElement(PrintPage, {
     logs: pLogs,
     machines: machines,
@@ -14838,7 +14839,8 @@ function GRNPage({
   deleteGRN,
   addNewMaterial,
   addNewMaterialV2,
-  addNewSupplier
+  addNewSupplier,
+  search
 }) {
   const [sf, ssf] = useState(false);
   const [selGrn, setSelGrn] = useState(null);
@@ -15202,7 +15204,7 @@ function GRNPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Supplier"), React.createElement("th", null, "Material"), React.createElement("th", null, "Code"), React.createElement("th", null, "Size"), React.createElement("th", null, "Qty"), React.createElement("th", null, "Rate"), React.createElement("th", null, "SqFt"), React.createElement("th", null, "Inv#"), React.createElement("th", null, "Job#"), React.createElement("th", null, "Type"), React.createElement("th", null, "By"), React.createElement("th", null, "QC"))), React.createElement("tbody", null, grn.map(g => React.createElement("tr", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Supplier"), React.createElement("th", null, "Material"), React.createElement("th", null, "Code"), React.createElement("th", null, "Size"), React.createElement("th", null, "Qty"), React.createElement("th", null, "Rate"), React.createElement("th", null, "SqFt"), React.createElement("th", null, "Inv#"), React.createElement("th", null, "Job#"), React.createElement("th", null, "Type"), React.createElement("th", null, "By"), React.createElement("th", null, "QC"))), React.createElement("tbody", null, (grn.filter(g => {if (!search || !search.trim()) return true;const q = search.trim().toLowerCase().split(/\s+/).filter(Boolean);const hay = [g.date, g.supplier, g.material, g.code, g.size, g.qty, g.rate, g.sqft, g.invoice_no, g.job_id, g.inward_type, g.received_by, g.unit].map(v => v == null ? "" : String(v)).join(" ").toLowerCase();return q.every(t => hay.includes(t));})).map(g => React.createElement("tr", {
     key: g.id,
     style: {
       cursor: "pointer"
