@@ -1982,11 +1982,11 @@ function MainApp({
       show('⚠️ Could not read current status from DB — try again. (' + (readErr?.message || 'no row') + ')', false);
       return;
     }
-    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'PRINTING', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'HARISH'];
+    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'PRINTING', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'HARISH', 'ABHIJIT'];
     const fromPrinting = (dbRow.status || '').startsWith('Printing');
     const _uname = String(userName || '').toUpperCase().trim();
     if (fromPrinting && !PRINT_FORWARD_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
-      show('🔒 Only authorized users (JIGAR/CHANDNI/PRINTING/ANKIT/PRATIK/SONU/AMOL/HARISH) can forward jobs from Printing.', false);
+      show('🔒 Only authorized users (JIGAR/CHANDNI/PRINTING/ANKIT/PRATIK/SONU/AMOL/HARISH/ABHIJIT) can forward jobs from Printing.', false);
       console.warn('updateJobStatus blocked (Patch I): user', userName, 'tried to move job', jobId, 'from', dbRow.status, 'to', newStatus);
       return;
     }
