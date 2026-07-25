@@ -31752,6 +31752,9 @@ function BankCRMPage({
     v: 'Work/PO Pending',
     l: 'Work/PO Pending'
   }, {
+    v: 'Completed',
+    l: 'Completed'
+  }, {
     v: 'Given for Billing',
     l: 'Given for Billing'
   }, {
@@ -32087,7 +32090,7 @@ function BankCRMPage({
       pending: pendingSites.length,
       pendingOther: pendingSites.filter(s => s.billing_category === 'Other').length,
       pendingGiven: pendingSites.filter(s => s.billing_category === 'Given for Billing').length,
-      pendingStale: pendingSites.filter(s => !s.billing_category || ['Photo Pending', 'Work/PO Pending', ''].includes(s.billing_category)).length,
+      pendingStale: pendingSites.filter(s => !s.billing_category || ['Photo Pending', 'Work/PO Pending', 'Completed', ''].includes(s.billing_category)).length,
       completed: f.filter(s => s.work_category === 'Completed').length,
       photoClean: f.filter(s => s.photo_status === 'Received').length,
       photoReshoot: f.filter(s => s.photo_status === 'Re-shoot needed').length,
@@ -34724,7 +34727,7 @@ function BankCRMPage({
         fontSize: 8,
         color: '#06b6d4'
       }
-    }, s.billing_status?.slice(0, 12) || '—'), React.createElement("td", null, canEditBillingCategory && s.billing_category !== 'Invoiced' ? React.createElement("select", {
+    }, s.billing_status?.slice(0, 12) || '—'), React.createElement("td", null, s.billing_category !== 'Invoiced' ? React.createElement("select", {
       className: "in",
       value: s.billing_category || '',
       onChange: e => setBillingCat(s, e.target.value),
