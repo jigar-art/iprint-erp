@@ -31735,6 +31735,75 @@ function BankCRMPage({
     const uN = (user?.name || '').toUpperCase();
     return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA', 'SHREYA', 'SONAM'].some(u => uN.includes(u));
   })();
+  const canEditBillingCategory = (() => {
+    const uN = (user?.name || '').toUpperCase();
+    return ['SONAM', 'PRIYANKA'].some(t => uN === t || uN.startsWith(t + ' '));
+  })();
+  const BILLING_CAT_OPTIONS = [{
+    v: '',
+    l: '\u2014'
+  }, {
+    v: 'Pending',
+    l: 'Pending'
+  }, {
+    v: 'Photo Pending',
+    l: 'Photo Pending'
+  }, {
+    v: 'Work/PO Pending',
+    l: 'Work/PO Pending'
+  }, {
+    v: 'Given for Billing',
+    l: 'Given for Billing'
+  }, {
+    v: 'On Hold',
+    l: 'On Hold'
+  }, {
+    v: 'Site Not Ready',
+    l: 'Site Not Ready'
+  }, {
+    v: 'Site Cancelled',
+    l: 'Site Cancelled'
+  }, {
+    v: 'Cancelled',
+    l: 'Cancelled'
+  }, {
+    v: 'Duplicate',
+    l: 'Duplicate'
+  }, {
+    v: 'Wrong atm branding',
+    l: 'Wrong ATM branding'
+  }, {
+    v: 'DOCKET NOT RECEIVED',
+    l: 'Docket Not Received'
+  }, {
+    v: 'Other',
+    l: 'Other'
+  }];
+  const setBillingCat = async (site, newCat) => {
+    const oldCat = site.billing_category || '';
+    if (oldCat === newCat) return;
+    if (newCat === 'Invoiced') {
+      show('\u26A0\uFE0F Invoiced is set automatically when an invoice is added', false);
+      return;
+    }
+    const updates = {
+      billing_category: newCat,
+      billing_category_changed_by: user?.name || '?',
+      billing_category_changed_at: new Date().toISOString()
+    };
+    const {
+      error
+    } = await sb.from('banking_sites').update(updates).eq('id', site.id);
+    if (error) {
+      show('\u26A0\uFE0F Category update failed: ' + error.message, false);
+      return;
+    }
+    setSites(p => p.map(x => x.id === site.id ? {
+      ...x,
+      ...updates
+    } : x));
+    show('\uD83C\uDFF7\uFE0F Category \u2192 ' + (newCat || '\u2014'));
+  };
   const togglePmtStatus = async (site, newStatus, note = '') => {
     const oldStatus = site.payment_status || 'Not Started';
     if (oldStatus === newStatus) {
@@ -34655,8 +34724,23 @@ function BankCRMPage({
         fontSize: 8,
         color: '#06b6d4'
       }
-    }, s.billing_status?.slice(0, 12) || '—'), React.createElement("td", null, React.createElement("span", {
+    }, s.billing_status?.slice(0, 12) || '—'), React.createElement("td", null, canEditBillingCategory && s.billing_category !== 'Invoiced' ? React.createElement("select", {
+      className: "in",
+      value: s.billing_category || '',
+      onChange: e => setBillingCat(s, e.target.value),
+      title: s.billing_category_changed_by ? 'Last set by ' + s.billing_category_changed_by : '',
+      style: {
+        fontSize: 8,
+        padding: '1px 2px',
+        width: 92,
+        color: billingColor
+      }
+    }, BILLING_CAT_OPTIONS.map(o => React.createElement("option", {
+      key: o.v,
+      value: o.v
+    }, o.l))) : React.createElement("span", {
       className: "bd",
+      title: s.billing_category === 'Invoiced' ? 'Locked \u2014 invoice on record' : '',
       style: {
         background: billingColor + '20',
         color: billingColor,
