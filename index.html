@@ -148,6 +148,17 @@ const checkJobsForBankingJobNo = async jobNo => {
   if (error || !data || !data.length) return null;
   return data[0].id;
 };
+const confirmSuidReuse = async suid => {
+  const u = (suid || '').trim();
+  if (!u) return true;
+  const {
+    data,
+    error
+  } = await sb.from('banking_sites').select('project,job_no,atm_id').ilike('site_unique_id', u).limit(5);
+  if (error || !data || !data.length) return true;
+  const lines = data.map(x => '  \u2022 ' + (x.project || '?') + ' / Job ' + (x.job_no || '?') + (x.atm_id ? ' / ' + x.atm_id : '')).join('\n');
+  return confirm('\u26A0\uFE0F Site UID "' + u + '" already exists in Banking CRM:\n\n' + lines + '\n\nThis may be legitimate repeat work. Continue anyway?');
+};
 const ensureBankingJobGroup = async (jobNo, firstSite) => {
   if (!jobNo) return null;
   const {
@@ -8951,7 +8962,11 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         site_unique_id: v
       } : x));
     },
-    onBlur: e => updateBatchField(b.id, 'site_unique_id', e.target.value),
+    onBlur: async e => {
+      const v = e.target.value;
+      if (v && v.trim() && !(await confirmSuidReuse(v))) return;
+      updateBatchField(b.id, 'site_unique_id', v);
+    },
     style: {
       width: 130,
       fontSize: 9,
@@ -10399,7 +10414,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
   }, "Cancel"))), sa ? (() => {
     const _BANKING_CLIENTS = ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'NUVAMA WEALTH', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'];
     const _isBnk = _BANKING_CLIENTS.some(b => (j.client_name || '').toUpperCase().includes(b));
-    const _submit = () => {
+    const _submit = async () => {
       const atmVal = document.getElementById('_newBatchAtm')?.value || '';
       const suidVal = document.getElementById('_newBatchSuid')?.value || '';
       const poVal = document.getElementById('_newBatchPO')?.value || '';
@@ -10410,6 +10425,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       if (_isBnk && !atmVal.trim() && !suidVal.trim()) {
         if (!confirm('⚠️ Banking job — both ATM ID and Site UID are blank. Add batch anyway?')) return;
       }
+      if (suidVal.trim() && !(await confirmSuidReuse(suidVal))) return;
       const bid = "B" + uid();
       const bd = {
         id: bid,
@@ -32054,6 +32070,18 @@ function BankCRMPage({
     dups.extraRows = dups.size - groupKeys.size;
     return dups;
   }, [sites]);
+  const suidClash = useMemo(() => {
+    const u = (newSite.site_unique_id || '').trim().toUpperCase();
+    if (!u) return null;
+    const proj = (newSite.project || '').trim();
+    const inProj = [], other = [];
+    sites.forEach(s => {
+      if ((s.site_unique_id || '').trim().toUpperCase() !== u) return;
+      if ((s.project || '').trim() === proj) inProj.push(s); else other.push(s);
+    });
+    if (!inProj.length && !other.length) return null;
+    return { inProj: inProj, other: other };
+  }, [newSite.site_unique_id, newSite.project, sites]);
   const filtered = useMemo(() => {
     let f = sites;
     if (tab !== 'ALL') f = f.filter(s => s.project === tab);
@@ -33204,9 +33232,33 @@ function BankCRMPage({
       site_unique_id: e.target.value
     })),
     style: {
-      fontSize: 10
+      fontSize: 10,
+      border: suidClash && suidClash.inProj.length ? '1px solid #f47067' : suidClash && suidClash.other.length ? '1px solid #f59e0b' : undefined,
+      background: suidClash && suidClash.inProj.length ? 'rgba(244,112,103,0.10)' : undefined
     }
-  })), React.createElement("div", {
+  }), suidClash && suidClash.inProj.length > 0 && React.createElement("div", {
+    style: {
+      marginTop: 3,
+      fontSize: 8,
+      lineHeight: 1.45,
+      color: '#fca5a5',
+      background: 'rgba(244,112,103,0.08)',
+      border: '1px solid rgba(244,112,103,0.3)',
+      borderRadius: 4,
+      padding: '3px 5px'
+    }
+  }, React.createElement("strong", null, "\u26D4 Duplicate in this project"), " \u2014 already used by ", suidClash.inProj.slice(0, 3).map(x => 'Job ' + (x.job_no || '?') + (x.atm_id ? ' / ' + x.atm_id : '')).join(', '), suidClash.inProj.length > 3 ? ' +' + (suidClash.inProj.length - 3) + ' more' : ''), suidClash && suidClash.inProj.length === 0 && suidClash.other.length > 0 && React.createElement("div", {
+    style: {
+      marginTop: 3,
+      fontSize: 8,
+      lineHeight: 1.45,
+      color: '#fcd34d',
+      background: 'rgba(245,158,11,0.08)',
+      border: '1px solid rgba(245,158,11,0.3)',
+      borderRadius: 4,
+      padding: '3px 5px'
+    }
+  }, React.createElement("strong", null, "\u2139\uFE0F Exists in another project"), " \u2014 ", suidClash.other.slice(0, 2).map(x => (x.project || '?') + ' / Job ' + (x.job_no || '?')).join(', '), suidClash.other.length > 2 ? ' +' + (suidClash.other.length - 2) + ' more' : '', ". Normal for repeat work \u2014 not blocked.")), React.createElement("div", {
     style: {
       gridColumn: 'span 2'
     }
