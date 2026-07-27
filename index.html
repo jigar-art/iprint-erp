@@ -1566,10 +1566,13 @@ function MainApp({
       const m = now.getMonth(),
         y = now.getFullYear();
       const curFYSuffix = m >= 3 ? `${String(y).slice(2)}${String(y + 1).slice(2)}` : `${String(y - 1).slice(2)}${String(y).slice(2)}`;
-      const [j, g, ex] = await Promise.all([fetchAll('jobs', 'id', q => q.like('id', '%-' + curFYSuffix)), fetchAll('grn', 'id'), fetchAll('expenses', 'id')]);
+      const [j, g, ex, pl0, fl0, ol0] = await Promise.all([fetchAll('jobs', 'id', q => q.like('id', '%-' + curFYSuffix)), fetchAll('grn', 'id'), fetchAll('expenses', 'id'), fetchAll('print_logs', 'id'), fetchAll('fab_logs', 'id'), fetchAll('outsource_logs', 'id')]);
       setJobs(j);
       setGrnData(g);
       setExpenses(ex);
+      setPLogs(pl0);
+      setFLogs(fl0);
+      setOsLogs(ol0);
       console.log('Phase 1: Loaded', j.length, 'current FY jobs');
       setLoading(false);
       try {
@@ -1596,11 +1599,8 @@ function MainApp({
           setReqs(rq);
           setPrs(pr);
           console.log('Phase 2: Loaded', b.length, 'batches', li.length, 'items', osi.length, 'outsource', rq.length, 'requisitions');
-          const [oldJ, pl, fl, ol, dl, sa] = await Promise.all([fetchAll('jobs', 'id', q => q.not('id', 'like', '%-' + curFYSuffix)), fetchAll('print_logs', 'id'), fetchAll('fab_logs', 'id'), fetchAll('outsource_logs', 'id'), fetchAll('dispatch_logs', 'id'), fetchAll('sales_activities', 'id')]);
+          const [oldJ, dl, sa] = await Promise.all([fetchAll('jobs', 'id', q => q.not('id', 'like', '%-' + curFYSuffix)), fetchAll('dispatch_logs', 'id'), fetchAll('sales_activities', 'id')]);
           setJobs(prev => [...prev, ...oldJ]);
-          setPLogs(pl);
-          setFLogs(fl);
-          setOsLogs(ol);
           setDLogs(dl);
           setSalesActs(sa);
           console.log('Phase 3: Loaded', oldJ.length, 'older jobs + logs');
@@ -2943,6 +2943,7 @@ function MainApp({
     search: search
   }), pg === "print" && React.createElement(PrintPage, {
     logs: pLogs,
+    fLogs: fLogs,
     machines: machines,
     materials: materials,
     materialsV2: masterData.materialsV2 || [],
@@ -15634,6 +15635,7 @@ function GRNPage({
 }
 function PrintPage({
   logs,
+  fLogs,
   machines,
   materials,
   materialsV2,
@@ -15693,15 +15695,28 @@ function PrintPage({
     internal_name: m.name
   }));
   const normMat = s => (s || '').toLowerCase().trim();
+  const unitByName = {};
+  allActiveMasters.forEach(m => {
+    unitByName[normMat(m.name)] = m.unit || 'roll';
+  });
   const grnByMat = {};
   (grn || []).forEach(g => {
     const k = normMat(g.material);
-    if (k) grnByMat[k] = (grnByMat[k] || 0) + (+g.sqft || 0);
+    if (!k) return;
+    const u = unitByName[k] || 'roll';
+    grnByMat[k] = (grnByMat[k] || 0) + (u === 'roll' ? +g.sqft || 0 : +g.qty || 0);
   });
   const usedByMat = {};
   (logs || []).forEach(l => {
     const k = normMat(l.material);
-    if (k) usedByMat[k] = (usedByMat[k] || 0) + (+l.print_sqft || 0);
+    if (!k) return;
+    const u = unitByName[k] || 'roll';
+    usedByMat[k] = (usedByMat[k] || 0) + (u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0);
+  });
+  (fLogs || []).forEach(l => {
+    const k = normMat(l.material);
+    if (!k) return;
+    usedByMat[k] = (usedByMat[k] || 0) + (+l.qty_used || 0);
   });
   const balanceFor = mat => {
     if (!mat) return {
@@ -18815,6 +18830,12 @@ function FabPage({
     const k = normMat(l.material);
     if (!k || !unitByName[k]) return;
     usedByMat[k] = (usedByMat[k] || 0) + (+l.qty_used || 0);
+  });
+  (pLogs || []).forEach(l => {
+    const k = normMat(l.material);
+    if (!k || !unitByName[k]) return;
+    const u = unitByName[k];
+    usedByMat[k] = (usedByMat[k] || 0) + (u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0);
   });
   const balanceFor = mat => {
     if (!mat) return {
