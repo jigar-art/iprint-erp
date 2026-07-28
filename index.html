@@ -1952,7 +1952,7 @@ function MainApp({
   const addGRN = useCallback(async data => {
     const {
       error
-    } = await sb.from('grn').insert(data);
+    } = _isDupTap('GR', data) ? { error: { message: 'duplicate tap ignored' } } : await sb.from('grn').insert(data);
     if (!error) {
       setGrnData(p => [data, ...p]);
       show("GRN saved!");
@@ -1979,7 +1979,19 @@ function MainApp({
       show("GRN entry deleted");
     } else show("Error: " + error.message, false);
   }, [show]);
+  const _dupRef = React.useRef({});
+  const _isDupTap = (kind, d) => {
+    const k = kind + '|' + [d.batch_id, d.line_item_id, d.material, d.print_sqft, d.qty_used, d.qty, d.sqft, d.date].join('|');
+    const now = Date.now();
+    const prev = _dupRef.current[k];
+    _dupRef.current[k] = now;
+    return !!prev && now - prev < 120000;
+  };
   const addPrintLog = useCallback(async data => {
+    if (_isDupTap('PL', data)) {
+      show("Duplicate entry blocked \u2014 identical log saved seconds ago", false);
+      return;
+    }
     const {
       error
     } = await sb.from('print_logs').insert(data);
@@ -2001,6 +2013,10 @@ function MainApp({
     } else show("Error: " + error.message, false);
   }, [show]);
   const addFabLog = useCallback(async data => {
+    if (_isDupTap('FL', data)) {
+      show("Duplicate entry blocked \u2014 identical log saved seconds ago", false);
+      return;
+    }
     const {
       error
     } = await sb.from('fab_logs').insert(data);
@@ -14993,6 +15009,7 @@ function GRNPage({
     const extras = extraV2.filter(m => !seen.has((m.name || '').toLowerCase().trim()));
     return [...base, ...extras].sort((a, b) => a.name.localeCompare(b.name));
   }, [materialsV2, extraV2]);
+  const masterUnitOf = nm => (activeMastersV2.find(x => x.name === nm) || {}).unit || '';
   const [f, sF] = useState({
     date: td(),
     supplier: suppliers[0]?.name || "",
@@ -15015,12 +15032,22 @@ function GRNPage({
   const [showNewMat, setShowNewMat] = useState(false);
   const [showNewSup, setShowNewSup] = useState(false);
   const add = async () => {
+    const mu = masterUnitOf(f.material);
+    if (!mu) {
+      alert("Pick a material from the master list before saving.");
+      return;
+    }
+    if (mu === 'roll' && !(+f.sqft > 0)) {
+      alert("SqFt is required.\n\n\"" + f.material + "\" is a roll material \u2014 stock is counted in ft\u00b2. Without SqFt this entry adds ZERO stock.");
+      return;
+    }
     setSaving(true);
     const photoUrl = await uploadFile(photoFile, 'grn-photos');
     const poUrl = await uploadFile(poFile, 'grn-po');
     await addGRN({
       id: "G" + uid(),
       ...f,
+      unit: mu,
       qty: +f.qty,
       rate: +f.rate,
       sqft: +f.sqft,
@@ -15193,17 +15220,18 @@ function GRNPage({
     }))
   })), React.createElement(F, {
     l: "Unit"
-  }, React.createElement("select", {
+  }, React.createElement("div", {
     className: "in",
-    value: f.unit,
-    onChange: e => sF(p => ({
-      ...p,
-      unit: e.target.value
-    }))
-  }, MUNITS.map(u => React.createElement("option", {
-    key: u
-  }, u)))), React.createElement(F, {
-    l: "SqFt"
+    title: "Locked to the material master \u2014 change it on the Materials page",
+    style: {
+      background: "#0d1118",
+      display: "flex",
+      alignItems: "center",
+      cursor: "not-allowed",
+      color: masterUnitOf(f.material) ? "#94a3b8" : "#f47067"
+    }
+  }, masterUnitOf(f.material) || "\u2014 not in master \u2014")), React.createElement(F, {
+    l: masterUnitOf(f.material) === 'roll' ? "SqFt *" : "SqFt"
   }, React.createElement("input", {
     className: "in mn",
     value: f.sqft,
@@ -15483,10 +15511,13 @@ function GRNPage({
       ...p,
       material: e.target.value
     }))
-  }, materials.map(m => React.createElement("option", {
+  }, (editGrn.material && !activeMastersV2.some(m => m.name === editGrn.material) ? [React.createElement("option", {
+    key: "__legacy",
+    value: editGrn.material
+  }, editGrn.material + "  (not in master)")] : []).concat(activeMastersV2.map(m => React.createElement("option", {
     key: m.id,
     value: m.name
-  }, m.name)))), React.createElement(F, {
+  }, m.name))))), React.createElement(F, {
     l: "Code#"
   }, React.createElement("input", {
     className: "in mn",
@@ -15525,17 +15556,18 @@ function GRNPage({
     }))
   })), React.createElement(F, {
     l: "Unit"
-  }, React.createElement("select", {
+  }, React.createElement("div", {
     className: "in",
-    value: editGrn.unit || 'roll',
-    onChange: e => setEditGrn(p => ({
-      ...p,
-      unit: e.target.value
-    }))
-  }, MUNITS.map(u => React.createElement("option", {
-    key: u
-  }, u)))), React.createElement(F, {
-    l: "SqFt"
+    title: "Locked to the material master \u2014 change it on the Materials page",
+    style: {
+      background: "#0d1118",
+      display: "flex",
+      alignItems: "center",
+      cursor: "not-allowed",
+      color: masterUnitOf(editGrn.material) ? "#94a3b8" : "#e3a008"
+    }
+  }, masterUnitOf(editGrn.material) || (editGrn.unit || 'roll') + " (legacy)")), React.createElement(F, {
+    l: masterUnitOf(editGrn.material) === 'roll' ? "SqFt *" : "SqFt"
   }, React.createElement("input", {
     className: "in mn",
     value: editGrn.sqft || '',
@@ -15613,12 +15645,19 @@ function GRNPage({
   }, "Cancel"), React.createElement("button", {
     className: "b bg",
     onClick: async () => {
+      const mu = masterUnitOf(editGrn.material);
+      if (mu === 'roll' && !(+editGrn.sqft > 0)) {
+        alert("SqFt is required.\n\n\"" + editGrn.material + "\" is a roll material \u2014 stock is counted in ft\u00b2. Without SqFt this entry adds ZERO stock.");
+        return;
+      }
       const {
         id,
         ...fields
       } = editGrn;
+      if (mu) fields.unit = mu;
+      const saved = mu ? { ...editGrn, unit: mu } : editGrn;
       await updateGRN(id, fields);
-      setSelGrn(editGrn);
+      setSelGrn(saved);
       setEditGrn(null);
     }
   }, "\uD83D\uDCBE Save Changes"))) : React.createElement("div", {
@@ -23726,18 +23765,33 @@ function GRNReceivePage({
       return;
     }
     try {
-      const grnRows = lines.filter(x => !x.is_service && x.stock_material && (+x.received_now || 0) > 0).map(x => ({
-        id: grn_id + '-' + x.index,
-        date: gf.received_at,
-        supplier: receiving.vendor_name || null,
-        material: x.stock_material,
-        qty: +x.received_now || 0,
-        unit: matUnit(x.stock_material),
-        invoice_no: gf.invoice_no || null,
-        job_id: receiving.job_id || null,
-        inward_type: 'PR',
-        received_by: gf.received_by
-      }));
+      const grnRows = lines.filter(x => !x.is_service && x.stock_material && (+x.received_now || 0) > 0).map(x => {
+        const mu = matUnit(x.stock_material);
+        const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
+        const hasDims = (+x.width || 0) > 0 && (+x.height || 0) > 0;
+        const per = String(x.per || '');
+        const recv = +x.received_now || 0;
+        let sqft = 0;
+        if (mu === 'roll' && um && um.needsWH && hasDims) {
+          if (per === 'ft\u00b2') sqft = Math.round(recv * 100) / 100;
+          else if (per === 'm\u00b2') sqft = Math.round(recv * 10.7639 * 100) / 100;
+        }
+        const ordDisp = +x.ordered_display || 0;
+        const qty = sqft > 0 ? ordDisp > 0 ? Math.round((+x.ordered_qty || 0) * recv / ordDisp * 100) / 100 : 0 : recv;
+        return {
+          id: grn_id + '-' + x.index,
+          date: gf.received_at,
+          supplier: receiving.vendor_name || null,
+          material: x.stock_material,
+          qty: qty,
+          unit: mu,
+          sqft: sqft,
+          invoice_no: gf.invoice_no || null,
+          job_id: receiving.job_id || null,
+          inward_type: 'PR',
+          received_by: gf.received_by
+        };
+      });
       if (grnRows.length) {
         const {
           error: grnErr
