@@ -101,29 +101,143 @@ const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 window._sbRef = sb;
+const UPLOAD_MAX_BYTES = 40 * 1024 * 1024;
+const UPLOAD_COMPRESS_ABOVE = 1.5 * 1024 * 1024;
+const UPLOAD_MAX_DIM = 2000;
+const _upOverlay = (() => {
+  let el = null,
+    depth = 0,
+    label = '';
+  const render = () => {
+    if (!el) {
+      el = document.createElement('div');
+      el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(2,6,23,.78);display:none;align-items:center;justify-content:center;text-align:center;padding:24px;white-space:pre-line;font:600 15px system-ui,-apple-system,sans-serif;color:#e2e8f0';
+      document.body.appendChild(el);
+    }
+    el.textContent = label || 'Uploading\u2026';
+    el.style.display = depth > 0 ? 'flex' : 'none';
+  };
+  return {
+    setLabel(t) {
+      label = t;
+      render();
+    },
+    push() {
+      depth++;
+      render();
+    },
+    pop() {
+      depth = Math.max(0, depth - 1);
+      if (!depth) label = '';
+      render();
+    }
+  };
+})();
+const _decodeImage = async file => {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(file, {
+        imageOrientation: 'from-image'
+      });
+    } catch (e) {}
+    try {
+      return await createImageBitmap(file);
+    } catch (e) {}
+  }
+  return null;
+};
+const compressImage = async file => {
+  let revoke = null;
+  try {
+    if (!file || !/^image\//i.test(file.type || '') || /gif|svg/i.test(file.type || '') || file.size <= UPLOAD_COMPRESS_ABOVE) return file;
+    let src = await _decodeImage(file);
+    if (!src) src = await new Promise(res => {
+      const u = URL.createObjectURL(file);
+      revoke = u;
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => res(null);
+      im.src = u;
+    });
+    if (!src) return file;
+    const iw = src.width || 1,
+      ih = src.height || 1;
+    const scale = Math.min(1, UPLOAD_MAX_DIM / Math.max(iw, ih));
+    const w = Math.max(1, Math.round(iw * scale)),
+      h = Math.max(1, Math.round(ih * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    cv.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.82));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], String(file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', {
+      type: 'image/jpeg'
+    });
+  } catch (e) {
+    return file;
+  } finally {
+    if (revoke) URL.revokeObjectURL(revoke);
+  }
+};
 const uploadFile = async (file, folder = 'general') => {
   if (!file) return null;
-  const ext = file.name.split('.').pop();
-  const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
-  const {
-    data,
-    error
-  } = await sb.storage.from('Uploads').upload(path, file);
-  if (error) {
-    console.error('Upload error:', error);
+  if (file.size > UPLOAD_MAX_BYTES) {
+    if (window._showToast) window._showToast('\u26a0\ufe0f ' + (file.name || 'File') + ' is ' + (file.size / 1048576).toFixed(1) + ' MB \u2014 max 40 MB', false);
     return null;
   }
-  const {
-    data: urlData
-  } = sb.storage.from('Uploads').getPublicUrl(path);
-  return urlData?.publicUrl || null;
+  _upOverlay.push();
+  let lastErr = null;
+  try {
+    const toSend = await compressImage(file);
+    const rawExt = String(file.name || '').split('.').pop().toLowerCase();
+    const ext = toSend !== file ? 'jpg' : /^[a-z0-9]{1,5}$/.test(rawExt) ? rawExt : 'bin';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      try {
+        const {
+          error
+        } = await sb.storage.from('Uploads').upload(path, toSend, {
+          contentType: toSend.type || undefined
+        });
+        if (!error) {
+          const {
+            data: urlData
+          } = sb.storage.from('Uploads').getPublicUrl(path);
+          if (urlData?.publicUrl) return urlData.publicUrl;
+          lastErr = {
+            message: 'no public URL returned'
+          };
+        } else lastErr = error;
+      } catch (e) {
+        lastErr = e;
+      }
+      if (attempt === 0) await new Promise(r => setTimeout(r, 1200));
+    }
+  } finally {
+    _upOverlay.pop();
+  }
+  console.error('Upload error:', lastErr);
+  const reason = lastErr && (lastErr.message || lastErr.error) || 'network error';
+  if (window._showToast) window._showToast('\u26a0\ufe0f Upload failed: ' + reason + ' \u2014 check signal and retry', false);
+  return null;
 };
 const uploadMultiple = async (files, folder = 'general') => {
+  const list = [...(files || [])];
   const urls = [];
-  for (const file of files) {
-    const url = await uploadFile(file, folder);
-    if (url) urls.push(url);
+  let failed = 0;
+  _upOverlay.push();
+  try {
+    for (let i = 0; i < list.length; i++) {
+      _upOverlay.setLabel('Uploading ' + (i + 1) + ' of ' + list.length + '\u2026\nKeep this page open');
+      const url = await uploadFile(list[i], folder);
+      if (url) urls.push(url);else failed++;
+    }
+  } finally {
+    _upOverlay.pop();
   }
+  if (failed && window._showToast) window._showToast('\u26a0\ufe0f ' + failed + ' of ' + list.length + ' file(s) failed to upload', false);
   return urls;
 };
 const isOfficeFile = url => /\.(pptx?|docx?|xlsx?)(\?|#|$)/i.test(url || '');
@@ -184,11 +298,15 @@ const ensureBankingJobGroup = async (jobNo, firstSite) => {
 };
 const appendToJsonArray = async (table, id, field, newItems) => {
   if (!table || !id || !field || !Array.isArray(newItems) || !newItems.length) return null;
+  window._lastSaveError = '';
   const {
     data: fresh,
     error: selErr
   } = await sb.from(table).select(field).eq('id', id).single();
-  if (selErr) return null;
+  if (selErr) {
+    window._lastSaveError = 'read: ' + (selErr.message || selErr);
+    return null;
+  }
   const existing = Array.isArray(fresh?.[field]) ? fresh[field] : fresh?.[field] ? [fresh[field]] : [];
   const merged = [...existing, ...newItems];
   const {
@@ -196,7 +314,10 @@ const appendToJsonArray = async (table, id, field, newItems) => {
   } = await sb.from(table).update({
     [field]: merged
   }).eq('id', id);
-  if (updErr) return null;
+  if (updErr) {
+    window._lastSaveError = 'write: ' + (updErr.message || updErr);
+    return null;
+  }
   return merged;
 };
 const removeFromJsonArray = async (table, id, field, itemToRemove) => {
@@ -2211,7 +2332,7 @@ function MainApp({
   const appendJobFiles = useCallback(async (jobId, field, newUrls) => {
     const merged = await appendToJsonArray('jobs', jobId, field, newUrls);
     if (merged === null) {
-      show('⚠️ Upload save failed — please retry', false);
+      show('⚠️ Upload save failed — ' + (window._lastSaveError || 'please retry'), false);
       return;
     }
     setJobs(p => p.map(j => j.id === jobId ? {
@@ -10122,7 +10243,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               dc_urls: merged
             } : x));
             show('📄 ' + urls.length + ' DC(s) uploaded!');
-          } else show('⚠️ DC save failed — please retry', false);
+          } else show('⚠️ DC save failed — ' + (window._lastSaveError || 'please retry'), false);
         }
       }
     })));
