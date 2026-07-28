@@ -6337,10 +6337,11 @@ function JobDetail({
     icon: "📄",
     batchField: "dc_urls"
   }, {
-    l: "⚖️ WEIGHT PHOTO",
+    l: "⚖️ WEIGHT PHOTO (ref only)",
     field: "weight_photo_urls",
     folder: "weight-photos",
-    icon: "⚖️"
+    icon: "⚖️",
+    frozen: true
   }, {
     l: "📎 INSTALLATION CERTS",
     field: "ic_file_url",
@@ -6376,6 +6377,7 @@ function JobDetail({
       batchId: null,
       batchIdx: null
     }));
+    if (sec.frozen && allEntries.length === 0) return null;
     return React.createElement("div", {
       key: sec.field,
       style: {
@@ -6455,7 +6457,13 @@ function JobDetail({
           removeJobFile(j.id, sec.field, e.url);
         }
       }
-    }, "\u2715")))), React.createElement("input", {
+    }, "\u2715")))), sec.frozen ? React.createElement("p", {
+      style: {
+        fontSize: 7,
+        color: "#64748b",
+        lineHeight: 1.3
+      }
+    }, "Not the weighment log \u2014 log it under Dispatch \u2192 \uD83D\uDCE6 Courier / Weighment.") : React.createElement("input", {
       type: "file",
       accept: ".pdf,.jpg,.png,.jpeg,image/*",
       multiple: true,
@@ -28127,7 +28135,7 @@ function AccPage({
         }
       }, "B", e.batchIdx)))), React.createElement("input", {
         type: "file",
-        accept: ".pdf,.jpg,.png",
+        accept: ".pdf,.jpg,.png,.jpeg,image/*",
         multiple: true,
         className: "in",
         style: {
@@ -28191,7 +28199,7 @@ function AccPage({
         }
       }, "\u2715")))), React.createElement("input", {
         type: "file",
-        accept: ".pdf,.jpg,.png",
+        accept: ".pdf,.jpg,.png,.jpeg,image/*",
         multiple: true,
         className: "in",
         style: {
