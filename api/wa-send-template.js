@@ -129,13 +129,17 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await interaktRes.json().catch(() => ({}));
+    const rawBody = await interaktRes.text();
+    let data = {};
+    try { data = JSON.parse(rawBody); } catch { /* non-JSON upstream body */ }
     if (interaktRes.ok && (data.result === true || data.id)) {
       return res.status(200).json({ ok: true, id: data.id || null });
     }
     return res.status(interaktRes.status >= 400 ? interaktRes.status : 502).json({
       ok: false,
       error: data.message || data.error || `interakt_http_${interaktRes.status}`,
+      upstream_status: interaktRes.status,
+      upstream_body: String(rawBody || '').slice(0, 300),
     });
   } catch (e) {
     return res.status(502).json({ ok: false, error: e.message || 'interakt_fetch_failed' });
