@@ -27,6 +27,14 @@
 // between the cron handler's traits object and the template variable order.
 // If you re-order the template body in the Interakt UI, update this array.
 const TEMPLATE_PARAM_ORDER = {
+  iprint_dept_digest: [
+    'dept_title',    // {{1}} e.g. "PO Pending"
+    'digest_date',   // {{2}} e.g. "Wed, 29 Jul 2026"
+    'total_open',    // {{3}} e.g. "88"
+    'stale_count',   // {{4}} e.g. "24"
+    'aging_line',    // {{5}} e.g. "0-7d 5, 8-30d 20, 31-60d 39, 60+d 24"
+    'oldest_list',   // {{6}} e.g. "1. 0412-2526 - Apex Interiors (120d) ..."
+  ],
   iprint_daily_digest: [
     'digest_date',           // {{1}}
     'prs_pending',           // {{2}}
