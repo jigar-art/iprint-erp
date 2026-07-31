@@ -2158,9 +2158,9 @@ function MainApp({
         console.warn('updateJobStatus blocked (Delivered needs In Transit): job', jobId, 'current', dbRow.status);
         return;
       }
-      const DELIVER_USERS = ['JIGAR', 'CHANDNI', 'AMOL', 'MURLI', 'MANOJ', 'HARISH'];
+      const DELIVER_USERS = ['JIGAR', 'CHANDNI', 'AMOL', 'MURLI', 'HARISH'];
       if (!DELIVER_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
-        show('🔒 Only Murli, Manoj or Harish (or admin) can mark a job Delivered.', false);
+        show('🔒 Only Murli or Harish (or admin) can mark a job Delivered.', false);
         console.warn('updateJobStatus blocked (Deliver actor gate): user', userName, 'job', jobId);
         return;
       }
@@ -2634,13 +2634,13 @@ function MainApp({
     l: "Dept Tracker",
     e: "🏭",
     roles: ["admin", "production", "sales", "designer", "printing", "fabrication", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "PRINTING"]
   }, {
     id: "grn",
     l: "Material In",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "VIDYA", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "VIDYA", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "print",
     l: "Printing",
@@ -2652,7 +2652,7 @@ function MainApp({
     l: "Fabrication",
     e: "🔧",
     roles: ["admin", "production", "fabrication", "designer", "printing", "sales", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "os",
     l: "Outsource",
@@ -2664,13 +2664,13 @@ function MainApp({
     l: "Dispatch",
     e: "🚚",
     roles: ["admin", "production", "sales", "dispatch", "designer", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "MURLI", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "stock",
     l: "Stock",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "rem",
     l: "PO Reminders",
@@ -2741,7 +2741,7 @@ function MainApp({
     l: "Receive Material",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "reports",
     l: "Reports",
@@ -6484,7 +6484,7 @@ function JobDetail({
     const [showPRForm, setShowPRForm] = React.useState(false);
     const [vendors, setVendors] = React.useState(null);
     const [showAddVendor, setShowAddVendor] = React.useState(false);
-    const PR_REQUESTORS = ['Amol', 'Murli Shetty', 'Manoj', 'Harish', 'Priyanka', 'Jigar'];
+    const PR_REQUESTORS = ['Amol', 'Murli Shetty', 'Harish', 'Priyanka', 'Jigar'];
     const PR_PAYMENT_TERMS = ['Advance 100%', 'Advance 50% + Balance on delivery', 'COD', '15 days from invoice', '30 days from invoice', '45 days from invoice', '60 days from invoice', 'Custom'];
     const PR_PER = ['Sheet', 'SqFt', 'Unit', 'Kg', 'Running Ft', 'Pcs', 'Ltr', 'Meter', 'Set', 'Job'];
     const PR_GST = [0, 5, 12, 18, 28];
@@ -15018,10 +15018,14 @@ function GRNPage({
     return [...base, ...extras].sort((a, b) => a.name.localeCompare(b.name));
   }, [materialsV2, extraV2]);
   const masterUnitOf = nm => (activeMastersV2.find(x => x.name === nm) || {}).unit || '';
+  const matPickerListV2 = activeMastersV2.map(m => ({
+    id: m.id,
+    internal_name: m.name
+  }));
   const [f, sF] = useState({
     date: td(),
     supplier: suppliers[0]?.name || "",
-    material: activeMastersV2[0]?.name || "",
+    material: "",
     code: "",
     size: "",
     length: "",
@@ -15036,6 +15040,7 @@ function GRNPage({
     qc: "OK"
   });
   const [newMat, setNewMat] = useState("");
+  const [newMatUnit, setNewMatUnit] = useState("roll");
   const [newSup, setNewSup] = useState("");
   const [showNewMat, setShowNewMat] = useState(false);
   const [showNewSup, setShowNewSup] = useState(false);
@@ -15079,14 +15084,16 @@ function GRNPage({
   };
   const doAddMat = async () => {
     if (!newMat.trim()) return;
-    const r = await addNewMaterial(newMat.trim());
+    const r = await addNewMaterialV2(newMat.trim(), newMatUnit);
     if (r) {
+      setExtraV2(p => [...p, r]);
       sF(p => ({
         ...p,
-        material: r.name
+        material: r.name,
+        unit: r.unit || newMatUnit
       }));
-      materials.push(r);
       setNewMat("");
+      setNewMatUnit("roll");
       setShowNewMat(false);
     }
   };
@@ -15169,11 +15176,17 @@ function GRNPage({
       display: "flex",
       gap: 2
     }
-  }, React.createElement("select", {
-    className: "in",
+  }, React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, React.createElement(MaterialPicker, {
     value: f.material,
-    onChange: e => {
-      const v = e.target.value;
+    products: matPickerListV2,
+    compact: true,
+    placeholder: "Search material...",
+    onPick: picked => {
+      const v = picked.internal_name;
       const m = activeMastersV2.find(x => x.name === v);
       sF(p => ({
         ...p,
@@ -15181,15 +15194,20 @@ function GRNPage({
         unit: m?.unit || p.unit
       }));
     },
-    style: {
-      flex: 1
+    onAddNew: nm => {
+      setNewMat(nm || '');
+      setNewMatUnit('roll');
+      setShowNewMat(true);
     }
-  }, activeMastersV2.length === 0 && React.createElement("option", {
-    value: ""
-  }, "\u2014 no masters loaded \u2014"), activeMastersV2.map(m => React.createElement("option", {
-    key: m.id,
-    value: m.name
-  }, m.name))))), React.createElement(F, {
+  })), React.createElement("button", {
+    className: "b bs bp",
+    title: "Add a material that is not in the master list",
+    onClick: () => {
+      setNewMat('');
+      setNewMatUnit('roll');
+      setShowNewMat(true);
+    }
+  }, "+"))), React.createElement(F, {
     l: "Code#"
   }, React.createElement("input", {
     className: "in mn",
@@ -15332,7 +15350,17 @@ function GRNPage({
     style: {
       flex: 1
     }
-  }), React.createElement("button", {
+  }), React.createElement("select", {
+    className: "in",
+    value: newMatUnit,
+    onChange: e => setNewMatUnit(e.target.value),
+    style: {
+      width: 88
+    }
+  }, ['roll', 'sheet', 'nos', 'sqft', 'kg', 'ltr', 'meter', 'pcs'].map(u => React.createElement("option", {
+    key: u,
+    value: u
+  }, u))), React.createElement("button", {
     className: "b bg bs",
     onClick: doAddMat
   }, "Add Material"), React.createElement("button", {
@@ -21270,7 +21298,7 @@ function WeighmentView({
   }, []);
   const canWeigh = (() => {
     const t = String(me || '').trim().toUpperCase();
-    return ['MANOJ', 'MURLI'].some(n => t === n || t.startsWith(n + ' '));
+    return ['MURLI'].some(n => t === n || t.startsWith(n + ' '));
   })();
   const isLocal = (m => m === 'Own delivery person' || m === 'Others')(String(f.delivery_mode || "").trim());
   const num = v => {
@@ -21302,7 +21330,7 @@ function WeighmentView({
   const save = async () => {
     if (saving) return;
     if (!canWeigh) {
-      show?.('Only Manoj / Murli can log weighments.', false);
+      show?.('Only Murli can log weighments.', false);
       return;
     }
     let jid = String(f.job_no || "").trim();
@@ -23286,7 +23314,6 @@ function StockPage({
 const WA_NUMBERS = {
   'Amol': '918433727608',
   'Murli Shetty': '918691069121',
-  'Manoj': '918356842202',
   'Harish': '919326282238',
   'Priyanka': '917400214057',
   'Jigar': '919076270111',
@@ -23301,7 +23328,6 @@ const WA_NUMBERS = {
 const STAFF_DEPTS = {
   'Amol': 'Production',
   'Murli Shetty': 'Production',
-  'Manoj': 'Production',
   'Harish': 'Printing',
   'Priyanka': 'Office',
   'Jigar': 'Admin',
@@ -23624,7 +23650,7 @@ function GRNReceivePage({
   user,
   show
 }) {
-  const GRN_RECEIVERS = ['Murli Shetty', 'Manoj', 'Shreya'];
+  const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
   const STATUS_FILTERS = ['PO Generated', 'Partially Received', 'PO Sent', 'Approved', 'All'];
   const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
@@ -23698,7 +23724,7 @@ function GRNReceivePage({
   const openReceive = pr => {
     const items = Array.isArray(pr.items) ? pr.items : [];
     setGf({
-      received_by: user?.name?.includes('MURLI') || user?.name?.includes('Murli') ? 'Murli Shetty' : user?.name?.includes('MANOJ') || user?.name?.includes('Manoj') ? 'Manoj' : user?.name?.includes('SHREYA') || user?.name?.includes('Shreya') ? 'Shreya' : 'Murli Shetty',
+      received_by: user?.name?.includes('MURLI') || user?.name?.includes('Murli') ? 'Murli Shetty' : user?.name?.includes('SHREYA') || user?.name?.includes('Shreya') ? 'Shreya' : 'Murli Shetty',
       received_at: new Date().toISOString().slice(0, 10),
       invoice_no: '',
       received_notes: '',
