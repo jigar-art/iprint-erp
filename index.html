@@ -23564,10 +23564,10 @@ th { background: #f0f0f0; font-size: 10px; font-weight: 700; padding: 5px 6px; b
   <span>Dated &nbsp;<strong>${dateStr}</strong></span>
 </div>
 <div class="meta-row" style="margin-top:-4px">
-  <span>Ref. No./PR No. : &nbsp;<strong>${pr.pr_no}</strong></span>
+  <span><span style="display:inline-block;width:104px">Ref. No./PR No.</span>: &nbsp;<strong>${pr.pr_no}</strong></span>
 </div>
 ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
-  <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${jobLabel}</strong></span>
+  <span><span style="display:inline-block;width:104px">Job No.</span>: &nbsp;<strong>${jobLabel}</strong></span>
 </div>` : ''}
 <div class="meta-row" style="margin-top:-4px">
   <span><span style="display:inline-block;width:104px">Requested By</span>: &nbsp;<strong>${pr.created_by || '—'}</strong></span>
@@ -24591,249 +24591,6 @@ function POPage({
     });
     const next = String(Math.max(0, ...nums) + 1).padStart(3, '0');
     return `${firmCode}/PO/${fy}/${next}`;
-  };
-  const buildPOHtml = (pr, poNo, firm, jobsArr, genBy) => {
-    const _dt = v => {
-      if (!v) return '—';
-      const d = new Date(v);
-      if (isNaN(d.getTime())) return '—';
-      return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }).replace(/\b(am|pm)\b/i, m => m.toUpperCase());
-    };
-    const items = Array.isArray(pr.items) ? pr.items : [];
-    const job = (jobsArr || []).find(j => j.id === pr.job_id);
-    const jobLabel = pr.job_id ? `${pr.job_id}${job && job.project ? ' (' + job.project + ')' : ''}` : '';
-    const isIntraState = (pr.vendor_state || 'Maharashtra').toLowerCase() === 'maharashtra';
-    const _lineBase = x => {
-      if (x && x.unit_mode) {
-        const um = getUnitMode(x.unit_mode);
-        const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
-        return um.totalFn(a, +x.qty || 1, +x.rate || 0);
-      }
-      return (+x.qty || 0) * (+x.rate || 0);
-    };
-    const subtotal = +pr.subtotal || items.reduce((s, x) => s + _lineBase(x), 0);
-    const gstTotal = pr.gst_total !== null && pr.gst_total !== undefined && pr.gst_total !== '' ? +pr.gst_total : items.reduce((s, x) => s + _lineBase(x) * (+x.gst_pct || 0) / 100, 0);
-    const transport = +pr.transport || 0;
-    const transportGstPct = +pr.transport_gst_pct || 0;
-    const transportGst = transport * transportGstPct / 100;
-    const tdsPct = +pr.tds_pct || 0;
-    const tdsAmount = +pr.tds_amount || subtotal * tdsPct / 100;
-    const roundOff = +pr.round_off || 0;
-    const grandTotal = subtotal + gstTotal + transport + transportGst + roundOff;
-    const netPayable = grandTotal - tdsAmount;
-    const totalQty = items.reduce((s, x) => s + (+x.qty || 0), 0);
-    const gstGroups = {};
-    items.forEach(x => {
-      const base = _lineBase(x);
-      const gp = +x.gst_pct || 0;
-      const key = gp;
-      if (!gstGroups[key]) gstGroups[key] = {
-        base: 0,
-        tax: 0
-      };
-      gstGroups[key].base += base;
-      gstGroups[key].tax += base * gp / 100;
-    });
-    const today = new Date();
-    const dateStr = today.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: '2-digit'
-    });
-    const itemRows = items.map((x, i) => {
-      const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
-      const area = um ? um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1) : 0;
-      const dimLine = um && um.needsWH && (x.width || x.height) ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width || ''}×${x.height || ''} ${um.dimUnit || ''}${area > 0 ? ' = ' + um.displayFn(area) : ''}</span>` : x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '';
-      const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-      const _basis = um ? (um.totalFn(1000, 1, 1) === 1000 ? 'area' : um.totalFn(0, 1000, 1) === 1000 ? 'qty' : 'lot') : 'qty';
-      const billQty = _basis === 'area' ? area : _basis === 'lot' ? 1 : um ? +x.qty || 1 : +x.qty || 0;
-      const billUnit = _basis === 'area' ? (getUomLabel(um.value).suffix || '').trim() || 'ft²' : _basis === 'lot' ? 'lot' : um ? um.value.indexOf('Roll') === 0 ? 'roll' : um.value : x.per || 'nos';
-      const lineAmt = _lineBase(x);
-      return `
-      <tr>
-        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${i + 1}</td>
-        <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product || ''}${dimLine}${hsnLine}</td>
-        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${pr.expected_delivery || dateStr}</td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${billQty.toFixed(2)} ${billUnit}</td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.rate || 0).toLocaleString('en-IN', {
-        minimumFractionDigits: 2
-      })}</td>
-        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${billUnit}</td>
-        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;"></td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${lineAmt.toLocaleString('en-IN', {
-        minimumFractionDigits: 2
-      })}</td>
-      </tr>`;
-    }).join('');
-    const gstRows = Object.entries(gstGroups).map(([pct, {
-      base,
-      tax
-    }]) => {
-      if (+pct === 0 || tax === 0) return '';
-      if (isIntraState) {
-        return `
-          <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input CGST @ ${pct / 2}%</td>
-          <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${(tax / 2).toLocaleString('en-IN', {
-          minimumFractionDigits: 2
-        })}</td></tr>
-          <tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input SGST @ ${pct / 2}%</td>
-          <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${(tax / 2).toLocaleString('en-IN', {
-          minimumFractionDigits: 2
-        })}</td></tr>`;
-      } else {
-        return `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Input IGST @ ${pct}%</td>
-          <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${tax.toLocaleString('en-IN', {
-          minimumFractionDigits: 2
-        })}</td></tr>`;
-      }
-    }).join('');
-    const transportRow = transport > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport / Freight</td>
-      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transport.toLocaleString('en-IN', {
-      minimumFractionDigits: 2
-    })}</td></tr>` : '';
-    const transportGstRow = transportGst > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Transport GST @ ${transportGstPct}%</td>
-      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${transportGst.toLocaleString('en-IN', {
-      minimumFractionDigits: 2
-    })}</td></tr>` : '';
-    const roundOffRow = roundOff !== 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;">Round Off</td>
-      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${roundOff.toLocaleString('en-IN', {
-      minimumFractionDigits: 2,
-      signDisplay: 'auto'
-    })}</td></tr>` : '';
-    const tdsRow = tdsAmount > 0 ? `<tr><td colspan="7" style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-style:italic;color:#b91c1c;">Less: TDS @ ${tdsPct}% (on subtotal)</td>
-      <td style="text-align:right;padding:3px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;color:#b91c1c;">(${tdsAmount.toLocaleString('en-IN', {
-      minimumFractionDigits: 2
-    })})</td></tr>
-      <tr><td colspan="7" style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:11px;font-weight:700;background:#f0fdf4;">Net Payable to Vendor</td>
-      <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;background:#f0fdf4;">₹ ${netPayable.toLocaleString('en-IN', {
-      minimumFractionDigits: 2
-    })}</td></tr>` : '';
-    return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, sans-serif; font-size: 11px; color: #222; padding: 24px; }
-  .po-header { text-align: center; margin-bottom: 12px; }
-  .po-header h2 { font-size: 15px; font-weight: 800; }
-  .po-header p { font-size: 10px; color: #333; line-height: 1.5; }
-  .po-title { font-size: 14px; font-weight: 800; text-align: center; border: 2px solid #222; padding: 4px; margin: 10px 0; letter-spacing: 1px; }
-  .meta-row { display: flex; justify-content: space-between; font-size: 10px; color: #555; margin-bottom: 8px; }
-  .party-box { border: 1px solid #ccc; padding: 8px; margin-bottom: 10px; font-size: 10px; }
-  .party-box strong { font-size: 11px; }
-  .pt-box { border: 1px solid #ccc; padding: 6px 8px; margin-bottom: 10px; font-size: 10px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-  th { background: #f0f0f0; font-size: 10px; font-weight: 700; padding: 5px 6px; border: 1px solid #ccc; text-align: center; }
-  .words-box { border: 1px solid #ccc; padding: 6px 8px; font-size: 10px; margin-bottom: 8px; }
-  .footer-row { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 6px; }
-  .sig-box { text-align: right; margin-top: 20px; font-size: 10px; }
-  .sig-img { width: 120px; height: 60px; object-fit: contain; }
-  .computer-gen { text-align: center; font-size: 9px; color: #888; margin-top: 16px; border-top: 1px solid #ccc; padding-top: 6px; }
-  @media print { body { padding: 12px; } }
-</style></head><body>
-
-  <div class="meta-row">
-    <span>Voucher No. &nbsp;<strong>${poNo}</strong></span>
-    <span>Dated &nbsp;<strong>${dateStr}</strong></span>
-  </div>
-  <div class="meta-row" style="margin-top:-4px">
-    <span>Ref. No./PR No. : &nbsp;<strong>${pr.pr_no}</strong></span>
-  </div>
-  ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
-    <span>Job No. &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>${jobLabel}</strong></span>
-  </div>` : ''}
-  <div class="meta-row" style="margin-top:-4px">
-    <span><span style="display:inline-block;width:104px">Requested By</span>: &nbsp;<strong>${pr.created_by || '—'}</strong></span>
-    <span>${_dt(pr.created_at)}</span>
-  </div>
-  <div class="meta-row" style="margin-top:-4px">
-    <span><span style="display:inline-block;width:104px">Approved By</span>: &nbsp;<strong>${pr.approved_by || '—'}</strong></span>
-    <span>${_dt(pr.approved_at)}</span>
-  </div>
-  <div class="meta-row" style="margin-top:-4px">
-    <span><span style="display:inline-block;width:104px">PO Generated By</span>: &nbsp;<strong>${pr.po_generated_by || genBy || '—'}</strong></span>
-    <span>${_dt(pr.po_generated_at || today)}</span>
-  </div>
-
-  <div class="po-header">
-    <h2>${firm.name}</h2>
-    <p>${firm.address}</p>
-    <p>GSTIN/UIN: ${firm.gstin}</p>
-    <p>State Name : ${firm.state}, Code : ${firm.state_code}</p>
-    ${firm.email ? '<p>E-Mail : ' + firm.email + '</p>' : ''}
-  </div>
-
-  <div class="po-title">PURCHASE ORDER</div>
-
-  <div class="party-box">
-    <div style="margin-bottom:4px"><span style="color:#555">Party : </span><strong>${pr.vendor_name}</strong></div>
-    ${pr.vendor_address ? '<div style="color:#444;line-height:1.6;margin-left:44px">' + pr.vendor_address + '</div>' : ''}
-    ${pr.vendor_gstin ? '<div style="margin-top:4px">GSTIN/UIN &nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin + '</strong></div>' : ''}
-    ${pr.vendor_gstin && pr.vendor_gstin.length >= 12 ? '<div>PAN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;<strong>' + pr.vendor_gstin.substring(2, 12) + '</strong></div>' : ''}
-    ${pr.vendor_phone ? '<div>Phone &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: &nbsp;' + pr.vendor_phone + '</div>' : ''}
-    <div>State Name &nbsp;: &nbsp;${pr.vendor_state || 'Maharashtra'}, Code : ${(pr.vendor_state || 'Maharashtra').toLowerCase() === 'maharashtra' ? '27' : '—'}</div>
-  </div>
-
-  <div class="pt-box"><strong>Payment Terms</strong><br>${pr.payment_terms || 'To be confirmed'}${pr.advance_amount || pr.advance_percent ? '<br><strong>Advance:</strong> ' + [pr.advance_amount, pr.advance_percent].filter(Boolean).join(' / ') : ''}</div>
-
-  <table>
-    <thead>
-      <tr>
-        <th style="width:30px">Sl<br>No.</th>
-        <th>Description of Goods</th>
-        <th style="width:70px">Due on</th>
-        <th style="width:80px">Quantity</th>
-        <th style="width:70px">Rate</th>
-        <th style="width:50px">per</th>
-        <th style="width:40px">Disc. %</th>
-        <th style="width:80px">Amount</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemRows}
-      <tr>
-        <td colspan="7" style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Subtotal</td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${subtotal.toLocaleString('en-IN', {
-      minimumFractionDigits: 2
-    })}</td>
-      </tr>
-      ${gstRows}
-      ${transportRow}
-      ${transportGstRow}
-      ${roundOffRow}
-      <tr style="background:#f9f9f9">
-        <td colspan="3" style="padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">Total</td>
-        <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:10px;font-weight:700;">${totalQty.toFixed(4)} nos</td>
-        <td colspan="3" style="border:1px solid #ccc;"></td>
-        <td style="text-align:right;padding:5px 6px;border:1px solid #ccc;font-size:12px;font-weight:800;">₹ ${grandTotal.toLocaleString('en-IN', {
-      minimumFractionDigits: 2
-    })}</td>
-      </tr>
-      ${tdsRow}
-    </tbody>
-  </table>
-
-  <div class="words-box">
-    <strong>Amount Chargeable (in words)</strong>
-    <span style="float:right;font-style:italic;font-size:9px">E. &amp; O.E</span><br>
-    <strong>INR ${numToWords(grandTotal)}</strong>
-  </div>
-
-  <div class="footer-row">
-    <div>
-      <div>Company's PAN &nbsp;&nbsp;: &nbsp;<strong>${firm.pan}</strong></div>
-      ${firm.msme ? '<div style="margin-top:2px">MSME Reg.No (UAN) : &nbsp;<strong>' + firm.msme + '</strong></div>' : ''}
-    </div>
-  </div>
-
-  <div class="sig-box">
-    <img src="${SIGNATURE_IMG}" style="width:180px;height:98px;object-fit:contain;display:block;margin-left:auto" alt="signature"/>
-    <div style="font-weight:700;font-size:11px">for ${firm.short}</div>
-    <div style="font-size:10px;color:#555;margin-top:2px">Authorised Signatory</div>
-  </div>
-
-  <div class="computer-gen">This is a Computer Generated Document</div>
-
-</body></html>`;
   };
   const generatePO = async pr => {
     setGenerating(pr.id);
@@ -26546,7 +26303,7 @@ function ApprovalsPage({
     const nowIso = new Date().toISOString();
     const updates = {
       status: 'Approved',
-      approved_by: 'Jigar',
+      approved_by: user?.name || 'Jigar',
       approved_at: nowIso,
       last_status_change_at: nowIso
     };
@@ -26584,7 +26341,7 @@ function ApprovalsPage({
     const nowIso = new Date().toISOString();
     const updates = {
       status: 'Rejected',
-      rejected_by: 'Jigar',
+      rejected_by: user?.name || 'Jigar',
       rejected_at: nowIso,
       rejection_reason: rejReason.trim(),
       last_status_change_at: nowIso
