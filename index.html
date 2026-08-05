@@ -23473,18 +23473,20 @@ function buildPOHtml(pr, poNo, firm, jobsArr, genBy) {
     const area = um ? um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1) : 0;
     const dimLine = um && um.needsWH && (x.width || x.height) ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width || ''}×${x.height || ''} ${um.dimUnit || ''}${area > 0 ? ' = ' + um.displayFn(area) : ''}</span>` : x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '';
     const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-    const qtyUnit = um ? um.value.indexOf('Roll') === 0 ? 'roll' : um.value : x.per || 'nos';
+    const _basis = um ? (um.totalFn(1000, 1, 1) === 1000 ? 'area' : um.totalFn(0, 1000, 1) === 1000 ? 'qty' : 'lot') : 'qty';
+    const billQty = _basis === 'area' ? area : _basis === 'lot' ? 1 : um ? +x.qty || 1 : +x.qty || 0;
+    const billUnit = _basis === 'area' ? (getUomLabel(um.value).suffix || '').trim() || 'ft²' : _basis === 'lot' ? 'lot' : um ? um.value.indexOf('Roll') === 0 ? 'roll' : um.value : x.per || 'nos';
     const lineAmt = _lineBase(x);
     return `
     <tr>
       <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${i + 1}</td>
       <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product || ''}${dimLine}${hsnLine}</td>
       <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${pr.expected_delivery || dateStr}</td>
-      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.qty || 0).toFixed(2)} ${qtyUnit}</td>
+      <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${billQty.toFixed(2)} ${billUnit}</td>
       <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.rate || 0).toLocaleString('en-IN', {
       minimumFractionDigits: 2
     })}</td>
-      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${qtyUnit}</td>
+      <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${billUnit}</td>
       <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;"></td>
       <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${lineAmt.toLocaleString('en-IN', {
       minimumFractionDigits: 2
@@ -24643,18 +24645,20 @@ function POPage({
       const area = um ? um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1) : 0;
       const dimLine = um && um.needsWH && (x.width || x.height) ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width || ''}×${x.height || ''} ${um.dimUnit || ''}${area > 0 ? ' = ' + um.displayFn(area) : ''}</span>` : x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '';
       const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
-      const qtyUnit = um ? um.value.indexOf('Roll') === 0 ? 'roll' : um.value : x.per || 'nos';
+      const _basis = um ? (um.totalFn(1000, 1, 1) === 1000 ? 'area' : um.totalFn(0, 1000, 1) === 1000 ? 'qty' : 'lot') : 'qty';
+      const billQty = _basis === 'area' ? area : _basis === 'lot' ? 1 : um ? +x.qty || 1 : +x.qty || 0;
+      const billUnit = _basis === 'area' ? (getUomLabel(um.value).suffix || '').trim() || 'ft²' : _basis === 'lot' ? 'lot' : um ? um.value.indexOf('Roll') === 0 ? 'roll' : um.value : x.per || 'nos';
       const lineAmt = _lineBase(x);
       return `
       <tr>
         <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${i + 1}</td>
         <td style="padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${x.product || ''}${dimLine}${hsnLine}</td>
         <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${pr.expected_delivery || dateStr}</td>
-        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.qty || 0).toFixed(2)} ${qtyUnit}</td>
+        <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${billQty.toFixed(2)} ${billUnit}</td>
         <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${(+x.rate || 0).toLocaleString('en-IN', {
         minimumFractionDigits: 2
       })}</td>
-        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${qtyUnit}</td>
+        <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;">${billUnit}</td>
         <td style="text-align:center;padding:4px 6px;border:1px solid #ccc;font-size:10px;"></td>
         <td style="text-align:right;padding:4px 6px;border:1px solid #ccc;font-size:10px;font-weight:600;">${lineAmt.toLocaleString('en-IN', {
         minimumFractionDigits: 2
