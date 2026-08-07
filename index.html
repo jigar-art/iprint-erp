@@ -15857,6 +15857,7 @@ function PrintPage({
     job_id: '',
     batch_id: '',
     machine: '',
+    operator: '',
     selectedItems: {},
     entryMode: 'item',
     lump: {
@@ -15875,6 +15876,7 @@ function PrintPage({
     ink_black: 0,
     ink_white: 0
   };
+  const OPERATOR_OPTIONS = (team || []).filter(m => m.active && m.is_operator).map(m => m.name).sort((a, b) => a.localeCompare(b));
   const [f, sF] = useState(blankForm);
   const MACHINES = ['Witcolour UV R2R', 'EPSON UV Flatbed', 'EPSON Latex', 'Plotter Cutting Machine'];
   const rollMaterials = (materialsV2 || []).filter(m => m.unit === 'roll' && m.active).sort((a, b) => a.name.localeCompare(b.name));
@@ -16225,6 +16227,10 @@ function PrintPage({
       show("Pick machine", false);
       return;
     }
+    if (!f.operator) {
+      show("Pick who printed this job \u2014 required.", false);
+      return;
+    }
     const itemIds = Object.keys(f.selectedItems || {});
     if (itemIds.length === 0) {
       show("Tick at least one line item", false);
@@ -16251,7 +16257,7 @@ function PrintPage({
       setSaving(true);
       const lumpPhoto = f.lump._photoUrl || '';
       const lbase = 'PL' + Date.now();
-      const lop = user?.name || '';
+      const lop = f.operator;
       let lidx = 0;
       for (const id of itemIds) {
         const item = (items || []).find(i => i.id === id) || {};
@@ -16372,7 +16378,7 @@ function PrintPage({
     if (!confirm(`Save ${totalRows} print log row${totalRows > 1 ? 's' : ''} across ${itemIds.length} item${itemIds.length > 1 ? 's' : ''} on machine "${f.machine}"?`)) return;
     setSaving(true);
     const baseId = 'PL' + Date.now();
-    const operator = user?.name || '';
+    const operator = f.operator;
     let rowIdx = 0;
     for (const id of itemIds) {
       const it = f.selectedItems[id];
@@ -17313,6 +17319,20 @@ function PrintPage({
       date: e.target.value
     }))
   })), React.createElement(F, {
+    l: "Printed by *"
+  }, React.createElement("select", {
+    className: "in",
+    value: f.operator,
+    onChange: e => sF(p => ({
+      ...p,
+      operator: e.target.value
+    }))
+  }, React.createElement("option", {
+    value: ""
+  }, "\u2014 who printed this? \u2014"), OPERATOR_OPTIONS.map(n => React.createElement("option", {
+    key: n,
+    value: n
+  }, n)))), React.createElement(F, {
     l: "Machine *"
   }, React.createElement("select", {
     className: "in",
