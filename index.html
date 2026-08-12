@@ -2453,6 +2453,24 @@ function MainApp({
     show("Boy added!");
     return row;
   }, [show]);
+  const addNewAgency = useCallback(async rawName => {
+    const name = String(rawName || '').trim();
+    if (!name) return null;
+    const row = {
+      id: 'OA' + uid(),
+      name,
+      active: true
+    };
+    const {
+      error
+    } = await sb.from('outsource_agencies').insert(row);
+    if (error) {
+      show("\u26A0\uFE0F Add vendor failed: " + error.message, false);
+      return null;
+    }
+    show("Vendor added!");
+    return row;
+  }, [show]);
   const addNewProduct = useCallback(async (rawName, rawClientName, productsList, extra) => {
     const name = String(rawName || '').trim();
     if (!name) return null;
@@ -2634,13 +2652,13 @@ function MainApp({
     l: "Dept Tracker",
     e: "🏭",
     roles: ["admin", "production", "sales", "designer", "printing", "fabrication", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "PRINTING"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING"]
   }, {
     id: "grn",
     l: "Material In",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "VIDYA", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "VIDYA", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "print",
     l: "Printing",
@@ -2652,7 +2670,7 @@ function MainApp({
     l: "Fabrication",
     e: "🔧",
     roles: ["admin", "production", "fabrication", "designer", "printing", "sales", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "os",
     l: "Outsource",
@@ -2664,13 +2682,13 @@ function MainApp({
     l: "Dispatch",
     e: "🚚",
     roles: ["admin", "production", "sales", "dispatch", "designer", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "MURLI", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "stock",
     l: "Stock",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "rem",
     l: "PO Reminders",
@@ -2741,7 +2759,7 @@ function MainApp({
     l: "Receive Material",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "reports",
     l: "Reports",
@@ -3131,6 +3149,8 @@ function MainApp({
   }), pg === "disp" && React.createElement(DispPage, {
     logs: dLogs,
     delBoys: delBoys,
+    agencies: agencies,
+    addNewAgency: addNewAgency,
     addLog: addDispatch,
     addNewDelBoy: addNewDelBoy,
     jobs: jobs,
@@ -21764,6 +21784,8 @@ function WeighmentView({
 function DispPage({
   logs,
   delBoys,
+  agencies,
+  addNewAgency,
   addLog,
   addNewDelBoy,
   jobs,
@@ -21781,8 +21803,15 @@ function DispPage({
     lr_no: "",
     challan_no: "",
     installer: "",
-    install_date: ""
+    install_date: "",
+    courier_name: "",
+    vendor_name: "",
+    batch_no: ""
   });
+  const [agLocal, setAgLocal] = useState(agencies || []);
+  useEffect(() => {
+    setAgLocal(agencies || []);
+  }, [agencies]);
   const [boysLocal, setBoysLocal] = useState(delBoys);
   useEffect(() => {
     setBoysLocal(delBoys);
@@ -21832,11 +21861,32 @@ function DispPage({
         return;
       }
     }
+    const isCourier = f.dispatch_type === "Courier to Vendor";
+    if (isCourier) {
+      if (!String(f.courier_name || '').trim()) {
+        alert("Enter Courier Agency");
+        return;
+      }
+      if (!String(f.vendor_name || '').trim()) {
+        alert("Enter Vendor (whom material was sent to)");
+        return;
+      }
+      const vName = String(f.vendor_name).trim();
+      const hit = (agLocal || []).find(a => String(a.name || '').trim().toLowerCase() === vName.toLowerCase());
+      if (!hit && addNewAgency) {
+        const row = await addNewAgency(vName);
+        if (row) setAgLocal(p => [...p, row]);
+      }
+    }
     const payload = {
       id: "D" + uid(),
       ...f,
       job_id: jid,
-      install_date: f.install_date || null
+      install_date: f.install_date || null,
+      courier_name: isCourier ? String(f.courier_name).trim() : null,
+      vendor_name: isCourier ? String(f.vendor_name).trim() : null,
+      batch_no: String(f.batch_no || '').trim() || null,
+      delivery_boy: isCourier ? "" : f.delivery_boy
     };
     await addLog(payload);
     sF(p => ({
@@ -21846,13 +21896,16 @@ function DispPage({
       lr_no: "",
       challan_no: "",
       installer: "",
-      install_date: ""
+      install_date: "",
+      courier_name: "",
+      vendor_name: "",
+      batch_no: ""
     }));
   };
   const filtered = useMemo(() => {
     const q = dq.trim().toLowerCase();
     if (!q) return logs;
-    return logs.filter(l => String(l.job_id || "").toLowerCase().includes(q) || String(l.dispatch_type || "").toLowerCase().includes(q) || String(l.delivery_boy || "").toLowerCase().includes(q) || String(l.vehicle || "").toLowerCase().includes(q) || String(l.lr_no || "").toLowerCase().includes(q) || String(l.challan_no || "").toLowerCase().includes(q) || String(l.installer || "").toLowerCase().includes(q) || String(l.date || "").toLowerCase().includes(q));
+    return logs.filter(l => String(l.job_id || "").toLowerCase().includes(q) || String(l.dispatch_type || "").toLowerCase().includes(q) || String(l.delivery_boy || "").toLowerCase().includes(q) || String(l.vehicle || "").toLowerCase().includes(q) || String(l.lr_no || "").toLowerCase().includes(q) || String(l.challan_no || "").toLowerCase().includes(q) || String(l.installer || "").toLowerCase().includes(q) || String(l.courier_name || "").toLowerCase().includes(q) || String(l.vendor_name || "").toLowerCase().includes(q) || String(l.batch_no || "").toLowerCase().includes(q) || String(l.date || "").toLowerCase().includes(q));
   }, [dq, logs]);
   return React.createElement("div", {
     style: {
@@ -22010,7 +22063,42 @@ function DispPage({
       ...p,
       dispatch_type: e.target.value
     }))
-  }, React.createElement("option", null, "Delivery Only"), React.createElement("option", null, "Delivery + Install"))), React.createElement(F, {
+  }, React.createElement("option", null, "Delivery Only"), React.createElement("option", null, "Delivery + Install"), React.createElement("option", null, "Courier to Vendor"))), f.dispatch_type === "Courier to Vendor" && React.createElement(React.Fragment, null, React.createElement(F, {
+    l: "Courier Agency"
+  }, React.createElement("input", {
+    className: "in",
+    placeholder: "e.g. Bluedart, VRL, DTDC",
+    value: f.courier_name,
+    onChange: e => sF(p => ({
+      ...p,
+      courier_name: e.target.value
+    }))
+  })), React.createElement(F, {
+    l: "Vendor (sent to)"
+  }, React.createElement("input", {
+    className: "in",
+    list: "dispVendorList",
+    placeholder: "Pick or type new vendor",
+    value: f.vendor_name,
+    onChange: e => sF(p => ({
+      ...p,
+      vendor_name: e.target.value
+    }))
+  }), React.createElement("datalist", {
+    id: "dispVendorList"
+  }, (agLocal || []).filter(a => a.active !== false).map(a => React.createElement("option", {
+    key: a.id,
+    value: a.name
+  })))), React.createElement(F, {
+    l: "Batch# (optional)"
+  }, React.createElement("input", {
+    className: "in mn",
+    value: f.batch_no,
+    onChange: e => sF(p => ({
+      ...p,
+      batch_no: e.target.value
+    }))
+  }))), React.createElement(F, {
     l: "Del Boy"
   }, React.createElement("div", {
     style: {
@@ -22191,20 +22279,20 @@ function DispPage({
     style: {
       overflowX: "auto"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Job"), React.createElement("th", null, "Type"), React.createElement("th", null, "Boy"), React.createElement("th", null, "Vehicle"), React.createElement("th", null, "Challan"), React.createElement("th", null, "LR"))), React.createElement("tbody", null, filtered.map(l => React.createElement("tr", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Job"), React.createElement("th", null, "Type"), React.createElement("th", null, "Boy / Vendor"), React.createElement("th", null, "Vehicle / Courier"), React.createElement("th", null, "Challan"), React.createElement("th", null, "LR"))), React.createElement("tbody", null, filtered.map(l => React.createElement("tr", {
     key: l.id
   }, React.createElement("td", null, l.date), React.createElement("td", {
     className: "mn",
     style: {
       color: "#e3a008"
     }
-  }, l.job_id), React.createElement("td", null, React.createElement("span", {
+  }, l.job_id, l.batch_no ? " \u00B7 " + l.batch_no : ""), React.createElement("td", null, React.createElement("span", {
     className: "bd",
     style: {
-      background: l.dispatch_type?.includes("Install") ? "#8b5cf620" : "#10b98120",
-      color: l.dispatch_type?.includes("Install") ? "#c084fc" : "#4ade80"
+      background: l.dispatch_type === "Courier to Vendor" ? "#3b82f620" : l.dispatch_type?.includes("Install") ? "#8b5cf620" : "#10b98120",
+      color: l.dispatch_type === "Courier to Vendor" ? "#60a5fa" : l.dispatch_type?.includes("Install") ? "#c084fc" : "#4ade80"
     }
-  }, l.dispatch_type)), React.createElement("td", null, l.delivery_boy), React.createElement("td", null, l.vehicle), React.createElement("td", {
+  }, l.dispatch_type)), React.createElement("td", null, l.dispatch_type === "Courier to Vendor" ? l.vendor_name || "" : l.delivery_boy), React.createElement("td", null, l.dispatch_type === "Courier to Vendor" ? l.courier_name || "" : l.vehicle), React.createElement("td", {
     className: "mn"
   }, l.challan_no), React.createElement("td", {
     className: "mn"
