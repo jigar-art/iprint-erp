@@ -2634,25 +2634,25 @@ function MainApp({
     l: "All Jobs",
     e: "📋",
     roles: ["admin", "sales", "production", "accounts", "designer"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "SHREYA", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "POONAM"]
   }, {
     id: "new",
     l: "New Job",
     e: "➕",
     roles: ["admin", "sales"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "PRIYANKA"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "PRIYANKA", "HARSHALA"]
   }, {
     id: "boq",
     l: "Import BOQ",
     e: "📥",
     roles: ["admin", "sales"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "ANKITA"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "ANKITA"]
   }, {
     id: "dept",
     l: "Dept Tracker",
     e: "🏭",
     roles: ["admin", "production", "sales", "designer", "printing", "fabrication", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING"]
   }, {
     id: "grn",
     l: "Material In",
@@ -2664,25 +2664,25 @@ function MainApp({
     l: "Printing",
     e: "🖨️",
     roles: ["admin", "production", "printing", "designer", "sales"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "fab",
     l: "Fabrication",
     e: "🔧",
     roles: ["admin", "production", "fabrication", "designer", "printing", "sales", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "PRAJAKTA", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "os",
     l: "Outsource",
     e: "📤",
     roles: ["admin", "production", "printing", "fabrication", "designer", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "SHREYA", "PRAJAKTA", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "SHREYA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK", "POONAM"]
   }, {
     id: "disp",
     l: "Dispatch",
     e: "🚚",
     roles: ["admin", "production", "sales", "dispatch", "designer", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "stock",
     l: "Stock",
@@ -2700,7 +2700,7 @@ function MainApp({
     l: "Clients",
     e: "👥",
     roles: ["admin", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "SHREYA"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA"]
   }, {
     id: "acc",
     l: "Accounts",
@@ -2724,7 +2724,7 @@ function MainApp({
     l: "Banking CRM",
     e: "🏦",
     roles: ["admin", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "SHREYA", "VIDYA", "SONAM", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "VIDYA", "SONAM", "POONAM"]
   }, {
     id: "sales",
     l: "Sales CRM",
@@ -5319,7 +5319,7 @@ function JobDetail({
   const role = user?.role || 'admin';
   const prodRoles = ['production', 'printing', 'fabrication', 'designer', 'dispatch'];
   const isProd = prodRoles.includes(role);
-  const canSeeRates = !isProd && !['PRIYANKA'].includes((user?.name || '').toUpperCase());
+  const canSeeRates = !isProd && !['PRIYANKA', 'HARSHALA'].includes((user?.name || '').toUpperCase());
   window._canSeeRates = canSeeRates;
   const [jf, setJf] = useState({
     client_name: j.client_name || '',
@@ -6504,7 +6504,7 @@ function JobDetail({
     const [showPRForm, setShowPRForm] = React.useState(false);
     const [vendors, setVendors] = React.useState(null);
     const [showAddVendor, setShowAddVendor] = React.useState(false);
-    const PR_REQUESTORS = ['Amol', 'Murli Shetty', 'Shreya', 'Harish', 'Priyanka', 'Jigar'];
+    const PR_REQUESTORS = ['Amol', 'Murli Shetty', 'Shreya', 'Harish', 'Priyanka', 'Harshala', 'Jigar'];
     const PR_PAYMENT_TERMS = ['Advance 100%', 'Advance 50% + Balance on delivery', 'COD', '15 days from invoice', '30 days from invoice', '45 days from invoice', '60 days from invoice', 'Custom'];
     const PR_PER = ['Sheet', 'SqFt', 'Unit', 'Kg', 'Running Ft', 'Pcs', 'Ltr', 'Meter', 'Set', 'Job'];
     const PR_GST = [0, 5, 12, 18, 28];
@@ -23424,6 +23424,7 @@ const WA_NUMBERS = {
   'Murli Shetty': '918691069121',
   'Harish': '919326282238',
   'Priyanka': '917400214057',
+  'Harshala': '917304672087',
   'Jigar': '919076270111',
   'Shreya': '917304008506',
   'Ruchita': '918591872142',
@@ -23438,6 +23439,7 @@ const STAFF_DEPTS = {
   'Murli Shetty': 'Production',
   'Harish': 'Printing',
   'Priyanka': 'Office',
+  'Harshala': 'Office',
   'Jigar': 'Admin',
   'Shreya': 'Accounts'
 };
@@ -31240,7 +31242,7 @@ function BankingJobGroupModal({
   const [search, setSearch] = useState('');
   const canUpload = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'PRIYANKA', 'APARNA'].some(u => uN.includes(u));
+    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'PRIYANKA', 'HARSHALA', 'APARNA'].some(u => uN.includes(u));
   })();
   useEffect(() => {
     let alive = true;
@@ -31751,7 +31753,7 @@ function BankCRMPage({
   const [billingReqs, setBillingReqs] = useState({});
   const canTogglePmt = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['JIGAR', 'VIDYA', 'APARNA', 'PRIYANKA', 'AMOL', 'CHANDNI', 'RUCHITA'].some(u => uN.includes(u));
+    return ['JIGAR', 'VIDYA', 'APARNA', 'PRIYANKA', 'HARSHALA', 'AMOL', 'CHANDNI', 'RUCHITA'].some(u => uN.includes(u));
   })();
   const canRequestBilling = (() => {
     const uN = (user?.name || '').toUpperCase();
@@ -31761,7 +31763,7 @@ function BankCRMPage({
   const isCanonicalStatus = s => !s || s === '' || CANONICAL_BILLING_STATUSES.includes(s);
   const canCleanup = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA', 'PRIYANKA'].some(u => uN.includes(u));
+    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA', 'PRIYANKA', 'HARSHALA'].some(u => uN.includes(u));
   })();
   const [bankMode, setBankMode] = useState('sites');
   const [cleanupShowMessyOnly, setCleanupShowMessyOnly] = useState(true);
@@ -31888,7 +31890,7 @@ function BankCRMPage({
   })();
   const canEditBillingCategory = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['SONAM', 'PRIYANKA'].some(t => uN === t || uN.startsWith(t + ' '));
+    return ['SONAM', 'PRIYANKA', 'HARSHALA'].some(t => uN === t || uN.startsWith(t + ' '));
   })();
   const BILLING_CAT_OPTIONS = [{
     v: '',
@@ -32048,7 +32050,7 @@ function BankCRMPage({
   }, []);
   const canUploadFiles = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'PRIYANKA', 'APARNA'].some(u => uN.includes(u));
+    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'PRIYANKA', 'HARSHALA', 'APARNA'].some(u => uN.includes(u));
   })();
   const updateSiteArr = async (siteId, field, newArr) => {
     const {
