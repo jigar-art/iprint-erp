@@ -3807,7 +3807,7 @@ function DashPage({
   user
 }) {
   const [dq, setDq] = useState("");
-  const DASH_VIEW_ONLY_USERS = ['ANKIT', 'SONU', 'PRATIK', 'PRINTING TEAM'];
+  const DASH_VIEW_ONLY_USERS = ['ANKIT', 'SONU', 'PRATIK', 'ANIKET'];
   const isDashViewOnly = DASH_VIEW_ONLY_USERS.includes((user?.name || '').toUpperCase());
   const low = Object.entries(stock).filter(([, v]) => v <= 2 && v >= 0).slice(0, 5);
   const BANKING_CLIENTS = ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'NUVAMA WEALTH', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'];
