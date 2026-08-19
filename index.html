@@ -28419,6 +28419,25 @@ function BOQImportPage({
       w: wm[1],
       h: hm[1]
     };
+    if (/['\u2019]/.test(s) && /[x\u00d7]/i.test(s)) {
+      const _ftp = s.split(/[x\u00d7]/i);
+      if (_ftp.length >= 2) {
+        const _ftsc = t => {
+          const _f = t.match(/(\d+\.?\d*)\s*['\u2019]/);
+          const _i = t.match(/(\d+\.?\d*)\s*["\u201d\u2033]/);
+          if (_f) return +_f[1] + (_i ? +_i[1] / 12 : 0);
+          if (_i) return +_i[1] / 12;
+          const _n = t.match(/(\d+\.?\d*)/);
+          return _n ? +_n[1] : NaN;
+        };
+        const _fw = _ftsc(_ftp[0]),
+          _fh = _ftsc(_ftp[1]);
+        if (!isNaN(_fw) && !isNaN(_fh) && _fw > 0 && _fh > 0) return {
+          w: String(Math.round(_fw * 1000) / 1000),
+          h: String(Math.round(_fh * 1000) / 1000)
+        };
+      }
+    }
     const xm = s.match(/(\d+\.?\d*)\s*(?:"|"|″|ft|in|inch|mm|cm|')?\s*[x×]\s*(\d+\.?\d*)\s*(?:"|"|″|ft|in|inch|mm|cm|')?/i);
     if (xm) return {
       w: xm[1],
@@ -28443,6 +28462,7 @@ function BOQImportPage({
       if (/(description|particular|item|job desc|signage\s*name|product\s*name)/.test(txt) && /(qty|quantity|unit|uom|nos|sqft|sft|size)/.test(txt)) return i;
       if (/(sl\.?\s*no|sr\.?\s*no)/.test(txt) && /(qty|quantity|unit|uom|rate|amount)/.test(txt)) return i;
       if (/(sr\.?\s*no|sl\.?\s*no)/.test(txt) && /(site\s*code|atm\s*id)/.test(txt) && /(address|location)/.test(txt)) return i;
+      if (/(atm\s*id|atmid|site\s*code|branch\s*code|ncr\s*unique)/.test(txt) && /(address|city|pincode|pin\s*code|district|location)/.test(txt)) return i;
     }
     return 0;
   };
@@ -28477,7 +28497,7 @@ function BOQImportPage({
       spec: find([/^specification|^material|media\s*make/]),
       wallNo: find([/wall.*no|location|zone/]),
       floor: find([/^floor$/]),
-      size: find([/^size$|size.*in|size.*\(|^uom$|^umo$|flex\s*size/]),
+      size: find([/^size$|size.*in|size.*\(|^uom$|^umo$|flex\s*size|signage\s*size/]),
       width,
       height,
       uom: find([/uom|umo|^unit$|^units$/]),
@@ -28509,9 +28529,12 @@ function BOQImportPage({
     const startRow = hasSplitHeader ? hRow + 2 : hRow + 1;
     const items = [];
     let lastFloor = '';
+    const _hdrSet = new Set((data[hRow] || []).map(c => String(c || '').toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
     for (let r = startRow; r < data.length; r++) {
       const row = data[r];
       if (!row || row.every(c => c === null || c === undefined || c === '')) continue;
+      const _rc = row.map(c => String(c || '').toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+      if (_rc.length >= 3 && _rc.filter(v => _hdrSet.has(v)).length >= Math.ceil(_rc.length * 0.6)) continue;
       const allCellsTxt = row.map(c => String(c || '').toLowerCase().trim()).join(' ');
       if (/^(sub\s*total|basic|gst|total|general\s*point|note|grand total)/i.test(String(row[0] || '').trim())) continue;
       if (/^(sub\s*total|total|grand total)/i.test(allCellsTxt.slice(0, 20))) continue;
@@ -29626,6 +29649,78 @@ function BOQImportPage({
     }
   }, "Auto-detected mappings shown below. Change any that are wrong, or assign unmapped columns."), React.createElement("div", {
     style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 8,
+      background: "#0c1017",
+      border: "1px solid #1a2030",
+      borderRadius: 6,
+      padding: "6px 8px"
+    }
+  }, React.createElement("span", {
+    style: {
+      fontSize: 9,
+      fontWeight: 700,
+      color: "#94a3b8",
+      whiteSpace: "nowrap"
+    }
+  }, "\uD83D\uDCCD Header row"), React.createElement("select", {
+    className: "in",
+    value: headerRow,
+    onChange: e => {
+      const hr = +e.target.value;
+      const s = sheets.find(x => selSheets.includes(x.name));
+      if (!s) return;
+      setHeaderRow(hr);
+      setTemplateMatched(null);
+      setColHeaders((s.data[hr] || []).map((h, i) => ({
+        idx: i,
+        label: String(h || 'Column ' + (i + 1)).trim()
+      })));
+      const auto = detectColumns(s.data[hr] || [], s.data[hr + 1] || []);
+      const m = {};
+      if (auto.desc >= 0) m[auto.desc] = 'item_name';
+      if (auto.spec >= 0) m[auto.spec] = 'material';
+      if (auto.width >= 0) m[auto.width] = 'width';
+      if (auto.height >= 0) m[auto.height] = 'height';
+      if (auto.size >= 0 && auto.width < 0) m[auto.size] = 'size';
+      if (auto.qty >= 0) m[auto.qty] = 'qty';
+      if (auto.supplyRate >= 0) m[auto.supplyRate] = 'rate';
+      if (auto.remarks >= 0) m[auto.remarks] = 'remarks';
+      if (auto.siteCode >= 0) m[auto.siteCode] = 'site_code';
+      if (auto.address >= 0) m[auto.address] = 'address';
+      if (auto.refImage >= 0) m[auto.refImage] = 'ref_image';
+      if (auto.pincode >= 0) m[auto.pincode] = 'pincode';
+      if (auto.city >= 0) m[auto.city] = 'city';
+      if (auto.district >= 0) m[auto.district] = 'district';
+      if (auto.state >= 0) m[auto.state] = 'state';
+      if (auto.fieldOfficer >= 0) m[auto.fieldOfficer] = 'field_officer';
+      setColMap(m);
+    },
+    style: {
+      fontSize: 9,
+      padding: "3px 6px",
+      maxWidth: 300
+    }
+  }, (() => {
+    const s = sheets.find(x => selSheets.includes(x.name));
+    if (!s) return null;
+    return (s.data || []).slice(0, 20).map((r, i) => {
+      const prev = (r || []).map(c => String(c || '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 4).join(' | ').slice(0, 45);
+      return React.createElement("option", {
+        key: i,
+        value: i
+      }, 'Row ' + (i + 1) + ' \u2014 ' + (prev || '(blank)'));
+    });
+  })()), React.createElement("span", {
+    style: {
+      fontSize: 8,
+      color: "#64748b"
+    }
+  }, "Columns wrong below? Pick the row that holds your real headers \u2014 mapping re-detects automatically.")), React.createElement("div", {
+    style: {
       overflowX: "auto"
     }
   }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, colHeaders.map(h => React.createElement("th", {
@@ -29977,9 +30072,12 @@ function BOQImportPage({
         if (!selSheets.includes(s.name)) continue;
         const hRow = headerRow;
         const items = [];
+        const _hdrSet = new Set((s.data[hRow] || []).map(c => String(c || '').toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
         for (let r = hRow + 1; r < s.data.length; r++) {
           const row = s.data[r];
           if (!row || row.every(c => !c && c !== 0)) continue;
+          const _rc = row.map(c => String(c || '').toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean);
+          if (_rc.length >= 3 && _rc.filter(v => _hdrSet.has(v)).length >= Math.ceil(_rc.length * 0.6)) continue;
           const get = role => {
             const idx = Object.keys(colMap).find(k => colMap[k] === role);
             return idx != null ? String(row[+idx] || '').trim() : '';
