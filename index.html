@@ -22382,7 +22382,7 @@ function DispPage({
     onClick: () => setView('pending')
   }, "\uD83D\uDCCB DC / IC Pending (" + (jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').length + ")")), view === 'pending' ? (() => {
     const q = dq.trim().toLowerCase();
-    const pendJobs = applySort((jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').filter(j => !q || String(j.id || '').toLowerCase().includes(q) || String(j.client_name || '').toLowerCase().includes(q) || String(j.project || '').toLowerCase().includes(q) || String(j.delivery_address || '').toLowerCase().includes(q)));
+    const pendJobs = (jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').filter(j => !q || String(j.id || '').toLowerCase().includes(q) || String(j.client_name || '').toLowerCase().includes(q) || String(j.project || '').toLowerCase().includes(q) || String(j.delivery_address || '').toLowerCase().includes(q));
     const daysIn = j => {
       const sd = j.status_dates || {};
       const raw = sd[j.status === 'DC Pending' ? 'dc_pending' : 'ic_pending'];
@@ -22391,7 +22391,7 @@ function DispPage({
       if (isNaN(d.getTime())) return null;
       return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
     };
-    const sorted = [...pendJobs].sort((a, b) => {
+    const sorted = sortKey ? applySort(pendJobs) : [...pendJobs].sort((a, b) => {
       const da = daysIn(a), db = daysIn(b);
       return (db === null ? -1 : db) - (da === null ? -1 : da);
     });
