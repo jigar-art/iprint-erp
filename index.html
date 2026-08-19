@@ -4563,7 +4563,76 @@ function JobsPage({
   const [ff, sf] = useState("All");
   const [fy, setFy] = useState("All");
   const [limit, setLimit] = useState(200);
-  const fl = jobs.filter(j => {
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['batches', 'po'];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'firm') return r.firm;
+    if (k === 'client') return r.client_name;
+    if (k === 'project') return r.project;
+    if (k === 'status') return r.status;
+    if (k === 'batches') return (r.batches || []).length;
+    if (k === 'po') return r.po_number ? 1 : 0;
+    if (k === 'by') return r.made_by;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const flBase = jobs.filter(j => {
     if (s) {
       const q = s.toLowerCase();
       const hitsBatch = (j.batches || []).some(b => b.bill_no?.toLowerCase().includes(q));
@@ -4574,6 +4643,7 @@ function JobsPage({
     if (fy === "26-27" && !j.id?.includes("2627")) return false;
     return true;
   }).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  const fl = applySort(flBase);
   const openJob = j => sm({
     t: `Job ${j.id} — ${j.project}`,
     jobId: j.id,
@@ -4634,7 +4704,7 @@ function JobsPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-130px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job"), React.createElement("th", null, "Firm"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Status"), React.createElement("th", null, "Batches"), React.createElement("th", null, "PO"), React.createElement("th", null, "By"))), React.createElement("tbody", null, fl.slice(0, limit).map(j => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('firm', "Firm"), sortTh('client', "Client"), sortTh('project', "Project"), sortTh('status', "Status"), sortTh('batches', "Batches"), sortTh('po', "PO"), sortTh('by', "By"))), React.createElement("tbody", null, fl.slice(0, limit).map(j => {
     const sc = {
       'Draft': '#64748b',
       'Quotation Sent': '#3b82f6',
@@ -15080,6 +15150,79 @@ function GRNPage({
   search
 }) {
   const [sf, ssf] = useState(false);
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['qty', 'rate', 'sqft'];
+  const sortVal = (r, k) => {
+    if (k === 'date') return r.date;
+    if (k === 'supplier') return r.supplier;
+    if (k === 'material') return r.material;
+    if (k === 'code') return r.code;
+    if (k === 'size') return r.size;
+    if (k === 'qty') return r.qty;
+    if (k === 'rate') return r.rate;
+    if (k === 'sqft') return r.sqft;
+    if (k === 'inv') return r.invoice_no;
+    if (k === 'job') return r.job_id;
+    if (k === 'type') return r.inward_type;
+    if (k === 'by') return r.received_by;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
   const [selGrn, setSelGrn] = useState(null);
   const [editGrn, setEditGrn] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
@@ -15481,7 +15624,7 @@ function GRNPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Supplier"), React.createElement("th", null, "Material"), React.createElement("th", null, "Code"), React.createElement("th", null, "Size"), React.createElement("th", null, "Qty"), React.createElement("th", null, "Rate"), React.createElement("th", null, "SqFt"), React.createElement("th", null, "Inv#"), React.createElement("th", null, "Job#"), React.createElement("th", null, "Type"), React.createElement("th", null, "By"), React.createElement("th", null, "QC"))), React.createElement("tbody", null, (grn.filter(g => {if (!search || !search.trim()) return true;const q = search.trim().toLowerCase().split(/\s+/).filter(Boolean);const hay = [g.date, g.supplier, g.material, g.code, g.size, g.qty, g.rate, g.sqft, g.invoice_no, g.job_id, g.inward_type, g.received_by, g.unit].map(v => v == null ? "" : String(v)).join(" ").toLowerCase();return q.every(t => hay.includes(t));})).map(g => React.createElement("tr", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('date', "Date"), sortTh('supplier', "Supplier"), sortTh('material', "Material"), sortTh('code', "Code"), sortTh('size', "Size"), sortTh('qty', "Qty"), sortTh('rate', "Rate"), sortTh('sqft', "SqFt"), sortTh('inv', "Inv#"), sortTh('job', "Job#"), sortTh('type', "Type"), sortTh('by', "By"), React.createElement("th", null, "QC"))), React.createElement("tbody", null, applySort(grn.filter(g => {if (!search || !search.trim()) return true;const q = search.trim().toLowerCase().split(/\s+/).filter(Boolean);const hay = [g.date, g.supplier, g.material, g.code, g.size, g.qty, g.rate, g.sqft, g.invoice_no, g.job_id, g.inward_type, g.received_by, g.unit].map(v => v == null ? "" : String(v)).join(" ").toLowerCase();return q.every(t => hay.includes(t));})).map(g => React.createElement("tr", {
     key: g.id,
     style: {
       cursor: "pointer"
@@ -16711,7 +16854,73 @@ function PrintPage({
     setShowModal(true);
   };
   const openJob = j => openPrintJobView(j.id);
-  const printQueue = (jobs || []).filter(j => j.status === 'Printing' || j.status === 'Printing · In-House' || j.status === 'Printing · Outsource');
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['items'];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'client') return r.client_name;
+    if (k === 'project') return r.project;
+    if (k === 'status') return r.status;
+    if (k === 'items') return (r.batches || []).reduce((s, b) => s + ((b.items || []).length), 0);
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const printQueue = applySort((jobs || []).filter(j => j.status === 'Printing' || j.status === 'Printing · In-House' || j.status === 'Printing · Outsource'));
   const FORWARD_STATUSES = ['Fabrication', 'Fabrication · In-House', 'Fabrication · Outsource', 'Dispatch'];
   const FORWARD_USERS = ['JIGAR', 'CHANDNI', 'PRINTING', 'ANKIT', 'PRATIK', 'SONU', 'AMOL'];
   const userCanForward = (() => {
@@ -16909,7 +17118,7 @@ function PrintPage({
       overflowX: "auto",
       maxHeight: 300
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job#"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Status"), React.createElement("th", null, "Items"), React.createElement("th", null, "Coverage"), React.createElement("th", null, "Forward to \u2192"))), React.createElement("tbody", null, printQueue.length === 0 && React.createElement("tr", null, React.createElement("td", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job#"), sortTh('client', "Client"), sortTh('project', "Project"), sortTh('status', "Status"), sortTh('items', "Items"), React.createElement("th", null, "Coverage"), React.createElement("th", null, "Forward to \u2192"))), React.createElement("tbody", null, printQueue.length === 0 && React.createElement("tr", null, React.createElement("td", {
     colSpan: 7,
     style: {
       textAlign: "center",
@@ -19062,7 +19271,73 @@ function FabPage({
   };
   const [f, sF] = useState(blankForm);
   const ALL_ST = ALL_ST_NEW;
-  const queue = (jobs || []).filter(j => j.status === 'Fabrication' || j.status === 'Fabrication · In-House' || j.status === 'Fabrication · Outsource');
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['items'];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'client') return r.client_name;
+    if (k === 'project') return r.project;
+    if (k === 'items') return (r.batches || []).reduce((s, b) => s + ((b.items || []).length), 0);
+    if (k === 'contact') return r.contact_person;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const queue = applySort((jobs || []).filter(j => j.status === 'Fabrication' || j.status === 'Fabrication · In-House' || j.status === 'Fabrication · Outsource'));
   const openJob = j => {
     sF(p => ({
       ...p,
@@ -19753,7 +20028,7 @@ function FabPage({
       overflowX: "auto",
       maxHeight: 250
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Items"), React.createElement("th", null, "Coverage"), React.createElement("th", null, "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, queue.map(j => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('client', "Client"), sortTh('project', "Project"), sortTh('items', "Items"), React.createElement("th", null, "Coverage"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, queue.map(j => {
     const itemCount = (j.batches || []).reduce((s, b) => s + (b.items || []).length, 0);
     const cov = checkFabJobCoverage(j);
     const covered = cov.all.length - cov.pending.length;
@@ -20871,7 +21146,71 @@ function OsPage({
   });
   const allVendors = Array.from(new Set(allOs.map(o => o.vendor_name || '').filter(Boolean))).sort();
   const ql = q.trim().toLowerCase();
-  const fQueue = queue.filter(j => {
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = [];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'client') return r.client_name;
+    if (k === 'status') return r.status;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const fQueue = applySort(queue.filter(j => {
     const r = osByJob[j.id];
     if (filt === 'with' && !r) return false;
     if (filt === 'without' && r) return false;
@@ -20882,7 +21221,7 @@ function OsPage({
       if (!hay.includes(ql) && !vendorHit) return false;
     }
     return true;
-  });
+  }));
   const totalPages = Math.max(1, Math.ceil(fQueue.length / PAGE_SIZE));
   const curPage = Math.min(page, totalPages);
   const pageStart = (curPage - 1) * PAGE_SIZE;
@@ -21105,7 +21444,7 @@ function OsPage({
     style: {
       overflowX: "auto"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job"), React.createElement("th", null, "Client / Project"), React.createElement("th", null, "Status"), React.createElement("th", null, "Vendors"), React.createElement("th", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('client', "Client / Project"), sortTh('status', "Status"), React.createElement("th", null, "Vendors"), React.createElement("th", {
     className: "mn"
   }, "Items"), React.createElement("th", {
     className: "mn"
@@ -21846,6 +22185,64 @@ function DispPage({
   jobs,
   show
 }) {
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = [];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'client') return r.client_name;
+    if (k === 'project') return r.project;
+    if (k === 'addr') return r.delivery_address;
+    if (k === 'status') return r.status;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
   const [sf, ssf] = useState(false);
   const [view, setView] = useState('dc');
   const [dq, setDq] = useState("");
@@ -21985,7 +22382,7 @@ function DispPage({
     onClick: () => setView('pending')
   }, "\uD83D\uDCCB DC / IC Pending (" + (jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').length + ")")), view === 'pending' ? (() => {
     const q = dq.trim().toLowerCase();
-    const pendJobs = (jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').filter(j => !q || String(j.id || '').toLowerCase().includes(q) || String(j.client_name || '').toLowerCase().includes(q) || String(j.project || '').toLowerCase().includes(q) || String(j.delivery_address || '').toLowerCase().includes(q));
+    const pendJobs = applySort((jobs || []).filter(j => j.status === 'DC Pending' || j.status === 'IC Pending').filter(j => !q || String(j.id || '').toLowerCase().includes(q) || String(j.client_name || '').toLowerCase().includes(q) || String(j.project || '').toLowerCase().includes(q) || String(j.delivery_address || '').toLowerCase().includes(q)));
     const daysIn = j => {
       const sd = j.status_dates || {};
       const raw = sd[j.status === 'DC Pending' ? 'dc_pending' : 'ic_pending'];
@@ -22030,7 +22427,7 @@ function DispPage({
       style: {
         overflowX: 'auto'
       }
-    }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job#"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Site / Address"), React.createElement("th", null, "Status"), React.createElement("th", null, "Days"))), React.createElement("tbody", null, sorted.map(j => {
+    }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job#"), sortTh('client', "Client"), sortTh('project', "Project"), sortTh('addr', "Site / Address"), sortTh('status', "Status"), React.createElement("th", null, "Days"))), React.createElement("tbody", null, sorted.map(j => {
       const dys = daysIn(j);
       const col = j.status === 'DC Pending' ? '#f59e0b' : '#f47067';
       return React.createElement("tr", {
@@ -27409,10 +27806,75 @@ function RemPage({
   reqs,
   setReqs
 }) {
-  const rem = jobs.filter(j => !j.po_number).map(j => ({
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['days'];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'client') return r.client_name;
+    if (k === 'project') return r.project;
+    if (k === 'days') return r.d;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const rem = applySort(jobs.filter(j => !j.po_number).map(j => ({
     ...j,
     d: Math.max(0, Math.floor((new Date() - new Date(j.created_at)) / 864e5))
-  })).sort((a, b) => b.d - a.d);
+  })).sort((a, b) => b.d - a.d));
   const pendingOs = (osItems || []).filter(o => o.po_status === 'Pending');
   const pendingReqs = (reqs || []).filter(r => r.po_status === 'Pending');
   const updateOsPO = async (osId, poNum) => {
@@ -27616,7 +28078,7 @@ function RemPage({
     style: {
       padding: 0
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Days"), React.createElement("th", null))), React.createElement("tbody", null, rem.map(j => React.createElement("tr", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('client', "Client"), sortTh('project', "Project"), sortTh('days', "Days"), React.createElement("th", null))), React.createElement("tbody", null, rem.map(j => React.createElement("tr", {
     key: j.id
   }, React.createElement("td", {
     className: "mn",
@@ -27729,7 +28191,74 @@ function AccPage({
     jobId: j.id,
     fallback: j
   });
-  const filtered = jobs.filter(j => {
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['po'];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.id;
+    if (k === 'firm') return r.firm;
+    if (k === 'client') return r.client_name;
+    if (k === 'project') return r.project;
+    if (k === 'status') return r.status;
+    if (k === 'po') return r.po_number ? 1 : 0;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const filteredBase = jobs.filter(j => {
     if (!cur.statuses.includes(j.status)) return false;
     if (statusFilter !== 'All' && j.status !== statusFilter) return false;
     if (sq) {
@@ -27738,6 +28267,7 @@ function AccPage({
     }
     return true;
   });
+  const filtered = applySort(filteredBase);
   const sc = {
     'Billing Pending': '#f59e0b',
     'Given for Billing': '#06b6d4',
@@ -27991,7 +28521,7 @@ function AccPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-180px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job"), React.createElement("th", null, "Firm"), React.createElement("th", null, "Client"), React.createElement("th", null, "Project"), React.createElement("th", null, "Status"), React.createElement("th", null, "PO"), React.createElement("th", null, "Invoices"), tab !== 'done' && React.createElement(React.Fragment, null, React.createElement("th", null, "\uD83D\uDCCE DC"), React.createElement("th", null, "\uD83D\uDCCE IC"), React.createElement("th", null, "Action")))), React.createElement("tbody", null, filtered.map(j => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('firm', "Firm"), sortTh('client', "Client"), sortTh('project', "Project"), sortTh('status', "Status"), sortTh('po', "PO"), React.createElement("th", null, "Invoices"), tab !== 'done' && React.createElement(React.Fragment, null, React.createElement("th", null, "\uD83D\uDCCE DC"), React.createElement("th", null, "\uD83D\uDCCE IC"), React.createElement("th", null, "Action")))), React.createElement("tbody", null, filtered.map(j => {
     return React.createElement("tr", {
       key: j.id
     }, React.createElement("td", {
@@ -30800,7 +31330,77 @@ function ExpensesPage({
     setReceiptFile(null);
     setSaving(false);
   };
-  const filtered = expenses.filter(e => {
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = ['amount'];
+  const sortVal = (r, k) => {
+    if (k === 'date') return r.date;
+    if (k === 'category') return r.category;
+    if (k === 'desc') return r.description;
+    if (k === 'amount') return r.amount;
+    if (k === 'paidto') return r.paid_to;
+    if (k === 'mode') return r.payment_mode;
+    if (k === 'firm') return r.firm;
+    if (k === 'job') return r.job_id;
+    if (k === 'by') return r.created_by;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const filteredBase = expenses.filter(e => {
     if (filter !== 'all' && e.category !== filter) return false;
     if (fMonth !== 'all') {
       const d = new Date(e.date);
@@ -30809,6 +31409,7 @@ function ExpensesPage({
     }
     return true;
   }).sort((a, b) => b.date?.localeCompare(a.date));
+  const filtered = applySort(filteredBase);
   const totalFiltered = filtered.reduce((s, e) => s + (+e.amount || 0), 0);
   const monthSet = new Set();
   expenses.forEach(e => {
@@ -31136,7 +31737,7 @@ function ExpensesPage({
       overflowX: "auto",
       maxHeight: "calc(100vh - 220px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Category"), React.createElement("th", null, "Description"), React.createElement("th", null, "Amount"), React.createElement("th", null, "Paid To"), React.createElement("th", null, "Mode"), React.createElement("th", null, "Firm"), React.createElement("th", null, "Job"), React.createElement("th", null, "By"), React.createElement("th", null, "\uD83D\uDCCE"), React.createElement("th", null))), React.createElement("tbody", null, filtered.map(e => React.createElement("tr", {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('date', "Date"), sortTh('category', "Category"), sortTh('desc', "Description"), sortTh('amount', "Amount"), sortTh('paidto', "Paid To"), sortTh('mode', "Mode"), sortTh('firm', "Firm"), sortTh('job', "Job"), sortTh('by', "By"), React.createElement("th", null, "\uD83D\uDCCE"), React.createElement("th", null))), React.createElement("tbody", null, filtered.map(e => React.createElement("tr", {
     key: e.id
   }, React.createElement("td", null, e.date), React.createElement("td", null, React.createElement("span", {
     className: "bd",
@@ -32642,7 +33243,80 @@ function BankCRMPage({
     'CMS BOB GSB+BRANDING': ['CMS', 'BOB'],
     'Diebold HDFC GSB': ['Diebold', 'HDFC']
   };
-  const paged = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortNumKeys = [];
+  const sortVal = (r, k) => {
+    if (k === 'job') return r.job_no;
+    if (k === 'date') return r.created_at;
+    if (k === 'atm') return r.atm_id;
+    if (k === 'uid') return r.site_unique_id;
+    if (k === 'city') return r.city;
+    if (k === 'state') return r.state;
+    if (k === 'vendor') return r.vendor_name;
+    if (k === 'cpo') return r.po_number;
+    if (k === 'vpo') return r.vendor_po;
+    if (k === 'billing') return r.billing_status;
+    if (k === 'category') return r.billing_category;
+    if (k === 'work') return r.work_category;
+    return '';
+  };
+  const applySort = rows => {
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = sortVal(a, sortKey);
+      const vb = sortVal(b, sortKey);
+      if (sortNumKeys.indexOf(sortKey) >= 0) {
+        const na = va === '' || va === null || va === undefined ? null : +va;
+        const nb = vb === '' || vb === null || vb === undefined ? null : +vb;
+        if (na === null && nb === null) return 0;
+        if (na === null) return 1;
+        if (nb === null) return -1;
+        return (na - nb) * dir;
+      }
+      const sa = String(va === null || va === undefined ? '' : va).trim();
+      const sbb = String(vb === null || vb === undefined ? '' : vb).trim();
+      if (!sa && !sbb) return 0;
+      if (!sa) return 1;
+      if (!sbb) return -1;
+      return sa.localeCompare(sbb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  };
+  const sortTh = (k, label, thProps) => React.createElement("th", {
+    ...(thProps || {}),
+    style: {
+      ...((thProps || {}).style || {}),
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const paged = applySort(filtered).slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(filtered.length / pageSize);
   if (loading) return React.createElement("div", {
     style: {
@@ -34712,15 +35386,15 @@ function BankCRMPage({
     style: {
       width: 30
     }
-  }, "#"), React.createElement("th", null, "Job#"), React.createElement("th", {
+  }, "#"), sortTh('job', "Job#"), React.createElement("th", {
     style: {
       minWidth: 90
     }
-  }, "Stage"), React.createElement("th", null, "Date"), React.createElement("th", null, "ATM ID"), React.createElement("th", null, "Site UID"), React.createElement("th", {
+  }, "Stage"), sortTh('date', "Date"), sortTh('atm', "ATM ID"), sortTh('uid', "Site UID"), React.createElement("th", {
     style: {
       minWidth: 150
     }
-  }, "Address"), React.createElement("th", null, "City"), React.createElement("th", null, "State"), React.createElement("th", null, "Vendor"), React.createElement("th", null, "V.Contact"), React.createElement("th", null, "Client PO#"), React.createElement("th", null, "Vendor PO#"), React.createElement("th", null, "Install"), React.createElement("th", null, "Photos"), React.createElement("th", null, "DC \u2713"), React.createElement("th", null, "Billing"), React.createElement("th", null, "Category"), React.createElement("th", null, "Work"), React.createElement("th", {
+  }, "Address"), sortTh('city', "City"), sortTh('state', "State"), sortTh('vendor', "Vendor"), React.createElement("th", null, "V.Contact"), sortTh('cpo', "Client PO#"), sortTh('vpo', "Vendor PO#"), React.createElement("th", null, "Install"), React.createElement("th", null, "Photos"), React.createElement("th", null, "DC \u2713"), sortTh('billing', "Billing"), sortTh('category', "Category"), sortTh('work', "Work"), React.createElement("th", {
     style: {
       minWidth: 90,
       color: '#3b82f6',
