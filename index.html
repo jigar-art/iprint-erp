@@ -14464,11 +14464,66 @@ function DeptPage({
     } catch (e) {}
   }, []);
   const cur = tabs.find(t => t.id === ad) || tabs[0];
-  const pen = useMemo(() => jobs.filter(j => {
-    if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
-    if (ad === null) return true;
-    return cur.match(j);
-  }), [jobs, cur, s, ad, jobLeading]);
+  const [sortKey, setSortKey] = React.useState(null);
+  const [sortDir, setSortDir] = React.useState('asc');
+  const sortBy = k => {
+    if (sortKey === k) {
+      if (sortDir === 'asc') setSortDir('desc');else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(k);
+      setSortDir('asc');
+    }
+  };
+  const sortIcon = k => sortKey === k ? React.createElement("span", {
+    style: {
+      color: '#e2e8f0'
+    }
+  }, sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : React.createElement("span", {
+    style: {
+      color: '#475569'
+    }
+  }, ' \u21C5');
+  const sortVal = (j, k) => {
+    if (k === 'job') return j.id || '';
+    if (k === 'date') return j.created_at || '';
+    if (k === 'client') return j.client_name || '';
+    if (k === 'product') return (j.batches || [])[0]?.items?.[0]?.internal_name || '';
+    if (k === 'status') return j.status || '';
+    if (k === 'project') return j.project || '';
+    if (k === 'contact') return j.contact_person || '';
+    return '';
+  };
+  const sortTh = (k, label) => React.createElement("th", {
+    style: {
+      cursor: 'pointer',
+      userSelect: 'none',
+      whiteSpace: 'nowrap'
+    },
+    onClick: () => sortBy(k)
+  }, label, sortIcon(k));
+  const pen = useMemo(() => {
+    const rows = jobs.filter(j => {
+      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
+      if (ad === null) return true;
+      return cur.match(j);
+    });
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return rows.sort((a, b) => {
+      const va = String(sortVal(a, sortKey)).trim();
+      const vb = String(sortVal(b, sortKey)).trim();
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return va.localeCompare(vb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir]);
   const cardDefs = STATUS_CARDS.map(c => ({
     k: c.key,
     l: c.label,
@@ -14660,7 +14715,7 @@ function DeptPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Job"), React.createElement("th", null, "Date"), React.createElement("th", null, "Client"), React.createElement("th", null, "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), React.createElement("th", null, "Status"), React.createElement("th", null, "Project"), React.createElement("th", null, "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, pen.map((j, i) => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, pen.map((j, i) => {
     const it = (j.batches || [])[0]?.items?.[0];
     const dt = j.created_at ? new Date(j.created_at) : null;
     const ds = dt ? dt.toLocaleDateString('en-IN', {
