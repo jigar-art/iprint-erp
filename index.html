@@ -3284,7 +3284,7 @@ function MainApp({
       overflowY: "auto"
     },
     onClick: () => {
-      if (window._jfDirty && !confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.')) return;
+      if (window._jfDirty && !confirm('⚠️ You have unsaved changes in this job.\n\nTap OK to close and DISCARD your changes.\nTap Cancel to go back and press \ud83d\udcbe Save Changes.')) return;
       setModal(null);
     }
   }, React.createElement("div", {
@@ -3322,7 +3322,7 @@ function MainApp({
   }, modal.t), React.createElement("button", {
     className: "b bs",
     onClick: () => {
-      if (window._jfDirty && !confirm('⚠️ You have unsaved changes in this job.\n\nClose anyway? Your changes will be lost.')) return;
+      if (window._jfDirty && !confirm('⚠️ You have unsaved changes in this job.\n\nTap OK to close and DISCARD your changes.\nTap Cancel to go back and press \ud83d\udcbe Save Changes.')) return;
       setModal(null);
     }
   }, "\u2715")), modal.jobId ? React.createElement(JobDetail, {
@@ -5407,13 +5407,27 @@ function JobDetail({
     remark: j.remark || '',
     firm: j.firm || ''
   });
-  const [jfDirty, setJfDirty] = useState(false);
+  const [jfSaved, setJfSaved] = useState(() => ({
+    client_name: j.client_name || '',
+    contact_person: j.contact_person || '',
+    contact_no: j.contact_no || '',
+    po_number: j.po_number || '',
+    delivery_address: j.delivery_address || '',
+    billing_address: j.billing_address || '',
+    client_gst: j.client_gst || '',
+    billing_name: j.billing_name || '',
+    payment_terms: j.payment_terms || '',
+    project: j.project || '',
+    client_email: j.client_email || '',
+    remark: j.remark || '',
+    firm: j.firm || ''
+  }));
+  const jfDirty = Object.keys(jfSaved).some(k => String(jf[k] == null ? '' : jf[k]) !== String(jfSaved[k] == null ? '' : jfSaved[k]));
   const setJF = (k, v) => {
     setJf(p => ({
       ...p,
       [k]: v
     }));
-    setJfDirty(true);
   };
   React.useEffect(() => {
     window._jfDirty = jfDirty;
@@ -5468,7 +5482,7 @@ function JobDetail({
     };
     if (!cleanFields.firm) delete cleanFields.firm;
     const ok = await updateJobFields(j.id, cleanFields);
-    if (ok !== false) setJfDirty(false);
+    if (ok !== false) setJfSaved({ ...jf });
   };
   const fm = firms.find(f => f.code === (jf.firm || j.firm)) || {};
   const ab = async () => {
