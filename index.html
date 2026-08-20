@@ -2130,11 +2130,11 @@ function MainApp({
       show('⚠️ Could not read current status from DB — try again. (' + (readErr?.message || 'no row') + ')', false);
       return;
     }
-    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANIKET', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'HARISH', 'ABHIJIT'];
+    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANIKET', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'ABHIJIT'];
     const fromPrinting = (dbRow.status || '').startsWith('Printing');
     const _uname = String(userName || '').toUpperCase().trim();
     if (fromPrinting && !PRINT_FORWARD_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
-      show('🔒 Only authorized users (JIGAR/CHANDNI/ANIKET/ANKIT/PRATIK/SONU/AMOL/HARISH/ABHIJIT) can forward jobs from Printing.', false);
+      show('🔒 Only authorized users (JIGAR/CHANDNI/ANIKET/ANKIT/PRATIK/SONU/AMOL/ABHIJIT) can forward jobs from Printing.', false);
       console.warn('updateJobStatus blocked (Patch I): user', userName, 'tried to move job', jobId, 'from', dbRow.status, 'to', newStatus);
       return;
     }
@@ -2269,6 +2269,7 @@ function MainApp({
       console.warn('audit log threw:', e?.message);
     }
     show("✅ Status → " + newStatus);
+    return true;
   }, [show, user, jobs]);
   const updateJobFields = useCallback(async (jobId, fields) => {
     const {
@@ -14932,20 +14933,13 @@ function DeptPage({
     }));
     const doBulkMove = async () => {
       if (selectedIds.length === 0) return;
-      if (!confirm(`Move ${selectedIds.length} job(s) from "${srcStatus}" to "${tgtStatus}"?\n\nThis updates the jobs directly in the database.`)) return;
+      if (!confirm(`Move ${selectedIds.length} job(s) from "${srcStatus}" to "${tgtStatus}"?\n\nPermission and workflow checks still apply to each job.`)) return;
       setReassignSaving(true);
       let ok = 0,
         fail = 0;
       for (const id of selectedIds) {
-        const {
-          error
-        } = await sb.from('jobs').update({
-          status: tgtStatus
-        }).eq('id', id);
-        if (error) fail++;else {
-          ok++;
-          updateJobStatus(id, tgtStatus);
-        }
+        const moved = await updateJobStatus(id, tgtStatus);
+        if (moved) ok++;else fail++;
       }
       setReassignSaving(false);
       alert(`Done: ${ok} moved, ${fail} failed.`);
