@@ -2130,11 +2130,11 @@ function MainApp({
       show('⚠️ Could not read current status from DB — try again. (' + (readErr?.message || 'no row') + ')', false);
       return;
     }
-    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'PRINTING', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'HARISH', 'ABHIJIT'];
+    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANIKET', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'HARISH', 'ABHIJIT'];
     const fromPrinting = (dbRow.status || '').startsWith('Printing');
     const _uname = String(userName || '').toUpperCase().trim();
     if (fromPrinting && !PRINT_FORWARD_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
-      show('🔒 Only authorized users (JIGAR/CHANDNI/PRINTING/ANKIT/PRATIK/SONU/AMOL/HARISH/ABHIJIT) can forward jobs from Printing.', false);
+      show('🔒 Only authorized users (JIGAR/CHANDNI/ANIKET/ANKIT/PRATIK/SONU/AMOL/HARISH/ABHIJIT) can forward jobs from Printing.', false);
       console.warn('updateJobStatus blocked (Patch I): user', userName, 'tried to move job', jobId, 'from', dbRow.status, 'to', newStatus);
       return;
     }
@@ -2652,43 +2652,43 @@ function MainApp({
     l: "Dept Tracker",
     e: "🏭",
     roles: ["admin", "production", "sales", "designer", "printing", "fabrication", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "ANIKET", "ABHIJIT"]
   }, {
     id: "grn",
     l: "Material In",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "VIDYA", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "VIDYA", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "print",
     l: "Printing",
     e: "🖨️",
     roles: ["admin", "production", "printing", "designer", "sales"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "fab",
     l: "Fabrication",
     e: "🔧",
     roles: ["admin", "production", "fabrication", "designer", "printing", "sales", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "os",
     l: "Outsource",
     e: "📤",
     roles: ["admin", "production", "printing", "fabrication", "designer", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "SHREYA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "SHREYA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "POONAM"]
   }, {
     id: "disp",
     l: "Dispatch",
     e: "🚚",
     roles: ["admin", "production", "sales", "dispatch", "designer", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "stock",
     l: "Stock",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "rem",
     l: "PO Reminders",
@@ -2759,7 +2759,7 @@ function MainApp({
     l: "Receive Material",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "MANOJ", "HARISH", "PRINTING", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "MANOJ", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
   }, {
     id: "reports",
     l: "Reports",
@@ -3807,7 +3807,7 @@ function DashPage({
   user
 }) {
   const [dq, setDq] = useState("");
-  const DASH_VIEW_ONLY_USERS = ['ANKIT', 'SONU', 'PRATIK', 'ANIKET'];
+  const DASH_VIEW_ONLY_USERS = ['ANKIT', 'SONU', 'PRATIK'];
   const isDashViewOnly = DASH_VIEW_ONLY_USERS.includes((user?.name || '').toUpperCase());
   const low = Object.entries(stock).filter(([, v]) => v <= 2 && v >= 0).slice(0, 5);
   const BANKING_CLIENTS = ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'NUVAMA WEALTH', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'];
@@ -16922,7 +16922,7 @@ function PrintPage({
   }, label, sortIcon(k));
   const printQueue = applySort((jobs || []).filter(j => j.status === 'Printing' || j.status === 'Printing · In-House' || j.status === 'Printing · Outsource'));
   const FORWARD_STATUSES = ['Fabrication', 'Fabrication · In-House', 'Fabrication · Outsource', 'Dispatch'];
-  const FORWARD_USERS = ['JIGAR', 'CHANDNI', 'PRINTING', 'ANKIT', 'PRATIK', 'SONU', 'AMOL'];
+  const FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANIKET', 'ABHIJIT', 'ANKIT', 'PRATIK', 'SONU', 'AMOL'];
   const userCanForward = (() => {
     const u = (user?.name || '').toUpperCase().trim();
     return FORWARD_USERS.some(t => u === t || u.startsWith(t + ' '));
