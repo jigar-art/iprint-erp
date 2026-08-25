@@ -15289,7 +15289,7 @@ function GRNPage({
       unit: mu,
       qty: +f.qty,
       rate: +f.rate,
-      sqft: +f.sqft,
+      sqft: mu === 'roll' ? +f.sqft : 0,
       photo_url: photoUrl,
       po_file_url: poUrl
     });
@@ -15482,8 +15482,8 @@ function GRNPage({
       cursor: "not-allowed",
       color: masterUnitOf(f.material) ? "#94a3b8" : "#f47067"
     }
-  }, masterUnitOf(f.material) || "\u2014 not in master \u2014")), React.createElement(F, {
-    l: masterUnitOf(f.material) === 'roll' ? "SqFt *" : "SqFt"
+  }, masterUnitOf(f.material) || "\u2014 not in master \u2014")), masterUnitOf(f.material) === 'roll' ? React.createElement(F, {
+    l: "SqFt *"
   }, React.createElement("input", {
     className: "in mn",
     value: f.sqft,
@@ -15491,7 +15491,7 @@ function GRNPage({
       ...p,
       sqft: e.target.value
     }))
-  })), React.createElement(F, {
+  })) : null, React.createElement(F, {
     l: "Rate"
   }, React.createElement("input", {
     className: "in mn",
@@ -24395,13 +24395,14 @@ function GRNReceivePage({
         const hasDims = (+x.width || 0) > 0 && (+x.height || 0) > 0;
         const per = String(x.per || '');
         const recv = +x.received_now || 0;
+        const isArea = !!(um && um.needsWH && hasDims && (per === 'ft\u00b2' || per === 'm\u00b2'));
         let sqft = 0;
-        if (mu === 'roll' && um && um.needsWH && hasDims) {
+        if (mu === 'roll' && isArea) {
           if (per === 'ft\u00b2') sqft = Math.round(recv * 100) / 100;
-          else if (per === 'm\u00b2') sqft = Math.round(recv * 10.7639 * 100) / 100;
+          else sqft = Math.round(recv * 10.7639 * 100) / 100;
         }
         const ordDisp = +x.ordered_display || 0;
-        const qty = sqft > 0 ? ordDisp > 0 ? Math.round((+x.ordered_qty || 0) * recv / ordDisp * 100) / 100 : 0 : recv;
+        const qty = isArea ? ordDisp > 0 ? Math.round((+x.ordered_qty || 0) * recv / ordDisp * 100) / 100 : 0 : recv;
         return {
           id: grn_id + '-' + x.index,
           date: gf.received_at,
@@ -24701,6 +24702,9 @@ function GRNReceivePage({
     }
   }, gf.items_received.map((x, i) => {
     const ordered = x.ordered_display != null ? +x.ordered_display : +x.ordered_qty;
+    const _mu = ((mats || []).find(m => m.name === x.stock_material) || {}).unit || '';
+    const _isAreaLine = x.per === 'ft\u00b2' || x.per === 'm\u00b2';
+    const _unitMismatch = !!(_mu && _mu !== 'roll' && _isAreaLine);
     const recvNow = +x.received_now || 0;
     const remaining = Math.max(0, ordered - (+x.received_so_far || 0) - recvNow);
     const setIt = patch => setGf(p => ({
@@ -24813,7 +24817,12 @@ function GRNReceivePage({
         fontSize: 10,
         color: '#8b949e'
       }
-    }, ordered, " ", x.per)), React.createElement("div", null, React.createElement("span", {
+    }, ordered, " ", x.per, _unitMismatch ? React.createElement("span", {
+      style: {
+        color: '#f59e0b',
+        fontWeight: 700
+      }
+    }, " = " + (+x.ordered_qty || 0) + " " + _mu) : null)), React.createElement("div", null, React.createElement("span", {
       style: {
         fontSize: 7,
         color: '#64748b',
@@ -24830,7 +24839,7 @@ function GRNReceivePage({
         color: '#64748b',
         display: 'block'
       }
-    }, "Received now"), React.createElement("input", {
+    }, _unitMismatch ? "Received now (" + x.per + ")" : "Received now"), React.createElement("input", {
       className: "in mn",
       type: "number",
       min: "0",
