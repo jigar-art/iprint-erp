@@ -726,6 +726,7 @@ function MaterialPicker({
     top: 0,
     left: 0,
     width: 220,
+    maxH: 240,
     placeAbove: false
   });
   const wrapRef = useRef(null);
@@ -740,15 +741,18 @@ function MaterialPicker({
     const panelW = Math.max(r.width || 0, 220);
     const panelMaxH = 240;
     const margin = 8;
-    const spaceBelow = window.innerHeight - r.bottom;
-    const spaceAbove = r.top;
-    const placeAbove = spaceBelow < panelMaxH + margin && spaceAbove > spaceBelow;
-    const top = placeAbove ? Math.max(margin, r.top - panelMaxH - 4) : r.bottom + 4;
+    const spaceBelow = window.innerHeight - r.bottom - margin - 4;
+    const spaceAbove = r.top - margin - 4;
+    const placeAbove = spaceBelow < panelMaxH && spaceAbove > spaceBelow;
+    const availH = Math.max(120, Math.min(panelMaxH, placeAbove ? spaceAbove : spaceBelow));
+    const rawTop = placeAbove ? r.top - availH - 4 : r.bottom + 4;
+    const top = Math.min(Math.max(margin, rawTop), Math.max(margin, window.innerHeight - availH - margin));
     const left = Math.min(Math.max(margin, r.left), Math.max(margin, window.innerWidth - panelW - margin));
     return {
       top,
       left,
       width: panelW,
+      maxH: availH,
       placeAbove
     };
   }, []);
@@ -764,14 +768,16 @@ function MaterialPicker({
     let rafId = null;
     const tick = () => {
       const p = computePos();
-      if (p) setPanelPos(prev => prev.top === p.top && prev.left === p.left && prev.width === p.width ? prev : p);
+      if (p) setPanelPos(prev => prev.top === p.top && prev.left === p.left && prev.width === p.width && prev.maxH === p.maxH ? prev : p);
       frame++;
       if (frame < 30) rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
-    const onScroll = () => {
+    const onScroll = e => {
+      const t = e && e.target;
+      if (t && t.nodeType === 1 && t.closest && t.closest('[data-mp-panel="1"]')) return;
       const p = computePos();
-      if (p) setPanelPos(p);
+      if (p) setPanelPos(prev => prev.top === p.top && prev.left === p.left && prev.width === p.width && prev.maxH === p.maxH ? prev : p);
     };
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
@@ -791,6 +797,18 @@ function MaterialPicker({
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
+  const panelRef = useRef(null);
+  const kbNavRef = useRef(false);
+  useEffect(() => {
+    if (!open || !kbNavRef.current) return;
+    kbNavRef.current = false;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const row = panel.querySelector('[data-mp-row="' + hi + '"]');
+    if (row && row.scrollIntoView) row.scrollIntoView({
+      block: 'nearest'
+    });
+  }, [hi, open]);
   const ql = String(q || '').trim().toLowerCase();
   const matches = useMemo(() => {
     if (!ql) return (products || []).slice(0, 200);
@@ -805,9 +823,11 @@ function MaterialPicker({
   const onKey = e => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      kbNavRef.current = true;
       setHi(h => Math.min(totalRows - 1, h + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      kbNavRef.current = true;
       setHi(h => Math.max(0, h - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -870,6 +890,7 @@ function MaterialPicker({
     }
   }), open && ReactDOM.createPortal(React.createElement("div", {
     "data-mp-panel": "1",
+    ref: panelRef,
     style: {
       position: 'fixed',
       top: panelPos.top,
@@ -879,8 +900,11 @@ function MaterialPicker({
       border: '1px solid #e3a008',
       borderRadius: 6,
       width: panelPos.width,
-      maxHeight: 240,
+      maxHeight: panelPos.maxH || 240,
       overflowY: 'auto',
+      overflowX: 'hidden',
+      overscrollBehavior: 'contain',
+      WebkitOverflowScrolling: 'touch',
       boxShadow: '0 4px 12px rgba(0,0,0,.5)'
     }
   }, React.createElement("div", {
@@ -900,6 +924,7 @@ function MaterialPicker({
     }
   }, "No matches"), matches.map((p, i) => React.createElement("div", {
     key: p.id || i,
+    "data-mp-row": i,
     onMouseDown: e => {
       e.preventDefault();
       onPick({
@@ -921,6 +946,7 @@ function MaterialPicker({
       textOverflow: 'ellipsis'
     }
   }, p.internal_name)), showAddNew && React.createElement("div", {
+    "data-mp-row": matches.length,
     onMouseDown: e => {
       e.preventDefault();
       onAddNew(q.trim());
