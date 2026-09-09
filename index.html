@@ -99,7 +99,28 @@ const {
 } = React;
 const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// ERP lockdown 2026-09-09: every request carries the session token (erp_jwt).
+// If none is present supabase-js falls back to the anon key, which after the grant revoke can read nothing but team_members_public.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  accessToken: async () => {
+    try {
+      return localStorage.getItem('erp_jwt') || null;
+    } catch (e) { return null; }
+  }
+});
+async function erpLoginRequest(body) {
+  const r = await fetch(SUPABASE_URL + '/functions/v1/erp-login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY },
+    body: JSON.stringify(body)
+  });
+  let j = {};
+  try { j = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, ...j };
+}
+function jwtExpMs(t) {
+  try { const p = t.split('.')[1]; return JSON.parse(atob(p.replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000; } catch (e) { return 0; }
+}
 window._sbRef = sb;
 const UPLOAD_MAX_BYTES = 40 * 1024 * 1024;
 const UPLOAD_COMPRESS_ABOVE = 1.5 * 1024 * 1024;
@@ -1099,16 +1120,14 @@ function Login({
       return;
     }
     try {
-      const data = new TextEncoder().encode(pin + ':' + member.id);
-      const buf = await crypto.subtle.digest('SHA-256', data);
-      const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-      const ok = member.pin_hash && member.pin_hash === hex;
-      if (!ok) {
-        setErr('Wrong PIN');
+      const res = await erpLoginRequest({ user_id: member.id, pin });
+      if (!res.ok || !res.token) {
+        setErr(res.error || 'Login failed — try again');
         return;
       }
-      onLogin(member);
-      window.__currentUser = member;
+      try { localStorage.setItem('erp_jwt', res.token); } catch (e) {}
+      onLogin(res.user);
+      window.__currentUser = res.user;
     } catch (e) {
       setErr('Login error — try again');
     }
@@ -31992,6 +32011,7 @@ function RootApp() {
       localStorage.removeItem('erp_user');
       localStorage.removeItem('erp_pg');
       localStorage.removeItem('erp_login_time');
+      localStorage.removeItem('erp_jwt');
     } catch (e) {}
   };
   useEffect(() => {
@@ -31999,6 +32019,31 @@ function RootApp() {
       return Promise.all([sb.from('firms').select('*'), sb.from('clients').select('*').order('name'), sb.from('suppliers').select('*').order('name'), sb.from('products').select('*').order('internal_name'), sb.from('materials').select('*').order('name'), sb.from('machines').select('*'), sb.from('outsource_agencies').select('*'), sb.from('delivery_boys').select('*'), sb.from('team_members').select('*').eq('active', true), sb.from('materials_master_v2').select('*').eq('active', true).order('name'), sb.from('lead_sources').select('*').eq('active', true).order('name')]);
     }
     async function loadMaster() {
+      // ERP lockdown: no session token -> only the safe names view is readable; masters load after login.
+      let tokenOk = false;
+      try {
+        const t = localStorage.getItem('erp_jwt');
+        const expMs = t ? jwtExpMs(t) : 0;
+        tokenOk = expMs > Date.now();
+        if (tokenOk && expMs - Date.now() < 3 * 60 * 60 * 1000) {
+          const r = await erpLoginRequest({ refresh: t });
+          if (r.ok && r.token) localStorage.setItem('erp_jwt', r.token);
+        }
+      } catch (e) {}
+      if (!user || !tokenOk) {
+        try {
+          localStorage.removeItem('erp_user');
+          localStorage.removeItem('erp_pg');
+          localStorage.removeItem('erp_login_time');
+          localStorage.removeItem('erp_jwt');
+        } catch (e) {}
+        if (user) setUser(null);
+        const { data: names } = await sb.from('team_members_public').select('*').order('name');
+        setMasterData({ firms: [], clients: [], suppliers: [], products: [], materials: [], machines: [], agencies: [], delBoys: [], team: names || [], materialsV2: [], leadSources: [] });
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       const mastersBad = r => {
         const mv2 = r && r[9];
         return !mv2 || mv2.error || !(mv2.data && mv2.data.length);
@@ -32029,12 +32074,12 @@ function RootApp() {
           const u = JSON.parse(stored);
           const teamList = tm.data || [];
           const valid = teamList.find(t => t.name === u.name);
-          const loginTime = parseInt(localStorage.getItem('erp_login_time') || '0', 10);
-          const expired = Date.now() - loginTime > 24 * 60 * 60 * 1000;
+          const expired = jwtExpMs(localStorage.getItem('erp_jwt') || '') <= Date.now();
           if (!valid || expired) {
             localStorage.removeItem('erp_user');
             localStorage.removeItem('erp_pg');
             localStorage.removeItem('erp_login_time');
+            localStorage.removeItem('erp_jwt');
             setUser(null);
           }
         }
@@ -32042,7 +32087,7 @@ function RootApp() {
       setLoading(false);
     }
     loadMaster();
-  }, []);
+  }, [user]);
   useEffect(() => {
     try {
       fetch('https://api.ipify.org?format=json', {
@@ -32072,7 +32117,8 @@ function RootApp() {
   }, "Loading iPrint ERP..."));
   const urlP = new URLSearchParams(window.location.search);
   const cCode = urlP.get('client');
-  if (cCode) return React.createElement(ClientPortal, {
+  // Client portal disabled 2026-09-09 (ERP lockdown). ClientPortal component retained but unreachable.
+  if (cCode && false) return React.createElement(ClientPortal, {
     code: cCode
   });
   if (!user) return React.createElement(Login, {
@@ -48149,7 +48195,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.c
       try {
         if (!window.supabase || typeof window.supabase.createClient !== 'function') throw new Error('supabase-js global missing/broken');
         var c = window.supabase.createClient('https://idjeniwznjiaanaxcjvg.supabase.co', IPRINT_ANON_KEY);
-        c.from('team_members').select('id', { head: true, count: 'exact' }).limit(1).then(function (r) {
+        c.from('team_members_public').select('id', { head: true, count: 'exact' }).limit(1).then(function (r) {
           if (done) return; done = true; clearTimeout(t);
           if (r && r.error) { reject(new Error('data probe error: ' + (r.error.message || 'unknown'))); } else { resolve(); }
         }, function (e) { if (done) return; done = true; clearTimeout(t); reject(e); });
