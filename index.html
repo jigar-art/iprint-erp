@@ -1825,12 +1825,26 @@ function MainApp({
     const {
       error: be
     } = await sb.from('batches').insert(batchData);
-    if (lineItemsData.length > 0) await sb.from('line_items').insert(lineItemsData);
+    if (be) {
+      show("\u26A0\uFE0F Job " + finalJobData.id + " saved but batch failed: " + be.message, false);
+      setJobs(p => [finalJobData, ...p]);
+      return finalJobData.id;
+    }
+    let savedItems = lineItemsData;
+    if (lineItemsData.length > 0) {
+      const {
+        error: lie
+      } = await sb.from('line_items').insert(lineItemsData);
+      if (lie) {
+        savedItems = [];
+        show("\u26A0\uFE0F Job " + finalJobData.id + " saved but ITEMS FAILED (not saved): " + lie.message + " \u2014 please re-add items in the job card.", false);
+      }
+    }
     setJobs(p => [finalJobData, ...p]);
     setBatches(p => [batchData, ...p]);
-    setItems(p => [...lineItemsData, ...p]);
+    setItems(p => [...savedItems, ...p]);
     if (!silent) {
-      show("Job " + finalJobData.id + " created successfully!");
+      if (savedItems.length === lineItemsData.length) show("Job " + finalJobData.id + " created successfully!");
       setPg("jobs");
     }
     return finalJobData.id;
@@ -13425,7 +13439,7 @@ function NewJobPage({
       width: it.w,
       height: it.h,
       size_unit: getUnitMode(it.rm).dimUnit || 'INCH',
-      qty: +it.qty || 1,
+      qty: Math.round(+it.qty) || 1,
       rate_mode: it.rm,
       rate: +it.rate || 0,
       sqft: it.sqft,
@@ -29800,7 +29814,7 @@ function BOQImportPage({
           width: it.w,
           height: it.h,
           size_unit: getUnitMode(it.rm).dimUnit || 'INCH',
-          qty: +it.qty || 1,
+          qty: Math.round(+it.qty) || 1,
           rate_mode: it.rm,
           rate: +it.rate || 0,
           sqft: it.sqft,
@@ -29922,7 +29936,7 @@ function BOQImportPage({
         width: it.w,
         height: it.h,
         size_unit: getUnitMode(it.rm).dimUnit || 'INCH',
-        qty: +it.qty || 1,
+        qty: Math.round(+it.qty) || 1,
         rate_mode: it.rm,
         rate: +it.rate || 0,
         sqft: it.sqft,
@@ -44372,7 +44386,7 @@ function ClientPortal({
           width: it.width,
           height: it.height,
           size_unit: it.size_unit,
-          qty: +it.qty || 1,
+          qty: Math.round(+it.qty) || 1,
           rate_mode: 'UNIT',
           rate: 0,
           sqft: 0,
@@ -45370,7 +45384,7 @@ function ClientPortal({
         width: it.w,
         height: it.h,
         size_unit: 'MM',
-        qty: +it.qty || 1,
+        qty: Math.round(+it.qty) || 1,
         rate_mode: 'UNIT',
         rate: 0,
         sqft: 0,
