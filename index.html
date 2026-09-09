@@ -675,6 +675,25 @@ const UNIT_MODES = [{
   displayFn: a => a > 0 ? 'rolls (' + a + ' ft² ref.)' : '—'
 }];
 const getUnitMode = rm => UNIT_MODES.find(u => u.value === rm) || UNIT_MODES[0];
+const prLineAmount = x => {
+  if (x && x.unit_mode) {
+    const um = getUnitMode(x.unit_mode);
+    const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
+    return um.totalFn(a, +x.qty || 1, +x.rate || 0);
+  }
+  return (+x.qty || 0) * (+x.rate || 0);
+};
+const prLineQtyLabel = x => {
+  const q = +x.qty || 0;
+  if (x && x.unit_mode) {
+    const um = getUnitMode(x.unit_mode);
+    if (um.needsWH) {
+      const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
+      if (a > 0 && a !== q) return a + ' ' + x.unit_mode + (q > 1 ? ' \u00b7 ' + q + ' pcs' : '');
+    }
+  }
+  return q + ' ' + (x.unit_mode || x.per || 'Unit');
+};
 const getUomLabel = rm => {
   const v = String(rm || '');
   if (v.startsWith('SqFt') || v.startsWith('Roll')) return {
@@ -26048,11 +26067,11 @@ function MyPRsPage({
       return;
     }
     const newSubtotal = items.reduce((s, it) => {
-      const amt = (+it.qty || 0) * (+it.rate || 0);
+      const amt = prLineAmount(it);
       return s + amt;
     }, 0);
     const newGstTotal = items.reduce((s, it) => {
-      const amt = (+it.qty || 0) * (+it.rate || 0);
+      const amt = prLineAmount(it);
       return s + amt * (+it.gst_pct || 0) / 100;
     }, 0);
     const transportAmt = +transport || 0;
@@ -26632,7 +26651,7 @@ function MyPRsPage({
       width: 18
     }
   }))), React.createElement("tbody", null, editPr.items.map((it, i) => {
-    const amt = (+it.qty || 0) * (+it.rate || 0);
+    const amt = prLineAmount(it);
     const gst = amt * (+it.gst_pct || 0) / 100;
     const updIt = (k, v) => setEditPr(p => ({
       ...p,
@@ -27046,8 +27065,8 @@ function ApprovalsPage({
     const jb = job(pr.job_id);
     const rItems = Array.isArray(pr.items) ? pr.items : [];
     const rows = rItems.map((x, i) => {
-      const amt = (+x.qty || 0) * (+x.rate || 0);
-      return '<tr><td style="text-align:center">' + (i + 1) + '</td>' + '<td>' + esc(x.product) + (x.size ? ' <span style="color:#666;font-size:11px">(' + esc(x.size) + ')</span>' : '') + '</td>' + '<td style="text-align:right">' + esc(x.qty) + ' ' + esc(x.unit_mode || x.per || 'Unit') + '</td>' + '<td style="text-align:right">' + inr(x.rate) + '</td>' + '<td style="text-align:center">' + esc(x.gst_pct) + '%</td>' + '<td style="text-align:right">' + inr(amt) + '</td></tr>';
+      const amt = prLineAmount(x);
+      return '<tr><td style="text-align:center">' + (i + 1) + '</td>' + '<td>' + esc(x.product) + (x.size ? ' <span style="color:#666;font-size:11px">(' + esc(x.size) + ')</span>' : '') + '</td>' + '<td style="text-align:right">' + esc(prLineQtyLabel(x)) + '</td>' + '<td style="text-align:right">' + inr(x.rate) + '</td>' + '<td style="text-align:center">' + esc(x.gst_pct) + '%</td>' + '<td style="text-align:right">' + inr(amt) + '</td></tr>';
     }).join('');
     const html = '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(pr.pr_no) + '</title>' + '<style>' + '*{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}' + 'body{margin:0;padding:24px;color:#111;font-size:13px}' + '.wrap{max-width:760px;margin:0 auto}' + '.hd{border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:14px}' + '.hd h1{margin:0;font-size:20px}' + '.hd .sub{color:#555;font-size:12px;margin-top:2px}' + '.tag{display:inline-block;padding:2px 8px;border:1px solid #999;border-radius:4px;font-size:11px;margin-left:6px}' + '.meta{display:flex;flex-wrap:wrap;gap:6px 28px;margin-bottom:14px;font-size:12px}' + '.meta div span{color:#666}' + 'table{width:100%;border-collapse:collapse;margin-bottom:12px}' + 'th,td{border:1px solid #ccc;padding:6px 8px;font-size:12px}' + 'th{background:#f3f3f3;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.3px}' + '.tot{width:280px;margin-left:auto}' + '.tot td{border:none;padding:3px 8px}' + '.tot .g{border-top:2px solid #111;font-weight:700;font-size:15px}' + '.notes{background:#fafafa;border:1px solid #eee;border-radius:4px;padding:8px 10px;font-size:12px;color:#444;margin-bottom:12px}' + '.ft{margin-top:24px;color:#888;font-size:11px;border-top:1px solid #eee;padding-top:8px}' + '@media print{body{padding:0}.noprint{display:none}}' + '</style></head><body><div class="wrap">' + '<div class="hd"><h1>' + esc(firm.short) + '<span class="tag">' + esc(pr.firm_code) + '</span></h1>' + '<div class="sub">' + esc(firm.name) + (firm.gstin ? ' &middot; GSTIN: ' + esc(firm.gstin) : '') + '</div></div>' + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">' + '<div><div style="font-size:16px;font-weight:700">Purchase Request</div>' + '<div style="color:#555;font-size:12px">' + esc(pr.pr_no) + ' &middot; ' + esc(pr.status) + (pr.urgency === 'Urgent' ? ' &middot; <b style="color:#c00">URGENT</b>' : '') + '</div></div>' + '<div style="text-align:right;color:#555;font-size:11px">' + esc(new Date(pr.created_at).toLocaleString('en-IN', {
       day: '2-digit',
@@ -27691,7 +27710,7 @@ function ApprovalsPage({
         fontWeight: 700,
         textAlign: 'right'
       }
-    }, "\u20B9", ((+x.qty || 0) * (+x.rate || 0)).toFixed(0)))))), +pr.transport > 0 && React.createElement("div", {
+    }, "\u20B9", prLineAmount(x).toFixed(0)))))), +pr.transport > 0 && React.createElement("div", {
       style: {
         textAlign: 'right',
         fontSize: 8,
