@@ -7310,7 +7310,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           style: {
             color: "#8b949e"
           }
-        }, x.product, dimStr, modeStr, " \xD7 ", x.qty, " @ \u20B9", x.rate, " ", React.createElement("span", {
+        }, x.product, dimStr, modeStr, " \xD7 ", prLineQtyLabel(x), " @ \u20B9", x.rate, " = \u20B9", prLineAmount(x).toFixed(0), " ", React.createElement("span", {
           style: {
             color: "#64748b"
           }
@@ -8498,7 +8498,15 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           padding: "2px 4px",
           width: "100%"
         }
-      })), React.createElement("td", null, React.createElement("input", {
+      }), um.needsWH && area > 0 && React.createElement("span", {
+        style: {
+          fontSize: 7,
+          color: "#e3a008",
+          display: "block",
+          textAlign: "right",
+          paddingRight: 4
+        }
+      }, "= " + um.displayFn(area))), React.createElement("td", null, React.createElement("input", {
         className: "in mn",
         type: "number",
         min: "0",
