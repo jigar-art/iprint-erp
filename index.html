@@ -5351,7 +5351,9 @@ function JobDetail({
     const fy = String(fyStart).slice(2) + '-' + String(fyStart + 1).slice(2);
     const {
       data
-    } = await sb.from('delivery_challans').select('dc_no').eq('firm_code', firmCode).eq('fy', fy);
+    } = await sb.from('delivery_challans').select('dc_no').eq('firm_code', firmCode).eq('fy', fy).order('created_at', {
+      ascending: false
+    }).limit(500);
     const nums = (data || []).map(x => {
       const m = x.dc_no?.match(/DC(\d+)$/);
       return m ? +m[1] : 0;
