@@ -4917,6 +4917,96 @@ function JobsPage({
     }
   }, "Both filter sets apply together \u2014 you need to match on both.")))));
 }
+/*DC_HELPERS_START*/
+const DC_TEMPLATES = {
+  standard: { label: 'Standard (iPrint)', counter: false, sizeUnit: 'native', extraFields: [] },
+  rivet: {
+    label: 'Rivet Design', counter: true, counterLabel: 'CHALLAN NUMBER',
+    head: { site: 'www.rivetdesign.in', name: 'Rivet Design Studio',
+            addr: '# 1197 / 1, 3rd Cross, HAL III Stage, New Thippasandra (Post), Bangalore - 560 075' },
+    extraFields: ['client_name', 'project_name', 'vehicle_no'], sizeUnit: 'inch'
+  },
+  westudio: {
+    label: 'WeStudio', counter: true, counterLabel: 'Delivery Note',
+    head: { logo_url: 'https://idjeniwznjiaanaxcjvg.supabase.co/storage/v1/object/public/Uploads/dc-assets/westudio-logo.png', name: 'WeStudio', tagline: 'BRANDING | DESIGN',
+            addr: 'Registered Office: 001, Akruti Abich, S.N. Road, Tambe Nagar, Mulund (W), Mumbai 400080' },
+    extraFields: ['client_name', 'billing_name', 'billing_address', 'client_job_no'], sizeUnit: 'native'
+  },
+  njl: { label: 'NJL (Ana Designs)', counter: false, extraFields: ['location'], sizeUnit: 'inch' }
+};
+const DC_FIELD_LABELS = {
+  client_name: 'Client Name', project_name: 'Project Name', vehicle_no: 'Vehicle Number',
+  billing_name: 'Billing Name', billing_address: 'Billing Address', client_job_no: 'Client Job No',
+  location: 'Site / Location line'
+};
+const toInch = (v, unit) => {
+  if (v === '' || v === null || v === undefined) return '';
+  const n = parseFloat(v);
+  if (isNaN(n)) return v;
+  const u = String(unit || '').toLowerCase();
+  const r = u === 'mm' ? n / 25.4 : u === 'ft' || u === 'foot' || u === 'feet' ? n * 12 : n;
+  return Math.round(r * 10) / 10;
+};
+const njlJobNo = id => {
+  const s = String(id || '');
+  const i = s.indexOf('-');
+  return i < 0 ? s : s.slice(i + 1) + '-' + s.slice(0, i);
+};
+const dcDescWestudio = x => {
+  const size = x.width && x.height ? x.width + '\u00D7' + x.height + (x.size_unit ? ' ' + x.size_unit : '') : '';
+  return [x.media, x.description, size].map(s => String(s || '').split('\n')[0].trim()).filter(Boolean).join(' \u00B7 ');
+};
+const dcEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const dcThumbHTML = url => url ? '<img class="dc-thumb" src="' + dcEsc(url) + '"/>' : '';
+const dcCompress = file => new Promise((res, rej) => {
+  const img = new Image();
+  img.onload = () => {
+    const MAX = 1200;
+    let w = img.width, h = img.height;
+    if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    c.toBlob(b => b ? res(new File([b], (file.name || 'img').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })) : rej('compress failed'), 'image/jpeg', 0.85);
+  };
+  img.onerror = () => rej('image load failed');
+  img.src = URL.createObjectURL(file);
+});
+function DcItemThumb({ it, updateLineItem, show }) {
+  const [busy, setBusy] = React.useState(false);
+  const stop = e => e.stopPropagation();
+  const pick = async e => {
+    stop(e);
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    try {
+      const c = await dcCompress(file);
+      const url = await uploadFile(c, 'item-images');
+      if (!url) { show('Image upload failed \u2014 retry', false); setBusy(false); return; }
+      await updateLineItem(it.id, { img_url: url });
+    } catch (err) { show('Image error: ' + (err && err.message || err), false); }
+    setBusy(false);
+  };
+  if (it.img_url) return React.createElement('a', { href: it.img_url, target: '_blank', rel: 'noopener noreferrer', onClick: stop },
+    React.createElement('img', { src: it.img_url, style: { width: 36, height: 36, objectFit: 'cover', borderRadius: 3, border: '1px solid #1a2030', flexShrink: 0 } }));
+  const lbl = (txt, cap) => React.createElement('label', { onClick: stop, style: { cursor: busy ? 'wait' : 'pointer', padding: '2px 5px', border: '1px dashed #e3a00860', borderRadius: 3, color: '#e3a008', fontSize: 8, fontWeight: 700, opacity: busy ? 0.5 : 1 } },
+    busy ? '\u23F3' : txt, React.createElement('input', { type: 'file', accept: 'image/*', capture: cap, disabled: busy, style: { display: 'none' }, onChange: pick }));
+  return React.createElement('span', { onClick: stop, style: { display: 'flex', gap: 3, flexShrink: 0 } }, lbl('\uD83D\uDCF7', 'environment'), lbl('\uD83D\uDDBC\uFE0F', undefined));
+}
+function DcTemplateFields({ dcForm, setDcForm }) {
+  const tpl = DC_TEMPLATES[dcForm.template] || DC_TEMPLATES.standard;
+  const set = k => e => setDcForm(p => ({ ...p, [k]: e.target.value }));
+  return React.createElement('div', { style: { marginBottom: 8, padding: 6, border: '1px solid #1a2030', borderRadius: 6, background: '#060810' } },
+    React.createElement('label', { style: { fontSize: 8, color: '#64748b' } }, 'DC Layout'),
+    React.createElement('select', { className: 'in', value: dcForm.template || 'standard', onChange: set('template'), style: { fontSize: 10 } },
+      Object.keys(DC_TEMPLATES).map(k => React.createElement('option', { key: k, value: k }, DC_TEMPLATES[k].label))),
+    tpl.extraFields.length ? React.createElement('div', { className: 'fg f2', style: { gap: 6, marginTop: 6 } },
+      tpl.extraFields.map(k => React.createElement('div', { key: k, style: k === 'billing_address' || k === 'location' ? { gridColumn: 'span 2' } : {} },
+        React.createElement('label', { style: { fontSize: 8, color: '#64748b' } }, DC_FIELD_LABELS[k]),
+        React.createElement('input', { className: 'in', value: dcForm[k] || '', onChange: set(k), style: { fontSize: 10 } })))) : null);
+}
+/*DC_HELPERS_END*/
 function JobDetail({
   j,
   firms,
@@ -5222,7 +5312,8 @@ function JobDetail({
     po_date: '',
     dc_date: td(),
     prepared_by: user?.name || '',
-    delivered_by: ''
+    delivered_by: '',
+    template: 'standard', client_name: '', project_name: '', vehicle_no: '', billing_name: '', billing_address: '', client_job_no: '', location: ''
   });
   const [dcSelectedItems, setDcSelectedItems] = useState(null);
   const [dcEditedItems, setDcEditedItems] = useState([]);
@@ -5236,7 +5327,15 @@ function JobDetail({
       po_date: '',
       dc_date: td(),
       prepared_by: user?.name || '',
-      delivered_by: ''
+      delivered_by: '',
+      template: 'standard',
+      client_name: j.billing_name || j.client_name || '',
+      project_name: j.project || '',
+      vehicle_no: '',
+      billing_name: j.billing_name || '',
+      billing_address: j.billing_address || '',
+      client_job_no: '',
+      location: j.project || ''
     });
     setDcSelectedItems(null);
     setDcEditedItems([]);
@@ -5268,12 +5367,37 @@ function JobDetail({
       show('Enter To (Customer) name', false);
       return;
     }
+    {
+      const src = dcEditedItems && dcEditedItems.length ? dcEditedItems : (batch.items || []).filter(it => dcSelectedItems === null || dcSelectedItems.has(it.id));
+      const noImg = src.filter(it => !it.img_url).length;
+      if (noImg > 0) {
+        show('\uD83D\uDCF7 ' + noImg + ' item(s) still have no artwork image', false);
+        return;
+      }
+    }
     const firmCode = j.firm || 'JXT';
     const firm = firms.find(f => f.code === firmCode) || {};
     const {
       dcNo,
       fy
     } = await generateDCNumber(firmCode);
+    const dcTplKey = DC_TEMPLATES[dcForm.template] ? dcForm.template : 'standard';
+    const dcTpl = DC_TEMPLATES[dcTplKey];
+    let clientDcNo = null;
+    if (dcTpl.counter) {
+      const {
+        data: cdata,
+        error: cerr
+      } = await sb.from('delivery_challans').select('client_dc_no').eq('dc_template', dcTplKey).not('client_dc_no', 'is', null).order('client_dc_no', {
+        ascending: false
+      }).limit(1);
+      if (cerr) {
+        show('\u26A0\uFE0F Could not read ' + dcTpl.label + ' counter: ' + cerr.message, false);
+        return;
+      }
+      clientDcNo = ((cdata && cdata[0] && cdata[0].client_dc_no) || 0) + 1;
+    }
+    const clientDcNoStr = clientDcNo === null ? '' : String(clientDcNo).padStart(3, '0');
     let dcItems;
     if (dcEditedItems && dcEditedItems.length) {
       dcItems = dcEditedItems.map((it, i) => ({
@@ -5285,7 +5409,8 @@ function JobDetail({
         qty: it.qty || 0,
         sqft: it.sqft || 0,
         description: it.description || '—',
-        media: it.media || ''
+        media: it.media || '',
+        img_url: it.img_url || ''
       }));
     } else {
       const allBatchItems = batch.items || [];
@@ -5300,7 +5425,8 @@ function JobDetail({
         qty: it.qty || 0,
         sqft: it.sqft || 0,
         description: it.internal_name || it.client_name || '—',
-        media: it.media || ''
+        media: it.media || '',
+        img_url: it.img_url || ''
       }));
     }
     const rec = {
@@ -5311,9 +5437,9 @@ function JobDetail({
       job_id: j.id,
       batch_id: batch.id,
       dc_date: dcForm.dc_date,
-      to_name: dcForm.to_name,
-      to_address: dcForm.to_address,
-      delivery_note: dcForm.delivery_note,
+      to_name: dcTplKey === 'rivet' || dcTplKey === 'westudio' ? dcForm.client_name || dcForm.to_name : dcForm.to_name,
+      to_address: dcTplKey === 'westudio' && (dcForm.billing_name || dcForm.billing_address) ? [dcForm.to_address, 'Billing: ' + [dcForm.billing_name, dcForm.billing_address].filter(Boolean).join(', ')].filter(Boolean).join('\n') : dcForm.to_address,
+      delivery_note: dcTplKey === 'njl' ? dcForm.location || dcForm.delivery_note : dcForm.delivery_note,
       po_no: dcForm.po_no,
       po_date: dcForm.po_date,
       items: dcItems,
@@ -5321,7 +5447,9 @@ function JobDetail({
       delivered_by: dcForm.delivered_by,
       dc_file_url: '',
       created_by: user?.name || '',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      dc_template: dcTplKey,
+      client_dc_no: clientDcNo
     };
     const {
       error
@@ -5368,7 +5496,7 @@ function JobDetail({
         show('⚠️ DC saved, but batch update threw: ' + e.message, false);
       }
     }
-    const copyHTML = copyLabel => `<div class="dc-copy"><div class="dc-box">
+    const stdCopyHTML = copyLabel => `<div class="dc-copy"><div class="dc-box">
       <div class="dc-head"><div class="dc-hdr-l">${firm.logo_url ? '<img src="' + firm.logo_url + '" class="dc-logo"/>' : ''}<div class="dc-firm">${firm.name || ''}</div></div>
       <div class="dc-hdr-r"><div class="dc-addr"><strong>${firm.name || ''}</strong><br>${(firm.address || '').replace(/,/g, ',<br>')}</div><div class="dc-gst">GSTIN / UIN : ${firm.gst || ''}</div></div></div>
       <div class="dc-meta">
@@ -5377,11 +5505,11 @@ function JobDetail({
       </div>
       <div class="dc-copy-label">${copyLabel}</div>
       <div class="dc-subhead">Please receive the undermentioned material as per your order</div>
-      <table class="dc-tbl"><thead><tr><th style="width:5%">Sr.No</th><th style="width:9%">Width<br><small>(mm/inch/feet)</small></th><th style="width:9%">Height<br><small>(mm/inch/feet)</small></th><th style="width:7%">Quantity<br><small>(nos)</small></th><th style="width:7%">Sq.Ft.</th><th style="width:18%">Material</th><th>Description</th></tr></thead>
+      <table class="dc-tbl"><thead><tr><th style="width:4%">Sr.No</th><th style="width:12%">Artwork</th><th style="width:8%">Width<br><small>(mm/inch/feet)</small></th><th style="width:8%">Height<br><small>(mm/inch/feet)</small></th><th style="width:6%">Quantity<br><small>(nos)</small></th><th style="width:6%">Sq.Ft.</th><th style="width:16%">Material</th><th>Description</th></tr></thead>
       <tbody>${dcItems.map(x => {
       const m = (x.media || '').split('\n')[0].trim();
       const matShort = !m ? '—' : m.length > 40 ? m.slice(0, 40) + '…' : m;
-      return `<tr><td>${x.sr}</td><td>${x.width ? x.width + (x.size_unit ? ' ' + x.size_unit : '') : ''}</td><td>${x.height || ''}</td><td>${x.qty}</td><td>${x.sqft || '—'}</td><td class="mat">${matShort}</td><td class="desc">${x.description}</td></tr>`;
+      return `<tr><td>${x.sr}</td><td class="img">${dcThumbHTML(x.img_url)}</td><td>${x.width ? x.width + (x.size_unit ? ' ' + x.size_unit : '') : ''}</td><td>${x.height || ''}</td><td>${x.qty}</td><td>${x.sqft || '—'}</td><td class="mat">${matShort}</td><td class="desc">${x.description}</td></tr>`;
     }).join('')}
       </tbody></table>
       <div class="dc-foot">
@@ -5398,6 +5526,58 @@ function JobDetail({
       <div class="dc-cheque">Cheque should be drawn under <strong>${firm.name || ''}</strong></div>
       <div class="dc-num"><strong>DC No: ${dcNo}</strong></div>
       </div></div>`;
+    const totQty = dcItems.reduce((s, x) => s + (parseFloat(x.qty) || 0), 0);
+    const totSqft = Math.round(dcItems.reduce((s, x) => s + (parseFloat(x.sqft) || 0), 0) * 100) / 100;
+    const inW = x => dcTpl.sizeUnit === 'inch' ? toInch(x.width, x.size_unit) : x.width || '';
+    const inH = x => dcTpl.sizeUnit === 'inch' ? toInch(x.height, x.size_unit) : x.height || '';
+    const rivetCopyHTML = copyLabel => `<div class="dc-copy"><div class="dc-box dc-rivet">
+      <div class="rv-top"><span>${dcEsc(dcTpl.head.site)}</span><span class="rv-title">DELIVERY CHALLAN</span><span></span></div>
+      <div class="rv-addr">${dcEsc(dcTpl.head.name)} ${dcEsc(dcTpl.head.addr)}</div>
+      <div class="dc-copy-label">${copyLabel}</div>
+      <div class="rv-meta">
+        <div><b>Client Name :</b> ${dcEsc(dcForm.client_name || dcForm.to_name)}</div>
+        <div><b>Project Name :</b> ${dcEsc(dcForm.project_name)}</div>
+        <div><b>Date :</b> ${dcEsc(dcForm.dc_date)}</div>
+        <div class="rv-row2"><span><b>VEHICLE NUMBER-</b> ${dcEsc(dcForm.vehicle_no)}</span><span><b>${dcTpl.counterLabel}-</b>${clientDcNoStr}</span></div>
+      </div>
+      <table class="dc-tbl"><thead><tr><th style="width:5%">Sr. No</th><th style="width:38%">Description</th><th style="width:22%">Media</th><th style="width:8%">Size In Inch<br>W</th><th style="width:8%">H</th><th style="width:7%">Qty</th><th style="width:8%">Sq.ft</th></tr></thead>
+      <tbody>${dcItems.map(x => `<tr><td>${x.sr}</td><td class="desc rv-desc">${dcThumbHTML(x.img_url)}<span>${dcEsc(x.description)}</span></td><td class="mat">${dcEsc((x.media || '').split('\n')[0])}</td><td>${inW(x)}</td><td>${inH(x)}</td><td>${x.qty}</td><td>${x.sqft || ''}</td></tr>`).join('')}
+      <tr class="tot"><td></td><td>TOTAL</td><td></td><td></td><td></td><td>${totQty}</td><td>${totSqft}</td></tr></tbody></table>
+      <div class="rv-foot"><div>CHECKED BY / APPROVAL BY<br>( FOR RIVET )<br><br>__________________</div><div>DATE INSTALLATION<br><br><br>__________________</div><div>NAME WITH DATE , SIGNATURE &amp; STAMP<br><br><br>__________________</div></div>
+      <div class="rv-sup">SITE SUPERVISOR : __________________</div>
+      <div class="dc-num">iPrint ref: ${dcNo}</div>
+      </div></div>`;
+    const westudioCopyHTML = copyLabel => `<div class="dc-copy"><div class="dc-box dc-ws">
+      <div class="dc-head"><div class="dc-hdr-l">${dcTpl.head.logo_url ? '<img src="' + dcEsc(dcTpl.head.logo_url) + '" class="ws-logo"/>' : '<div class="dc-firm">' + dcEsc(dcTpl.head.name) + '</div>'}</div>
+      <div class="dc-hdr-r"><div class="dc-addr">${dcEsc(dcTpl.head.addr).replace('Registered Office: ', '<strong>Registered Office:</strong><br>').replace(/, /g, ',<br>')}</div></div></div>
+      <div class="ws-title">DELIVERY CHALLAN</div>
+      <div class="dc-copy-label">${copyLabel}</div>
+      <div class="dc-meta">
+        <div class="dc-to ws-left"><div class="row"><b>Client Name</b> ${dcEsc(dcForm.client_name || dcForm.to_name)}</div><div class="row"><b>Billing Name</b> ${dcEsc(dcForm.billing_name)}</div><div class="row"><b>Billing Address</b> ${dcEsc(dcForm.billing_address)}</div><div class="row"><b>Dispatch Address</b> ${dcEsc(dcForm.to_address)}</div></div>
+        <div class="dc-job"><div class="row"><b>Job:</b> <span>${dcEsc(dcForm.client_job_no)}</span></div><div class="row"><b>${dcTpl.counterLabel}:</b> <span>${clientDcNoStr}</span></div><div class="row"><b>Date:</b> <span>${dcEsc(dcForm.dc_date)}</span></div><div class="row"><b>P.O. No.:</b> <span>${dcEsc(dcForm.po_no)}</span></div><div class="row"><b>Date:</b> <span>${dcEsc(dcForm.po_date)}</span></div></div>
+      </div>
+      <div class="ws-bar">Please receive the undermentioned materials as per your order</div>
+      <table class="dc-tbl"><thead><tr><th style="width:8%">Sr.No.</th><th style="width:14%">Artwork</th><th>Description</th><th style="width:12%">Quantity</th></tr></thead>
+      <tbody>${dcItems.map(x => `<tr><td>${x.sr}</td><td class="img">${dcThumbHTML(x.img_url)}</td><td class="desc">${dcEsc(dcDescWestudio(x))}</td><td>${x.qty}</td></tr>`).join('')}</tbody></table>
+      <div class="ws-recv">Please receive the above mentioned Goods in good order &amp; condition</div>
+      <div class="ws-cin"><b>CIN NO.:</b> ______________________</div>
+      <div class="dc-foot"><div class="dc-foot-l"><div class="fl-row"><b>Prepared by:</b> ${dcEsc(dcForm.prepared_by)}</div><div class="fl-row"><b>Delivered by :</b> ${dcEsc(dcForm.delivered_by)}</div></div>
+      <div class="dc-foot-r"><div class="fr-row"><b>Receivers name:</b> ________________</div><div class="fr-row"><b>Receivers Signature with company seal :</b> ________________</div></div></div>
+      <div class="dc-num">iPrint ref: ${dcNo}</div>
+      </div></div>`;
+    const njlCopyHTML = copyLabel => `<div class="dc-copy"><div class="dc-box dc-njl">
+      <div class="njl-title">DELIVERY CHALLAN</div>
+      <div class="njl-loc">${dcEsc(dcForm.location)}</div>
+      <div class="dc-copy-label">${copyLabel}</div>
+      <div class="njl-meta"><span><b>Job No:-</b> ${dcEsc(njlJobNo(j.id))}</span><span><b>Date:-</b> ${dcEsc(dcForm.dc_date)}</span></div>
+      <div class="njl-meta"><span><b>Masers:-</b></span></div>
+      <table class="dc-tbl"><thead><tr><th style="width:20%">TYPE</th><th style="width:20%">IMAGE/ LOCATION</th><th style="width:24%">Media</th><th style="width:9%">Size in INCH<br>W</th><th style="width:9%">H</th><th style="width:8%">QTY</th><th style="width:10%">SQ.FT</th></tr></thead>
+      <tbody>${dcItems.map(x => `<tr><td class="desc">${dcEsc(x.description)}</td><td class="img">${dcThumbHTML(x.img_url)}</td><td class="mat">${dcEsc((x.media || '').split('\n')[0])}</td><td>${inW(x)}</td><td>${inH(x)}</td><td>${x.qty}</td><td>${x.sqft || ''}</td></tr>`).join('')}
+      <tr class="tot"><td>TOTAL</td><td></td><td></td><td></td><td></td><td>${totQty}</td><td>${totSqft}</td></tr></tbody></table>
+      <div class="njl-sign">Authorised Sign</div>
+      <div class="dc-num">iPrint ref: ${dcNo}</div>
+      </div></div>`;
+    const copyHTML = dcTplKey === 'rivet' ? rivetCopyHTML : dcTplKey === 'westudio' ? westudioCopyHTML : dcTplKey === 'njl' ? njlCopyHTML : stdCopyHTML;
     const html = `<html><head><title>Delivery Challan ${dcNo}</title><style>
       @page{size:A4;margin:0}
       *{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif}
@@ -5435,6 +5615,31 @@ function JobDetail({
       .fl-row,.fr-row{padding:3px 0;border-bottom:1px dashed #999}
       .dc-cheque{background:#e0e0e0;padding:4px;text-align:center;font-size:10.5px;border-top:1px solid #222}
       .dc-num{text-align:right;font-size:10px;padding:2px 6px;color:#555}
+      .dc-tbl td.img{width:22mm;height:18mm;padding:1mm}
+      .dc-thumb{max-width:20mm;max-height:16mm;object-fit:contain;display:block;margin:0 auto}
+      .dc-tbl tr.tot td{font-weight:700;background:#f7f7f7}
+      .rv-top{display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:2px 0}
+      .rv-title{font-size:16px;font-weight:900;letter-spacing:1px}
+      .rv-addr{font-size:9.5px;text-align:center;border-bottom:1px solid #222;padding-bottom:4px;margin-bottom:4px}
+      .rv-meta{font-size:11px;line-height:1.7;border-bottom:1px solid #222;padding-bottom:4px;margin-bottom:4px}
+      .rv-row2{display:flex;justify-content:space-between}
+      .rv-desc{display:flex;align-items:center;gap:4px}
+      .rv-desc .dc-thumb{max-width:22mm;max-height:16mm;margin:0}
+      .rv-foot{display:flex;border-top:1px solid #222;margin-top:6px;font-size:9.5px;text-align:center}
+      .rv-foot>div{flex:1;padding:6px 4px;border-right:1px solid #222}
+      .rv-foot>div:last-child{border-right:none}
+      .rv-sup{font-size:10px;padding:6px 4px;border-top:1px solid #222}
+      .ws-logo{max-height:52px;max-width:180px}
+      .ws-title{text-align:center;font-size:15px;font-weight:900;letter-spacing:1px;padding:4px 0;border-bottom:1px solid #222}
+      .ws-left .row{padding:3px 0;border-bottom:1px solid #ccc;font-size:11px}
+      .ws-left .row b{display:inline-block;min-width:110px;font-weight:400;color:#333}
+      .ws-bar{background:#555;color:#fff;font-size:11px;padding:4px 8px;margin-top:6px}
+      .ws-recv{text-align:right;font-size:10px;padding:4px 6px}
+      .ws-cin{text-align:center;font-size:10.5px;padding:4px}
+      .njl-title{text-align:center;font-size:16px;font-weight:900;letter-spacing:1px;padding:6px 0 2px}
+      .njl-loc{text-align:center;font-size:12px;font-weight:700;padding-bottom:6px;border-bottom:1px solid #222}
+      .njl-meta{display:flex;justify-content:space-between;font-size:11px;padding:3px 0}
+      .njl-sign{font-size:11px;font-weight:700;padding:28px 0 4px}
     </style></head><body>${copyHTML('ORIGINAL - CUSTOMER COPY')}${copyHTML('DUPLICATE - OFFICE COPY')}${copyHTML('TRIPLICATE - ACCOUNTS COPY')}</body></html>`;
     const w = window.open('', '_blank');
     w.document.write(html);
@@ -11941,7 +12146,10 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         fontSize: 9,
         marginTop: 2
       }
-    }, "GSTIN: ", firm.gst)), dcStep === 'form' && React.createElement(React.Fragment, null, React.createElement("div", {
+    }, "GSTIN: ", firm.gst)), dcStep === 'form' && React.createElement(React.Fragment, null, React.createElement(DcTemplateFields, {
+      dcForm,
+      setDcForm
+    }), React.createElement("div", {
       className: "fg f2",
       style: {
         gap: 6
@@ -12201,8 +12409,24 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             color: '#64748b',
             marginLeft: 4
           }
-        }, "\xD7 ", it.qty)));
-      })), selCount === 0 && React.createElement("div", {
+        }, "\xD7 ", it.qty)), React.createElement(DcItemThumb, {
+          it,
+          updateLineItem,
+          show
+        }));
+      })), (() => {
+        const missing = allItems.filter(x => selSet.has(x.id) && !x.img_url).length;
+        return missing > 0 && React.createElement("div", {
+          style: {
+            fontSize: 9,
+            color: '#e3a008',
+            marginTop: 6,
+            padding: '4px 6px',
+            background: 'rgba(227,160,8,0.08)',
+            borderRadius: 4
+          }
+        }, "\uD83D\uDCF7 ", missing, " selected item", missing === 1 ? '' : 's', " need an artwork image before the DC can be printed \u2014 use \uD83D\uDCF7 / \uD83D\uDDBC\uFE0F on the row");
+      })(), selCount === 0 && React.createElement("div", {
         style: {
           fontSize: 9,
           color: '#f47067',
@@ -12238,6 +12462,11 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           const allItems = batch.items || [];
           const selSet = dcSelectedItems === null ? new Set(allItems.map(x => x.id)) : dcSelectedItems;
           const filtered = allItems.filter(it => selSet.has(it.id));
+          const noImg = filtered.filter(it => !it.img_url).length;
+          if (noImg > 0) {
+            show('\uD83D\uDCF7 ' + noImg + ' selected item(s) have no artwork image \u2014 upload from the row first', false);
+            return;
+          }
           setDcEditedItems(filtered.map(it => ({
             item_id: it.id || '',
             width: it.width || '',
@@ -12246,7 +12475,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             qty: it.qty || 0,
             sqft: it.sqft || 0,
             media: it.media || '',
-            description: it.internal_name || it.client_name || ''
+            description: it.internal_name || it.client_name || '',
+            img_url: it.img_url || ''
           })));
           setDcStep('edit');
         },
