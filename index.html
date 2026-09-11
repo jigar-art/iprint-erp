@@ -5642,6 +5642,7 @@ function JobDetail({
       .njl-loc{text-align:center;font-size:12px;font-weight:700;padding-bottom:6px;border-bottom:1px solid #222}
       .njl-meta{display:flex;justify-content:space-between;font-size:11px;padding:3px 0}
       .njl-sign{font-size:11px;font-weight:700;padding:28px 0 4px}
+      .dc-rivet .dc-copy-label,.dc-ws .dc-copy-label,.dc-njl .dc-copy-label{position:static;align-self:flex-end;margin:2px 0 4px;font-size:10px;padding:2px 6px}
     </style></head><body>${copyHTML('ORIGINAL - CUSTOMER COPY')}${copyHTML('DUPLICATE - OFFICE COPY')}${copyHTML('TRIPLICATE - ACCOUNTS COPY')}</body></html>`;
     const w = window.open('', '_blank');
     w.document.write(html);
