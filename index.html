@@ -4973,11 +4973,20 @@ function DcItemThumb({ it, updateLineItem, show }) {
     } catch (err) { show('\u26A0\uFE0F Image error: ' + (err && err.message || err), false); }
     setBusy(false);
   };
+  const markNoArt = async e => {
+    stop(e);
+    if (!window.confirm('Mark "' + (it.internal_name || 'this item') + '" as material only (no artwork)?')) return;
+    setBusy(true);
+    try { await updateLineItem(it.id, { no_artwork: true }); } catch (err) { show('\u26A0\uFE0F ' + (err && err.message || err), false); }
+    setBusy(false);
+  };
+  if (it.no_artwork && !it.img_url) return React.createElement('span', { onClick: async e => { stop(e); if (!window.confirm('Remove the "no artwork" mark so an image can be added?')) return; setBusy(true); try { await updateLineItem(it.id, { no_artwork: false }); } catch (err) { show('\u26A0\uFE0F ' + (err && err.message || err), false); } setBusy(false); }, title: 'Material only \u2014 click to undo', style: { fontSize: 8, color: '#64748b', border: '1px solid #1a2030', borderRadius: 3, padding: '2px 5px', flexShrink: 0, cursor: 'pointer' } }, '\uD83D\uDEAB no artwork');
   if (it.img_url) return React.createElement('a', { href: it.img_url, target: '_blank', rel: 'noopener noreferrer', onClick: stop },
     React.createElement('img', { src: it.img_url, style: { width: 36, height: 36, objectFit: 'cover', borderRadius: 3, border: '1px solid #1a2030', flexShrink: 0 } }));
   const lbl = (txt, cap) => React.createElement('label', { onClick: stop, style: { cursor: busy ? 'wait' : 'pointer', padding: '2px 5px', border: '1px dashed #e3a00860', borderRadius: 3, color: '#e3a008', fontSize: 8, fontWeight: 700, opacity: busy ? 0.5 : 1 } },
     busy ? '\u23F3' : txt, React.createElement('input', { type: 'file', accept: '.jpg,.jpeg,.png,image/jpeg,image/png', capture: cap, disabled: busy, style: { display: 'none' }, onChange: pick }));
-  return React.createElement('span', { onClick: stop, style: { display: 'flex', gap: 3, flexShrink: 0 } }, lbl('\uD83D\uDCF7', 'environment'), lbl('\uD83D\uDDBC\uFE0F', undefined));
+  return React.createElement('span', { onClick: stop, style: { display: 'flex', gap: 3, flexShrink: 0 } }, lbl('\uD83D\uDCF7', 'environment'), lbl('\uD83D\uDDBC\uFE0F', undefined),
+    React.createElement('button', { type: 'button', onClick: markNoArt, disabled: busy, title: 'Material only \u2014 no artwork', style: { cursor: 'pointer', padding: '2px 5px', border: '1px dashed #64748b80', borderRadius: 3, color: '#94a3b8', fontSize: 8, fontWeight: 700, background: 'transparent' } }, '\uD83D\uDEAB'));
 }
 function DcTemplateFields({ dcForm, setDcForm }) {
   const tpl = DC_TEMPLATES[dcForm.template] || DC_TEMPLATES.standard;
@@ -5356,7 +5365,7 @@ function JobDetail({
     }
     {
       const src = dcEditedItems && dcEditedItems.length ? dcEditedItems : (batch.items || []).filter(it => dcSelectedItems === null || dcSelectedItems.has(it.id));
-      const noImg = src.filter(it => !it.img_url).length;
+      const noImg = src.filter(it => !it.img_url && !it.no_artwork).length;
       if (noImg > 0) {
         show('\uD83D\uDCF7 ' + noImg + ' item(s) still have no artwork image', false);
         return;
@@ -12403,7 +12412,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           show
         }));
       })), (() => {
-        const missing = allItems.filter(x => selSet.has(x.id) && !x.img_url).length;
+        const missing = allItems.filter(x => selSet.has(x.id) && !x.img_url && !x.no_artwork).length;
         return missing > 0 && React.createElement("div", {
           style: {
             fontSize: 9,
@@ -12413,7 +12422,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             background: 'rgba(227,160,8,0.08)',
             borderRadius: 4
           }
-        }, "\uD83D\uDCF7 ", missing, " selected item", missing === 1 ? '' : 's', " need an artwork image before the DC can be printed \u2014 use \uD83D\uDCF7 / \uD83D\uDDBC\uFE0F on the row");
+        }, "\uD83D\uDCF7 ", missing, " selected item", missing === 1 ? '' : 's', " need an artwork image before the DC can be printed \u2014 use \uD83D\uDCF7 / \uD83D\uDDBC\uFE0F on the row, or \uD83D\uDEAB for material-only items");
       })(), selCount === 0 && React.createElement("div", {
         style: {
           fontSize: 9,
@@ -12450,7 +12459,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           const allItems = batch.items || [];
           const selSet = dcSelectedItems === null ? new Set(allItems.map(x => x.id)) : dcSelectedItems;
           const filtered = allItems.filter(it => selSet.has(it.id));
-          const noImg = filtered.filter(it => !it.img_url).length;
+          const noImg = filtered.filter(it => !it.img_url && !it.no_artwork).length;
           if (noImg > 0) {
             show('\uD83D\uDCF7 ' + noImg + ' selected item(s) have no artwork image \u2014 upload from the row first', false);
             return;
@@ -12464,7 +12473,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             sqft: it.sqft || 0,
             media: it.media || '',
             description: it.internal_name || it.client_name || '',
-            img_url: it.img_url || ''
+            img_url: it.img_url || '',
+            no_artwork: !!it.no_artwork
           })));
           setDcStep('edit');
         },
