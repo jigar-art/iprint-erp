@@ -5496,8 +5496,8 @@ function JobDetail({
       <div class="dc-head"><div class="dc-hdr-l">${firm.logo_url ? '<img src="' + firm.logo_url + '" class="dc-logo"/>' : ''}<div class="dc-firm">${firm.name || ''}</div></div>
       <div class="dc-hdr-r"><div class="dc-addr"><strong>${firm.name || ''}</strong><br>${(firm.address || '').replace(/,/g, ',<br>')}</div><div class="dc-gst">GSTIN / UIN : ${firm.gst || ''}</div></div></div>
       <div class="dc-meta">
-        <div class="dc-to"><div class="dc-label">To,</div><div class="dc-to-box">${(dcForm.to_name || '').replace(/\n/g, '<br>')}<br>${(dcForm.to_address || '').replace(/\n/g, '<br>')}</div></div>
-        <div class="dc-job"><div class="row"><b>Job # :</b> <span>${j.id}</span></div><div class="row"><b>Delivery Note :</b> <span>${dcForm.delivery_note || ''}</span></div><div class="row"><b>Date :</b> <span>${dcForm.dc_date}</span></div><div class="row"><b>PO. No :</b> <span>${dcForm.po_no || ''}</span></div><div class="row"><b>Date :</b> <span>${dcForm.po_date || ''}</span></div></div>
+        <div class="dc-to"><div class="dc-label">To,</div><div class="dc-to-box">${dcEsc(dcForm.to_name || '').replace(/\n/g, '<br>')}<br>${dcEsc(dcForm.to_address || '').replace(/\n/g, '<br>')}</div></div>
+        <div class="dc-job"><div class="row"><b>Job # :</b> <span>${j.id}</span></div><div class="row"><b>Delivery Note :</b> <span>${dcEsc(dcForm.delivery_note || '')}</span></div><div class="row"><b>Date :</b> <span>${dcForm.dc_date}</span></div><div class="row"><b>PO. No :</b> <span>${dcEsc(dcForm.po_no || '')}</span></div><div class="row"><b>Date :</b> <span>${dcForm.po_date || ''}</span></div></div>
       </div>
       <div class="dc-copy-label">${copyLabel}</div>
       <div class="dc-subhead">Please receive the undermentioned material as per your order</div>
@@ -5505,7 +5505,7 @@ function JobDetail({
       <tbody>${dcItems.map(x => {
       const m = (x.media || '').split('\n')[0].trim();
       const matShort = !m ? '—' : m.length > 40 ? m.slice(0, 40) + '…' : m;
-      return `<tr><td>${x.sr}</td><td class="img">${dcThumbHTML(x.img_url)}</td><td>${x.width ? x.width + (x.size_unit ? ' ' + x.size_unit : '') : ''}</td><td>${x.height || ''}</td><td>${x.qty}</td><td>${x.sqft || '—'}</td><td class="mat">${matShort}</td><td class="desc">${x.description}</td></tr>`;
+      return `<tr><td>${x.sr}</td><td class="img">${dcThumbHTML(x.img_url)}</td><td>${x.width ? x.width + (x.size_unit ? ' ' + x.size_unit : '') : ''}</td><td>${x.height || ''}</td><td>${x.qty}</td><td>${x.sqft || '—'}</td><td class="mat">${dcEsc(matShort)}</td><td class="desc">${dcEsc(x.description)}</td></tr>`;
     }).join('')}
       </tbody></table>
       <div class="dc-foot">
