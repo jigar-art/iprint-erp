@@ -5461,33 +5461,24 @@ function JobDetail({
         dcEditedItems.forEach(e => {
           if (e.item_id) editById[e.item_id] = e;
         });
-        const updatedBatches = (j.batches || []).map(b => {
-          if (b.id !== batch.id) return b;
-          const newItems = (b.items || []).map(it => {
-            const e = editById[it.id];
-            if (!e) return it;
-            return {
-              ...it,
-              width: e.width || it.width,
-              height: e.height || it.height,
-              size_unit: e.size_unit || it.size_unit,
-              qty: e.qty ?? it.qty,
-              sqft: e.sqft ?? it.sqft,
-              media: e.media ?? it.media,
-              internal_name: e.description || it.internal_name
-            };
-          });
-          return {
-            ...b,
-            items: newItems
-          };
-        });
-        const {
-          error: bErr
-        } = await sb.from('jobs').update({
-          batches: updatedBatches
-        }).eq('id', j.id);
-        if (bErr) show('⚠️ DC saved, but batch update failed: ' + bErr.message, false);else show('✅ DC ' + dcNo + ' saved + batch updated!');
+        let changed = 0;
+        for (const it of batch.items || []) {
+          const e = editById[it.id];
+          if (!e) continue;
+          const upd = {};
+          const same = (a, b) => String(a ?? '') === String(b ?? '');
+          if (e.width && !same(e.width, it.width)) upd.width = e.width;
+          if (e.height && !same(e.height, it.height)) upd.height = e.height;
+          if (e.size_unit && !same(e.size_unit, it.size_unit)) upd.size_unit = e.size_unit;
+          if (!same(e.qty, it.qty) && !isNaN(parseFloat(e.qty))) upd.qty = parseFloat(e.qty);
+          if (!same(e.sqft, it.sqft) && !isNaN(parseFloat(e.sqft))) upd.sqft = parseFloat(e.sqft);
+          if (!same(e.media, it.media)) upd.media = e.media;
+          if (e.description && !same(e.description, it.internal_name)) upd.internal_name = e.description;
+          if (!Object.keys(upd).length) continue;
+          await updateLineItem(it.id, upd);
+          changed++;
+        }
+        show('✅ DC ' + dcNo + ' saved + ' + changed + ' item(s) updated in batch');
       } catch (e) {
         show('⚠️ DC saved, but batch update threw: ' + e.message, false);
       }
