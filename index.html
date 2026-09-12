@@ -4958,19 +4958,6 @@ const dcDescWestudio = x => {
 };
 const dcEsc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const dcThumbHTML = url => url ? '<img class="dc-thumb" src="' + dcEsc(url) + '"/>' : '';
-const dcCompress = file => new Promise((res, rej) => {
-  const img = new Image();
-  img.onload = () => {
-    const MAX = 1200;
-    let w = img.width, h = img.height;
-    if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-    const c = document.createElement('canvas'); c.width = w; c.height = h;
-    c.getContext('2d').drawImage(img, 0, 0, w, h);
-    c.toBlob(b => b ? res(new File([b], (file.name || 'img').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })) : rej('compress failed'), 'image/jpeg', 0.85);
-  };
-  img.onerror = () => rej('image load failed');
-  img.src = URL.createObjectURL(file);
-});
 function DcItemThumb({ it, updateLineItem, show }) {
   const [busy, setBusy] = React.useState(false);
   const stop = e => e.stopPropagation();
@@ -4981,17 +4968,15 @@ function DcItemThumb({ it, updateLineItem, show }) {
     if (!file) return;
     setBusy(true);
     try {
-      const c = await dcCompress(file);
-      const url = await uploadFile(c, 'item-images');
-      if (!url) { show('Image upload failed \u2014 retry', false); setBusy(false); return; }
-      await updateLineItem(it.id, { img_url: url });
-    } catch (err) { show('Image error: ' + (err && err.message || err), false); }
+      const url = await uploadFile(file, 'item-images');
+      if (url) await updateLineItem(it.id, { img_url: url });
+    } catch (err) { show('\u26A0\uFE0F Image error: ' + (err && err.message || err), false); }
     setBusy(false);
   };
   if (it.img_url) return React.createElement('a', { href: it.img_url, target: '_blank', rel: 'noopener noreferrer', onClick: stop },
     React.createElement('img', { src: it.img_url, style: { width: 36, height: 36, objectFit: 'cover', borderRadius: 3, border: '1px solid #1a2030', flexShrink: 0 } }));
   const lbl = (txt, cap) => React.createElement('label', { onClick: stop, style: { cursor: busy ? 'wait' : 'pointer', padding: '2px 5px', border: '1px dashed #e3a00860', borderRadius: 3, color: '#e3a008', fontSize: 8, fontWeight: 700, opacity: busy ? 0.5 : 1 } },
-    busy ? '\u23F3' : txt, React.createElement('input', { type: 'file', accept: 'image/*', capture: cap, disabled: busy, style: { display: 'none' }, onChange: pick }));
+    busy ? '\u23F3' : txt, React.createElement('input', { type: 'file', accept: '.jpg,.jpeg,.png,image/jpeg,image/png', capture: cap, disabled: busy, style: { display: 'none' }, onChange: pick }));
   return React.createElement('span', { onClick: stop, style: { display: 'flex', gap: 3, flexShrink: 0 } }, lbl('\uD83D\uDCF7', 'environment'), lbl('\uD83D\uDDBC\uFE0F', undefined));
 }
 function DcTemplateFields({ dcForm, setDcForm }) {
@@ -32320,39 +32305,6 @@ function RootApp() {
       setLoading(false);
     }
     loadMaster();
-  }, [user]);
-  /* MARKER:SESSION_KEEPALIVE_v1 — in-session JWT refresh + auto-logout on expiry (2026-09-12) */
-  useEffect(() => {
-    if (!user) return;
-    let busy = false;
-    const tick = async () => {
-      if (busy) return;
-      busy = true;
-      try {
-        const t = localStorage.getItem('erp_jwt') || '';
-        const expMs = jwtExpMs(t);
-        const left = expMs - Date.now();
-        if (left <= 0) {
-          try {
-            localStorage.removeItem('erp_user');
-            localStorage.removeItem('erp_pg');
-            localStorage.removeItem('erp_login_time');
-            localStorage.removeItem('erp_jwt');
-          } catch (e) {}
-          if (window._showToast) window._showToast('\u26A0\uFE0F Session expired \u2014 please log in again', false);
-          setUser(null);
-        } else if (left < 3 * 60 * 60 * 1000) {
-          const r = await erpLoginRequest({ refresh: t });
-          if (r.ok && r.token) localStorage.setItem('erp_jwt', r.token);
-        }
-      } catch (e) {}
-      busy = false;
-    };
-    const id = setInterval(tick, 15 * 60 * 1000);
-    const onVis = () => { if (document.visibilityState === 'visible') tick(); };
-    document.addEventListener('visibilitychange', onVis);
-    tick();
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
   }, [user]);
   useEffect(() => {
     try {
