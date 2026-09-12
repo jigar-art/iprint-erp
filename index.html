@@ -32321,6 +32321,39 @@ function RootApp() {
     }
     loadMaster();
   }, [user]);
+  /* MARKER:SESSION_KEEPALIVE_v1 — in-session JWT refresh + auto-logout on expiry (2026-09-12) */
+  useEffect(() => {
+    if (!user) return;
+    let busy = false;
+    const tick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const t = localStorage.getItem('erp_jwt') || '';
+        const expMs = jwtExpMs(t);
+        const left = expMs - Date.now();
+        if (left <= 0) {
+          try {
+            localStorage.removeItem('erp_user');
+            localStorage.removeItem('erp_pg');
+            localStorage.removeItem('erp_login_time');
+            localStorage.removeItem('erp_jwt');
+          } catch (e) {}
+          if (window._showToast) window._showToast('\u26A0\uFE0F Session expired \u2014 please log in again', false);
+          setUser(null);
+        } else if (left < 3 * 60 * 60 * 1000) {
+          const r = await erpLoginRequest({ refresh: t });
+          if (r.ok && r.token) localStorage.setItem('erp_jwt', r.token);
+        }
+      } catch (e) {}
+      busy = false;
+    };
+    const id = setInterval(tick, 15 * 60 * 1000);
+    const onVis = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVis);
+    tick();
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, [user]);
   useEffect(() => {
     try {
       fetch('https://api.ipify.org?format=json', {
