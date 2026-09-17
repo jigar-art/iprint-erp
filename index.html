@@ -3469,7 +3469,11 @@ function MainApp({
     user: user,
     show: show,
     rows: quoteRows,
-    reload: loadQuotes
+    reload: loadQuotes,
+    isBoss: (() => {
+      const un = (user && user.name || '').toUpperCase();
+      return FULL_ACCESS.some(u => un.includes(u)) || un === 'AMOL' || un.startsWith('AMOL ');
+    })()
   }))), modal && React.createElement("div", {
     style: {
       position: "fixed",
@@ -47495,13 +47499,13 @@ function QuotesPage({
   user,
   show,
   rows,
-  reload
+  reload,
+  isBoss
 }) {
   const [tab, setTab] = useState('open');
   const [dept, setDept] = useState('All');
   const [busy, setBusy] = useState(0);
   const uname = (user && user.name || '').toUpperCase();
-  const isBoss = FULL_ACCESS.some(u => uname.includes(u)) || uname === 'AMOL' || uname.startsWith('AMOL ');
   const mineOnly = r => {
     if (isBoss) return true;
     const a = (r.assigned_to || '').toUpperCase();
