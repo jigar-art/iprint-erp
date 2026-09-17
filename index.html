@@ -3886,8 +3886,20 @@ function DashPage({
   user
 }) {
   const [dq, setDq] = useState("");
-  const DASH_VIEW_ONLY_USERS = ['ANKIT', 'SONU', 'PRATIK'];
+  const DASH_VIEW_ONLY_USERS = ['ANKIT', 'SONU', 'PRATIK', 'SHAHAJAD', 'ABHIJIT', 'ANIL', 'SANKET', 'PRINCE', 'UMESH', 'SHIV', 'MUSTAFA', 'KAIF', 'SAHIL'];
   const isDashViewOnly = DASH_VIEW_ONLY_USERS.includes((user?.name || '').toUpperCase());
+  // Access: quick actions are gated by role, mirroring the sidebar nav.
+  const QA_ROLES = {
+    new: ['admin', 'sales'],
+    grn: ['admin', 'production', 'dispatch', 'accounts', 'printing'],
+    print: ['admin', 'production', 'printing', 'designer', 'sales'],
+    fab: ['admin', 'production', 'fabrication', 'designer', 'printing', 'sales', 'dispatch'],
+    os: ['admin', 'production', 'printing', 'fabrication', 'designer', 'sales', 'accounts'],
+    disp: ['admin', 'production', 'sales', 'dispatch', 'designer', 'printing'],
+    stock: ['admin', 'production', 'dispatch', 'accounts', 'printing'],
+    acc: ['admin', 'accounts', 'sales']
+  };
+  const canQA = pid => (QA_ROLES[pid] || ['admin']).includes((user?.role || '').toLowerCase());
   const low = Object.entries(stock).filter(([, v]) => v <= 2 && v >= 0).slice(0, 5);
   const BANKING_CLIENTS = ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'NUVAMA WEALTH', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'];
   const isBanking = cn => {
@@ -4610,7 +4622,7 @@ function DashPage({
     l: "Accounts",
     p: "acc",
     e: "🧾"
-  }].map(a => React.createElement("button", {
+  }].filter(a => canQA(a.p)).map(a => React.createElement("button", {
     key: a.l,
     className: "b",
     style: {
