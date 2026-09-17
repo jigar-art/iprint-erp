@@ -360,7 +360,7 @@ const removeFromJsonArray = async (table, id, field, itemToRemove) => {
 };
 const DEPTS = ["Estimate", "Design", "Production", "Printing", "Fabrication", "Dispatch", "Installation", "Accounts"];
 const DC = ["#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#dc2626", "#10b981", "#059669", "#06b6d4"];
-const BILLING_TEAM = ['SONAM', 'SHREYA', 'APARNA', 'VIDYA', 'JIGAR', 'CHANDNI'];
+const BILLING_TEAM = ['PRACHI', 'SHREYA', 'APARNA', 'VIDYA', 'JIGAR', 'CHANDNI'];
 const canEditInvoice2 = user => {
   const u = (user?.name || '').toUpperCase();
   return BILLING_TEAM.some(n => u.includes(n));
@@ -2208,11 +2208,11 @@ function MainApp({
       show('⚠️ Could not read current status from DB — try again. (' + (readErr?.message || 'no row') + ')', false);
       return;
     }
-    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANIKET', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'ABHIJIT'];
+    const PRINT_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'ABHIJIT', 'SHAHAJAD'];
     const fromPrinting = (dbRow.status || '').startsWith('Printing');
     const _uname = String(userName || '').toUpperCase().trim();
     if (fromPrinting && !PRINT_FORWARD_USERS.some(t => _uname === t || _uname.startsWith(t + ' '))) {
-      show('🔒 Only authorized users (JIGAR/CHANDNI/ANIKET/ANKIT/PRATIK/SONU/AMOL/ABHIJIT) can forward jobs from Printing.', false);
+      show('🔒 Only authorized users (JIGAR/CHANDNI/ANKIT/PRATIK/SONU/AMOL/ABHIJIT/SHAHAJAD) can forward jobs from Printing.', false);
       console.warn('updateJobStatus blocked (Patch I): user', userName, 'tried to move job', jobId, 'from', dbRow.status, 'to', newStatus);
       return;
     }
@@ -2713,7 +2713,7 @@ function MainApp({
     l: "All Jobs",
     e: "📋",
     roles: ["admin", "sales", "production", "accounts", "designer"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "POONAM", "KULDEEP", "PRACHI"]
   }, {
     id: "new",
     l: "New Job",
@@ -2731,43 +2731,43 @@ function MainApp({
     l: "Dept Tracker",
     e: "🏭",
     roles: ["admin", "production", "sales", "designer", "printing", "fabrication", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "ANIKET", "ABHIJIT"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA", "APARNA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "HARISH", "MURLI", "MANOJ", "ABHIJIT", "POONAM", "KULDEEP", "ANIL", "VIKAS"]
   }, {
     id: "grn",
     l: "Material In",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "VIDYA", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "VIDYA", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "SHAHAJAD", "ANIL"]
   }, {
     id: "print",
     l: "Printing",
     e: "🖨️",
     roles: ["admin", "production", "printing", "designer", "sales"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "HARISH", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "SHAHAJAD"]
   }, {
     id: "fab",
     l: "Fabrication",
     e: "🔧",
     roles: ["admin", "production", "fabrication", "designer", "printing", "sales", "dispatch"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "MURLI", "MANOJ", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "PRAJAKTA", "HARISH", "MURLI", "MANOJ", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "SHAHAJAD", "ANIL", "SANKET", "PRINCE", "UMESH"]
   }, {
     id: "os",
     l: "Outsource",
     e: "📤",
     roles: ["admin", "production", "printing", "fabrication", "designer", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "SHREYA", "PRAJAKTA", "SIDDHARTH", "MEDHA", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "SHREYA", "PRAJAKTA", "HARISH", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "POONAM", "ANIL"]
   }, {
     id: "disp",
     l: "Dispatch",
     e: "🚚",
     roles: ["admin", "production", "sales", "dispatch", "designer", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "HARISH", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "POONAM", "KULDEEP", "SHIV", "MUSTAFA", "KAIF", "SAHIL"]
   }, {
     id: "stock",
     l: "Stock",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "SHAHAJAD", "ANIL", "HARISH"]
   }, {
     id: "rem",
     l: "PO Reminders",
@@ -2779,19 +2779,19 @@ function MainApp({
     l: "Clients",
     e: "👥",
     roles: ["admin", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "PRACHI"]
   }, {
     id: "acc",
     l: "Accounts",
     e: "🧾",
     roles: ["admin", "accounts", "sales"],
-    users: ["JIGAR", "CHANDNI", "APARNA", "SHREYA", "VIDYA", "SONAM"]
+    users: ["JIGAR", "CHANDNI", "APARNA", "SHREYA", "VIDYA", "PRACHI"]
   }, {
     id: "expenses",
     l: "Expenses",
     e: "💸",
     roles: ["admin", "accounts", "production"],
-    users: ["JIGAR", "CHANDNI", "SHREYA", "SONAM"]
+    users: ["JIGAR", "CHANDNI", "SHREYA"]
   }, {
     id: "backup",
     l: "Backup Data",
@@ -2803,7 +2803,7 @@ function MainApp({
     l: "Banking CRM",
     e: "🏦",
     roles: ["admin", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "VIDYA", "SONAM", "POONAM"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "APARNA", "PRIYANKA", "HARSHALA", "SHREYA", "VIDYA", "PRACHI", "POONAM"]
   }, {
     id: "sales",
     l: "Sales CRM",
@@ -2838,7 +2838,7 @@ function MainApp({
     l: "Receive Material",
     e: "📦",
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
-    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "MANOJ", "HARISH", "ANIKET", "ABHIJIT", "ANKIT", "SONU", "PRATIK"]
+    users: ["JIGAR", "CHANDNI", "SHREYA", "MURLI", "MANOJ", "HARISH", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "ANIL"]
   }, {
     id: "reports",
     l: "Reports",
@@ -2851,8 +2851,8 @@ function MainApp({
     roles: ["admin", "sales"],
     users: ["JIGAR", "CHANDNI", "BATUL", "POONAM"]
   }];
-  const FULL_ACCESS = ["JIGAR", "CHANDNI", "SONAM"];
-  const FULL_FINANCIAL_ACCESS = ["JIGAR", "CHANDNI", "SONAM"];
+  const FULL_ACCESS = ["JIGAR", "CHANDNI"];
+  const FULL_FINANCIAL_ACCESS = ["JIGAR", "CHANDNI"];
   const nav = allNav.filter(n => {
     const uName = (user.name || '').toUpperCase();
     if (FULL_ACCESS.some(u => uName.includes(u))) return true;
@@ -17284,7 +17284,7 @@ function PrintPage({
   }, label, sortIcon(k));
   const printQueue = applySort((jobs || []).filter(j => j.status === 'Printing' || j.status === 'Printing · In-House' || j.status === 'Printing · Outsource'));
   const FORWARD_STATUSES = ['Fabrication', 'Fabrication · In-House', 'Fabrication · Outsource', 'Dispatch'];
-  const FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ANIKET', 'ABHIJIT', 'ANKIT', 'PRATIK', 'SONU', 'AMOL'];
+  const FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ABHIJIT', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'SHAHAJAD', 'ANIL', 'SANKET', 'PRINCE', 'UMESH', 'HARISH'];
   const userCanForward = (() => {
     const u = (user?.name || '').toUpperCase().trim();
     return FORWARD_USERS.some(t => u === t || u.startsWith(t + ' '));
@@ -33038,11 +33038,11 @@ function BankCRMPage({
   const [newInvoiceAmount, setNewInvoiceAmount] = useState('');
   const canAddInvoice = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA', 'SHREYA', 'SONAM'].some(u => uN.includes(u));
+    return ['JIGAR', 'AMOL', 'CHANDNI', 'RUCHITA', 'APARNA', 'VIDYA', 'SHREYA', 'PRACHI'].some(u => uN.includes(u));
   })();
   const canEditBillingCategory = (() => {
     const uN = (user?.name || '').toUpperCase();
-    return ['SONAM', 'PRIYANKA', 'HARSHALA'].some(t => uN === t || uN.startsWith(t + ' '));
+    return ['PRIYANKA', 'HARSHALA'].some(t => uN === t || uN.startsWith(t + ' '));
   })();
   const BILLING_CAT_OPTIONS = [{
     v: '',
@@ -33234,7 +33234,7 @@ function BankCRMPage({
     const okDate = validInvDate(d, show);
     if (!okDate) return;
     const uname = (user?.name || '').toUpperCase();
-    const canSetAmount = ["JIGAR", "CHANDNI", "SONAM"].some(u => uname.includes(u));
+    const canSetAmount = ["JIGAR", "CHANDNI"].some(u => uname.includes(u));
     const insertPayload = {
       site_id: site.id,
       invoice_no: v,
@@ -35461,7 +35461,7 @@ function BankCRMPage({
       width: '100%'
     },
     onKeyDown: e => e.key === 'Enter' && addInvoice(showAddInvoice, newInvoiceNo, newInvoiceDate, newInvoiceAmount)
-  })), ["JIGAR", "CHANDNI", "SONAM"].some(u => (user?.name || '').toUpperCase().includes(u)) && React.createElement("div", {
+  })), ["JIGAR", "CHANDNI"].some(u => (user?.name || '').toUpperCase().includes(u)) && React.createElement("div", {
     style: {
       marginBottom: 12
     }
@@ -42369,7 +42369,7 @@ function ReportsPage({
     style: cardStyle
   }, React.createElement("div", {
     style: sectionTitleStyle
-  }, "Value contributed"), myData.myInvoiceTotal > 0 && ["JIGAR", "CHANDNI", "SONAM"].includes(uname) && React.createElement("div", {
+  }, "Value contributed"), myData.myInvoiceTotal > 0 && ["JIGAR", "CHANDNI"].includes(uname) && React.createElement("div", {
     style: rowStyle
   }, React.createElement("span", {
     style: {
@@ -42690,7 +42690,7 @@ function ReportsPage({
       fontWeight: 700,
       color: outputData.nbInvoices.length > 0 ? '#30b54a' : '#1a2030'
     }
-  }, outputData.nbInvoices.length)), ["JIGAR", "CHANDNI", "SONAM"].includes(uname) && React.createElement("div", {
+  }, outputData.nbInvoices.length)), ["JIGAR", "CHANDNI"].includes(uname) && React.createElement("div", {
     style: rowStyle
   }, React.createElement("span", null, "\uD83D\uDCB0 Invoice value"), React.createElement("span", {
     style: {
