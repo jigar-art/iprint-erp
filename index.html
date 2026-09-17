@@ -2729,6 +2729,12 @@ function MainApp({
     e: "📊",
     roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"]
   }, {
+    id: "leave",
+    l: "Leave",
+    e: "\ud83c\udf34",
+    roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"],
+    hideUsers: ["JIGAR", "CHANDNI"]
+  }, {
     id: "myscore",
     l: "My Score",
     e: "\ud83c\udfaf",
@@ -2891,6 +2897,7 @@ function MainApp({
   const FULL_FINANCIAL_ACCESS = ["JIGAR", "CHANDNI"];
   const nav = allNav.filter(n => {
     const uName = (user.name || '').toUpperCase();
+    if (n.hideUsers && n.hideUsers.some(u => uName === u || uName.startsWith(u + ' '))) return false;
     if (FULL_ACCESS.some(u => uName.includes(u))) return true;
     if (!n.roles.includes(user.role)) return false;
     if (n.users) {
@@ -3392,6 +3399,9 @@ function MainApp({
     user: user,
     show: show,
     updateJobStatus: updateJobStatus
+  }), pg === "leave" && React.createElement(LeavePage, {
+    user: user,
+    show: show
   }))), modal && React.createElement("div", {
     style: {
       position: "fixed",
@@ -47392,6 +47402,236 @@ function ClientPortal({
       color: "#333"
     }
   }, "Powered by iPrint ERP \xB7 \xA9 ", new Date().getFullYear())));
+}
+function LeavePage({
+  user,
+  show
+}) {
+  const [types, setTypes] = useState([]);
+  const [reqs, setReqs] = useState([]);
+  const [tab, setTab] = useState('apply');
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    leave_type: 'CL',
+    from_date: '',
+    to_date: '',
+    days: '',
+    reason: ''
+  });
+  const me = user?.id || null;
+  const load = useCallback(async () => {
+    if (!me) return;
+    const [t, r] = await Promise.all([sb.from('leave_types').select('*').eq('active', true).order('sort_order'), sb.from('leave_requests').select('*').order('applied_at', {
+      ascending: false
+    }).limit(500)]);
+    if (t.error) show('\u26a0\ufe0f Leave types: ' + t.error.message, false);else setTypes(t.data || []);
+    if (r.error) show('\u26a0\ufe0f Requests: ' + r.error.message, false);else setReqs(r.data || []);
+  }, [me, show]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const dayCount = (a, z) => {
+    if (!a || !z) return '';
+    const d1 = new Date(a),
+      d2 = new Date(z);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime()) || d2 < d1) return '';
+    return Math.round((d2 - d1) / 86400000) + 1;
+  };
+  const setF = (k, v) => setForm(p => {
+    const n = { ...p, [k]: v };
+    if (k === 'from_date' || k === 'to_date') {
+      const d = dayCount(n.from_date, n.to_date);
+      if (d !== '') n.days = String(d);
+    }
+    return n;
+  });
+  const apply = async () => {
+    if (!form.from_date || !form.to_date) { show('Pick both dates', false); return; }
+    const d = parseFloat(form.days);
+    if (!d || d <= 0) { show('Days must be more than 0', false); return; }
+    if (!(form.reason || '').trim()) { show('Reason is required', false); return; }
+    setBusy(true);
+    const { error } = await sb.from('leave_requests').insert({
+      person_id: me,
+      leave_type: form.leave_type,
+      from_date: form.from_date,
+      to_date: form.to_date,
+      days: d,
+      reason: form.reason.trim()
+    });
+    setBusy(false);
+    if (error) { show('\u26a0\ufe0f Could not apply: ' + error.message, false); return; }
+    show('\u2705 Leave applied \u2014 sent for approval');
+    setForm({ leave_type: 'CL', from_date: '', to_date: '', days: '', reason: '' });
+    setTab('mine');
+    load();
+  };
+  const act = async (row, action) => {
+    const remark = prompt((action === 'Approved' ? 'Approve' : 'Reject') + ' \u2014 remark (optional)');
+    if (remark === null) return;
+    setBusy(true);
+    const { data, error } = await sb.rpc('erp_leave_action', {
+      p_request_id: row.id,
+      p_action: action,
+      p_remark: remark || null
+    });
+    setBusy(false);
+    if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
+    show('\u2705 ' + (data || action));
+    load();
+  };
+  const cancelReq = async row => {
+    if (!confirm('Cancel this leave request?')) return;
+    setBusy(true);
+    const { error } = await sb.rpc('erp_leave_cancel', { p_request_id: row.id });
+    setBusy(false);
+    if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
+    show('\u2705 Cancelled');
+    load();
+  };
+  const mine = reqs.filter(r => r.person_id === me);
+  const queue = reqs.filter(r => r.status === 'Pending L1' && r.l1_approver_id === me || r.status === 'Pending L2' && r.l2_approver_id === me || r.status === 'Pending L3' && r.l3_approver_id === me);
+  const sc = s => s === 'Approved' ? '#10b981' : s === 'Rejected' ? '#f47067' : s === 'Cancelled' ? '#64748b' : '#f0b429';
+  const card = {
+    background: '#0c1017',
+    border: '1px solid #1a2030',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10
+  };
+  const inp = {
+    width: '100%',
+    background: '#070a10',
+    border: '1px solid #1a2030',
+    borderRadius: 8,
+    color: '#e2e8f0',
+    padding: '10px 12px',
+    fontSize: 14,
+    boxSizing: 'border-box'
+  };
+  const lbl = {
+    fontSize: 11,
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: .4,
+    marginBottom: 4,
+    display: 'block'
+  };
+  const tabBtn = (id, label, n) => React.createElement("button", {
+    key: id,
+    onClick: () => setTab(id),
+    style: {
+      flex: 1,
+      background: tab === id ? '#10b981' : 'transparent',
+      color: tab === id ? '#04110c' : '#94a3b8',
+      border: '1px solid ' + (tab === id ? '#10b981' : '#1a2030'),
+      borderRadius: 8,
+      padding: '9px 6px',
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: 'pointer'
+    }
+  }, label, n ? ' (' + n + ')' : '');
+  const row = (r, showWho, actions) => React.createElement("div", {
+    key: r.id,
+    style: card
+  }, React.createElement("div", {
+    style: { display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }
+  }, React.createElement("div", {
+    style: { fontWeight: 700, fontSize: 13, color: '#e2e8f0' }
+  }, showWho ? r.person_name || '\u2014' : r.leave_type, showWho ? React.createElement("span", {
+    style: { color: '#64748b', fontWeight: 400 }
+  }, ' \u00b7 ', r.leave_type) : null), React.createElement("span", {
+    style: { fontSize: 11, fontWeight: 700, color: sc(r.status) }
+  }, r.status)), React.createElement("div", {
+    style: { fontSize: 12, color: '#94a3b8' }
+  }, r.from_date, ' \u2192 ', r.to_date, ' \u00b7 ', r.days, ' day(s)'), r.reason ? React.createElement("div", {
+    style: { fontSize: 12, color: '#cbd5e1', marginTop: 4 }
+  }, r.reason) : null, React.createElement("div", {
+    style: { fontSize: 10, color: '#64748b', marginTop: 6 }
+  }, 'L1 ', r.l1_name || '\u2014', r.l1_action ? ' \u2713' : '', ' \u00b7 L2 ', r.l2_name || 'skipped', r.l2_action ? ' \u2713' : '', ' \u00b7 L3 ', r.l3_name || '\u2014', r.l3_action ? ' \u2713' : ''), actions ? React.createElement("div", {
+    style: { display: 'flex', gap: 8, marginTop: 10 }
+  }, actions) : null);
+  const btn = (label, bg, fg, onClick) => React.createElement("button", {
+    onClick: onClick,
+    disabled: busy,
+    style: {
+      flex: 1,
+      background: bg,
+      color: fg,
+      border: 'none',
+      borderRadius: 8,
+      padding: '9px 8px',
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      opacity: busy ? .6 : 1
+    }
+  }, label);
+  return React.createElement("div", {
+    style: { padding: 12, maxWidth: 720, margin: '0 auto' }
+  }, React.createElement("div", {
+    style: { display: 'flex', gap: 8, marginBottom: 12 }
+  }, tabBtn('apply', '\u270d\ufe0f Apply'), tabBtn('mine', '\ud83d\udcc5 My Leave', mine.length), tabBtn('queue', '\u2705 Approvals', queue.length)), tab === 'apply' ? React.createElement("div", null, React.createElement("div", {
+    style: card
+  }, React.createElement("label", { style: lbl }, 'Leave type'), React.createElement("select", {
+    value: form.leave_type,
+    onChange: e => setF('leave_type', e.target.value),
+    style: inp
+  }, types.map(t => React.createElement("option", {
+    key: t.code,
+    value: t.code
+  }, t.label))), React.createElement("div", {
+    style: { display: 'flex', gap: 8, marginTop: 10 }
+  }, React.createElement("div", { style: { flex: 1 } }, React.createElement("label", { style: lbl }, 'From'), React.createElement("input", {
+    type: 'date',
+    value: form.from_date,
+    onChange: e => setF('from_date', e.target.value),
+    style: inp
+  })), React.createElement("div", { style: { flex: 1 } }, React.createElement("label", { style: lbl }, 'To'), React.createElement("input", {
+    type: 'date',
+    value: form.to_date,
+    onChange: e => setF('to_date', e.target.value),
+    style: inp
+  }))), React.createElement("div", { style: { marginTop: 10 } }, React.createElement("label", { style: lbl }, 'Days (edit for half-day)'), React.createElement("input", {
+    type: 'number',
+    step: '0.5',
+    min: '0.5',
+    value: form.days,
+    onChange: e => setF('days', e.target.value),
+    style: inp
+  })), React.createElement("div", { style: { marginTop: 10 } }, React.createElement("label", { style: lbl }, 'Reason'), React.createElement("textarea", {
+    rows: 3,
+    value: form.reason,
+    onChange: e => setF('reason', e.target.value),
+    style: { ...inp, resize: 'vertical' }
+  })), React.createElement("button", {
+    onClick: apply,
+    disabled: busy,
+    style: {
+      width: '100%',
+      marginTop: 12,
+      background: '#10b981',
+      color: '#04110c',
+      border: 'none',
+      borderRadius: 8,
+      padding: '12px',
+      fontSize: 14,
+      fontWeight: 800,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      opacity: busy ? .6 : 1
+    }
+  }, busy ? 'Submitting\u2026' : '\ud83c\udf34 Apply for Leave'))) : null, tab === 'mine' ? React.createElement("div", null, mine.length ? mine.map(r => row(r, false, String(r.status).indexOf('Pending') === 0 ? [React.createElement("div", {
+    key: 'c',
+    style: { display: 'flex', width: '100%' }
+  }, btn('Cancel request', '#1a2030', '#e2e8f0', () => cancelReq(r)))] : null)) : React.createElement("div", {
+    style: { ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }
+  }, 'No leave applications yet.')) : null, tab === 'queue' ? React.createElement("div", null, queue.length ? queue.map(r => row(r, true, [React.createElement("div", {
+    key: 'a',
+    style: { display: 'flex', gap: 8, width: '100%' }
+  }, btn('\u2713 Approve', '#10b981', '#04110c', () => act(r, 'Approved')), btn('\u2715 Reject', '#f47067', '#1a0a0a', () => act(r, 'Rejected')))])) : React.createElement("div", {
+    style: { ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }
+  }, 'Nothing waiting on you.')) : null);
 }
 function HealthCheckPage() {
   const [checks, setChecks] = useState({
