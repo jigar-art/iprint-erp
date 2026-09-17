@@ -2746,6 +2746,41 @@ function MainApp({
       clearInterval(tmr);
     };
   }, [user && user.id, pg]);
+  const [quotePending, setQuotePending] = useState(0);
+  const [quoteRows, setQuoteRows] = useState([]);
+  const loadQuotes = React.useCallback(async () => {
+    const uname = (user && user.name || '').toUpperCase();
+    if (!uname) return;
+    const {
+      data,
+      error
+    } = await sb.from('v_quote_sla').select('*').order('due_at', {
+      ascending: true
+    });
+    if (error || !data) return;
+    setQuoteRows(data);
+    const isBoss = FULL_ACCESS.some(u => uname.includes(u)) || uname === 'AMOL' || uname.startsWith('AMOL ');
+    const mine = data.filter(r => {
+      if (r.status !== 'Pending') return false;
+      if (isBoss) return true;
+      const a = (r.assigned_to || '').toUpperCase();
+      const e = (r.escalate_to || '').toUpperCase();
+      return uname === a || uname.startsWith(a + ' ') || uname === e || uname.startsWith(e + ' ');
+    });
+    setQuotePending(mine.filter(r => r.sla_state === 'red').length);
+  }, [user && user.name]);
+  useEffect(() => {
+    let dead = false;
+    const run = () => {
+      if (!dead) loadQuotes();
+    };
+    run();
+    const tmr = setInterval(run, 120000);
+    return () => {
+      dead = true;
+      clearInterval(tmr);
+    };
+  }, [loadQuotes, pg]);
   const allNav = [{
     id: "dash",
     l: "Dashboard",
@@ -2757,6 +2792,11 @@ function MainApp({
     e: "\ud83c\udf34",
     roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"],
     hideUsers: ["JIGAR", "CHANDNI"]
+  }, {
+    id: "quotes",
+    l: "Quote Pending",
+    e: "\u23f1",
+    roles: ["admin", "sales", "production", "designer"]
   }, {
     id: "myscore",
     l: "My Score",
@@ -3002,7 +3042,7 @@ function MainApp({
       overflowY: "auto"
     }
   }, nav.map(n => {
-    const pendOs = n.id === 'leave' ? leavePending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
+    const pendOs = n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
         const lvKey = 'myprs_last_viewed_' + uname;
@@ -3425,6 +3465,11 @@ function MainApp({
   }), pg === "leave" && React.createElement(LeavePage, {
     user: user,
     show: show
+  }), pg === "quotes" && React.createElement(QuotesPage, {
+    user: user,
+    show: show,
+    rows: quoteRows,
+    reload: loadQuotes
   }))), modal && React.createElement("div", {
     style: {
       position: "fixed",
@@ -47445,6 +47490,279 @@ function ClientPortal({
       color: "#333"
     }
   }, "Powered by iPrint ERP \xB7 \xA9 ", new Date().getFullYear())));
+}
+function QuotesPage({
+  user,
+  show,
+  rows,
+  reload
+}) {
+  const [tab, setTab] = useState('open');
+  const [dept, setDept] = useState('All');
+  const [busy, setBusy] = useState(0);
+  const uname = (user && user.name || '').toUpperCase();
+  const isBoss = FULL_ACCESS.some(u => uname.includes(u)) || uname === 'AMOL' || uname.startsWith('AMOL ');
+  const mineOnly = r => {
+    if (isBoss) return true;
+    const a = (r.assigned_to || '').toUpperCase();
+    const e = (r.escalate_to || '').toUpperCase();
+    return uname === a || uname.startsWith(a + ' ') || uname === e || uname.startsWith(e + ' ');
+  };
+  const visible = (rows || []).filter(mineOnly).filter(r => dept === 'All' || r.department === dept);
+  const open = visible.filter(r => r.status === 'Pending');
+  const done = visible.filter(r => r.status !== 'Pending');
+  const list = tab === 'open' ? open : done;
+  const nRed = open.filter(r => r.sla_state === 'red').length;
+  const nAmber = open.filter(r => r.sla_state === 'amber').length;
+  const nLate = done.filter(r => r.was_late).length;
+  const markSent = async r => {
+    if (!window.confirm('Mark as sent: ' + (r.client_name || '') + '?\n\nThis stops the SLA clock and is recorded against your name.')) return;
+    setBusy(r.id);
+    const {
+      error
+    } = await sb.from('quote_requests').update({
+      status: 'Sent',
+      sent_at: new Date().toISOString(),
+      sent_by: uname,
+      updated_at: new Date().toISOString()
+    }).eq('id', r.id);
+    setBusy(0);
+    if (error) {
+      show('Could not update: ' + error.message, false);
+      return;
+    }
+    show('Marked sent', true);
+    if (reload) reload();
+  };
+  const dropIt = async r => {
+    const why = window.prompt('Reason for closing without a quote:');
+    if (!why) return;
+    setBusy(r.id);
+    const {
+      error
+    } = await sb.from('quote_requests').update({
+      status: 'No Quote Required',
+      notes: (r.notes ? r.notes + ' | ' : '') + 'Closed by ' + uname + ': ' + why,
+      updated_at: new Date().toISOString()
+    }).eq('id', r.id);
+    setBusy(0);
+    if (error) {
+      show('Could not update: ' + error.message, false);
+      return;
+    }
+    show('Closed', true);
+    if (reload) reload();
+  };
+  const card = (label, value, colour) => React.createElement("div", {
+    style: {
+      flex: 1,
+      background: "#0b0f1a",
+      border: "1px solid #1a2030",
+      borderRadius: 8,
+      padding: "8px 10px"
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: "#64748b"
+    }
+  }, label), React.createElement("div", {
+    style: {
+      fontSize: 20,
+      fontWeight: 700,
+      color: colour
+    }
+  }, value));
+  return React.createElement("div", {
+    style: {
+      padding: 12
+    }
+  }, React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      marginBottom: 10,
+      flexWrap: "wrap"
+    }
+  }, React.createElement("h2", {
+    style: {
+      margin: 0,
+      fontSize: 15,
+      fontWeight: 700,
+      color: "#e2e8f0"
+    }
+  }, "Quote Pending"), React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: "#64748b"
+    }
+  }, "Same-day rule: received before 5:00 pm \u2192 due 5:00 pm today"), React.createElement("button", {
+    onClick: () => reload && reload(),
+    style: {
+      marginLeft: "auto",
+      padding: "4px 10px",
+      fontSize: 11,
+      background: "#111827",
+      color: "#e2e8f0",
+      border: "1px solid #1a2030",
+      borderRadius: 6,
+      cursor: "pointer"
+    }
+  }, "Refresh")), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginBottom: 10
+    }
+  }, card('Overdue', nRed, '#f87171'), card('Due today', nAmber, '#fbbf24'), card('Sent late', nLate, '#94a3b8')), React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 10,
+      flexWrap: "wrap"
+    }
+  }, ['open', 'closed'].map(t => React.createElement("button", {
+    key: t,
+    onClick: () => setTab(t),
+    style: {
+      padding: "4px 12px",
+      fontSize: 11,
+      borderRadius: 6,
+      cursor: "pointer",
+      border: "1px solid " + (tab === t ? "#e3a008" : "#1a2030"),
+      background: tab === t ? "#e3a00820" : "#0b0f1a",
+      color: tab === t ? "#e3a008" : "#94a3b8"
+    }
+  }, t === 'open' ? 'Open (' + open.length + ')' : 'Closed (' + done.length + ')')), ['All', 'Estimation', 'Design'].map(d => React.createElement("button", {
+    key: d,
+    onClick: () => setDept(d),
+    style: {
+      padding: "4px 12px",
+      fontSize: 11,
+      borderRadius: 6,
+      cursor: "pointer",
+      border: "1px solid " + (dept === d ? "#38bdf8" : "#1a2030"),
+      background: dept === d ? "#38bdf820" : "#0b0f1a",
+      color: dept === d ? "#38bdf8" : "#94a3b8"
+    }
+  }, d))), list.length === 0 && React.createElement("div", {
+    style: {
+      padding: 24,
+      textAlign: "center",
+      color: "#64748b",
+      fontSize: 12
+    }
+  }, tab === 'open' ? "Nothing pending. All quotes are out." : "Nothing closed yet."), list.map(r => {
+    const red = r.sla_state === 'red';
+    const amber = r.sla_state === 'amber';
+    const bar = red ? "#f87171" : amber ? "#fbbf24" : r.was_late ? "#94a3b8" : "#34d399";
+    const days = Math.floor((r.hours_overdue || 0) / 24);
+    const hrs = Math.round((r.hours_overdue || 0) % 24);
+    return React.createElement("div", {
+      key: r.id,
+      style: {
+        borderLeft: "3px solid " + bar,
+        background: "#0b0f1a",
+        border: "1px solid #1a2030",
+        borderLeftColor: bar,
+        borderRadius: 6,
+        padding: "9px 11px",
+        marginBottom: 6
+      }
+    }, React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "baseline",
+        gap: 8,
+        flexWrap: "wrap"
+      }
+    }, React.createElement("span", {
+      style: {
+        fontSize: 13,
+        fontWeight: 700,
+        color: "#e2e8f0"
+      }
+    }, r.client_name || '\u2014'), React.createElement("span", {
+      style: {
+        fontSize: 9,
+        padding: "1px 7px",
+        borderRadius: 9,
+        background: r.department === 'Design' ? "#a855f720" : "#38bdf820",
+        color: r.department === 'Design' ? "#c084fc" : "#38bdf8"
+      }
+    }, r.work_type), r.job_no && React.createElement("span", {
+      style: {
+        fontSize: 9,
+        color: "#64748b"
+      }
+    }, "Job ", r.job_no), React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        fontSize: 10,
+        fontWeight: 700,
+        color: bar
+      }
+    }, r.status !== 'Pending' ? r.status + (r.was_late ? ' (late)' : '') : red ? (days > 0 ? days + 'd ' : '') + hrs + 'h overdue' : amber ? 'Due today' : 'On track')), React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: "#94a3b8",
+        margin: "3px 0 6px"
+      }
+    }, r.subject), React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap"
+      }
+    }, React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: "#64748b"
+      }
+    }, r.assigned_to, r.status === 'Pending' ? ' \u00b7 escalates to ' + r.escalate_to : r.sent_by ? ' \u00b7 sent by ' + r.sent_by : ''), r.gmail_thread_id && React.createElement("a", {
+      href: "https://mail.google.com/mail/u/0/#all/" + r.gmail_thread_id,
+      target: "_blank",
+      rel: "noreferrer",
+      style: {
+        fontSize: 10,
+        color: "#38bdf8",
+        textDecoration: "none"
+      }
+    }, "Open mail"), r.status === 'Pending' && React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        display: "flex",
+        gap: 6
+      }
+    }, React.createElement("button", {
+      disabled: busy === r.id,
+      onClick: () => dropIt(r),
+      style: {
+        padding: "3px 9px",
+        fontSize: 10,
+        background: "#0b0f1a",
+        color: "#94a3b8",
+        border: "1px solid #1a2030",
+        borderRadius: 5,
+        cursor: "pointer"
+      }
+    }, "No quote"), React.createElement("button", {
+      disabled: busy === r.id,
+      onClick: () => markSent(r),
+      style: {
+        padding: "3px 9px",
+        fontSize: 10,
+        background: "#e3a008",
+        color: "#060810",
+        border: "none",
+        borderRadius: 5,
+        fontWeight: 700,
+        cursor: "pointer"
+      }
+    }, busy === r.id ? "..." : "Mark sent"))));
+  }));
 }
 function LeavePage({
   user,
