@@ -2504,7 +2504,11 @@ function MainApp({
   const addNewMaterialV2 = useCallback(async (name, unit) => {
     const cleanName = String(name || '').trim();
     if (!cleanName) return null;
-    const safeUnit = ['roll', 'sheet', 'nos', 'sqft', 'kg', 'ltr', 'meter', 'pcs'].includes(unit) ? unit : 'roll';
+    if (!['roll', 'sheet', 'nos'].includes(unit)) {
+      show("Pick a unit (roll, sheet or nos) before adding the material.", false);
+      return null;
+    }
+    const safeUnit = unit;
     const {
       data,
       error
@@ -15705,7 +15709,7 @@ function GRNPage({
     qc: "OK"
   });
   const [newMat, setNewMat] = useState("");
-  const [newMatUnit, setNewMatUnit] = useState("roll");
+  const [newMatUnit, setNewMatUnit] = useState("");
   const [newSup, setNewSup] = useState("");
   const [showNewMat, setShowNewMat] = useState(false);
   const [showNewSup, setShowNewSup] = useState(false);
@@ -15749,6 +15753,10 @@ function GRNPage({
   };
   const doAddMat = async () => {
     if (!newMat.trim()) return;
+    if (!newMatUnit) {
+      alert("Pick the unit for \"" + newMat.trim() + "\" \u2014 roll, sheet or nos.\n\nThe unit is locked once the material is created, so it must be right.");
+      return;
+    }
     const r = await addNewMaterialV2(newMat.trim(), newMatUnit);
     if (r) {
       setExtraV2(p => [...p, r]);
@@ -15758,7 +15766,7 @@ function GRNPage({
         unit: r.unit || newMatUnit
       }));
       setNewMat("");
-      setNewMatUnit("roll");
+      setNewMatUnit("");
       setShowNewMat(false);
     }
   };
@@ -16020,9 +16028,13 @@ function GRNPage({
     value: newMatUnit,
     onChange: e => setNewMatUnit(e.target.value),
     style: {
-      width: 88
+      width: 132,
+      color: newMatUnit ? "#e2e8f0" : "#f0b429"
     }
-  }, ['roll', 'sheet', 'nos', 'sqft', 'kg', 'ltr', 'meter', 'pcs'].map(u => React.createElement("option", {
+  }, React.createElement("option", {
+    key: "__pick",
+    value: ""
+  }, "Unit \u2014 pick one"), ['roll', 'sheet', 'nos'].map(u => React.createElement("option", {
     key: u,
     value: u
   }, u))), React.createElement("button", {
