@@ -317,6 +317,17 @@ const ensureBankingJobGroup = async (jobNo, firstSite) => {
   if (insErr) return null;
   return inserted;
 };
+const BATCH_FILE_FIELDS = ['dc_urls', 'photo_urls', 'invoice_docs_urls'];
+const writeBatchFiles = async (batchId, field, urls) => {
+  const {
+    error
+  } = await sb.rpc('erp_batch_set_files', {
+    p_batch_id: batchId,
+    p_field: field,
+    p_urls: urls
+  });
+  return error;
+};
 const appendToJsonArray = async (table, id, field, newItems) => {
   if (!table || !id || !field || !Array.isArray(newItems) || !newItems.length) return null;
   window._lastSaveError = '';
@@ -330,11 +341,9 @@ const appendToJsonArray = async (table, id, field, newItems) => {
   }
   const existing = Array.isArray(fresh?.[field]) ? fresh[field] : fresh?.[field] ? [fresh[field]] : [];
   const merged = [...existing, ...newItems];
-  const {
-    error: updErr
-  } = await sb.from(table).update({
+  const updErr = table === 'batches' && BATCH_FILE_FIELDS.includes(field) ? await writeBatchFiles(id, field, merged) : (await sb.from(table).update({
     [field]: merged
-  }).eq('id', id);
+  }).eq('id', id)).error;
   if (updErr) {
     window._lastSaveError = 'write: ' + (updErr.message || updErr);
     return null;
@@ -350,11 +359,9 @@ const removeFromJsonArray = async (table, id, field, itemToRemove) => {
   if (selErr) return null;
   const existing = Array.isArray(fresh?.[field]) ? fresh[field] : fresh?.[field] ? [fresh[field]] : [];
   const filtered = existing.filter(u => u !== itemToRemove);
-  const {
-    error: updErr
-  } = await sb.from(table).update({
+  const updErr = table === 'batches' && BATCH_FILE_FIELDS.includes(field) ? await writeBatchFiles(id, field, filtered) : (await sb.from(table).update({
     [field]: filtered
-  }).eq('id', id);
+  }).eq('id', id)).error;
   if (updErr) return null;
   return filtered;
 };
@@ -6869,9 +6876,7 @@ function JobDetail({
           const b = (j.batches || []).find(x => x.id === e.batchId);
           if (!b) return;
           const nw = (Array.isArray(b[sec.batchField]) ? b[sec.batchField] : []).filter(u => u !== e.url);
-          await sb.from('batches').update({
-            [sec.batchField]: nw
-          }).eq('id', e.batchId);
+          await writeBatchFiles(e.batchId, sec.batchField, nw);
           if (setBatches) setBatches(p => p.map(x => x.id === e.batchId ? {
             ...x,
             [sec.batchField]: nw
@@ -10581,9 +10586,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       onClick: async () => {
         if (!confirm('Remove photo?')) return;
         const nw = photos.filter((_, i) => i !== pi);
-        await sb.from('batches').update({
-          photo_urls: nw
-        }).eq('id', b.id);
+        await writeBatchFiles(b.id, 'photo_urls', nw);
         setBatches(p => p.map(x => x.id === b.id ? {
           ...x,
           photo_urls: nw
@@ -10662,9 +10665,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       onClick: async () => {
         if (!confirm('Remove DC?')) return;
         const nw = dcs.filter((_, i) => i !== di);
-        await sb.from('batches').update({
-          dc_urls: nw
-        }).eq('id', b.id);
+        await writeBatchFiles(b.id, 'dc_urls', nw);
         setBatches(p => p.map(x => x.id === b.id ? {
           ...x,
           dc_urls: nw
@@ -10743,9 +10744,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       onClick: async () => {
         if (!confirm('Remove Invoice Doc?')) return;
         const nw = ivds.filter((_, i) => i !== di);
-        await sb.from('batches').update({
-          invoice_docs_urls: nw
-        }).eq('id', b.id);
+        await writeBatchFiles(b.id, 'invoice_docs_urls', nw);
         setBatches(p => p.map(x => x.id === b.id ? {
           ...x,
           invoice_docs_urls: nw
@@ -10774,9 +10773,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         const urls = await uploadMultiple(files, 'batch-invoice-docs');
         if (urls.length) {
           const nw = [...ivds, ...urls];
-          await sb.from('batches').update({
-            invoice_docs_urls: nw
-          }).eq('id', b.id);
+          await writeBatchFiles(b.id, 'invoice_docs_urls', nw);
           setBatches(p => p.map(x => x.id === b.id ? {
             ...x,
             invoice_docs_urls: nw
