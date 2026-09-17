@@ -5780,28 +5780,38 @@ function JobDetail({
     if (oldAddr !== newAddr && oldAddr) {
       if (!confirm('⚠️ DELIVERY ADDRESS CHANGE\n\nJob: ' + j.id + '\n\nOLD:\n' + oldAddr + '\n\nNEW:\n' + newAddr + '\n\nChanged by: ' + (user?.name || 'Unknown') + '\n\nAre you sure you want to update the delivery address?')) return;
       try {
-        await sb.from('client_notes').insert({
+        const {
+          error: naErr
+        } = await sb.from('client_notes').insert({
           id: 'N' + Date.now(),
           job_id: j.id,
           dept: 'SYSTEM',
           text: '📍 Delivery address changed by ' + (user?.name || 'Unknown') + ':\n\nOLD: ' + oldAddr + '\nNEW: ' + newAddr,
           created_at: new Date().toISOString()
         });
-      } catch (e) {}
+        if (naErr) show('⚠️ Address updated, but the audit note did not save: ' + naErr.message, false);
+      } catch (e) {
+        show('⚠️ Address updated, but the audit note did not save: ' + (e.message || e), false);
+      }
     }
     const oldBillAddr = (j.billing_address || '').trim();
     const newBillAddr = (jf.billing_address || '').trim();
     if (oldBillAddr !== newBillAddr && oldBillAddr) {
       if (!confirm('⚠️ BILLING ADDRESS CHANGE\n\nJob: ' + j.id + '\n\nOLD:\n' + oldBillAddr + '\n\nNEW:\n' + newBillAddr + '\n\nChanged by: ' + (user?.name || 'Unknown') + '\n\nAre you sure you want to update the billing address?')) return;
       try {
-        await sb.from('client_notes').insert({
+        const {
+          error: nbErr
+        } = await sb.from('client_notes').insert({
           id: 'N' + Date.now() + 'b',
           job_id: j.id,
           dept: 'SYSTEM',
           text: '🏢 Billing address changed by ' + (user?.name || 'Unknown') + ':\n\nOLD: ' + oldBillAddr + '\nNEW: ' + newBillAddr,
           created_at: new Date().toISOString()
         });
-      } catch (e) {}
+        if (nbErr) show('⚠️ Billing address updated, but the audit note did not save: ' + nbErr.message, false);
+      } catch (e) {
+        show('⚠️ Billing address updated, but the audit note did not save: ' + (e.message || e), false);
+      }
     }
     const cleanFields = {
       ...jf
