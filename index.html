@@ -32431,6 +32431,8 @@ function MyScorePage({ user }) {
   const [err, setErr] = React.useState('');
   const [, force] = React.useState(0);
   const uname = (user?.name || '').toUpperCase();
+  // Job values are commercial data: only admin / accounts / sales see rupee figures.
+  const canSeeMoney = ['admin', 'accounts', 'sales'].includes((user?.role || '').toLowerCase());
   React.useEffect(() => {
     (async () => {
       try {
@@ -32479,12 +32481,12 @@ function MyScorePage({ user }) {
               const d = mine.reduce((a, r) => a + (r.red || 0), 0);
               return j ? Math.round(100 * (j - d) / j) + '%' : '—';
             })(), null, "#2fb37a"),
-            card('₹ at risk', '₹' + mine.reduce((a, r) => a + Number(r.red_lakh || 0), 0).toFixed(1) + ' L', null, "#e3a008")
+            canSeeMoney ? card('₹ at risk', '₹' + mine.reduce((a, r) => a + Number(r.red_lakh || 0), 0).toFixed(1) + ' L', null, "#e3a008") : null
           ),
           React.createElement("div", { className: "c", style: { padding: 0, overflowX: "auto" } },
             React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12 } },
               React.createElement("thead", null, React.createElement("tr", null,
-                ["Area", TL('Open jobs'), TL('Late'), TL('On time'), "₹ L"].map(h =>
+                (canSeeMoney ? ["Area", TL('Open jobs'), TL('Late'), TL('On time'), "₹ L"] : ["Area", TL('Open jobs'), TL('Late'), TL('On time')]).map(h =>
                   React.createElement("th", { key: h, style: { textAlign: "left", padding: "7px 9px", color: "#64748b", fontSize: 10, textTransform: "uppercase", borderBottom: "1px solid #1c2236" } }, h)))),
               React.createElement("tbody", null, mine.map((r, i) =>
                 React.createElement("tr", { key: i },
@@ -32492,7 +32494,7 @@ function MyScorePage({ user }) {
                   React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, r.jobs),
                   React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236", color: r.red > 0 ? "#e0574f" : undefined } }, r.red),
                   React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, (r.on_time_pct ?? '—') + (r.on_time_pct != null ? '%' : '')),
-                  React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, r.red_lakh)))))),
+                  canSeeMoney ? React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, r.red_lakh) : null))))),
           myMonths.length ? React.createElement("div", { style: { marginTop: 14 } },
             React.createElement("div", { style: { fontSize: 11, color: "#64748b", marginBottom: 6, textTransform: "uppercase" } }, TL('This month')),
             React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
