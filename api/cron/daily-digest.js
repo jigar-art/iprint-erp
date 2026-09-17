@@ -9,6 +9,7 @@
 // digest_history. NO operational tables (jobs/prs/etc.) are written by this
 // handler — strictly read-only on operational data + INSERT-only on history.
 
+import { sendTemplate } from '../wa-send-template.js';
 const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 
 // WhatsApp number map — must stay in sync with WA_NUMBERS in index.html.
@@ -290,11 +291,11 @@ export default async function handler(req, res) {
     });
   }
 
-  // 4. Send to each recipient via /api/wa-send-template (separate proxy).
-  //    Determine our own host so the request stays internal.
-  const proto = (req.headers['x-forwarded-proto'] || 'https');
-  const host  = (req.headers['x-forwarded-host'] || req.headers.host);
-  const sendUrl = `${proto}://${host}/api/wa-send-template`;
+  // 4. Send to each recipient IN-PROCESS (2026-09-17).
+  //    Previously this POSTed to `https://{host}/api/wa-send-template`. On Vercel
+  //    that self-call is an external request and Deployment Protection rejected it
+  //    with 401 "Protected deployment", so every run since at least 10 Sep failed
+  //    silently. Calling sendTemplate() directly removes the round-trip entirely.
 
   const results = [];
   for (const name of recipients) {
@@ -304,22 +305,16 @@ export default async function handler(req, res) {
       continue;
     }
     try {
-      const r = await fetch(sendUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: phone,
-          template_name: 'iprint_daily_digest',
-          language_code: 'en',
-          traits,
-          fallback_text: textBody,
-        }),
+      const data = await sendTemplate({
+        to: phone,
+        template_name: 'iprint_daily_digest',
+        language_code: 'en',
+        traits,
       });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok && data.ok) {
+      if (data.ok) {
         results.push({ name, phone, status: 'sent', interakt_id: data.id || null, error: null });
       } else {
-        results.push({ name, phone, status: 'failed', interakt_id: null, error: data.error || `HTTP ${r.status}` });
+        results.push({ name, phone, status: 'failed', interakt_id: null, error: data.error || `interakt_http_${data.upstream_status || '?'}` });
       }
     } catch (e) {
       results.push({ name, phone, status: 'failed', interakt_id: null, error: e.message });
