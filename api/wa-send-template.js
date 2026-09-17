@@ -54,6 +54,53 @@ const TEMPLATE_PARAM_ORDER = {
   ],
 };
 
+
+// --- In-process sender (added 2026-09-17) ---------------------------------
+// The daily-digest cron previously POSTed to this route over HTTPS. On Vercel
+// that outbound self-call is treated as an external request and is rejected by
+// Deployment Protection with 401 "Protected deployment". Calling this function
+// directly keeps the work inside one invocation and needs no protection change.
+export async function sendTemplate({ to, template_name, language_code = 'en', traits = {} }) {
+  const interaktKey = process.env.INTERAKT_KEY;
+  if (!interaktKey) return { ok: false, error: 'INTERAKT_KEY not configured' };
+
+  const digits = String(to || '').replace(/\D/g, '');
+  if (!digits || digits.length < 10) return { ok: false, error: 'invalid_phone' };
+  const templateName = String(template_name || '').trim();
+  if (!templateName) return { ok: false, error: 'missing_template_name' };
+
+  let countryCode = '91';
+  let phoneNumber = digits;
+  if (digits.startsWith('91') && digits.length === 12) phoneNumber = digits.slice(2);
+
+  const order = TEMPLATE_PARAM_ORDER[templateName];
+  if (!order) return { ok: false, error: `unknown_template:${templateName}` };
+  const bodyValues = order.map(k => {
+    const v = traits[k];
+    return (v === null || v === undefined) ? '' : String(v);
+  });
+
+  try {
+    const r = await fetch('https://api.interakt.ai/v1/public/message/', {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${interaktKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        countryCode, phoneNumber,
+        callbackData: `iprint_${templateName}_${Date.now()}`,
+        type: 'Template',
+        template: { name: templateName, languageCode: String(language_code || 'en'), bodyValues },
+      }),
+    });
+    const raw = await r.text();
+    let data = {};
+    try { data = JSON.parse(raw); } catch { /* non-JSON upstream */ }
+    if (r.ok && (data.result === true || data.id)) return { ok: true, id: data.id || null };
+    return { ok: false, error: data.message || data.error || `interakt_http_${r.status}`, upstream_status: r.status, upstream_body: String(raw || '').slice(0, 300) };
+  } catch (e) {
+    return { ok: false, error: e.message || 'interakt_fetch_failed' };
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
