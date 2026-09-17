@@ -2723,6 +2723,26 @@ function MainApp({
       disp: dLogs.length
     };
   }, [filteredJobs, grnData, osLogs, dLogs]);
+  const [leavePending, setLeavePending] = useState(0);
+  useEffect(() => {
+    let dead = false;
+    const loadLeavePending = async () => {
+      const me = user && user.id;
+      if (!me) return;
+      const {
+        data,
+        error
+      } = await sb.from('leave_requests').select('id,status,l1_approver_id,l2_approver_id,l3_approver_id').like('status', 'Pending%');
+      if (dead || error || !data) return;
+      setLeavePending(data.filter(r => r.status === 'Pending L1' && r.l1_approver_id === me || r.status === 'Pending L2' && r.l2_approver_id === me || r.status === 'Pending L3' && r.l3_approver_id === me).length);
+    };
+    loadLeavePending();
+    const tmr = setInterval(loadLeavePending, 120000);
+    return () => {
+      dead = true;
+      clearInterval(tmr);
+    };
+  }, [user && user.id, pg]);
   const allNav = [{
     id: "dash",
     l: "Dashboard",
@@ -2979,7 +2999,7 @@ function MainApp({
       overflowY: "auto"
     }
   }, nav.map(n => {
-    const pendOs = n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
+    const pendOs = n.id === 'leave' ? leavePending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
         const lvKey = 'myprs_last_viewed_' + uname;
