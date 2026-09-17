@@ -2022,16 +2022,15 @@ function MainApp({
         date: td(),
         job_id: item.job_id || '',
         delivery_boy: user?.name || '',
-        mode: 'In-house',
-        qty: +item.qty || 0,
-        vehicle_no: '',
-        notes: 'Auto: ' + (item.internal_name || ''),
+        dispatch_type: 'In-house',
+        vehicle: '',
+        notes: 'Auto: ' + (item.internal_name || '') + (+item.qty ? ' (qty ' + (+item.qty) + ')' : ''),
         created_by: user?.name || ''
       };
       const {
         error: e
       } = await sb.from('dispatch_logs').insert(ld);
-      if (!e) setDLogs(p => [ld, ...p]);
+      if (e) show('\u26a0\ufe0f Dispatch ticked, but the dispatch log did not save: ' + e.message, false);else setDLogs(p => [ld, ...p]);
     }
   }, [show, items, user]);
   const addGRN = useCallback(async data => {
