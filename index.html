@@ -15920,16 +15920,22 @@ function GRNPage({
     l: "Unit"
   }, React.createElement("div", {
     className: "in",
-    title: "Locked to the material master \u2014 change it on the Materials page",
+    title: "The unit comes from the material master. Nothing to do here.",
     style: {
       background: "#0d1118",
       display: "flex",
       alignItems: "center",
-      cursor: "not-allowed",
+      cursor: "default",
       color: masterUnitOf(f.material) ? "#94a3b8" : "#f47067"
     }
-  }, masterUnitOf(f.material) || "\u2014 not in master \u2014")), masterUnitOf(f.material) === 'roll' ? React.createElement(F, {
-    l: "SqFt *"
+  }, masterUnitOf(f.material) ? React.createElement(React.Fragment, null, masterUnitOf(f.material), React.createElement("span", {
+    style: {
+      color: "#4b5563",
+      fontSize: 10,
+      marginLeft: 6
+    }
+  }, "\u00b7 from master")) : "\u2014 not in master \u2014")), masterUnitOf(f.material) === 'roll' ? React.createElement(F, {
+    l: "SqFt * (needed for roll)"
   }, React.createElement("input", {
     className: "in mn",
     value: f.sqft,
@@ -16270,16 +16276,22 @@ function GRNPage({
     l: "Unit"
   }, React.createElement("div", {
     className: "in",
-    title: "Locked to the material master \u2014 change it on the Materials page",
+    title: "The unit comes from the material master. Nothing to do here.",
     style: {
       background: "#0d1118",
       display: "flex",
       alignItems: "center",
-      cursor: "not-allowed",
+      cursor: "default",
       color: masterUnitOf(editGrn.material) ? "#94a3b8" : "#e3a008"
     }
-  }, masterUnitOf(editGrn.material) || (editGrn.unit || 'roll') + " (legacy)")), React.createElement(F, {
-    l: masterUnitOf(editGrn.material) === 'roll' ? "SqFt *" : "SqFt"
+  }, masterUnitOf(editGrn.material) ? React.createElement(React.Fragment, null, masterUnitOf(editGrn.material), React.createElement("span", {
+    style: {
+      color: "#4b5563",
+      fontSize: 10,
+      marginLeft: 6
+    }
+  }, "\u00b7 from master")) : (editGrn.unit || 'roll') + " (legacy)")), React.createElement(F, {
+    l: masterUnitOf(editGrn.material) === 'roll' ? "SqFt * (needed for roll)" : "SqFt"
   }, React.createElement("input", {
     className: "in mn",
     value: editGrn.sqft || '',
