@@ -47858,6 +47858,9 @@ function LeavePage({
   };
   const mine = reqs.filter(r => r.person_id === me);
   const queue = reqs.filter(r => r.status === 'Pending L1' && r.l1_approver_id === me || r.status === 'Pending L2' && r.l2_approver_id === me || r.status === 'Pending L3' && r.l3_approver_id === me);
+  const seeAll = (user?.role || '') === 'admin';
+  const isPend = r => String(r.status).indexOf('Pending') === 0;
+  const allReqs = seeAll ? reqs.slice().sort((a, b) => (isPend(b) ? 1 : 0) - (isPend(a) ? 1 : 0)) : [];
   const sc = s => s === 'Approved' ? '#10b981' : s === 'Rejected' ? '#f47067' : s === 'Cancelled' ? '#64748b' : '#f0b429';
   const card = {
     background: '#0c1017',
@@ -47939,7 +47942,7 @@ function LeavePage({
     style: { padding: 12, maxWidth: 720, margin: '0 auto' }
   }, React.createElement("div", {
     style: { display: 'flex', gap: 8, marginBottom: 12 }
-  }, tabBtn('apply', '\u270d\ufe0f Apply'), tabBtn('mine', '\ud83d\udcc5 My Leave', mine.length), tabBtn('queue', '\u2705 Approvals', queue.length)), tab === 'apply' ? React.createElement("div", null, React.createElement("div", {
+  }, tabBtn('apply', '\u270d\ufe0f Apply'), tabBtn('mine', '\ud83d\udcc5 My Leave', mine.length), tabBtn('queue', '\u2705 Approvals', queue.length), seeAll ? tabBtn('all', '\ud83d\udccb All', allReqs.filter(isPend).length) : null), tab === 'apply' ? React.createElement("div", null, React.createElement("div", {
     style: card
   }, React.createElement("label", { style: lbl }, 'Leave type'), React.createElement("select", {
     value: form.leave_type,
@@ -47998,7 +48001,9 @@ function LeavePage({
     style: { display: 'flex', gap: 8, width: '100%' }
   }, btn('\u2713 Approve', '#10b981', '#04110c', () => act(r, 'Approved')), btn('\u2715 Reject', '#f47067', '#1a0a0a', () => act(r, 'Rejected')))])) : React.createElement("div", {
     style: { ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }
-  }, 'Nothing waiting on you.')) : null);
+  }, 'Nothing waiting on you.')) : null, tab === 'all' && seeAll ? React.createElement("div", null, allReqs.length ? allReqs.map(r => row(r, true, null)) : React.createElement("div", {
+    style: { ...card, textAlign: 'center', color: '#64748b', fontSize: 12 }
+  }, 'No leave requests yet.')) : null);
 }
 function HealthCheckPage() {
   const [checks, setChecks] = useState({
