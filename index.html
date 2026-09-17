@@ -2204,6 +2204,24 @@ function MainApp({
       data: dbRow,
       error: readErr
     } = await sb.from('jobs').select('id,status,status_dates,updated_at').eq('id', jobId).single();
+    // Transition check (2026-09-17): warn on unusual moves, never block. The
+    // override is logged so the history stays readable.
+    if (dbRow && dbRow.status && newStatus && dbRow.status !== newStatus) {
+      try {
+        const tr = await sb.from('status_transitions').select('to_status')
+          .eq('from_status', dbRow.status).eq('to_status', newStatus).limit(1);
+        const known = !tr.error && tr.data && tr.data.length > 0;
+        if (!known) {
+          const ok = confirm('⚠️ Unusual step\n\n' + dbRow.status + '  →  ' + newStatus +
+            '\n\nThis is not a normal move for a job. Continue anyway?\n\nIt will be recorded against your name.');
+          if (!ok) return;
+          sb.from('transition_overrides').insert({
+            job_id: jobId, from_status: dbRow.status, to_status: newStatus,
+            overridden_by: userName, reason: 'confirmed in app'
+          }).then(() => {}, () => {});
+        }
+      } catch (e) { /* never block a status change on the warning check */ }
+    }
     if (readErr || !dbRow) {
       show('⚠️ Could not read current status from DB — try again. (' + (readErr?.message || 'no row') + ')', false);
       return;
@@ -2703,6 +2721,17 @@ function MainApp({
     l: "Dashboard",
     e: "📊",
     roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"]
+  }, {
+    id: "myscore",
+    l: "My Score",
+    e: "\ud83c\udfaf",
+    roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"]
+  }, {
+    id: "install",
+    l: "Installation",
+    e: "\ud83e\uddf0",
+    roles: ["admin", "production", "dispatch", "sales"],
+    users: ["JIGAR", "AMOL", "POONAM", "KULDEEP", "MURLI", "MANOJ", "SHIV", "MUSTAFA", "KAIF", "SAHIL", "PRIYANKA", "HARSHALA"]
   }, {
     id: "mytasks",
     l: "My Tasks",
@@ -3349,6 +3378,13 @@ function MainApp({
     user: user,
     team: masterData.team,
     show: show
+  }), pg === "myscore" && React.createElement(MyScorePage, {
+    user: user
+  }), pg === "install" && React.createElement(InstallPage, {
+    jobs: filteredJobs,
+    user: user,
+    show: show,
+    updateJobStatus: updateJobStatus
   }))), modal && React.createElement("div", {
     style: {
       position: "fixed",
@@ -17391,7 +17427,7 @@ function PrintPage({
       flexDirection: "column",
       gap: 6
     }
-  }, React.createElement("div", {
+  }, React.createElement(LangToggle, null), React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -20251,7 +20287,7 @@ function FabPage({
       flexDirection: "column",
       gap: 6
     }
-  }, React.createElement("div", {
+  }, React.createElement(LangToggle, null), React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -32212,6 +32248,245 @@ function ExpensesPage({
     }
   }, "No expenses found")))))));
 }
+
+// ===== Bilingual labels (added 2026-09-17) =================================
+// Floor staff (printing / fabrication / installation) can switch the screen to
+// Hindi. Preference is per person, stored locally; English stays the default.
+const ERP_LANG_KEY = 'erp_lang';
+function erpLang() {
+  try { return localStorage.getItem(ERP_LANG_KEY) === 'hi' ? 'hi' : 'en'; } catch (e) { return 'en'; }
+}
+function erpSetLang(v) {
+  try { localStorage.setItem(ERP_LANG_KEY, v === 'hi' ? 'hi' : 'en'); } catch (e) {}
+}
+const ERP_T = {
+  'Printing': 'प्रिंटिंग',
+  'Fabrication': 'फैब्रिकेशन',
+  'Installation': 'इंस्टॉलेशन',
+  'Job': 'जॉब',
+  'Client': 'क्लाइंट',
+  'Machine': 'मशीन',
+  'Operator': 'ऑपरेटर',
+  'Date': 'तारीख',
+  'Sqft printed': 'छपाई (स्क्वायर फीट)',
+  'Wastage %': 'वेस्टेज %',
+  'Material': 'मटेरियल',
+  'Save': 'सेव करें',
+  'Saved': 'सेव हो गया',
+  'Site': 'साइट',
+  'Start time': 'शुरू का समय',
+  'End time': 'खत्म का समय',
+  'Photos': 'फोटो',
+  'Upload photos': 'फोटो अपलोड करें',
+  'Report': 'रिपोर्ट',
+  'What was done on site': 'साइट पर क्या काम हुआ',
+  'Mark complete': 'पूरा हुआ चिह्नित करें',
+  'Complete': 'पूरा',
+  'Pending': 'बाकी',
+  'My work': 'मेरा काम',
+  'My score': 'मेरा स्कोर',
+  'On time': 'समय पर',
+  'Late': 'देर से',
+  'Open jobs': 'खुले जॉब',
+  'This month': 'इस महीने',
+  'Language': 'भाषा',
+  'Hindi': 'हिंदी',
+  'English': 'English',
+  'required': 'ज़रूरी',
+  'Select a job': 'जॉब चुनें',
+  'No jobs assigned': 'कोई जॉब नहीं',
+};
+function T(k) { return erpLang() === 'hi' ? (ERP_T[k] || k) : k; }
+// Bilingual label: English with Hindi underneath when the toggle is on.
+function TL(k) {
+  if (erpLang() !== 'hi' || !ERP_T[k]) return k;
+  return k + ' / ' + ERP_T[k];
+}
+function LangToggle({ onChange }) {
+  const [l, setL] = React.useState(erpLang());
+  const flip = v => { erpSetLang(v); setL(v); if (onChange) onChange(v); };
+  return React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", marginBottom: 10 } },
+    React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, "🌐"),
+    ["en", "hi"].map(v => React.createElement("button", {
+      key: v, className: "b", onClick: () => flip(v),
+      style: { padding: "4px 12px", fontSize: 12, fontWeight: l === v ? 700 : 400,
+               borderColor: l === v ? "#7f77dd" : undefined }
+    }, v === 'en' ? 'English' : 'हिंदी'))
+  );
+}
+
+// ===== My Score (added 2026-09-17) ========================================
+function MyScorePage({ user }) {
+  const [rows, setRows] = React.useState(null);
+  const [month, setMonth] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  const [, force] = React.useState(0);
+  const uname = (user?.name || '').toUpperCase();
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const r = await sb.from('v_tat_accountability').select('*');
+        if (r.error) throw r.error;
+        const m = await sb.from('v_tat_monthly').select('*').order('month', { ascending: false }).limit(60);
+        setRows(r.data || []);
+        setMonth(m.error ? [] : (m.data || []));
+      } catch (e) { setErr(e.message || 'Could not load score'); setRows([]); }
+    })();
+  }, []);
+  if (err) return React.createElement("div", { className: "c", style: { padding: 16 } }, "⚠️ " + err);
+  if (!rows) return React.createElement("div", { className: "c", style: { padding: 16 } }, "Loading…");
+
+  const mine = rows.filter(r => {
+    const k = (r.owner_key || '').toUpperCase();
+    return k === uname || uname.startsWith(k) || k.startsWith(uname.split(' ')[0]) ||
+           (r.reports_to || '').toUpperCase() === uname;
+  });
+  const direct = mine.filter(r => (r.owner_key || '').toUpperCase() !== uname ? (r.reports_to || '').toUpperCase() === uname : true);
+  const myMonths = (month || []).filter(m => {
+    const k = (m.owner_key || '').toUpperCase();
+    return k === uname || uname.startsWith(k) || k.startsWith(uname.split(' ')[0]);
+  }).slice(0, 4);
+
+  const card = (label, value, sub, color) => React.createElement("div", {
+    className: "c", style: { padding: 12, minWidth: 130, flex: "1 1 130px" }
+  }, React.createElement("div", { style: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: .5 } }, label),
+     React.createElement("div", { style: { fontSize: 24, fontWeight: 700, color: color || "#e6e9f2", lineHeight: 1.2 } }, value),
+     sub ? React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, sub) : null);
+
+  return React.createElement("div", { style: { padding: 4 } },
+    React.createElement(LangToggle, { onChange: () => force(x => x + 1) }),
+    React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 2px" } }, TL('My score')),
+    React.createElement("p", { style: { fontSize: 12, color: "#64748b", margin: "0 0 12px" } },
+      user?.name + " · practice period — scores are shown but not counted until October"),
+
+    mine.length === 0
+      ? React.createElement("div", { className: "c", style: { padding: 16, color: "#64748b" } }, TL('No jobs assigned'))
+      : React.createElement("div", null,
+          React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 } },
+            card(TL('Open jobs'), mine.reduce((a, r) => a + (r.jobs || 0), 0), null),
+            card(TL('Late'), mine.reduce((a, r) => a + (r.red || 0), 0), null, "#e0574f"),
+            card(TL('On time'), (() => {
+              const j = mine.reduce((a, r) => a + (r.jobs || 0), 0);
+              const d = mine.reduce((a, r) => a + (r.red || 0), 0);
+              return j ? Math.round(100 * (j - d) / j) + '%' : '—';
+            })(), null, "#2fb37a"),
+            card('₹ at risk', '₹' + mine.reduce((a, r) => a + Number(r.red_lakh || 0), 0).toFixed(1) + ' L', null, "#e3a008")
+          ),
+          React.createElement("div", { className: "c", style: { padding: 0, overflowX: "auto" } },
+            React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12 } },
+              React.createElement("thead", null, React.createElement("tr", null,
+                ["Area", TL('Open jobs'), TL('Late'), TL('On time'), "₹ L"].map(h =>
+                  React.createElement("th", { key: h, style: { textAlign: "left", padding: "7px 9px", color: "#64748b", fontSize: 10, textTransform: "uppercase", borderBottom: "1px solid #1c2236" } }, h)))),
+              React.createElement("tbody", null, mine.map((r, i) =>
+                React.createElement("tr", { key: i },
+                  React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, r.owner_key),
+                  React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, r.jobs),
+                  React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236", color: r.red > 0 ? "#e0574f" : undefined } }, r.red),
+                  React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, (r.on_time_pct ?? '—') + (r.on_time_pct != null ? '%' : '')),
+                  React.createElement("td", { style: { padding: "8px 9px", borderBottom: "1px solid #1c2236" } }, r.red_lakh)))))),
+          myMonths.length ? React.createElement("div", { style: { marginTop: 14 } },
+            React.createElement("div", { style: { fontSize: 11, color: "#64748b", marginBottom: 6, textTransform: "uppercase" } }, TL('This month')),
+            React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+              myMonths.map((m, i) => card(String(m.month).slice(0, 7), (m.tat_pct ?? 0) + '%',
+                (m.on_time || 0) + '/' + (m.stages_entered || 0) + ' on time',
+                (m.tat_pct >= 70) ? "#2fb37a" : (m.tat_pct >= 55 ? "#e3a008" : "#e0574f"))))) : null
+        )
+  );
+}
+
+
+// ===== Installation (added 2026-09-17) ====================================
+// Installers log from their own phone at the site: start/end time, photos,
+// what was done, and mark the site complete. Bilingual.
+function InstallPage({ jobs, user, show, updateJobStatus }) {
+  const [sel, setSel] = React.useState('');
+  const [startT, setStartT] = React.useState('');
+  const [endT, setEndT] = React.useState('');
+  const [report, setReport] = React.useState('');
+  const [files, setFiles] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [, force] = React.useState(0);
+
+  const mine = (jobs || []).filter(j =>
+    ['Installation WIP', 'Recee', 'In Transit', 'IC Pending', 'DC Pending'].includes(j.status));
+
+  const save = async (markComplete) => {
+    if (!sel) { show(T('Select a job'), false); return; }
+    if (!startT || !endT) { show(TL('Start time') + ' + ' + TL('End time') + ' ' + T('required'), false); return; }
+    if (!report.trim()) { show(TL('Report') + ' ' + T('required'), false); return; }
+    if (!files.length) { show(TL('Photos') + ' ' + T('required'), false); return; }
+    setBusy(true);
+    try {
+      const urls = [];
+      for (const f of files) {
+        const path = 'install/' + sel + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
+        const up = await sb.storage.from('uploads').upload(path, f, { upsert: false });
+        if (up.error) throw up.error;
+        const pub = sb.storage.from('uploads').getPublicUrl(path);
+        urls.push(pub?.data?.publicUrl || path);
+      }
+      const row = {
+        job_id: sel,
+        date: new Date().toISOString().slice(0, 10),
+        person: user?.name || '',
+        start_time: startT,
+        end_time: endT,
+        report: report.trim(),
+        photo_urls: urls,
+        site_complete: !!markComplete
+      };
+      const ins = await sb.from('install_logs').insert(row);
+      if (ins.error) throw ins.error;
+      if (markComplete && updateJobStatus) {
+        try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
+      }
+      show('✅ ' + T('Saved'), true);
+      setSel(''); setStartT(''); setEndT(''); setReport(''); setFiles([]);
+    } catch (e) {
+      show('⚠️ ' + (e.message || 'Save failed'), false);
+    }
+    setBusy(false);
+  };
+
+  const F = (label, node) => React.createElement("div", { style: { marginBottom: 10 } },
+    React.createElement("label", { style: { display: "block", fontSize: 11, color: "#94a3b8", marginBottom: 3 } }, label), node);
+
+  return React.createElement("div", { style: { padding: 4, maxWidth: 560 } },
+    React.createElement(LangToggle, { onChange: () => force(x => x + 1) }),
+    React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 10px" } }, TL('Installation')),
+
+    F(TL('Job'), React.createElement("select", {
+      className: "in", value: sel, onChange: e => setSel(e.target.value), style: { width: "100%", padding: 10, fontSize: 14 }
+    }, React.createElement("option", { value: "" }, "— " + T('Select a job') + " —"),
+       mine.map(j => React.createElement("option", { key: j.id, value: j.id },
+         j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || ''))))),
+
+    React.createElement("div", { style: { display: "flex", gap: 8 } },
+      React.createElement("div", { style: { flex: 1 } }, F(TL('Start time'), React.createElement("input", {
+        className: "in", type: "time", value: startT, onChange: e => setStartT(e.target.value), style: { width: "100%", padding: 10, fontSize: 14 } }))),
+      React.createElement("div", { style: { flex: 1 } }, F(TL('End time'), React.createElement("input", {
+        className: "in", type: "time", value: endT, onChange: e => setEndT(e.target.value), style: { width: "100%", padding: 10, fontSize: 14 } })))),
+
+    F(TL('Report'), React.createElement("textarea", {
+      className: "in", value: report, onChange: e => setReport(e.target.value),
+      placeholder: T('What was done on site'),
+      style: { width: "100%", minHeight: 70, padding: 10, fontSize: 14, fontFamily: "inherit" } })),
+
+    F(TL('Photos'), React.createElement("input", {
+      className: "in", type: "file", accept: "image/*", multiple: true,
+      onChange: e => setFiles(Array.from(e.target.files || [])),
+      style: { width: "100%", padding: 8, fontSize: 13 } })),
+    files.length ? React.createElement("div", { style: { fontSize: 11, color: "#64748b", marginBottom: 10 } }, files.length + ' photo(s) selected') : null,
+
+    React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
+      React.createElement("button", { className: "b", disabled: busy, onClick: () => save(false),
+        style: { flex: 1, padding: 12, fontSize: 14 } }, busy ? '…' : TL('Save')),
+      React.createElement("button", { className: "b", disabled: busy, onClick: () => save(true),
+        style: { flex: 1, padding: 12, fontSize: 14, borderColor: "#2fb37a", color: "#2fb37a", fontWeight: 600 } },
+        busy ? '…' : TL('Mark complete')))
+  );
+}
+
 function RootApp() {
   const [user, setUser] = useState(() => {
     try {
