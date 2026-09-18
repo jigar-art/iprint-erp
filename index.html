@@ -2899,7 +2899,7 @@ function MainApp({
     l: "Dispatch",
     e: "🚚",
     roles: ["admin", "production", "sales", "dispatch", "designer", "printing"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "HARISH", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "POONAM", "KULDEEP", "SHIV", "MUSTAFA", "KAIF", "SAHIL"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "PRIYANKA", "HARSHALA", "MURLI", "MANOJ", "MANISH", "HARISH", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "POONAM", "KULDEEP", "SHIV", "MUSTAFA", "KAIF", "SAHIL"]
   }, {
     id: "stock",
     l: "Stock",
@@ -3138,7 +3138,7 @@ function MainApp({
       color: "#e3a008",
       marginLeft: 4
     }
-  }, user.role)), React.createElement("div", {
+  }, deptLabel(user.role))), React.createElement("div", {
     className: "ni",
     onClick: onLogout
   }, React.createElement("span", null, "\uD83D\uDEAA"), !col && React.createElement("span", null, "Logout")), React.createElement("div", {
@@ -32630,6 +32630,25 @@ function InstallPage({ jobs, user, show, updateJobStatus }) {
         style: { flex: 1, padding: 12, fontSize: 14, borderColor: "#2fb37a", color: "#2fb37a", fontWeight: 600 } },
         busy ? '…' : TL('Mark complete')))
   );
+}
+
+
+// ===== Department labels (2026-09-18) =====================================
+// The `role` column is a PERMISSION bucket, not a job title. Renaming the stored
+// values would touch 42 places in this bundle plus RLS helpers, so only the
+// displayed label changes here.
+const ERP_DEPT_LABEL = {
+  admin:       'Admin',
+  sales:       'Client Servicing / Backoffice',
+  printing:    'Printing Dept',
+  fabrication: 'Fabrication Dept',
+  production:  'Site & Installation Dept',
+  dispatch:    'Dispatch',
+  accounts:    'Accounts',
+  designer:    'Design'
+};
+function deptLabel(role) {
+  return ERP_DEPT_LABEL[(role || '').toLowerCase()] || (role || '');
 }
 
 function RootApp() {
