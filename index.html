@@ -101,11 +101,42 @@ const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
 // ERP lockdown 2026-09-09: every request carries the session token (erp_jwt).
 // If none is present supabase-js falls back to the anon key, which after the grant revoke can read nothing but team_members_public.
+// Session keep-alive 2026-09-18: every request renews a token that is close to expiry; an expired one sends the user to login instead of silently returning empty lists.
+let _erpRefreshP = null;
+let _erpLastRefreshAt = 0;
+const _erpNow = () => Date.now() + Math.max(0, +window.__erpClockSkewMs || 0);
+const _erpExpired = () => { try { window.dispatchEvent(new Event('erp-session-expired')); } catch (e) {} };
+async function ensureSession() {
+  let t = null;
+  try { t = localStorage.getItem('erp_jwt') || null; } catch (e) { return null; }
+  if (!t) return null;
+  const left = jwtExpMs(t) - _erpNow();
+  if (left <= 60 * 1000) { _erpExpired(); return null; }
+  if (left < 3 * 60 * 60 * 1000 && (_erpRefreshP || Date.now() - _erpLastRefreshAt > 60 * 1000)) {
+    if (!_erpRefreshP) {
+      _erpLastRefreshAt = Date.now();
+      _erpRefreshP = erpLoginRequest({ refresh: t }).then(r => {
+        if (r && r.ok && r.token) { try { localStorage.setItem('erp_jwt', r.token); } catch (e) {} }
+      }).catch(() => {}).finally(() => { _erpRefreshP = null; });
+    }
+    await _erpRefreshP;
+    try { return localStorage.getItem('erp_jwt') || t; } catch (e) { return t; }
+  }
+  return t;
+}
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  accessToken: async () => {
-    try {
-      return localStorage.getItem('erp_jwt') || null;
-    } catch (e) { return null; }
+  accessToken: ensureSession,
+  global: {
+    fetch: async (...a) => {
+      const r = await fetch(...a);
+      if (r.status === 401) {
+        try {
+          const body = await r.clone().text();
+          if (/JWT expired|PGRST30[13]/i.test(body) && localStorage.getItem('erp_jwt')) _erpExpired();
+        } catch (e) {}
+      }
+      return r;
+    }
   }
 });
 async function erpLoginRequest(body) {
@@ -1115,7 +1146,9 @@ function Login({
 }) {
   const [sel, setSel] = useState('');
   const [pin, setPin] = useState('');
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState(() => {
+    try { return sessionStorage.getItem('erp_session_msg') || ''; } catch (e) { return ''; }
+  });
   const submit = async () => {
     const member = team.find(t => t.name === sel);
     if (!member) {
@@ -32621,6 +32654,12 @@ function RootApp() {
       localStorage.setItem('erp_user', JSON.stringify(safe));
       localStorage.setItem('erp_login_time', Date.now().toString());
     } catch (e) {}
+    try {
+      const back = JSON.parse(sessionStorage.getItem('erp_return_pg') || 'null');
+      sessionStorage.removeItem('erp_return_pg');
+      sessionStorage.removeItem('erp_session_msg');
+      if (back && back.pg && back.name === member.name) localStorage.setItem('erp_pg', back.pg);
+    } catch (e) {}
   };
   const handleLogout = () => {
     setUser(null);
@@ -32631,6 +32670,27 @@ function RootApp() {
       localStorage.removeItem('erp_jwt');
     } catch (e) {}
   };
+  useEffect(() => {
+    if (!user) return;
+    const onExpired = () => {
+      try { if (!localStorage.getItem('erp_user')) return; } catch (e) {}
+      try {
+        sessionStorage.setItem('erp_return_pg', JSON.stringify({ pg: localStorage.getItem('erp_pg') || '', name: user.name || '' }));
+        sessionStorage.setItem('erp_session_msg', 'Session expired \u2014 please log in again.');
+      } catch (e) {}
+      handleLogout();
+    };
+    const check = () => { ensureSession(); };
+    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('erp-session-expired', onExpired);
+    document.addEventListener('visibilitychange', onVis);
+    const iv = setInterval(check, 5 * 60 * 1000);
+    return () => {
+      window.removeEventListener('erp-session-expired', onExpired);
+      document.removeEventListener('visibilitychange', onVis);
+      clearInterval(iv);
+    };
+  }, [user]);
   useEffect(() => {
     async function fetchMasters() {
       return Promise.all([sb.from('firms').select('*'), sb.from('clients').select('*').order('name'), sb.from('suppliers').select('*').order('name'), sb.from('products').select('*').order('internal_name'), sb.from('materials').select('*').order('name'), sb.from('machines').select('*'), sb.from('outsource_agencies').select('*'), sb.from('delivery_boys').select('*'), sb.from('team_members').select('*').eq('active', true), sb.from('materials_master_v2').select('*').eq('active', true).order('name'), sb.from('lead_sources').select('*').eq('active', true).order('name')]);
