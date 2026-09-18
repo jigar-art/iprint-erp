@@ -32464,8 +32464,9 @@ function MyScorePage({ user }) {
   const [err, setErr] = React.useState('');
   const [, force] = React.useState(0);
   const uname = (user?.name || '').toUpperCase();
-  // Job values are commercial data: only admin / accounts / sales see rupee figures.
-  const canSeeMoney = ['admin', 'accounts', 'sales'].includes((user?.role || '').toLowerCase());
+  // Job values are commercial data. Only admin and accounts see rupee figures.
+  // 'sales' (Aparna, Harshala, Poonam, Priyanka) is servicing/coordination — documents, not money.
+  const canSeeMoney = ['admin', 'accounts'].includes((user?.role || '').toLowerCase());
   React.useEffect(() => {
     (async () => {
       try {
