@@ -5482,7 +5482,9 @@ function JobDetail({
   const [dcSelectedItems, setDcSelectedItems] = useState(null);
   const [dcEditedItems, setDcEditedItems] = useState([]);
   const [dcSaveToBatch, setDcSaveToBatch] = useState(false);
-  const openDCForm = batch => {
+  const [dcExpandedBatches, setDcExpandedBatches] = useState(() => new Set());
+  const [dcPriorDCs, setDcPriorDCs] = useState({});
+  const openDCForm = async batch => {
     setDcForm({
       to_name: j.billing_name || j.client_name || '',
       to_address: batch.delivery_address || j.delivery_address || '',
@@ -5501,11 +5503,34 @@ function JobDetail({
       client_job_no: '',
       location: j.project || ''
     });
-    setDcSelectedItems(null);
+    setDcSelectedItems(new Set((batch.items || []).map(x => x.id)));
+    setDcExpandedBatches(new Set([batch.id]));
+    setDcPriorDCs({});
     setDcEditedItems([]);
     setDcSaveToBatch(false);
     setDcStep('form');
     setDcMode(batch.id);
+    try {
+      const {
+        data: priorRows
+      } = await sb.from('delivery_challans').select('dc_no,dc_date,items').eq('job_id', j.id).order('created_at', {
+        ascending: true
+      }).limit(500);
+      const pmap = {};
+      (priorRows || []).forEach(d => (Array.isArray(d.items) ? d.items : []).forEach(x => {
+        const iid = x && x.item_id;
+        if (iid) pmap[iid] = {
+          dc_no: d.dc_no,
+          dc_date: d.dc_date
+        };
+      }));
+      setDcPriorDCs(pmap);
+      setDcSelectedItems(prev => {
+        const initial = (batch.items || []).map(x => x.id);
+        const untouched = prev instanceof Set && prev.size === initial.length && initial.every(id => prev.has(id));
+        return untouched ? new Set(initial.filter(id => !pmap[id])) : prev;
+      });
+    } catch (e) {}
   };
   const generateDCNumber = async firmCode => {
     const now = new Date();
@@ -5534,7 +5559,8 @@ function JobDetail({
       return;
     }
     {
-      const src = dcEditedItems && dcEditedItems.length ? dcEditedItems : (batch.items || []).filter(it => dcSelectedItems === null || dcSelectedItems.has(it.id));
+      const jobPool = (j.batches || []).reduce((a, b) => a.concat(b.items || []), []);
+      const src = dcEditedItems && dcEditedItems.length ? dcEditedItems : jobPool.filter(it => dcSelectedItems instanceof Set && dcSelectedItems.has(it.id));
       const noImg = src.filter(it => !it.img_url && !it.no_artwork).length;
       if (noImg > 0) {
         show('\uD83D\uDCF7 ' + noImg + ' item(s) still have no artwork image', false);
@@ -5579,9 +5605,9 @@ function JobDetail({
         img_url: it.img_url || ''
       }));
     } else {
-      const allBatchItems = batch.items || [];
+      const allBatchItems = (j.batches || []).reduce((a, b) => a.concat(b.items || []), []);
       const selectedSet = dcSelectedItems;
-      const filteredItems = selectedSet === null ? allBatchItems : allBatchItems.filter(it => selectedSet.has(it.id));
+      const filteredItems = selectedSet instanceof Set ? allBatchItems.filter(it => selectedSet.has(it.id)) : allBatchItems;
       dcItems = filteredItems.map((it, i) => ({
         sr: i + 1,
         item_id: it.id || '',
@@ -12470,53 +12496,35 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         borderRadius: 6
       }
     }, (() => {
-      const allItems = batch.items || [];
-      const selSet = dcSelectedItems === null ? new Set(allItems.map(x => x.id)) : dcSelectedItems;
-      const selCount = dcSelectedItems === null ? allItems.length : dcSelectedItems.size;
+      const dcGroups = (j.batches || []).map((b, bi) => ({
+        b,
+        bi,
+        items: b.items || []
+      })).filter(g => g.items.length);
+      const allItems = dcGroups.reduce((a, g) => a.concat(g.items), []);
+      const selSet = dcSelectedItems instanceof Set ? dcSelectedItems : new Set(allItems.map(x => x.id));
+      const selCount = selSet.size;
       const toggleItem = id => {
-        const current = dcSelectedItems === null ? new Set(allItems.map(x => x.id)) : new Set(dcSelectedItems);
-        if (current.has(id)) current.delete(id);else current.add(id);
-        setDcSelectedItems(current.size === allItems.length ? null : new Set(current));
+        const c = new Set(selSet);
+        if (c.has(id)) c.delete(id);else c.add(id);
+        setDcSelectedItems(c);
       };
-      const toggleAll = () => setDcSelectedItems(dcSelectedItems === null ? new Set() : null);
-      return React.createElement(React.Fragment, null, React.createElement("div", {
-        style: {
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 6
-        }
-      }, React.createElement("p", {
-        style: {
-          fontSize: 9,
-          color: '#10b981',
-          fontWeight: 700
-        }
-      }, "ITEMS TO BE INCLUDED", React.createElement("span", {
-        style: {
-          marginLeft: 6,
-          color: selCount < allItems.length ? '#f59e0b' : '#10b981'
-        }
-      }, "(", selCount, " of ", allItems.length, " selected", selCount < allItems.length ? ' — PARTIAL DC' : '', ")")), React.createElement("button", {
-        onClick: toggleAll,
-        style: {
-          fontSize: 8,
-          padding: '2px 8px',
-          background: 'transparent',
-          border: '1px solid #1a2030',
-          borderRadius: 4,
-          color: '#64748b',
-          cursor: 'pointer'
-        }
-      }, dcSelectedItems === null ? 'Deselect All' : 'Select All')), React.createElement("div", {
-        style: {
-          fontSize: 9,
-          color: '#8b949e',
-          maxHeight: 160,
-          overflowY: 'auto'
-        }
-      }, allItems.map((it, i) => {
+      const toggleGroup = items => {
+        const c = new Set(selSet);
+        const allOn = items.every(x => c.has(x.id));
+        items.forEach(x => allOn ? c.delete(x.id) : c.add(x.id));
+        setDcSelectedItems(c);
+      };
+      const toggleAll = () => setDcSelectedItems(selCount >= allItems.length ? new Set() : new Set(allItems.map(x => x.id)));
+      const toggleExpand = bid => setDcExpandedBatches(p => {
+        const c = new Set(p);
+        if (c.has(bid)) c.delete(bid);else c.add(bid);
+        return c;
+      });
+      const spanned = dcGroups.filter(g => g.items.some(x => selSet.has(x.id))).length;
+      const itemRow = (it, i) => {
         const checked = selSet.has(it.id);
+        const prior = dcPriorDCs[it.id];
         return React.createElement("div", {
           key: it.id,
           onClick: () => toggleItem(it.id),
@@ -12529,6 +12537,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             cursor: 'pointer',
             background: checked ? 'rgba(16,185,129,0.05)' : 'transparent',
             borderRadius: 3,
+            opacity: !checked && prior ? 0.5 : 1,
             transition: 'background 0.1s'
           }
         }, React.createElement("div", {
@@ -12550,7 +12559,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             fontWeight: 900,
             lineHeight: 1
           }
-        }, "\u2713")), React.createElement("span", {
+        }, "✓")), React.createElement("span", {
           style: {
             flex: 1,
             color: checked ? '#e2e8f0' : '#64748b',
@@ -12567,11 +12576,112 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             color: '#64748b',
             marginLeft: 4
           }
-        }, "\xD7 ", it.qty)), React.createElement(DcItemThumb, {
+        }, "\xD7 ", it.qty), prior ? React.createElement("span", {
+          style: {
+            display: 'block',
+            color: '#e3a008',
+            fontSize: 8,
+            marginTop: 2,
+            textDecoration: 'none'
+          }
+        }, "✓ already sent on ", prior.dc_no, prior.dc_date ? ' (' + prior.dc_date + ')' : '') : null), React.createElement(DcItemThumb, {
           it,
           updateLineItem,
           show
         }));
+      };
+      return React.createElement(React.Fragment, null, React.createElement("div", {
+        style: {
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 6
+        }
+      }, React.createElement("p", {
+        style: {
+          fontSize: 9,
+          color: '#10b981',
+          fontWeight: 700
+        }
+      }, "ITEMS TO BE INCLUDED", React.createElement("span", {
+        style: {
+          marginLeft: 6,
+          color: selCount === 0 ? '#f47067' : selCount < allItems.length ? '#e3a008' : '#10b981'
+        }
+      }, "(", selCount, " of ", allItems.length, " selected", spanned > 1 ? ' · ' + spanned + ' batches' : '', ")")), React.createElement("button", {
+        onClick: toggleAll,
+        style: {
+          fontSize: 8,
+          padding: '2px 8px',
+          background: 'transparent',
+          border: '1px solid #1a2030',
+          borderRadius: 4,
+          color: '#64748b',
+          cursor: 'pointer'
+        }
+      }, selCount >= allItems.length ? 'Deselect All' : 'Select Whole Job')), React.createElement("div", {
+        style: {
+          fontSize: 9,
+          color: '#8b949e',
+          maxHeight: 240,
+          overflowY: 'auto'
+        }
+      }, dcGroups.map(g => {
+        const open = dcExpandedBatches instanceof Set ? dcExpandedBatches.has(g.b.id) : false;
+        const gSel = g.items.filter(x => selSet.has(x.id)).length;
+        return React.createElement("div", {
+          key: g.b.id,
+          style: {
+            marginBottom: 4
+          }
+        }, React.createElement("div", {
+          onClick: () => toggleExpand(g.b.id),
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 6px',
+            background: '#0b0f1a',
+            border: '1px solid ' + (gSel ? '#10b98140' : '#1a2030'),
+            borderRadius: 4,
+            cursor: 'pointer'
+          }
+        }, React.createElement("span", {
+          style: {
+            fontSize: 9,
+            color: '#64748b',
+            width: 10,
+            flexShrink: 0
+          }
+        }, open ? '▾' : '▸'), React.createElement("span", {
+          style: {
+            flex: 1,
+            fontSize: 9,
+            color: gSel ? '#e2e8f0' : '#64748b',
+            fontWeight: 700
+          }
+        }, "Batch ", g.bi + 1, g.b.date ? ' · ' + g.b.date : '', g.b.note ? ' · ' + g.b.note : ''), React.createElement("span", {
+          style: {
+            fontSize: 8,
+            color: gSel ? '#10b981' : '#475569',
+            flexShrink: 0
+          }
+        }, gSel, "/", g.items.length), React.createElement("button", {
+          onClick: e => {
+            e.stopPropagation();
+            toggleGroup(g.items);
+          },
+          style: {
+            fontSize: 8,
+            padding: '1px 6px',
+            background: 'transparent',
+            border: '1px solid #1a2030',
+            borderRadius: 3,
+            color: '#64748b',
+            cursor: 'pointer',
+            flexShrink: 0
+          }
+        }, gSel === g.items.length ? 'None' : 'All')), open && React.createElement("div", null, g.items.map((it, i) => itemRow(it, i))));
       })), (() => {
         const missing = allItems.filter(x => selSet.has(x.id) && !x.img_url && !x.no_artwork).length;
         return missing > 0 && React.createElement("div", {
@@ -12583,7 +12693,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             background: 'rgba(227,160,8,0.08)',
             borderRadius: 4
           }
-        }, "\uD83D\uDCF7 ", missing, " selected item", missing === 1 ? '' : 's', " need an artwork image before the DC can be printed \u2014 use \uD83D\uDCF7 / \uD83D\uDDBC\uFE0F on the row, or \uD83D\uDEAB for material-only items");
+        }, "📷 ", missing, " selected item", missing === 1 ? '' : 's', " need an artwork image before the DC can be printed — open the batch above and use 📷 / 🖼️ on the row, or 🚫 for material-only items");
       })(), selCount === 0 && React.createElement("div", {
         style: {
           fontSize: 9,
@@ -12593,7 +12703,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           background: 'rgba(244,112,103,0.08)',
           borderRadius: 4
         }
-      }, "\u26A0\uFE0F No items selected \u2014 select at least 1 item to generate DC"));
+      }, "⚠️ No items selected — select at least 1 item to generate DC"));
     })()), React.createElement("div", {
       style: {
         display: "flex",
@@ -12605,7 +12715,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       className: "b",
       onClick: () => setDcMode(null)
     }, "Cancel"), (() => {
-      const cnt = dcSelectedItems === null ? (batch.items || []).length : dcSelectedItems?.size || 0;
+      const cnt = dcSelectedItems instanceof Set ? dcSelectedItems.size : 0;
       return React.createElement("button", {
         className: "b bp",
         onClick: () => {
@@ -12617,8 +12727,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             show('Select at least 1 item', false);
             return;
           }
-          const allItems = batch.items || [];
-          const selSet = dcSelectedItems === null ? new Set(allItems.map(x => x.id)) : dcSelectedItems;
+          const allItems = (j.batches || []).reduce((a, b) => a.concat(b.items || []), []);
+          const selSet = dcSelectedItems instanceof Set ? dcSelectedItems : new Set();
           const filtered = allItems.filter(it => selSet.has(it.id));
           const noImg = filtered.filter(it => !it.img_url && !it.no_artwork).length;
           if (noImg > 0) {
