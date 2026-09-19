@@ -12559,9 +12559,13 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             fontWeight: 900,
             lineHeight: 1
           }
-        }, "✓")), React.createElement("span", {
+        }, "✓")), React.createElement("div", {
           style: {
             flex: 1,
+            minWidth: 0
+          }
+        }, React.createElement("span", {
+          style: {
             color: checked ? '#e2e8f0' : '#64748b',
             textDecoration: checked ? 'none' : 'line-through'
           }
@@ -12576,13 +12580,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
             color: '#64748b',
             marginLeft: 4
           }
-        }, "\xD7 ", it.qty), prior ? React.createElement("span", {
+        }, "\xD7 ", it.qty)), prior ? React.createElement("div", {
           style: {
-            display: 'block',
             color: '#e3a008',
             fontSize: 8,
             marginTop: 2,
-            textDecoration: 'none'
+            fontWeight: 700
           }
         }, "✓ already sent on ", prior.dc_no, prior.dc_date ? ' (' + prior.dc_date + ')' : '') : null), React.createElement(DcItemThumb, {
           it,
