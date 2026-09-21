@@ -6954,7 +6954,12 @@ function JobDetail({
         }
       }, d)));
     }))) : null;
-  })(), React.createElement("div", {
+  })(), React.createElement(JobTatTracker, {
+    jobId: j.id,
+    approvedBy: j.tat_plan_approved_by,
+    approvedAt: j.tat_plan_approved_at,
+    reason: j.tat_plan_reason
+  }), React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
@@ -13681,6 +13686,26 @@ function NewJobPage({
   });
   const [su, sSu] = useState("INCH");
   const [lsList, setLsList] = useState(() => (leadSources || []).map(x => x.name));
+  // TAT plan (2026-09-21)
+  const [tatBudgets, setTatBudgets] = useState(null);
+  const [tatRows, setTatRows] = useState([]);
+  const [tatOk, setTatOk] = useState(false);
+  const [tatReason, setTatReason] = useState('');
+  const tatClient = (clients || []).find(c => c.id === f.cl) || {};
+  const tatCls = tatClient.client_class || 'A';
+  const tatOpts = { installDate: f.nosite ? '' : f.ind, recceDate: f.nosite ? '' : f.rcd, nosite: !!f.nosite };
+  useEffect(() => {
+    sb.from('sla_config').select('client_class,stage_budgets').then(r => {
+      const m = {};
+      (r.data || []).forEach(x => { m[x.client_class] = x.stage_budgets || {}; });
+      setTatBudgets(m);
+    });
+  }, []);
+  useEffect(() => {
+    if (!tatBudgets) return;
+    setTatRows(buildTatRows(tatCls, tatBudgets, tatClient.name || f.cn, tatOpts));
+    setTatOk(false);
+  }, [tatBudgets, tatCls, f.cl, f.nosite, !!f.rcd]);
   useEffect(() => {
     setLsList((leadSources || []).map(x => x.name));
   }, [leadSources]);
@@ -13975,6 +14000,14 @@ function NewJobPage({
         alert("Add at least one item before creating a job.");
         return;
       }
+      if (!tatOk) {
+        alert("⚠️ Review and approve the TAT plan (tick the box in the TAT plan section) before creating the job.");
+        return;
+      }
+      if (tatRows.some(r => r.on && r.d !== r.std) && !tatReason.trim()) {
+        alert("⚠️ You changed standard TAT days — enter the reason in the TAT plan section.");
+        return;
+      }
       if (!confirm(`Create Job ${jid}?\n\nClient: ${f.cn}\nProject: ${f.pr}\nBilling: ${f.bname}\nGST: ${f.cgst}\nItems: ${its.length}\n\nClick OK to proceed.`)) return;
     }
     setSubmitting(true);
@@ -14056,7 +14089,21 @@ function NewJobPage({
         } catch (e) {}
       }
     }
-    await createJob(jobData, batchData, lineItems);
+    const createdJobId = await createJob(jobData, batchData, lineItems);
+    if (createdJobId && tatOk && tatRows.length) {
+      try {
+        const plan = computeTatPlan(tatRows, new Date(), tatCls, tatOpts);
+        const ins = await sb.from('job_tat_plan').insert(plan.map(r => ({
+          job_id: createdJobId, stage_key: r.k, seq: r.seq, stage_label: r.l, owner: r.o,
+          std_days: r.std, planned_days: r.d, applies: !!r.on, planned_due: r.due ? r.due.toISOString() : null
+        })));
+        if (ins.error) throw ins.error;
+        const up = await sb.from('jobs').update({ tat_plan_approved_by: user?.name || '', tat_plan_approved_at: new Date().toISOString(), tat_plan_reason: tatReason.trim() || null }).eq('id', createdJobId);
+        if (up.error) throw up.error;
+      } catch (e) {
+        alert('⚠️ Job ' + createdJobId + ' created, but the TAT plan did not save: ' + (e.message || e));
+      }
+    }
     if (syncBankingNJ && bankProjectNJ) {
       const bm = NJ_BANK_MAP[bankProjectNJ] || ['', ''];
       const siteId = 'BS-' + Date.now() + Math.random().toString(36).slice(2, 5);
@@ -14884,7 +14931,10 @@ function NewJobPage({
     }
   }, fmt(tot.t)), React.createElement("td", {
     colSpan: 2
-  })))))), React.createElement("div", {
+  })))))), tatRows.length ? React.createElement(TatPlanPanel, {
+    rows: tatRows, setRows: setTatRows, cls: tatCls, opts: tatOpts,
+    ok: tatOk, setOk: setTatOk, reason: tatReason, setReason: setTatReason
+  }) : null, React.createElement("div", {
     style: {
       display: "flex",
       gap: 4,
@@ -33027,6 +33077,127 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
             (r.client_class !== 'B' && r.status !== 'IC Pending' && r._j && !(r.status === 'Recee' ? r._j.recce_date : r._j.install_date) ? ' \u00b7 no date set (using TAT days)' : '') +
             (r._j && (r._j.batches || []).length > 1 ? ' \u00b7 batches ' + r._j.batches.filter(b => b.installed_at || (b.bill_no || '').trim()).length + '/' + r._j.batches.length + ' installed' : ''))
         )));
+}
+
+// ===== Job TAT plan (2026-09-21) ==========================================
+// Pre-filled from the client class at job entry; the person entering the job
+// approves it (edits need a reason). Working days skip Sundays (IST), matching
+// erp_add_workdays() in the database. Plan dates stay fixed so slippage shows.
+function istDow(t) { return new Date(t.getTime() + 19800000).getUTCDay(); }
+function erpAddWorkdays(from, days) {
+  let t = new Date(from.getTime());
+  const whole = Math.floor(days || 0), frac = (days || 0) - whole;
+  let i = 0;
+  while (i < whole) { t = new Date(t.getTime() + 86400000); if (istDow(t) !== 0) i++; }
+  if (frac > 0) { t = new Date(t.getTime() + frac * 86400000); if (istDow(t) === 0) t = new Date(t.getTime() + 86400000); }
+  return t;
+}
+function istEndOfDate(ymd) { return new Date(new Date(ymd + 'T00:00:00+05:30').getTime() + 86400000); }
+const TAT_STAGES = [
+  { k: 'design', l: 'Design', bk: 'Designing - In House' },
+  { k: 'printing', l: 'Printing', bk: 'Printing · In-House' },
+  { k: 'fabrication', l: 'Fabrication', bk: 'Fabrication · In-House' },
+  { k: 'dispatch', l: 'Dispatch', bk: 'In Transit' },
+  { k: 'recce', l: 'Recce', bk: 'Recee' },
+  { k: 'installation', l: 'Installation', bk: 'Installation WIP' },
+  { k: 'ic', l: 'IC upload', bk: 'IC Pending' },
+  { k: 'billing', l: 'Billing docket', bk: 'Billing Pending' },
+  { k: 'invoice', l: 'Invoice raised', bk: 'Given for Billing' }
+];
+function tatOwner(k, cls, clientName) {
+  const pri = /(\bncr\b|atleos|\bcms\b|diebold|hitachi)/i.test(clientName || '');
+  const site = cls === 'B' && pri ? 'PRIYANKA' : 'POONAM';
+  return { design: 'PRAJAKTA', printing: 'PRATIK + operators', fabrication: 'HARISH + crew', dispatch: 'Dispatch',
+           recce: site, installation: site + ' + crew', ic: cls === 'B' ? 'MANOJ' : 'MANOJ + POONAM',
+           billing: 'APARNA', invoice: 'PRACHI' }[k] || '';
+}
+function buildTatRows(cls, budgets, clientName, opts) {
+  const b = (budgets || {})[cls] || (budgets || {})['A'] || {};
+  return TAT_STAGES.map(st => {
+    const std = Number(b[st.bk] != null ? b[st.bk] : 1);
+    let on = true;
+    if (st.k === 'recce') on = !!(opts && opts.recceDate);
+    if (opts && opts.nosite && ['recce', 'installation', 'ic'].includes(st.k)) on = false;
+    return { k: st.k, l: st.l, o: tatOwner(st.k, cls, clientName), std, d: std, on };
+  });
+}
+function computeTatPlan(rows, start, cls, opts) {
+  let cur = new Date(start.getTime());
+  return rows.map((r, i) => {
+    let due = null, byDate = false;
+    if (r.on) {
+      if (cls !== 'B' && r.k === 'installation' && opts && opts.installDate) { due = istEndOfDate(opts.installDate); byDate = true; }
+      else if (cls !== 'B' && r.k === 'recce' && opts && opts.recceDate) { due = istEndOfDate(opts.recceDate); byDate = true; }
+      else due = erpAddWorkdays(cur, r.d);
+      cur = due;
+    }
+    return { ...r, seq: i + 1, due, byDate };
+  });
+}
+function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }) {
+  const plan = computeTatPlan(rows || [], new Date(), cls, opts);
+  const edited = (rows || []).some(r => r.on && r.d !== r.std);
+  const last = [...plan].reverse().find(r => r.on && r.due);
+  const fmtD = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' }) : '';
+  const setRow = (k, patch) => setRows(p => p.map(r => r.k === k ? { ...r, ...patch } : r));
+  const cell = { padding: "5px 6px", fontSize: 11, borderBottom: "1px solid #1a2030" };
+  return React.createElement("div", { className: "c", style: { padding: 12, marginBottom: 10, border: "1px solid " + (ok ? "#10b98155" : "#e3a00855") } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
+      React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#e2e8f0" } }, "\u23f1 TAT plan"),
+      React.createElement("span", { style: { fontSize: 10, color: "#94a3b8" } }, "Class " + cls + " defaults \u00b7 working days, Sundays skipped \u00b7 untick stages that don't apply")),
+    React.createElement("div", { style: { overflowX: "auto" } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+        React.createElement("thead", null, React.createElement("tr", null,
+          ["", "Stage", "Owner", "Days", "Target"].map(h => React.createElement("th", { key: h, style: { ...cell, color: "#64748b", textAlign: "left", fontWeight: 600 } }, h)))),
+        React.createElement("tbody", null, plan.map(r => React.createElement("tr", { key: r.k, style: { opacity: r.on ? 1 : 0.45 } },
+          React.createElement("td", { style: cell }, React.createElement("input", { type: "checkbox", checked: r.on, onChange: e => setRow(r.k, { on: e.target.checked }) })),
+          React.createElement("td", { style: { ...cell, color: "#e2e8f0" } }, r.l, r.on && r.d !== r.std ? React.createElement("span", { style: { fontSize: 9, color: "#e3a008", marginLeft: 6 } }, "edited (std " + r.std + ")") : null),
+          React.createElement("td", { style: { ...cell, color: "#94a3b8" } }, r.o),
+          React.createElement("td", { style: cell }, r.byDate ? React.createElement("span", { style: { fontSize: 10, color: "#64748b" } }, "by date") :
+            React.createElement("input", { className: "in", type: "number", min: 0, step: 0.5, value: r.d, disabled: !r.on, style: { width: 56, fontSize: 11, padding: "2px 4px" },
+              onChange: e => setRow(r.k, { d: Math.max(0, Math.round((parseFloat(e.target.value) || 0) * 2) / 2) }) })),
+          React.createElement("td", { style: { ...cell, color: r.on ? "#e2e8f0" : "#64748b", whiteSpace: "nowrap" } }, r.on ? fmtD(r.due) : 'not needed')))))),
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, margin: "8px 0", color: "#94a3b8" } },
+      React.createElement("span", null, "Planned completion (to invoice) \u00b7 payment follows client terms"),
+      React.createElement("span", { style: { color: "#e2e8f0", fontWeight: 700 } }, last ? fmtD(last.due) : '\u2014')),
+    edited ? React.createElement("div", { style: { marginBottom: 8 } },
+      React.createElement("div", { style: { fontSize: 10, color: "#e3a008", marginBottom: 3 } }, "You changed standard days \u2014 reason (required)"),
+      React.createElement("input", { className: "in", value: reason, placeholder: "Client gave extra time for site access", onChange: e => setReason(e.target.value), style: { width: "100%", fontSize: 11 } })) : null,
+    React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "flex-start", fontSize: 11, color: "#e2e8f0", cursor: "pointer" } },
+      React.createElement("input", { type: "checkbox", checked: ok, onChange: e => setOk(e.target.checked), style: { marginTop: 2 } }),
+      "I've reviewed this TAT plan. Each owner will be measured against these target dates."));
+}
+function JobTatTracker({ jobId, approvedBy, approvedAt, reason }) {
+  const [rows, setRows] = React.useState(null);
+  React.useEffect(() => {
+    let dead = false;
+    sb.from('v_job_tat_tracker').select('*').eq('job_id', jobId).order('seq').then(r => { if (!dead) setRows(r.error ? [] : (r.data || [])); });
+    return () => { dead = true; };
+  }, [jobId]);
+  if (!rows || !rows.length) return null;
+  const fmtD = v => v ? new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' }) : '\u2014';
+  const pill = r => {
+    const s = r.slip_days, n = Math.abs(Math.round(s || 0));
+    const m = { done_on_time: ['#2fb37a', n ? n + (n === 1 ? ' day early' : ' days early') : 'On time'], done_late: ['#e0574f', n + (n === 1 ? ' day late' : ' days late')],
+      running_late: ['#e0574f', 'In progress \u00b7 ' + n + 'd late'], in_progress: ['#e3a008', 'In progress'], not_started_late: ['#e0574f', 'Not started \u00b7 ' + n + 'd late'],
+      upcoming: ['#64748b', 'Upcoming'], skipped: ['#475569', 'Not needed'] }[r.state] || ['#64748b', r.state];
+    return React.createElement("span", { style: { fontSize: 10, padding: "1px 8px", borderRadius: 9, background: m[0] + "20", color: m[0], whiteSpace: "nowrap" } }, m[1]);
+  };
+  const worst = rows.filter(r => r.applies && ['done_late', 'running_late', 'not_started_late'].includes(r.state)).reduce((a, r) => Math.max(a, r.slip_days || 0), 0);
+  const cell = { padding: "5px 6px", fontSize: 11, borderBottom: "1px solid #1a2030" };
+  return React.createElement("div", { className: "c", style: { padding: 10, marginBottom: 8 } },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
+      React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#e2e8f0" } }, "\u23f1 TAT tracker \u00b7 plan vs actual"),
+      React.createElement("span", { style: { fontSize: 10, color: "#94a3b8" } }, approvedBy ? 'Plan approved by ' + approvedBy + (approvedAt ? ' \u00b7 ' + fmtD(approvedAt) : '') + (reason ? ' \u00b7 ' + reason : '') : '')),
+    React.createElement("div", { style: { overflowX: "auto" } },
+      React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+        React.createElement("thead", null, React.createElement("tr", null, ["Stage \u00b7 owner", "Planned", "Actual", "Status"].map(h => React.createElement("th", { key: h, style: { ...cell, color: "#64748b", textAlign: "left" } }, h)))),
+        React.createElement("tbody", null, rows.map(r => React.createElement("tr", { key: r.stage_key, style: { opacity: r.applies ? 1 : 0.5 } },
+          React.createElement("td", { style: { ...cell, color: "#e2e8f0" } }, r.stage_label + (r.owner ? ' \u00b7 ' + r.owner : '')),
+          React.createElement("td", { style: cell }, r.applies ? fmtD(r.planned_due) : '\u2014'),
+          React.createElement("td", { style: cell }, fmtD(r.actual_end)),
+          React.createElement("td", { style: cell }, pill(r))))))),
+    worst > 0 ? React.createElement("div", { style: { fontSize: 11, color: "#e0574f", marginTop: 6 } }, "Job is " + Math.round(worst) + (Math.round(worst) === 1 ? " day" : " days") + " behind plan") : null);
 }
 
 // ===== Crew picker (2026-09-21) — everyone tapped gets individual TAT credit
