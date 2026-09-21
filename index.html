@@ -33098,11 +33098,11 @@ function erpAddWorkdays(from, days) {
 }
 function istEndOfDate(ymd) { return new Date(new Date(ymd + 'T00:00:00+05:30').getTime() + 86400000); }
 const TAT_STAGES = [
+  { k: 'recce', l: 'Recce', bk: 'Recee' },
   { k: 'design', l: 'Design', bk: 'Designing - In House' },
   { k: 'printing', l: 'Printing', bk: 'Printing · In-House' },
   { k: 'fabrication', l: 'Fabrication', bk: 'Fabrication · In-House' },
   { k: 'dispatch', l: 'Dispatch', bk: 'In Transit' },
-  { k: 'recce', l: 'Recce', bk: 'Recee' },
   { k: 'installation', l: 'Installation', bk: 'Installation WIP' },
   { k: 'ic', l: 'IC upload', bk: 'IC Pending' },
   { k: 'billing', l: 'Billing docket', bk: 'Billing Pending' },
