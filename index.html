@@ -23176,8 +23176,63 @@ function DispPage({
     install_date: "",
     courier_name: "",
     vendor_name: "",
-    batch_no: ""
+    batch_no: "",
+    dispatch_mode: "",
+    dc_id: ""
   });
+  // Dispatch hard rules (2026-09-21): mode + carrier details + ERP DC, then Delivered and signed copy on the row
+  const [modes, setModes] = useState([]);
+  const [jobDcs, setJobDcs] = useState(null);
+  const [tatMap, setTatMap] = useState({});
+  const [tatTick, setTatTick] = useState(0);
+  const [upd, setUpd] = useState({});
+  useEffect(() => {
+    sb.from('dispatch_mode_config').select('*').eq('active', true).order('sort').then(r => setModes(r.data || []));
+  }, []);
+  useEffect(() => {
+    sb.from('v_dispatch_tat').select('id,dc_no,dc_made_at,dispatched_at,dispatch_late_days,deliver_due,deliver_late_days,upload_late_days').then(r => {
+      const m = {};
+      (r.data || []).forEach(x => { m[x.id] = x; });
+      setTatMap(m);
+    });
+  }, [tatTick]);
+  const resolvedJid = useMemo(() => {
+    const v = String(f.job_id || '').trim();
+    if (!v) return '';
+    if ((jobs || []).some(j => j.id === v)) return v;
+    const m = (jobs || []).filter(j => j.id.startsWith(v + '-'));
+    return m.length === 1 ? m[0].id : '';
+  }, [f.job_id, jobs]);
+  useEffect(() => {
+    if (!resolvedJid) { setJobDcs(null); return; }
+    let dead = false;
+    sb.from('delivery_challans').select('id,dc_no,dc_date,created_at').eq('job_id', resolvedJid).order('created_at', { ascending: false })
+      .then(r => { if (!dead) setJobDcs(r.data || []); });
+    return () => { dead = true; };
+  }, [resolvedJid]);
+  const usedDc = useMemo(() => new Set((logs || []).map(l => l.dc_id).filter(Boolean)), [logs]);
+  const modeCfg = (modes || []).find(m => m.mode === f.dispatch_mode);
+  const markDelivered = async l => {
+    const who = prompt('Received by (name of the person who received the material):', '');
+    if (who === null) return;
+    if (!who.trim()) { show('\u26a0\ufe0f Receiver name is required', false); return; }
+    const at = new Date().toISOString();
+    const { error } = await sb.from('dispatch_logs').update({ delivered_at: at, received_by: who.trim() }).eq('id', l.id);
+    if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
+    setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), delivered_at: at, received_by: who.trim() } }));
+    setTatTick(t => t + 1);
+    show('\u2713 Delivered \u2014 upload the signed & stamped DC within 1 day');
+  };
+  const uploadSigned = async (l, file) => {
+    if (!file) return;
+    const url = await uploadFile(file, 'dispatch-signed-dc');
+    if (!url) { show('\u26a0\ufe0f Upload failed', false); return; }
+    const { error } = await sb.from('dispatch_logs').update({ pod_url: url }).eq('id', l.id);
+    if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
+    setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), pod_url: url, signed_uploaded_at: new Date().toISOString() } }));
+    setTatTick(t => t + 1);
+    show('\u2713 Signed DC uploaded');
+  };
   const [agLocal, setAgLocal] = useState(agencies || []);
   useEffect(() => {
     setAgLocal(agencies || []);
@@ -23232,11 +23287,14 @@ function DispPage({
       }
     }
     const isCourier = f.dispatch_type === "Courier to Vendor";
+    if (!modeCfg) { alert("Choose the dispatch Mode"); return; }
+    for (const k of modeCfg.required_fields || []) {
+      const v = String(f[k] || '').trim();
+      if (!v || (k === 'delivery_boy' && /^other/i.test(v))) { alert(modeCfg.mode + " needs: " + ((modeCfg.field_labels || {})[k] || k)); return; }
+    }
+    if (!isCourier && !f.dc_id) { alert("Pick the ERP DC for this job. If none exists, make the DC first (Delivery Challans)."); return; }
+    if (f.dispatch_type.includes("Install") && !String(f.installer || '').trim()) { alert("Delivery + Install needs the installer name"); return; }
     if (isCourier) {
-      if (!String(f.courier_name || '').trim()) {
-        alert("Enter Courier Agency");
-        return;
-      }
       if (!String(f.vendor_name || '').trim()) {
         alert("Enter Vendor (whom material was sent to)");
         return;
@@ -23253,12 +23311,17 @@ function DispPage({
       ...f,
       job_id: jid,
       install_date: f.install_date || null,
-      courier_name: isCourier ? String(f.courier_name).trim() : null,
-      vendor_name: isCourier ? String(f.vendor_name).trim() : null,
+      courier_name: String(f.courier_name || '').trim() || null,
+      vendor_name: String(f.vendor_name || '').trim() || null,
+      lr_no: String(f.lr_no || '').trim() || null,
+      vehicle: String(f.vehicle || '').trim() || null,
       batch_no: String(f.batch_no || '').trim() || null,
-      delivery_boy: isCourier ? "" : f.delivery_boy
+      delivery_boy: f.dispatch_mode === 'Own vehicle' ? f.delivery_boy : "",
+      dc_id: isCourier ? null : f.dc_id,
+      challan_no: isCourier ? (f.challan_no || null) : ((jobDcs || []).find(d => d.id === f.dc_id) || {}).dc_no || null
     };
     await addLog(payload);
+    setTatTick(t => t + 1);
     sF(p => ({
       ...p,
       job_id: "",
@@ -23269,7 +23332,8 @@ function DispPage({
       install_date: "",
       courier_name: "",
       vendor_name: "",
-      batch_no: ""
+      batch_no: "",
+      dc_id: ""
     }));
   };
   const filtered = useMemo(() => {
@@ -23424,7 +23488,8 @@ function DispPage({
     value: f.job_id,
     onChange: e => sF(p => ({
       ...p,
-      job_id: e.target.value
+      job_id: e.target.value,
+      dc_id: ""
     }))
   })), React.createElement(F, {
     l: "Type"
@@ -23435,17 +23500,29 @@ function DispPage({
       ...p,
       dispatch_type: e.target.value
     }))
-  }, React.createElement("option", null, "Delivery Only"), React.createElement("option", null, "Delivery + Install"), React.createElement("option", null, "Courier to Vendor"))), f.dispatch_type === "Courier to Vendor" && React.createElement(React.Fragment, null, React.createElement(F, {
-    l: "Courier Agency"
+  }, React.createElement("option", null, "Delivery Only"), React.createElement("option", null, "Delivery + Install"), React.createElement("option", null, "Courier to Vendor"))), React.createElement(F, {
+    l: "Mode *"
+  }, React.createElement("select", {
+    className: "in",
+    value: f.dispatch_mode,
+    onChange: e => sF(p => ({ ...p, dispatch_mode: e.target.value }))
+  }, React.createElement("option", { value: "" }, "\u2014 choose mode \u2014"), (modes || []).map(m => React.createElement("option", { key: m.mode, value: m.mode }, m.mode + (m.tat_days ? ' \u00b7 ' + m.tat_days + (m.tat_days === 1 ? ' day' : ' days') : ' \u00b7 same day'))))),
+  f.dispatch_type !== "Courier to Vendor" && React.createElement(F, {
+    l: "ERP DC *"
+  }, React.createElement("select", {
+    className: "in",
+    value: f.dc_id,
+    onChange: e => sF(p => ({ ...p, dc_id: e.target.value }))
+  }, React.createElement("option", { value: "" }, jobDcs === null ? 'enter a valid Job# first' : jobDcs.length ? '\u2014 choose DC \u2014' : 'no ERP DC for this job \u2014 make the DC first'),
+    (jobDcs || []).map(d => React.createElement("option", { key: d.id, value: d.id, disabled: usedDc.has(d.id) }, d.dc_no + (d.dc_date ? ' \u00b7 ' + d.dc_date : '') + (usedDc.has(d.id) ? ' \u00b7 already dispatched' : ''))))),
+  ...((modeCfg && modeCfg.required_fields) || []).filter(k => k !== 'delivery_boy').map(k => React.createElement(F, {
+    key: 'mf_' + k,
+    l: ((modeCfg.field_labels || {})[k] || k) + ' *'
   }, React.createElement("input", {
     className: "in",
-    placeholder: "e.g. Bluedart, VRL, DTDC",
-    value: f.courier_name,
-    onChange: e => sF(p => ({
-      ...p,
-      courier_name: e.target.value
-    }))
-  })), React.createElement(F, {
+    value: f[k] || '',
+    onChange: e => { const v = e.target.value; sF(p => ({ ...p, [k]: v })); }
+  }))), f.dispatch_type === "Courier to Vendor" && React.createElement(React.Fragment, null, React.createElement(F, {
     l: "Vendor (sent to)"
   }, React.createElement("input", {
     className: "in",
@@ -23470,8 +23547,8 @@ function DispPage({
       ...p,
       batch_no: e.target.value
     }))
-  }))), React.createElement(F, {
-    l: "Del Boy"
+  }))), f.dispatch_mode === 'Own vehicle' && React.createElement(F, {
+    l: "Delivery boy *"
   }, React.createElement("div", {
     style: {
       position: "relative"
@@ -23531,62 +23608,8 @@ function DispPage({
       background: "#0a1f15",
       fontWeight: 600
     }
-  }, "\u2795 Add \"", boyQ.trim(), "\""), React.createElement("div", {
-    onMouseDown: () => pickBoy("Other"),
-    style: {
-      padding: "6px 10px",
-      cursor: "pointer",
-      fontSize: 10,
-      color: "#64748b",
-      borderTop: "1px solid #1a2030"
-    }
-  }, "Other (unknown)")))), React.createElement(F, {
-    l: "Vehicle/Courier"
-  }, React.createElement("input", {
-    className: "in",
-    value: f.vehicle,
-    onChange: e => sF(p => ({
-      ...p,
-      vehicle: e.target.value
-    }))
-  })), React.createElement(F, {
-    l: "LR/Track#"
-  }, React.createElement("input", {
-    className: "in mn",
-    value: f.lr_no,
-    onChange: e => sF(p => ({
-      ...p,
-      lr_no: e.target.value
-    }))
-  })), React.createElement(F, {
-    l: "Challan#"
-  }, React.createElement("input", {
-    className: "in mn",
-    value: f.challan_no,
-    onChange: e => sF(p => ({
-      ...p,
-      challan_no: e.target.value
-    }))
-  })), React.createElement(F, {
-    l: "\uD83D\uDCF8 Challan"
-  }, React.createElement("input", {
-    type: "file",
-    accept: "image/*",
-    className: "in",
-    style: {
-      padding: 2
-    }
-  })), React.createElement(F, {
-    l: "\uD83D\uDCF8 POD"
-  }, React.createElement("input", {
-    type: "file",
-    accept: "image/*",
-    className: "in",
-    style: {
-      padding: 2
-    }
-  })), f.dispatch_type.includes("Install") && React.createElement(React.Fragment, null, React.createElement(F, {
-    l: "Installer"
+  }, "\u2795 Add \"", boyQ.trim(), "\"")))), f.dispatch_type.includes("Install") && React.createElement(React.Fragment, null, React.createElement(F, {
+    l: "Installer *"
   }, React.createElement("input", {
     className: "in",
     value: f.installer,
@@ -23651,25 +23674,39 @@ function DispPage({
     style: {
       overflowX: "auto"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Job"), React.createElement("th", null, "Type"), React.createElement("th", null, "Boy / Vendor"), React.createElement("th", null, "Vehicle / Courier"), React.createElement("th", null, "Challan"), React.createElement("th", null, "LR"))), React.createElement("tbody", null, filtered.map(l => React.createElement("tr", {
-    key: l.id
-  }, React.createElement("td", null, l.date), React.createElement("td", {
-    className: "mn",
-    style: {
-      color: "#e3a008"
-    }
-  }, l.job_id, l.batch_no ? " \u00B7 " + l.batch_no : ""), React.createElement("td", null, React.createElement("span", {
-    className: "bd",
-    style: {
-      background: l.dispatch_type === "Courier to Vendor" ? "#3b82f620" : l.dispatch_type?.includes("Install") ? "#8b5cf620" : "#10b98120",
-      color: l.dispatch_type === "Courier to Vendor" ? "#60a5fa" : l.dispatch_type?.includes("Install") ? "#c084fc" : "#4ade80"
-    }
-  }, l.dispatch_type)), React.createElement("td", null, l.dispatch_type === "Courier to Vendor" ? l.vendor_name || "" : l.delivery_boy), React.createElement("td", null, l.dispatch_type === "Courier to Vendor" ? l.courier_name || "" : l.vehicle), React.createElement("td", {
-    className: "mn"
-  }, l.challan_no), React.createElement("td", {
-    className: "mn"
-  }, l.lr_no))), filtered.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: 7,
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null,
+    ["Date", "Job", "Type", "Mode / carrier", "DC", "DC \u2192 dispatched", "Delivered", "Signed DC"].map(h => React.createElement("th", { key: h }, h)))),
+  React.createElement("tbody", null, filtered.map(l0 => {
+    const l = { ...l0, ...(upd[l0.id] || {}) };
+    const t = tatMap[l.id] || {};
+    const late = (d, lbl) => d > 0 ? React.createElement("span", { className: "bd", style: { background: "#f4706720", color: "#f47067", fontSize: 9, marginLeft: 4 } }, (d >= 1 ? Math.floor(d) + 'd' : Math.ceil(d * 24) + 'h') + ' late' + (lbl ? ' ' + lbl : '')) : null;
+    const fmt = v => v ? new Date(v).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }) : '';
+    const carrier = !l.dispatch_mode ? [l.delivery_boy, l.vehicle, l.courier_name, l.lr_no].filter(Boolean).join(' \u00b7 ')
+      : l.dispatch_mode === 'Own vehicle' ? [l.delivery_boy, l.vehicle].filter(Boolean).join(' \u00b7 ')
+      : l.dispatch_mode === 'Client / vendor pickup' ? 'collected by ' + (l.vendor_name || '')
+      : [l.courier_name, l.lr_no].filter(Boolean).join(' \u00b7 ');
+    const isNew = !!l.dispatch_mode && l.dispatch_type !== 'In-house';
+    return React.createElement("tr", { key: l.id },
+      React.createElement("td", null, l.date),
+      React.createElement("td", { className: "mn", style: { color: "#e3a008" } }, l.job_id, l.batch_no ? " \u00B7 " + l.batch_no : ""),
+      React.createElement("td", null, React.createElement("span", { className: "bd", style: {
+        background: l.dispatch_type === "Courier to Vendor" ? "#3b82f620" : l.dispatch_type?.includes("Install") ? "#8b5cf620" : "#10b98120",
+        color: l.dispatch_type === "Courier to Vendor" ? "#60a5fa" : l.dispatch_type?.includes("Install") ? "#c084fc" : "#4ade80" } }, l.dispatch_type)),
+      React.createElement("td", { style: { fontSize: 10 } }, l.dispatch_mode ? React.createElement("b", null, l.dispatch_mode) : React.createElement("span", { style: { color: "#64748b" } }, "(old entry)"),
+        carrier ? React.createElement("div", { style: { color: "#94a3b8" } }, carrier) : null),
+      React.createElement("td", { className: "mn" }, l.challan_no || '\u2014'),
+      React.createElement("td", { style: { fontSize: 10 } }, isNew && t.dc_made_at ? fmt(t.dc_made_at) + ' \u2192 ' + fmt(t.dispatched_at || l.created_at) : '\u2014', isNew ? late(t.dispatch_late_days) : null),
+      React.createElement("td", { style: { fontSize: 10 } }, l.delivered_at
+        ? React.createElement(React.Fragment, null, fmt(l.delivered_at), React.createElement("div", { style: { color: "#94a3b8" } }, 'rcvd: ' + (l.received_by || '')))
+        : isNew ? React.createElement(React.Fragment, null, React.createElement("button", { className: "b bs", style: { fontSize: 9, padding: "2px 8px" }, onClick: () => markDelivered(l) }, "\u2713 Delivered"), late(t.deliver_late_days)) : '\u2014',
+        l.delivered_at && isNew ? late(t.deliver_late_days) : null),
+      React.createElement("td", { style: { fontSize: 10 } }, l.pod_url
+        ? React.createElement(React.Fragment, null, React.createElement("a", { href: l.pod_url, target: "_blank", rel: "noreferrer", style: { color: "#4ade80" } }, "\u2713 view"), l.signed_uploaded_at ? React.createElement("div", { style: { color: "#94a3b8" } }, fmt(l.signed_uploaded_at)) : null, isNew ? late(t.upload_late_days) : null)
+        : isNew && l.delivered_at ? React.createElement(React.Fragment, null, React.createElement("label", { className: "b bs", style: { fontSize: 9, padding: "2px 8px", cursor: "pointer" } }, "\uD83D\uDCCE Upload signed DC",
+            React.createElement("input", { type: "file", accept: "image/*,application/pdf", style: { display: "none" }, onChange: e => uploadSigned(l, e.target.files && e.target.files[0]) })), late(t.upload_late_days))
+        : '\u2014'));
+  }), filtered.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: 8,
     style: {
       textAlign: "center",
       color: "#64748b",
