@@ -6954,7 +6954,10 @@ function JobDetail({
         }
       }, d)));
     }))) : null;
-  })(), React.createElement(JobTatTracker, {
+  })(), j.status === 'Draft' && !j.tat_plan_approved_at ? React.createElement(JobTatApproval, {
+    job: j,
+    user: user
+  }) : null, React.createElement(JobTatTracker, {
     jobId: j.id,
     approvedBy: j.tat_plan_approved_by,
     approvedAt: j.tat_plan_approved_at,
@@ -14032,6 +14035,9 @@ function NewJobPage({
       payment_terms: f.pt,
       recce_date: f.nosite ? null : f.rcd || null,
       install_date: f.nosite ? null : f.ind || null,
+      tat_plan_approved_by: tatOk ? user?.name || '' : null,
+      tat_plan_approved_at: tatOk ? new Date().toISOString() : null,
+      tat_plan_reason: tatOk ? tatReason.trim() || null : null,
       status: isDraft ? "Draft" : "Active",
       po_file_url: poUrl ? [poUrl] : [],
       design_ref_urls: designUrls
@@ -14098,8 +14104,6 @@ function NewJobPage({
           std_days: r.std, planned_days: r.d, applies: !!r.on, planned_due: r.due ? r.due.toISOString() : null
         })));
         if (ins.error) throw ins.error;
-        const up = await sb.from('jobs').update({ tat_plan_approved_by: user?.name || '', tat_plan_approved_at: new Date().toISOString(), tat_plan_reason: tatReason.trim() || null }).eq('id', createdJobId);
-        if (up.error) throw up.error;
       } catch (e) {
         alert('⚠️ Job ' + createdJobId + ' created, but the TAT plan did not save: ' + (e.message || e));
       }
@@ -30570,7 +30574,7 @@ function BOQImportPage({
           billing_name: f.cn,
           client_gst: f.cgst || "",
           payment_terms: f.pt,
-          status: "Active"
+          status: "Draft"
         };
         const batchId = "B" + uid();
         const batchData = {
@@ -30692,7 +30696,7 @@ function BOQImportPage({
         billing_name: f.cn,
         client_gst: f.cgst || "",
         payment_terms: f.pt,
-        status: "Active"
+        status: "Draft"
       };
       const batchId = "B" + uid();
       const batchData = {
@@ -33166,6 +33170,63 @@ function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }
     React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "flex-start", fontSize: 11, color: "#e2e8f0", cursor: "pointer" } },
       React.createElement("input", { type: "checkbox", checked: ok, onChange: e => setOk(e.target.checked), style: { marginTop: 2 } }),
       "I've reviewed this TAT plan. Each owner will be measured against these target dates."));
+}
+function JobTatApproval({ job, user }) {
+  const [budgets, setBudgets] = React.useState(null);
+  const [client, setClient] = React.useState(null);
+  const [rows, setRows] = React.useState([]);
+  const [ok, setOk] = React.useState(false);
+  const [reason, setReason] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const cls = (client && client.client_class) || 'A';
+  const opts = { installDate: job.install_date || '', recceDate: job.recce_date || '', nosite: false };
+  React.useEffect(() => {
+    let dead = false;
+    (async () => {
+      const a = await sb.from('sla_config').select('client_class,stage_budgets');
+      const m = {};
+      (a.data || []).forEach(x => { m[x.client_class] = x.stage_budgets || {}; });
+      const c = job.client_id ? await sb.from('clients').select('client_class,name').eq('id', job.client_id).maybeSingle() : { data: null };
+      if (dead) return;
+      setBudgets(m);
+      setClient(c.data || { client_class: 'A', name: job.client_name });
+    })();
+    return () => { dead = true; };
+  }, [job.id]);
+  React.useEffect(() => {
+    if (budgets && client) setRows(buildTatRows(cls, budgets, client.name || job.client_name, opts));
+  }, [budgets, client]);
+  if (done) return React.createElement("div", { className: "c", style: { padding: 10, marginBottom: 8, fontSize: 11, color: "#2fb37a" } },
+    "\u2713 TAT plan approved \u2014 this job can now move forward from Draft.");
+  if (!rows.length) return null;
+  const save = async () => {
+    setErr('');
+    if (!ok) { setErr('Tick the approval box first.'); return; }
+    if (rows.some(r => r.on && r.d !== r.std) && !reason.trim()) { setErr('Enter the reason for the changed days.'); return; }
+    setBusy(true);
+    try {
+      const plan = computeTatPlan(rows, new Date(), cls, opts);
+      const del = await sb.from('job_tat_plan').delete().eq('job_id', job.id);
+      if (del.error) throw del.error;
+      const ins = await sb.from('job_tat_plan').insert(plan.map(r => ({
+        job_id: job.id, stage_key: r.k, seq: r.seq, stage_label: r.l, owner: r.o,
+        std_days: r.std, planned_days: r.d, applies: !!r.on, planned_due: r.due ? r.due.toISOString() : null
+      })));
+      if (ins.error) throw ins.error;
+      const up = await sb.from('jobs').update({ tat_plan_approved_by: user?.name || '', tat_plan_approved_at: new Date().toISOString(), tat_plan_reason: reason.trim() || null }).eq('id', job.id);
+      if (up.error) throw up.error;
+      setDone(true);
+    } catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+  return React.createElement("div", { style: { marginBottom: 8 } },
+    React.createElement("div", { style: { fontSize: 11, color: "#e3a008", marginBottom: 4 } }, "\u26a0 This job has no approved TAT plan. It cannot move out of Draft until the plan below is approved."),
+    React.createElement(TatPlanPanel, { rows, setRows, cls, opts, ok, setOk, reason, setReason }),
+    err ? React.createElement("div", { style: { fontSize: 11, color: "#e0574f", marginBottom: 6 } }, err) : null,
+    React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
+      React.createElement("button", { className: "b bp", disabled: busy, onClick: save, style: { padding: "6px 16px" } }, busy ? '\u2026' : 'Approve TAT plan')));
 }
 function JobTatTracker({ jobId, approvedBy, approvedAt, reason }) {
   const [rows, setRows] = React.useState(null);
