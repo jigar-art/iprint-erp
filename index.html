@@ -6958,6 +6958,8 @@ function JobDetail({
     job: j,
     user: user
   }) : null, React.createElement(JobTatTracker, {
+    job: j,
+    user: user,
     jobId: j.id,
     approvedBy: j.tat_plan_approved_by,
     approvedAt: j.tat_plan_approved_at,
@@ -14941,7 +14943,7 @@ function NewJobPage({
     colSpan: 2
   })))))), tatRows.length ? React.createElement(TatPlanPanel, {
     rows: tatRows, setRows: setTatRows, cls: tatCls, opts: tatOpts,
-    ok: tatOk, setOk: setTatOk, reason: tatReason, setReason: setTatReason
+    ok: tatOk, setOk: setTatOk, reason: tatReason, setReason: setTatReason, canEdit: isTatEditor(user)
   }) : null, React.createElement("div", {
     style: {
       display: "flex",
@@ -33129,6 +33131,11 @@ function buildTatRows(cls, budgets, clientName, opts) {
     return { k: st.k, l: st.l, o: tatOwner(st.k, cls, clientName), std, d: std, on, decided };
   });
 }
+// Only these people may change TAT days or edit a plan later (DB enforces the same list)
+function isTatEditor(user) {
+  const b = ((user && user.name) || '').toUpperCase().split(/\s*[-(]/)[0].trim();
+  return ['JIGAR', 'AMOL', 'RUCHITA', 'ANKITA'].includes(b);
+}
 function tatRecceDecided(rows) {
   const r = (rows || []).find(x => x.k === 'recce');
   return !r || !!r.decided;
@@ -33146,7 +33153,7 @@ function computeTatPlan(rows, start, cls, opts) {
     return { ...r, seq: i + 1, due, byDate };
   });
 }
-function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }) {
+function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason, canEdit, reasonAlways, okText }) {
   const plan = computeTatPlan(rows || [], new Date(), cls, opts);
   const edited = (rows || []).some(r => r.on && r.d !== r.std);
   const last = [...plan].reverse().find(r => r.on && r.due);
@@ -33172,7 +33179,7 @@ function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }
         React.createElement("span", { style: { fontSize: 10, color: "#64748b" } }, recceRow.on ? (opts && opts.recceDate ? "target = recce date" : "target = " + recceRow.d + " working days \u2014 enter a recce date to fix it") : "no recce on this job")) : null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
       React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#e2e8f0" } }, "\u23f1 TAT plan"),
-      React.createElement("span", { style: { fontSize: 10, color: "#94a3b8" } }, "Class " + cls + " defaults \u00b7 working days, Sundays skipped \u00b7 untick stages that don't apply")),
+      React.createElement("span", { style: { fontSize: 10, color: "#94a3b8" } }, "Class " + cls + " defaults \u00b7 working days, Sundays skipped \u00b7 untick stages that don't apply" + (canEdit ? '' : ' \u00b7 days can be changed only by Jigar / Amol / Ruchita / Ankita'))),
     React.createElement("div", { style: { overflowX: "auto" } },
       React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
         React.createElement("thead", null, React.createElement("tr", null,
@@ -33182,18 +33189,19 @@ function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }
           React.createElement("td", { style: { ...cell, color: "#e2e8f0" } }, r.l, r.on && r.d !== r.std ? React.createElement("span", { style: { fontSize: 9, color: "#e3a008", marginLeft: 6 } }, "edited (std " + r.std + ")") : null),
           React.createElement("td", { style: { ...cell, color: "#94a3b8" } }, r.o),
           React.createElement("td", { style: cell }, r.byDate ? React.createElement("span", { style: { fontSize: 10, color: "#64748b" } }, "by date") :
+            !canEdit ? React.createElement("span", { style: { fontSize: 11, color: "#e2e8f0" } }, r.d) :
             React.createElement("input", { className: "in", type: "number", min: 0, step: 0.5, value: r.d, disabled: !r.on, style: { width: 56, fontSize: 11, padding: "2px 4px" },
               onChange: e => setRow(r.k, { d: Math.max(0, Math.round((parseFloat(e.target.value) || 0) * 2) / 2) }) })),
           React.createElement("td", { style: { ...cell, color: r.on ? "#e2e8f0" : "#64748b", whiteSpace: "nowrap" } }, r.on ? fmtD(r.due) : 'not needed')))))),
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 11, margin: "8px 0", color: "#94a3b8" } },
       React.createElement("span", null, "Planned completion (to invoice) \u00b7 payment follows client terms"),
       React.createElement("span", { style: { color: "#e2e8f0", fontWeight: 700 } }, last ? fmtD(last.due) : '\u2014')),
-    edited ? React.createElement("div", { style: { marginBottom: 8 } },
-      React.createElement("div", { style: { fontSize: 10, color: "#e3a008", marginBottom: 3 } }, "You changed standard days \u2014 reason (required)"),
+    edited || reasonAlways ? React.createElement("div", { style: { marginBottom: 8 } },
+      React.createElement("div", { style: { fontSize: 10, color: "#e3a008", marginBottom: 3 } }, reasonAlways ? "Reason for changing the plan (required)" : "You changed standard days \u2014 reason (required)"),
       React.createElement("input", { className: "in", value: reason, placeholder: "Client gave extra time for site access", onChange: e => setReason(e.target.value), style: { width: "100%", fontSize: 11 } })) : null,
     React.createElement("label", { style: { display: "flex", gap: 8, alignItems: "flex-start", fontSize: 11, color: "#e2e8f0", cursor: "pointer" } },
       React.createElement("input", { type: "checkbox", checked: ok, onChange: e => setOk(e.target.checked), style: { marginTop: 2 } }),
-      "I've reviewed this TAT plan. Each owner will be measured against these target dates."));
+      okText || "I've reviewed this TAT plan. Each owner will be measured against these target dates."));
 }
 function JobTatApproval({ job, user }) {
   const [budgets, setBudgets] = React.useState(null);
@@ -33248,19 +33256,75 @@ function JobTatApproval({ job, user }) {
   };
   return React.createElement("div", { style: { marginBottom: 8 } },
     React.createElement("div", { style: { fontSize: 11, color: "#e3a008", marginBottom: 4 } }, "\u26a0 This job has no approved TAT plan. It cannot move out of Draft until the plan below is approved."),
-    React.createElement(TatPlanPanel, { rows, setRows, cls, opts, ok, setOk, reason, setReason }),
+    React.createElement(TatPlanPanel, { rows, setRows, cls, opts, ok, setOk, reason, setReason, canEdit: isTatEditor(user) }),
     err ? React.createElement("div", { style: { fontSize: 11, color: "#e0574f", marginBottom: 6 } }, err) : null,
     React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
       React.createElement("button", { className: "b bp", disabled: busy, onClick: save, style: { padding: "6px 16px" } }, busy ? '\u2026' : 'Approve TAT plan')));
 }
-function JobTatTracker({ jobId, approvedBy, approvedAt, reason }) {
+function JobTatTracker({ job, user, jobId, approvedBy, approvedAt, reason }) {
   const [rows, setRows] = React.useState(null);
+  const [tick, setTick] = React.useState(0);
+  const [edit, setEdit] = React.useState(null);
+  const [eOk, setEOk] = React.useState(false);
+  const [eReason, setEReason] = React.useState('');
+  const [eCls, setECls] = React.useState('A');
+  const [eErr, setEErr] = React.useState('');
+  const [eBusy, setEBusy] = React.useState(false);
   React.useEffect(() => {
     let dead = false;
     sb.from('v_job_tat_tracker').select('*').eq('job_id', jobId).order('seq').then(r => { if (!dead) setRows(r.error ? [] : (r.data || [])); });
     return () => { dead = true; };
-  }, [jobId]);
+  }, [jobId, tick]);
   if (!rows || !rows.length) return null;
+  const editor = isTatEditor(user);
+  const eOpts = { installDate: (job && job.install_date) || '', recceDate: (job && job.recce_date) || '', nosite: false };
+  const startEdit = async () => {
+    let cls = 'A';
+    if (job && job.client_id) {
+      const c = await sb.from('clients').select('client_class').eq('id', job.client_id).maybeSingle();
+      cls = (c.data && c.data.client_class) || 'A';
+    }
+    setECls(cls); setEOk(false); setEReason(''); setEErr('');
+    setEdit(rows.map(r => ({ k: r.stage_key, l: r.stage_label, o: r.owner || '', std: Number(r.std_days || 0), d: Number(r.planned_days || 0), on: !!r.applies, decided: true })));
+  };
+  const saveEdit = async () => {
+    setEErr('');
+    if (!eReason.trim()) { setEErr('Enter the reason for changing the plan.'); return; }
+    if (!eOk) { setEErr('Tick the confirmation box.'); return; }
+    setEBusy(true);
+    try {
+      const start = approvedAt ? new Date(approvedAt) : new Date();
+      const plan = computeTatPlan(edit, start, eCls, eOpts);
+      const changes = [];
+      for (const r of plan) {
+        const old = rows.find(x => x.stage_key === r.k) || {};
+        const newDue = r.on && r.due ? r.due.toISOString() : null;
+        const changed = !!old.applies !== !!r.on || Number(old.planned_days) !== Number(r.d) || (old.planned_due || null) !== newDue;
+        if (!changed) continue;
+        changes.push({ stage: r.l, applies: [!!old.applies, !!r.on], days: [Number(old.planned_days), Number(r.d)], due: [old.planned_due || null, newDue] });
+        const up = await sb.from('job_tat_plan').update({
+          applies: !!r.on, planned_days: r.d, planned_due: newDue,
+          original_days: old.original_days != null ? old.original_days : old.planned_days,
+          original_due: old.original_due != null ? old.original_due : old.planned_due,
+          updated_by: user?.name || '', updated_at: new Date().toISOString()
+        }).eq('job_id', jobId).eq('stage_key', r.k);
+        if (up.error) throw up.error;
+      }
+      if (changes.length) {
+        const lg = await sb.from('job_tat_plan_log').insert({ job_id: jobId, changed_by: user?.name || '', reason: eReason.trim(), change: { stages: changes } });
+        if (lg.error) throw lg.error;
+      }
+      setEdit(null); setTick(t => t + 1);
+    } catch (e) { setEErr(e.message || String(e)); }
+    setEBusy(false);
+  };
+  if (edit) return React.createElement("div", { style: { marginBottom: 8 } },
+    React.createElement(TatPlanPanel, { rows: edit, setRows: setEdit, cls: eCls, opts: eOpts, ok: eOk, setOk: setEOk, reason: eReason, setReason: setEReason,
+      canEdit: true, reasonAlways: true, okText: "Save this revised plan. The original dates stay on record for comparison." }),
+    eErr ? React.createElement("div", { style: { fontSize: 11, color: "#e0574f", marginBottom: 6 } }, eErr) : null,
+    React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", gap: 6 } },
+      React.createElement("button", { className: "b", onClick: () => setEdit(null) }, "Cancel"),
+      React.createElement("button", { className: "b bp", disabled: eBusy, onClick: saveEdit }, eBusy ? '\u2026' : 'Save plan')));
   const fmtD = v => v ? new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' }) : '\u2014';
   const pill = r => {
     const s = r.slip_days, n = Math.abs(Math.round(s || 0));
@@ -33274,13 +33338,17 @@ function JobTatTracker({ jobId, approvedBy, approvedAt, reason }) {
   return React.createElement("div", { className: "c", style: { padding: 10, marginBottom: 8 } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
       React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#e2e8f0" } }, "\u23f1 TAT tracker \u00b7 plan vs actual"),
-      React.createElement("span", { style: { fontSize: 10, color: "#94a3b8" } }, approvedBy ? 'Plan approved by ' + approvedBy + (approvedAt ? ' \u00b7 ' + fmtD(approvedAt) : '') + (reason ? ' \u00b7 ' + reason : '') : '')),
+      React.createElement("span", { style: { fontSize: 10, color: "#94a3b8", display: "flex", gap: 8, alignItems: "center" } },
+        approvedBy ? 'Plan approved by ' + approvedBy + (approvedAt ? ' \u00b7 ' + fmtD(approvedAt) : '') + (reason ? ' \u00b7 ' + reason : '') : '',
+        editor ? React.createElement("button", { className: "b", onClick: startEdit, style: { fontSize: 10, padding: "2px 10px" } }, "\u270e Edit plan") : null)),
     React.createElement("div", { style: { overflowX: "auto" } },
       React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
         React.createElement("thead", null, React.createElement("tr", null, ["Stage \u00b7 owner", "Planned", "Actual", "Status"].map(h => React.createElement("th", { key: h, style: { ...cell, color: "#64748b", textAlign: "left" } }, h)))),
         React.createElement("tbody", null, rows.map(r => React.createElement("tr", { key: r.stage_key, style: { opacity: r.applies ? 1 : 0.5 } },
-          React.createElement("td", { style: { ...cell, color: "#e2e8f0" } }, r.stage_label + (r.owner ? ' \u00b7 ' + r.owner : '')),
-          React.createElement("td", { style: cell }, r.applies ? fmtD(r.planned_due) : '\u2014'),
+          React.createElement("td", { style: { ...cell, color: "#e2e8f0" } }, r.stage_label + (r.owner ? ' \u00b7 ' + r.owner : ''),
+            r.auto_added ? React.createElement("span", { style: { fontSize: 9, color: "#38bdf8", marginLeft: 6 } }, "auto-added") : null),
+          React.createElement("td", { style: cell }, r.applies ? fmtD(r.planned_due) : '\u2014',
+            r.original_due && r.original_due !== r.planned_due ? React.createElement("span", { style: { fontSize: 9, color: "#64748b", marginLeft: 4 } }, "(was " + fmtD(r.original_due) + ")") : null),
           React.createElement("td", { style: cell }, fmtD(r.actual_end)),
           React.createElement("td", { style: cell }, pill(r))))))),
     worst > 0 ? React.createElement("div", { style: { fontSize: 11, color: "#e0574f", marginTop: 6 } }, "Job is " + Math.round(worst) + (Math.round(worst) === 1 ? " day" : " days") + " behind plan") : null);
