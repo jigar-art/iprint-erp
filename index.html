@@ -15369,12 +15369,12 @@ function DeptPage({
   })();
   const ageBtn = (n, label) => React.createElement("button", {
     key: n, type: "button", onClick: () => setInstAge(n),
-    style: { fontSize: 9, padding: "2px 8px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
+    style: { fontSize: 11, fontWeight: 700, padding: "3px 10px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
              border: "1px solid " + (instAge === n ? "#e3a008" : "#1a2030"), background: instAge === n ? "#e3a00815" : "transparent", color: instAge === n ? "#e3a008" : "#8b949e" }
   }, label);
   const whoBtn = (id, label) => React.createElement("button", {
     key: 'w' + id, type: "button", onClick: () => setInstWho(id),
-    style: { fontSize: 9, padding: "2px 8px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
+    style: { fontSize: 11, fontWeight: 700, padding: "3px 10px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
              border: "1px solid " + (instWho === id ? "#38bdf8" : "#1a2030"), background: instWho === id ? "#38bdf815" : "transparent", color: instWho === id ? "#38bdf8" : "#8b949e" }
   }, label);
   const docTag = (label, ok, late, na) => React.createElement("span", {
@@ -15553,7 +15553,9 @@ function DeptPage({
       borderBottom: `2px solid ${ad === null ? '#64748b' : cur.c}`,
       background: "#0a0f1a",
       display: 'flex',
-      justifyContent: 'space-between',
+      justifyContent: isInst ? 'center' : 'space-between',
+      gap: isInst ? 18 : 0,
+      flexWrap: 'wrap',
       alignItems: 'center'
     }
   }, React.createElement("span", {
@@ -15562,7 +15564,7 @@ function DeptPage({
       fontWeight: 700,
       color: ad === null ? '#94a3b8' : cur.c
     }
-  }, ad === null ? 'All jobs' : cur.l, " \u2014 ", penShown.length, " jobs", isInst ? React.createElement("span", { style: { color: "#e0574f", marginLeft: 6 } }, "\u00b7 " + instLateN + " late vs TAT") : null), isInst ? React.createElement("span", {
+  }, React.createElement("span", { style: isInst ? { fontSize: 12 } : null }, ad === null ? 'All jobs' : cur.l, " \u2014 ", penShown.length, " jobs"), isInst ? React.createElement("span", { style: { color: "#e0574f", marginLeft: 6 } }, "\u00b7 " + instLateN + " late vs TAT") : null), isInst ? React.createElement("span", {
     style: { display: "flex", alignItems: "center", flexWrap: "wrap" }
   }, whoBtn('all', 'Everyone'), whoBtn('poonam', 'Poonam'), whoBtn('priyanka', 'Priyanka (NCR / CMS / Diebold / Hitachi)'),
      whoBtn('docs', 'Banking docs missing (' + pen.filter(docMissing).length + ')'),
