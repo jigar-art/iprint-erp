@@ -14003,6 +14003,10 @@ function NewJobPage({
         alert("Add at least one item before creating a job.");
         return;
       }
+      if (!tatRecceDecided(tatRows)) {
+        alert("⚠️ TAT plan: answer 'Recce required for this job?' — Yes or No — before creating the job.");
+        return;
+      }
       if (!tatOk) {
         alert("⚠️ Review and approve the TAT plan (tick the box in the TAT plan section) before creating the job.");
         return;
@@ -33119,11 +33123,15 @@ function buildTatRows(cls, budgets, clientName, opts) {
   const b = (budgets || {})[cls] || (budgets || {})['A'] || {};
   return TAT_STAGES.map(st => {
     const std = Number(b[st.bk] != null ? b[st.bk] : 1);
-    let on = true;
-    if (st.k === 'recce') on = !!(opts && opts.recceDate);
-    if (opts && opts.nosite && ['recce', 'installation', 'ic'].includes(st.k)) on = false;
-    return { k: st.k, l: st.l, o: tatOwner(st.k, cls, clientName), std, d: std, on };
+    let on = true, decided = true;
+    if (st.k === 'recce') { on = !!(opts && opts.recceDate); decided = !!(opts && opts.recceDate); }
+    if (opts && opts.nosite && ['recce', 'installation', 'ic'].includes(st.k)) { on = false; decided = true; }
+    return { k: st.k, l: st.l, o: tatOwner(st.k, cls, clientName), std, d: std, on, decided };
   });
+}
+function tatRecceDecided(rows) {
+  const r = (rows || []).find(x => x.k === 'recce');
+  return !r || !!r.decided;
 }
 function computeTatPlan(rows, start, cls, opts) {
   let cur = new Date(start.getTime());
@@ -33145,7 +33153,23 @@ function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }
   const fmtD = d => d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' }) : '';
   const setRow = (k, patch) => setRows(p => p.map(r => r.k === k ? { ...r, ...patch } : r));
   const cell = { padding: "5px 6px", fontSize: 11, borderBottom: "1px solid #1a2030" };
+  const recceRow = (rows || []).find(r => r.k === 'recce');
+  const recceBtn = (val, label) => {
+    const sel = recceRow && recceRow.decided && recceRow.on === val;
+    const c = val ? "#10b981" : "#94a3b8";
+    return React.createElement("button", {
+      type: "button", onClick: () => setRow('recce', { on: val, decided: true }),
+      style: { fontSize: 12, fontWeight: 700, padding: "4px 16px", borderRadius: 6, cursor: "pointer",
+               border: "1px solid " + (sel ? c : "#1a2030"), background: sel ? c + "22" : "transparent", color: sel ? c : "#8b949e" }
+    }, (sel ? "\u2713 " : "") + label);
+  };
   return React.createElement("div", { className: "c", style: { padding: 12, marginBottom: 10, border: "1px solid " + (ok ? "#10b98155" : "#e3a00855") } },
+    recceRow ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 10px", marginBottom: 10, borderRadius: 6,
+        border: "1px solid " + (recceRow.decided ? "#1a2030" : "#e0574f88"), background: recceRow.decided ? "transparent" : "#e0574f10" } },
+      React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#e2e8f0" } }, "Recce required for this job? *"),
+      recceBtn(true, 'Yes'), recceBtn(false, 'No'),
+      !recceRow.decided ? React.createElement("span", { style: { fontSize: 10, color: "#e0574f" } }, "choose Yes or No") :
+        React.createElement("span", { style: { fontSize: 10, color: "#64748b" } }, recceRow.on ? (opts && opts.recceDate ? "target = recce date" : "target = " + recceRow.d + " working days \u2014 enter a recce date to fix it") : "no recce on this job")) : null,
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6, marginBottom: 6 } },
       React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#e2e8f0" } }, "\u23f1 TAT plan"),
       React.createElement("span", { style: { fontSize: 10, color: "#94a3b8" } }, "Class " + cls + " defaults \u00b7 working days, Sundays skipped \u00b7 untick stages that don't apply")),
@@ -33154,7 +33178,7 @@ function TatPlanPanel({ rows, setRows, cls, opts, ok, setOk, reason, setReason }
         React.createElement("thead", null, React.createElement("tr", null,
           ["", "Stage", "Owner", "Days", "Target"].map(h => React.createElement("th", { key: h, style: { ...cell, color: "#64748b", textAlign: "left", fontWeight: 600 } }, h)))),
         React.createElement("tbody", null, plan.map(r => React.createElement("tr", { key: r.k, style: { opacity: r.on ? 1 : 0.45 } },
-          React.createElement("td", { style: cell }, React.createElement("input", { type: "checkbox", checked: r.on, onChange: e => setRow(r.k, { on: e.target.checked }) })),
+          React.createElement("td", { style: cell }, React.createElement("input", { type: "checkbox", checked: r.on, onChange: e => setRow(r.k, r.k === 'recce' ? { on: e.target.checked, decided: true } : { on: e.target.checked }) })),
           React.createElement("td", { style: { ...cell, color: "#e2e8f0" } }, r.l, r.on && r.d !== r.std ? React.createElement("span", { style: { fontSize: 9, color: "#e3a008", marginLeft: 6 } }, "edited (std " + r.std + ")") : null),
           React.createElement("td", { style: { ...cell, color: "#94a3b8" } }, r.o),
           React.createElement("td", { style: cell }, r.byDate ? React.createElement("span", { style: { fontSize: 10, color: "#64748b" } }, "by date") :
@@ -33203,6 +33227,7 @@ function JobTatApproval({ job, user }) {
   if (!rows.length) return null;
   const save = async () => {
     setErr('');
+    if (!tatRecceDecided(rows)) { setErr("Answer 'Recce required for this job?' — Yes or No — first."); return; }
     if (!ok) { setErr('Tick the approval box first.'); return; }
     if (rows.some(r => r.on && r.d !== r.std) && !reason.trim()) { setErr('Enter the reason for the changed days.'); return; }
     setBusy(true);
