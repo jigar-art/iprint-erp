@@ -2821,10 +2821,10 @@ function MainApp({
   const loadInstDelay = React.useCallback(async () => {
     const uname = (user && user.name || '').toUpperCase();
     if (!uname) return;
-    const { data, error } = await sb.from('v_job_sla').select('job_id,client_name,client_class,status,owner_person,owner_label,stage_entered_at,due_at,rag,days_in_stage').in('status', ['Recee', 'Installation WIP', 'IC Pending']);
+    const { data, error } = await sb.from('v_job_sla').select('job_id,client_name,client_class,status,owner_person,owner_label,stage_entered_at,due_at,rag,days_in_stage,coordinator').in('status', ['Recee', 'Installation WIP', 'IC Pending']);
     if (error || !data) return;
     setInstRows(data);
-    const bd = await sb.from('v_banking_docs').select('job_id,client_name,project,status,delivered_at,installed_at,pod_ok,pod_late,pod_due,image_needed,image_ok,image_late,image_due,vendor_direct,pod_required,pod_backlog,image_backlog');
+    const bd = await sb.from('v_banking_docs').select('job_id,client_name,project,status,delivered_at,installed_at,pod_ok,pod_late,pod_due,image_needed,image_ok,image_late,image_due,vendor_direct,pod_required,pod_backlog,image_backlog,image_owner');
     if (!bd.error && bd.data) setBankDocs(bd.data);
     const seg = instDefaultSeg(uname);
     setInstDelayCount(data.filter(r => r.rag === 'red' && instInSeg(r, seg)).length);
@@ -6981,7 +6981,7 @@ function JobDetail({
     folder: "po",
     icon: "📄"
   }, {
-    l: "📎 DC / POD",
+    l: "📎 DC / POD (signed & stamped)",
     field: "dc_file_url",
     folder: "dc",
     icon: "📄",
@@ -32726,7 +32726,7 @@ function MyScorePage({ user }) {
         setMonth(m.error ? [] : (m.data || []));
         const dt = await sb.from('v_daily_target_progress').select('*').order('day', { ascending: false }).limit(120);
         setDaily(dt.error ? [] : (dt.data || []));
-        const bdv = await sb.from('v_banking_docs').select('pod_ok,pod_late,image_needed,image_ok,image_late');
+        const bdv = await sb.from('v_banking_docs').select('pod_ok,pod_late,image_needed,image_ok,image_late,image_owner');
         setBdocs(bdv.error ? null : (bdv.data || []));
       } catch (e) { setErr(e.message || 'Could not load score'); setRows([]); }
     })();
@@ -32758,13 +32758,15 @@ function MyScorePage({ user }) {
     (() => {
       if (!bdocs) return null;
       const isPod = meBase === 'MANOJ';
-      const isImg = meBase === 'PRIYANKA' || meBase === 'HARSHALA';
+      const isImg = meBase === 'PRIYANKA' || meBase === 'HARSHALA' || meBase === 'POONAM';
       if (!isPod && !isImg) return null;
-      const missing = isPod ? bdocs.filter(d => !d.pod_ok).length : bdocs.filter(d => d.image_needed && !d.image_ok).length;
-      const lateN = isPod ? bdocs.filter(d => d.pod_late).length : bdocs.filter(d => d.image_late).length;
+      const imgOwner = meBase === 'POONAM' ? 'POONAM' : 'PRIYANKA';
+      const mineImg = bdocs.filter(d => (d.image_owner || '').toUpperCase().startsWith(imgOwner));
+      const missing = isPod ? bdocs.filter(d => !d.pod_ok).length : mineImg.filter(d => d.image_needed && !d.image_ok).length;
+      const lateN = isPod ? bdocs.filter(d => d.pod_late).length : mineImg.filter(d => d.image_late).length;
       return React.createElement("div", { className: "c", style: { padding: 12, marginBottom: 12 } },
         React.createElement("div", { style: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: .5 } },
-          isPod ? 'Banking POD uploads \u00b7 due 1 day after delivery' : 'Banking installed images (PPT / JPEG) \u00b7 due 1 day after install'),
+          isPod ? 'Banking signed & stamped POD \u00b7 due 1 day after delivery' : 'Banking installed images (PPT / JPEG) \u00b7 due 1 day after install'),
         React.createElement("div", { style: { fontSize: 28, fontWeight: 700, color: lateN ? "#e0574f" : "#2fb37a", lineHeight: 1.2 } },
           lateN + ' late', React.createElement("span", { style: { fontSize: 11, color: "#64748b", fontWeight: 400, marginLeft: 6 } }, missing + ' missing in total \u00b7 see Install Delay \u2192 Banking docs')));
     })(),
@@ -32822,16 +32824,16 @@ function MyScorePage({ user }) {
 // job's own dates when entered; otherwise the class budget. IC Pending = 2 days.
 function instDefaultSeg(uname) {
   const u = (uname || '').toUpperCase();
-  if (u.startsWith('POONAM')) return 'nb';
-  if (u.startsWith('PRIYANKA') || u.startsWith('HARSHALA')) return 'b';
+  if (u.startsWith('POONAM')) return 'poonam';
+  if (u.startsWith('PRIYANKA') || u.startsWith('HARSHALA')) return 'priyanka';
   if (u.startsWith('MANOJ')) return 'docs';
   if (u.startsWith('MURLI')) return 'ic';
   return 'all';
 }
 function instInSeg(r, seg) {
   if (seg === 'docs') return false;
-  if (seg === 'nb') return r.client_class !== 'B';
-  if (seg === 'b') return r.client_class === 'B';
+  if (seg === 'poonam') return (r.coordinator || '').toUpperCase().includes('POONAM');
+  if (seg === 'priyanka') return (r.coordinator || '').toUpperCase().startsWith('PRIYANKA');
   if (seg === 'ic') return r.status === 'IC Pending';
   return true;
 }
@@ -32886,7 +32888,13 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
     .sort((a, b) => b._late - a._late);
   const docLateN = (docs || []).filter(d => d.pod_late || d.image_late).length;
   const stageLabel = s => s === 'Recee' ? 'Recce' : s === 'Installation WIP' ? 'Installation' : s === 'IC Pending' ? 'IC upload' : s;
-  const owner = r => r.status === 'IC Pending' ? (r.client_class === 'B' ? 'MANOJ' : 'MANOJ + POONAM') : (r.owner_person || r.owner_label || '\u2014');
+  const owner = r => {
+    const coord = r.coordinator || '';
+    const doer = r.owner_person || r.owner_label || '';
+    if (!coord) return doer || '\u2014';
+    const b = v => (v || '').toUpperCase().split(/\s*[-(+]/)[0].trim();
+    return coord + (doer && b(doer) !== b(coord) && r.status !== 'IC Pending' ? ' \u00b7 crew ' + doer : '');
+  };
   const chip = (id, label, cur, set) => React.createElement("button", {
     key: id, type: "button", onClick: () => set(id),
     style: { fontSize: 12, padding: "5px 12px", borderRadius: 7, cursor: "pointer",
@@ -32905,14 +32913,14 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
     React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 } },
       chip('late', 'Late (' + late + ')', view, setView), chip('all', 'All (' + inSeg.length + ')', view, setView),
       React.createElement("span", { style: { width: 10 } }),
-      chip('nb', 'Non-banking', seg, setSeg), chip('b', 'Banking', seg, setSeg), chip('ic', 'IC upload', seg, setSeg), chip('docs', 'Banking docs (' + docLateN + ' late)', seg, setSeg), chip('all', 'Everything', seg, setSeg)),
+      chip('poonam', 'Poonam', seg, setSeg), chip('priyanka', 'Priyanka (NCR / CMS / Diebold / Hitachi)', seg, setSeg), chip('ic', 'IC upload', seg, setSeg), chip('docs', 'Banking docs (' + docLateN + ' late)', seg, setSeg), chip('all', 'Everything', seg, setSeg)),
     React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" } },
       chip('all', 'All stages', stage, setStage), chip('Recee', 'Recce', stage, setStage), chip('Installation WIP', 'Installation', stage, setStage), chip('IC Pending', 'IC upload', stage, setStage),
       React.createElement("input", { className: "in", placeholder: "Search job / client / site", value: q, onChange: e => setQ(e.target.value), style: { marginLeft: "auto", fontSize: 12, padding: "5px 8px", minWidth: 180 } })),
     seg === 'docs'
       ? React.createElement("div", null,
           React.createElement("div", { style: { fontSize: 11, color: "#64748b", margin: "0 0 8px" } },
-            "Banking: POD (Manoj) due 1 day after delivery \u00b7 installed image PPT/JPEG (Priyanka, Harshala helps) due 1 day after installation \u00b7 upload on the job \u2192 DC / POD, PPT or Work Photos. Work delivered / installed from 21 Sep cannot move to IC / DC / billing without them. Vendor-only jobs: tick \u201cExecuted fully by vendor\u201d on the job \u2014 no POD needed."),
+            "Banking: signed & stamped DC / POD (Manoj) due 1 day after delivery \u00b7 installed image PPT/JPEG due 1 day after installation \u2014 Priyanka (Harshala helps) for NCR / CMS / Diebold / Hitachi, Poonam for other banking clients \u00b7 upload on the job \u2192 DC / POD, PPT or Work Photos. Work delivered / installed from 21 Sep cannot move to IC / DC / billing without them. Vendor-only jobs: tick \u201cExecuted fully by vendor\u201d on the job \u2014 no POD needed."),
           docRows.length === 0
             ? React.createElement("div", { className: "c", style: { padding: 16, color: "#64748b" } }, 'All banking documents are in \u2014 good.')
             : docRows.map(d => React.createElement("div", {
@@ -32928,9 +32936,10 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
                     d.image_needed ? instDocTag('Image', d.image_ok, d.image_late, d.image_due) : null)),
                 React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", margin: "3px 0" } }, d.project || ''),
                 React.createElement("div", { style: { fontSize: 10, color: "#64748b" } },
-                  (d.pod_ok ? '' : 'POD \u2192 MANOJ') + (!d.pod_ok && d.image_needed && !d.image_ok ? ' \u00b7 ' : '') + (d.image_needed && !d.image_ok ? 'Image \u2192 PRIYANKA (Harshala helps)' : '') +
+                  (d.pod_ok ? '' : 'POD \u2192 MANOJ') + (!d.pod_ok && d.image_needed && !d.image_ok ? ' \u00b7 ' : '') + (d.image_needed && !d.image_ok ? 'Image \u2192 ' + ((d.image_owner || '').startsWith('PRIYANKA') ? 'PRIYANKA (Harshala helps)' : (d.image_owner || 'POONAM')) : '') +
                   (d.delivered_at ? ' \u00b7 delivered ' + new Date(d.delivered_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '') +
-                  ((!d.pod_ok && d.pod_backlog) || (d.image_needed && !d.image_ok && d.image_backlog) ? ' \u00b7 backlog \u2014 can still bill' : ' \u00b7 blocks billing until uploaded'))
+                  (['IC Pending', 'DC Pending', 'Billing Pending', 'Given for Billing', 'Cash Pending'].includes(d.status) ? ' \u00b7 already in billing \u2014 late, upload now'
+                    : (!d.pod_ok && d.pod_backlog) || (d.image_needed && !d.image_ok && d.image_backlog) ? ' \u00b7 backlog \u2014 can still bill' : ' \u00b7 blocks billing until uploaded'))
               )))
     : list.length === 0
       ? React.createElement("div", { className: "c", style: { padding: 16, color: "#64748b" } }, view === 'late' ? 'Nothing late here \u2014 good.' : 'No jobs in this view.')
