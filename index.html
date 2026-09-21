@@ -2864,12 +2864,6 @@ function MainApp({
     roles: ["admin", "production", "dispatch", "sales"],
     users: ["JIGAR", "AMOL", "POONAM", "KULDEEP", "MURLI", "MANOJ", "SHIV", "MUSTAFA", "KAIF", "SAHIL", "PRIYANKA", "HARSHALA"]
   }, {
-    id: "instdelay",
-    l: "Install Delay",
-    e: "\u23f3",
-    roles: ["admin", "production", "dispatch", "sales"],
-    users: ["JIGAR", "AMOL", "POONAM", "KULDEEP", "MURLI", "MANOJ", "PRIYANKA", "HARSHALA"]
-  }, {
     id: "mytasks",
     l: "My Tasks",
     e: "📋",
@@ -3328,7 +3322,9 @@ function MainApp({
     updateJobFields: updateJobFields,
     sm: setModal,
     items: items,
-    osItems: osItems
+    osItems: osItems,
+    delayRows: instRows,
+    bankDocs: bankDocs
   }), pg === "grn" && React.createElement(GRNPage, {
     grn: grnData,
     suppliers: suppliers,
@@ -3518,16 +3514,10 @@ function MainApp({
     show: show
   }), pg === "myscore" && React.createElement(MyScorePage, {
     user: user
-  }), pg === "instdelay" && React.createElement(InstallDelayPage, {
-    user: user,
-    jobs: filteredJobs,
-    rows: instRows,
-    docs: bankDocs,
-    reload: loadInstDelay,
-    sm: setModal
   }), pg === "install" && React.createElement(InstallPage, {
     jobs: filteredJobs,
     team: masterData.team,
+    setBatches: setBatches,
     user: user,
     show: show,
     updateJobStatus: updateJobStatus
@@ -15214,7 +15204,9 @@ function DeptPage({
   updateJobStatus,
   sm,
   items,
-  osItems
+  osItems,
+  delayRows,
+  bankDocs
 }) {
   const ALL_ST = ALL_ST_NEW;
   const [showReassignModal, setShowReassignModal] = React.useState(false);
@@ -15342,6 +15334,53 @@ function DeptPage({
       }) * dir;
     });
   }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir]);
+  // Installation delay vs TAT (2026-09-21) — same data as the Install Delay page
+  const [instAge, setInstAge] = useState(0);
+  const [instWho, setInstWho] = useState('all');
+  const isInst = ad === 'installation';
+  const docByJob = React.useMemo(() => {
+    const m = new Map();
+    (bankDocs || []).forEach(d => m.set(d.job_id, d));
+    return m;
+  }, [bankDocs]);
+  const docMissing = j => {
+    const d = docByJob.get(j.id);
+    return !!d && (!d.pod_ok || (d.image_needed && !d.image_ok));
+  };
+  const whoOf = j => ((delayMap.get(j.id) || {}).coordinator || '').toUpperCase();
+  const delayMap = React.useMemo(() => {
+    const m = new Map();
+    (delayRows || []).forEach(r => m.set(r.job_id, r));
+    return m;
+  }, [delayRows]);
+  const lateDaysOf = j => {
+    const r = delayMap.get(j.id);
+    if (!r || !r.due_at) return null;
+    return (Date.now() - new Date(r.due_at).getTime()) / 86400000;
+  };
+  const instAgeN = n => pen.filter(j => (lateDaysOf(j) ?? -1) >= n).length;
+  const instLateN = isInst ? pen.filter(j => (lateDaysOf(j) ?? -1) > 0).length : 0;
+  const penShown = !isInst ? pen : (() => {
+    let rows = instAge ? pen.filter(j => (lateDaysOf(j) ?? -1) >= instAge) : pen.slice();
+    if (instWho === 'poonam') rows = rows.filter(j => whoOf(j).includes('POONAM'));
+    else if (instWho === 'priyanka') rows = rows.filter(j => whoOf(j).startsWith('PRIYANKA'));
+    else if (instWho === 'docs') rows = rows.filter(docMissing);
+    return sortKey ? rows : rows.sort((a, b) => (lateDaysOf(b) ?? -1e9) - (lateDaysOf(a) ?? -1e9));
+  })();
+  const ageBtn = (n, label) => React.createElement("button", {
+    key: n, type: "button", onClick: () => setInstAge(n),
+    style: { fontSize: 9, padding: "2px 8px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
+             border: "1px solid " + (instAge === n ? "#e3a008" : "#1a2030"), background: instAge === n ? "#e3a00815" : "transparent", color: instAge === n ? "#e3a008" : "#8b949e" }
+  }, label);
+  const whoBtn = (id, label) => React.createElement("button", {
+    key: 'w' + id, type: "button", onClick: () => setInstWho(id),
+    style: { fontSize: 9, padding: "2px 8px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
+             border: "1px solid " + (instWho === id ? "#38bdf8" : "#1a2030"), background: instWho === id ? "#38bdf815" : "transparent", color: instWho === id ? "#38bdf8" : "#8b949e" }
+  }, label);
+  const docTag = (label, ok, late, na) => React.createElement("span", {
+    key: label, className: "bd",
+    style: { fontSize: 8, marginLeft: 3, background: "transparent", border: "1px solid " + (na ? "#47556966" : ok ? "#2fb37a66" : late ? "#e0574f66" : "#e3a00866"), color: na ? "#64748b" : ok ? "#2fb37a" : late ? "#e0574f" : "#e3a008" }
+  }, label + (na ? ' n/a' : ok ? ' \u2713' : ' \u2717'));
   const cardDefs = STATUS_CARDS.map(c => ({
     k: c.key,
     l: c.label,
@@ -15523,7 +15562,12 @@ function DeptPage({
       fontWeight: 700,
       color: ad === null ? '#94a3b8' : cur.c
     }
-  }, ad === null ? 'All jobs' : cur.l, " \u2014 ", pen.length, " jobs"), React.createElement("span", {
+  }, ad === null ? 'All jobs' : cur.l, " \u2014 ", penShown.length, " jobs", isInst ? React.createElement("span", { style: { color: "#e0574f", marginLeft: 6 } }, "\u00b7 " + instLateN + " late vs TAT") : null), isInst ? React.createElement("span", {
+    style: { display: "flex", alignItems: "center", flexWrap: "wrap" }
+  }, whoBtn('all', 'Everyone'), whoBtn('poonam', 'Poonam'), whoBtn('priyanka', 'Priyanka (NCR / CMS / Diebold / Hitachi)'),
+     whoBtn('docs', 'Banking docs missing (' + pen.filter(docMissing).length + ')'),
+     React.createElement("span", { key: 'sep', style: { width: 8 } }),
+     ageBtn(0, 'All'), ageBtn(15, '15+ days (' + instAgeN(15) + ')'), ageBtn(30, '30+ days (' + instAgeN(30) + ')'), ageBtn(60, '60+ days (' + instAgeN(60) + ')'), ageBtn(90, '90+ days (' + instAgeN(90) + ')')) : React.createElement("span", {
     style: {
       fontSize: 8,
       color: '#64748b'
@@ -15533,7 +15577,7 @@ function DeptPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, pen.map((j, i) => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), isInst ? React.createElement("th", null, "Delay") : null, sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
     const it = (j.batches || [])[0]?.items?.[0];
     const dt = j.created_at ? new Date(j.created_at) : null;
     const ds = dt ? dt.toLocaleDateString('en-IN', {
@@ -15616,7 +15660,16 @@ function DeptPage({
         background: (sc[j.status] || '#64748b') + '20',
         color: sc[j.status] || '#64748b'
       }
-    }, j.status))), React.createElement("td", {
+    }, j.status))), isInst ? React.createElement("td", { style: { whiteSpace: "nowrap" } }, (() => {
+      const r = delayMap.get(j.id);
+      if (!r || !r.due_at) return React.createElement("span", { style: { fontSize: 8, color: "#475569" } }, "\u2014");
+      const d = instDelayText(r);
+      const bd = docByJob.get(j.id);
+      return React.createElement(React.Fragment, null,
+        React.createElement("span", { className: "bd", style: { background: d.c + "20", color: d.c, fontSize: 9, fontWeight: 700 } }, d.t),
+        bd ? docTag('POD', bd.pod_ok, bd.pod_late, bd.pod_required === false) : null,
+        bd && bd.image_needed ? docTag('Image', bd.image_ok, bd.image_late, false) : null);
+    })()) : null, React.createElement("td", {
       style: {
         fontSize: 10,
         color: "#64748b"
@@ -32684,6 +32737,7 @@ const ERP_T = {
   'Select a job': 'जॉब चुनें',
   'No jobs assigned': 'कोई जॉब नहीं',
   'Installed by': 'किसने लगाया',
+  'Select batch': 'बैच चुनें',
 };
 function T(k) { return erpLang() === 'hi' ? (ERP_T[k] || k) : k; }
 // Bilingual label: English with Hindi underneath when the toggle is on.
@@ -32768,7 +32822,7 @@ function MyScorePage({ user }) {
         React.createElement("div", { style: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: .5 } },
           isPod ? 'Banking signed & stamped POD \u00b7 due 1 day after delivery' : 'Banking installed images (PPT / JPEG) \u00b7 due 1 day after install'),
         React.createElement("div", { style: { fontSize: 28, fontWeight: 700, color: lateN ? "#e0574f" : "#2fb37a", lineHeight: 1.2 } },
-          lateN + ' late', React.createElement("span", { style: { fontSize: 11, color: "#64748b", fontWeight: 400, marginLeft: 6 } }, missing + ' missing in total \u00b7 see Install Delay \u2192 Banking docs')));
+          lateN + ' late', React.createElement("span", { style: { fontSize: 11, color: "#64748b", fontWeight: 400, marginLeft: 6 } }, missing + ' missing in total \u00b7 see Dept Tracker \u2192 Installation \u2192 Banking docs missing')));
     })(),
     myDaily.length ? React.createElement("div", { className: "c", style: { padding: 12, marginBottom: 12 } },
       React.createElement("div", { style: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: .5 } },
@@ -32865,6 +32919,7 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
   const [view, setView] = React.useState('late');
   const [stage, setStage] = React.useState('all');
   const [q, setQ] = React.useState('');
+  const [age, setAge] = React.useState(0);
   const jobById = React.useMemo(() => {
     const m = new Map();
     (jobs || []).forEach(j => m.set(j.id, j));
@@ -32876,13 +32931,17 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
   const today = inSeg.filter(r => r.rag !== 'red' && r._d.t === 'Due today').length;
   const ok = inSeg.length - late - today;
   const ql = q.trim().toLowerCase();
+  const lateDays = r => r._d.late > 0 ? r._d.late / 24 : 0;
+  const ageCount = n => inSeg.filter(r => r.rag === 'red' && lateDays(r) >= n).length;
   const list = inSeg
     .filter(r => view === 'all' || r.rag === 'red')
+    .filter(r => !age || lateDays(r) >= age)
     .filter(r => !ql || [r.job_id, r.client_name, r._j && r._j.project, r._j && r._j.delivery_address].some(v => (v || '').toLowerCase().includes(ql)))
     .sort((a, b) => b._d.late - a._d.late);
   const docMap = new Map((docs || []).map(d => [d.job_id, d]));
   const docIssue = d => !d.pod_ok || (d.image_needed && !d.image_ok);
   const docRows = (docs || []).filter(docIssue)
+    .filter(d => !age || Math.max(d.pod_late ? (Date.now() - new Date(d.pod_due).getTime()) : 0, d.image_late ? (Date.now() - new Date(d.image_due).getTime()) : 0) / 86400000 >= age)
     .filter(d => !ql || [d.job_id, d.client_name, d.project].some(v => (v || '').toLowerCase().includes(ql)))
     .map(d => ({ ...d, _late: Math.max(d.pod_late ? Date.now() - new Date(d.pod_due).getTime() : 0, d.image_late ? Date.now() - new Date(d.image_due).getTime() : 0) }))
     .sort((a, b) => b._late - a._late);
@@ -32915,6 +32974,9 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
       React.createElement("span", { style: { width: 10 } }),
       chip('poonam', 'Poonam', seg, setSeg), chip('priyanka', 'Priyanka (NCR / CMS / Diebold / Hitachi)', seg, setSeg), chip('ic', 'IC upload', seg, setSeg), chip('docs', 'Banking docs (' + docLateN + ' late)', seg, setSeg), chip('all', 'Everything', seg, setSeg)),
     React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" } },
+      chip(0, 'Any delay', age, setAge), chip(15, '15+ days (' + ageCount(15) + ')', age, setAge), chip(30, '30+ days (' + ageCount(30) + ')', age, setAge),
+      chip(60, '60+ days (' + ageCount(60) + ')', age, setAge), chip(90, '90+ days (' + ageCount(90) + ')', age, setAge),
+      React.createElement("span", { style: { width: 10 } }),
       chip('all', 'All stages', stage, setStage), chip('Recee', 'Recce', stage, setStage), chip('Installation WIP', 'Installation', stage, setStage), chip('IC Pending', 'IC upload', stage, setStage),
       React.createElement("input", { className: "in", placeholder: "Search job / client / site", value: q, onChange: e => setQ(e.target.value), style: { marginLeft: "auto", fontSize: 12, padding: "5px 8px", minWidth: 180 } })),
     seg === 'docs'
@@ -32931,7 +32993,7 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
                 React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" } },
                   React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#e2e8f0" } }, d.client_name || '\u2014'),
                   React.createElement("span", { style: { fontSize: 9, color: "#64748b" } }, d.job_id + ' \u00b7 ' + d.status),
-                  React.createElement("span", { style: { marginLeft: "auto", display: "flex", gap: 4 } },
+                  React.createElement("span", { style: { display: "flex", gap: 4 } },
                     instDocTag('POD', d.pod_ok, d.pod_late, d.pod_due, d.pod_required === false),
                     d.image_needed ? instDocTag('Image', d.image_ok, d.image_late, d.image_due) : null)),
                 React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", margin: "3px 0" } }, d.project || ''),
@@ -32952,7 +33014,7 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
             React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#e2e8f0" } }, r.client_name || '\u2014'),
             React.createElement("span", { style: { fontSize: 9, padding: "1px 7px", borderRadius: 9, background: "#38bdf820", color: "#38bdf8" } }, stageLabel(r.status)),
             React.createElement("span", { style: { fontSize: 9, color: "#64748b" } }, r.job_id + (r.client_class === 'B' ? ' \u00b7 banking' : '')),
-            React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, fontWeight: 700, color: r._d.c } }, r._d.t)),
+            React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: r._d.c, background: r._d.c + "18", padding: "1px 8px", borderRadius: 9 } }, r._d.t)),
           r.client_class === 'B' && docMap.get(r.job_id) ? React.createElement("div", { style: { display: "flex", gap: 4, marginTop: 4 } },
             instDocTag('POD', docMap.get(r.job_id).pod_ok, docMap.get(r.job_id).pod_late, docMap.get(r.job_id).pod_due, docMap.get(r.job_id).pod_required === false),
             docMap.get(r.job_id).image_needed ? instDocTag('Image', docMap.get(r.job_id).image_ok, docMap.get(r.job_id).image_late, docMap.get(r.job_id).image_due) : null) : null,
@@ -32960,7 +33022,8 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
           React.createElement("div", { style: { fontSize: 10, color: "#64748b" } },
             owner(r) + ' \u00b7 in stage ' + (r.days_in_stage != null ? r.days_in_stage + 'd' : '\u2014') +
             (r.due_at ? ' \u00b7 due ' + new Date(r.due_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '') +
-            (r.client_class !== 'B' && r.status !== 'IC Pending' && r._j && !(r.status === 'Recee' ? r._j.recce_date : r._j.install_date) ? ' \u00b7 no date set (using TAT days)' : ''))
+            (r.client_class !== 'B' && r.status !== 'IC Pending' && r._j && !(r.status === 'Recee' ? r._j.recce_date : r._j.install_date) ? ' \u00b7 no date set (using TAT days)' : '') +
+            (r._j && (r._j.batches || []).length > 1 ? ' \u00b7 batches ' + r._j.batches.filter(b => b.installed_at || (b.bill_no || '').trim()).length + '/' + r._j.batches.length + ' installed' : ''))
         )));
 }
 
@@ -32983,8 +33046,10 @@ function CrewPicker({ team, value, onChange }) {
     }));
 }
 
-function InstallPage({ jobs, team, user, show, updateJobStatus }) {
+function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [sel, setSel] = React.useState('');
+  const [selB, setSelB] = React.useState([]);
+  const [doneLocal, setDoneLocal] = React.useState([]);
   const [startT, setStartT] = React.useState('');
   const [endT, setEndT] = React.useState('');
   const [report, setReport] = React.useState('');
@@ -32995,6 +33060,15 @@ function InstallPage({ jobs, team, user, show, updateJobStatus }) {
 
   const mine = (jobs || []).filter(j =>
     ['Installation WIP', 'Recee', 'In Transit', 'IC Pending', 'DC Pending'].includes(j.status));
+  // Batch-level completion (2026-09-21): a job moves on only when every batch is installed.
+  // A batch counts as done when marked installed or already invoiced (part-billed earlier).
+  const selJob = mine.find(j => j.id === sel);
+  const jobBatches = (selJob && selJob.batches) || [];
+  const batchDone = b => !!b.installed_at || doneLocal.includes(b.id) || !!(b.bill_no || '').trim();
+  const pendingBatches = jobBatches.filter(b => !batchDone(b));
+  const multiBatch = jobBatches.length > 1;
+  const effBatches = multiBatch ? selB : pendingBatches.map(b => b.id);
+  const batchLabel = b => [b.note || 'Batch', b.date ? new Date(b.date + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '', b.site_unique_id || b.atm_id || '', (b.delivery_address || '').slice(0, 40)].filter(Boolean).join(' \u00b7 ');
 
   const save = async (markComplete) => {
     if (!sel) { show(T('Select a job'), false); return; }
@@ -33002,6 +33076,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus }) {
     if (!report.trim()) { show(TL('Report') + ' ' + T('required'), false); return; }
     if (!files.length) { show(TL('Photos') + ' ' + T('required'), false); return; }
     if (!crew.length) { show(TL('Installed by') + ' ' + T('required'), false); return; }
+    if (multiBatch && !selB.length) { show(TL('Select batch') + ' ' + T('required'), false); return; }
     setBusy(true);
     try {
       const urls = [];
@@ -33021,15 +33096,30 @@ function InstallPage({ jobs, team, user, show, updateJobStatus }) {
         end_time: endT,
         report: report.trim(),
         photo_urls: urls,
-        site_complete: !!markComplete
+        site_complete: !!markComplete,
+        batch_ids: effBatches.length ? effBatches : null
       };
       const ins = await sb.from('install_logs').insert(row);
       if (ins.error) throw ins.error;
-      if (markComplete && updateJobStatus) {
-        try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
+      let remaining = pendingBatches.length;
+      if (markComplete && effBatches.length) {
+        const at = new Date().toISOString();
+        const by = crew.join(', ');
+        const ub = await sb.from('batches').update({ installed_at: at, installed_by: by }).in('id', effBatches);
+        if (ub.error) throw ub.error;
+        setDoneLocal(p => [...p, ...effBatches]);
+        if (setBatches) setBatches(p => p.map(b => effBatches.includes(b.id) ? { ...b, installed_at: at, installed_by: by } : b));
+        remaining = pendingBatches.filter(b => !effBatches.includes(b.id)).length;
       }
-      show('✅ ' + T('Saved'), true);
-      setSel(''); setStartT(''); setEndT(''); setReport(''); setFiles([]); setCrew([]);
+      if (markComplete && remaining === 0 && updateJobStatus) {
+        try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
+        show('✅ ' + T('Saved'), true);
+      } else if (markComplete) {
+        show('✅ ' + effBatches.length + ' batch(es) installed \u00b7 ' + remaining + ' still pending \u2014 job stays in Installation', true);
+      } else {
+        show('✅ ' + T('Saved'), true);
+      }
+      setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setCrew([]);
     } catch (e) {
       show('⚠️ ' + (e.message || 'Save failed'), false);
     }
@@ -33044,10 +33134,25 @@ function InstallPage({ jobs, team, user, show, updateJobStatus }) {
     React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 10px" } }, TL('Installation')),
 
     F(TL('Job'), React.createElement("select", {
-      className: "in", value: sel, onChange: e => setSel(e.target.value), style: { width: "100%", padding: 10, fontSize: 14 }
+      className: "in", value: sel, onChange: e => { setSel(e.target.value); setSelB([]); }, style: { width: "100%", padding: 10, fontSize: 14 }
     }, React.createElement("option", { value: "" }, "— " + T('Select a job') + " —"),
        mine.map(j => React.createElement("option", { key: j.id, value: j.id },
          j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || ''))))),
+
+    multiBatch ? F(TL('Select batch') + ' * (' + (jobBatches.length - pendingBatches.length) + '/' + jobBatches.length + ' done)',
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+        jobBatches.map(b => {
+          const done = batchDone(b);
+          const on = selB.includes(b.id);
+          return React.createElement("label", {
+            key: b.id,
+            style: { display: "flex", gap: 8, alignItems: "center", fontSize: 13, padding: "8px 10px", borderRadius: 8, cursor: done ? "default" : "pointer",
+                     border: "1px solid " + (on ? "#10b981" : "#1a2030"), background: on ? "#10b98112" : "transparent", color: done ? "#64748b" : "#e2e8f0" }
+          }, React.createElement("input", {
+            type: "checkbox", disabled: done, checked: done || on,
+            onChange: e => setSelB(p => e.target.checked ? [...p, b.id] : p.filter(x => x !== b.id))
+          }), React.createElement("span", null, batchLabel(b) + (done ? (b.installed_at || doneLocal.includes(b.id) ? ' \u00b7 \u2713 installed' : ' \u00b7 \u2713 billed') : '')));
+        }))) : null,
 
     F(TL('Installed by') + ' *', React.createElement(CrewPicker, { team: team, value: crew, onChange: setCrew })),
 
