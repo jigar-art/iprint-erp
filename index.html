@@ -3492,6 +3492,7 @@ function MainApp({
     user: user
   }), pg === "install" && React.createElement(InstallPage, {
     jobs: filteredJobs,
+    team: masterData.team,
     user: user,
     show: show,
     updateJobStatus: updateJobStatus
@@ -19932,7 +19933,8 @@ function FabPage({
     selectedItems: {},
     start_time: '',
     end_time: '',
-    notes: ''
+    notes: '',
+    crew: []
   };
   const [f, sF] = useState(blankForm);
   const ALL_ST = ALL_ST_NEW;
@@ -20409,10 +20411,12 @@ function FabPage({
       totalRows += mats.length;
     }
     if (f.process === 'Outsource' && !(f.outsource_name || '').trim()) { show('Vendor / Machine name required for Outsource', false); return; }
+    if (f.process !== 'Outsource' && !(f.crew || []).length) { show('Tap who did the work (Done by)', false); return; }
     if (!confirm(`Save ${totalRows} fab log row${totalRows > 1 ? 's' : ''} across ${itemIds.length} item${itemIds.length > 1 ? 's' : ''} for process "${f.process}"?`)) return;
     setSaving(true);
     const baseId = 'FL' + Date.now();
-    const operator = user?.name || '';
+    const crew = f.process === 'Outsource' ? [] : (f.crew || []);
+    const operator = crew[0] || user?.name || '';
     let rowIdx = 0;
     for (const id of itemIds) {
       const it = f.selectedItems[id];
@@ -20430,6 +20434,7 @@ function FabPage({
           line_item_id: id,
           process: f.process === 'Outsource' ? ('Outsource — ' + (f.outsource_name || '').trim()) : f.process,
           operator,
+          crew: crew.length ? crew : null,
           material: r.material,
           qty_used: +r.qty_used || 0,
           actual_qty: +r.actual_qty || 0,
@@ -21184,7 +21189,7 @@ function FabPage({
   }, "\u2014 pick \u2014"), (FAB_P || []).map(p => React.createElement("option", {
     key: p,
     value: p
-  }, p))))), f.process === 'Outsource' && React.createElement("div", { style: { marginTop: 6 } }, React.createElement(F, { l: "Vendor / Machine *" }, React.createElement("input", { className: "in", placeholder: "vendor name / machine", value: f.outsource_name || '', onChange: e => sF(p => ({ ...p, outsource_name: e.target.value })) }))), React.createElement("div", {
+  }, p))))), f.process === 'Outsource' && React.createElement("div", { style: { marginTop: 6 } }, React.createElement(F, { l: "Vendor / Machine *" }, React.createElement("input", { className: "in", placeholder: "vendor name / machine", value: f.outsource_name || '', onChange: e => sF(p => ({ ...p, outsource_name: e.target.value })) }))), f.process !== 'Outsource' && React.createElement("div", { style: { marginTop: 6 } }, React.createElement(F, { l: "Done by * (tap everyone who worked)" }, React.createElement(CrewPicker, { team: team, value: f.crew || [], onChange: v => sF(p => ({ ...p, crew: v })) }))), React.createElement("div", {
     style: {
       marginTop: 6
     }
@@ -32550,6 +32555,7 @@ const ERP_T = {
   'required': 'ज़रूरी',
   'Select a job': 'जॉब चुनें',
   'No jobs assigned': 'कोई जॉब नहीं',
+  'Installed by': 'किसने लगाया',
 };
 function T(k) { return erpLang() === 'hi' ? (ERP_T[k] || k) : k; }
 // Bilingual label: English with Hindi underneath when the toggle is on.
@@ -32656,12 +32662,32 @@ function MyScorePage({ user }) {
 // ===== Installation (added 2026-09-17) ====================================
 // Installers log from their own phone at the site: start/end time, photos,
 // what was done, and mark the site complete. Bilingual.
-function InstallPage({ jobs, user, show, updateJobStatus }) {
+// ===== Crew picker (2026-09-21) — everyone tapped gets individual TAT credit
+function CrewPicker({ team, value, onChange }) {
+  const names = (team || []).filter(m => m.active && m.is_operator).map(m => m.name).sort((a, b) => a.localeCompare(b));
+  const sel = value || [];
+  const toggle = n => onChange(sel.includes(n) ? sel.filter(x => x !== n) : [...sel, n]);
+  return React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+    names.length === 0 ? React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, "No operators set up") :
+    names.map(n => {
+      const on = sel.includes(n);
+      return React.createElement("button", {
+        key: n, type: "button", onClick: () => toggle(n),
+        style: { fontSize: 12, padding: "6px 11px", borderRadius: 16, cursor: "pointer",
+                 border: "1px solid " + (on ? "#10b981" : "#1a2030"),
+                 background: on ? "#10b98122" : "transparent",
+                 color: on ? "#10b981" : "#8b949e", fontWeight: on ? 700 : 400 }
+      }, (on ? "\u2713 " : "") + n);
+    }));
+}
+
+function InstallPage({ jobs, team, user, show, updateJobStatus }) {
   const [sel, setSel] = React.useState('');
   const [startT, setStartT] = React.useState('');
   const [endT, setEndT] = React.useState('');
   const [report, setReport] = React.useState('');
   const [files, setFiles] = React.useState([]);
+  const [crew, setCrew] = React.useState([]);
   const [busy, setBusy] = React.useState(false);
   const [, force] = React.useState(0);
 
@@ -32673,6 +32699,7 @@ function InstallPage({ jobs, user, show, updateJobStatus }) {
     if (!startT || !endT) { show(TL('Start time') + ' + ' + TL('End time') + ' ' + T('required'), false); return; }
     if (!report.trim()) { show(TL('Report') + ' ' + T('required'), false); return; }
     if (!files.length) { show(TL('Photos') + ' ' + T('required'), false); return; }
+    if (!crew.length) { show(TL('Installed by') + ' ' + T('required'), false); return; }
     setBusy(true);
     try {
       const urls = [];
@@ -32686,7 +32713,8 @@ function InstallPage({ jobs, user, show, updateJobStatus }) {
       const row = {
         job_id: sel,
         date: new Date().toISOString().slice(0, 10),
-        person: user?.name || '',
+        person: crew[0] || user?.name || '',
+        crew: crew,
         start_time: startT,
         end_time: endT,
         report: report.trim(),
@@ -32699,7 +32727,7 @@ function InstallPage({ jobs, user, show, updateJobStatus }) {
         try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
       }
       show('✅ ' + T('Saved'), true);
-      setSel(''); setStartT(''); setEndT(''); setReport(''); setFiles([]);
+      setSel(''); setStartT(''); setEndT(''); setReport(''); setFiles([]); setCrew([]);
     } catch (e) {
       show('⚠️ ' + (e.message || 'Save failed'), false);
     }
@@ -32718,6 +32746,8 @@ function InstallPage({ jobs, user, show, updateJobStatus }) {
     }, React.createElement("option", { value: "" }, "— " + T('Select a job') + " —"),
        mine.map(j => React.createElement("option", { key: j.id, value: j.id },
          j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || ''))))),
+
+    F(TL('Installed by') + ' *', React.createElement(CrewPicker, { team: team, value: crew, onChange: setCrew })),
 
     React.createElement("div", { style: { display: "flex", gap: 8 } },
       React.createElement("div", { style: { flex: 1 } }, F(TL('Start time'), React.createElement("input", {
@@ -47908,7 +47938,17 @@ function QuotesPage({
         color: "#94a3b8",
         margin: "3px 0 6px"
       }
-    }, r.subject), React.createElement("div", {
+    }, r.subject), r.status === 'Pending' && r.suggested_match && React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: "#fbbf24",
+        background: "#fbbf2412",
+        border: "1px dashed #fbbf2455",
+        borderRadius: 5,
+        padding: "3px 7px",
+        margin: "0 0 6px"
+      }
+    }, "\u26a0 ", r.suggested_match, " \u2014 if this is the quote, tap Mark sent"), React.createElement("div", {
       style: {
         display: "flex",
         alignItems: "center",
