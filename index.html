@@ -23055,6 +23055,44 @@ function WeighmentView({
     }
   }, dq ? 'No matches for "' + dq + '"' : "No weighments logged yet")))))));
 }
+// ===== Banking jobs already with accounts but POD / image still missing (2026-09-21)
+// Stay on Manoj's list until uploaded; they can finish billing (already handed over before the gate).
+function AccountsDocsMissing({ jobs }) {
+  const [rows, setRows] = React.useState(null);
+  React.useEffect(() => {
+    let dead = false;
+    sb.from('v_banking_docs').select('job_id,client_name,project,status,delivered_at,pod_ok,image_needed,image_ok,image_owner')
+      .in('status', ['Given for Billing', 'Cash Pending']).then(r => {
+        if (dead) return;
+        const d = (r.data || []).filter(x => !x.pod_ok || (x.image_needed && !x.image_ok));
+        d.sort((a, b) => new Date(a.delivered_at || 0) - new Date(b.delivered_at || 0));
+        setRows(d);
+      });
+    return () => { dead = true; };
+  }, []);
+  if (!rows || !rows.length) return null;
+  const days = v => v ? Math.max(0, Math.floor((Date.now() - new Date(v).getTime()) / 86400000)) : null;
+  const tag = (label, c) => React.createElement("span", { className: "bd", style: { background: c + '20', color: c, fontSize: 9, marginRight: 3 } }, label);
+  return React.createElement("div", { style: { marginTop: 14 } },
+    React.createElement("p", { style: { fontSize: 12, fontWeight: 700, marginBottom: 2 } }, "\uD83D\uDCCE With accounts \u2014 POD / image missing (" + rows.length + ")"),
+    React.createElement("p", { style: { fontSize: 10, color: '#94a3b8', marginBottom: 6 } }, "Already handed to billing before the document rule. Upload the signed & stamped DC / POD (Manoj) and installed image (Priyanka / Poonam) on each job."),
+    React.createElement("div", { style: { overflowX: 'auto' } },
+      React.createElement("table", null,
+        React.createElement("thead", null, React.createElement("tr", null, ["Job#", "Client", "Project", "Status", "Missing", "Since delivery"].map(h => React.createElement("th", { key: h }, h)))),
+        React.createElement("tbody", null, rows.map(r => {
+          const d = days(r.delivered_at);
+          return React.createElement("tr", { key: r.job_id },
+            React.createElement("td", { className: "mn", style: { fontSize: 10, fontWeight: 700 } }, r.job_id),
+            React.createElement("td", { style: { fontSize: 10 } }, r.client_name || '\u2014'),
+            React.createElement("td", { style: { fontSize: 10, color: '#94a3b8' } }, (r.project || '').slice(0, 30)),
+            React.createElement("td", null, tag(r.status, '#8b5cf6')),
+            React.createElement("td", null,
+              !r.pod_ok ? tag('POD \u2192 MANOJ', '#f47067') : null,
+              r.image_needed && !r.image_ok ? tag('Image \u2192 ' + ((r.image_owner || '').startsWith('PRIYANKA') ? 'PRIYANKA' : 'POONAM'), '#f59e0b') : null),
+            React.createElement("td", { style: { fontSize: 10, fontWeight: 700, color: d !== null && d > 15 ? '#f47067' : '#e2e8f0' } }, d !== null ? d + 'd' : '\u2014'));
+        })))));
+}
+
 function DispPage({
   logs,
   delBoys,
@@ -23353,7 +23391,9 @@ function DispPage({
         color: '#4ade80',
         padding: 16
       }
-    }, "\uD83C\uDF89 Nothing pending \u2014 all DCs & ICs collected!"))))));
+    }, "\uD83C\uDF89 Nothing pending \u2014 all DCs & ICs collected!"))))), React.createElement(AccountsDocsMissing, {
+      jobs: jobs
+    }));
   })() : view === 'weigh' ? React.createElement(WeighmentView, {
     jobs: jobs,
     show: show
