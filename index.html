@@ -32888,7 +32888,7 @@ function MyScorePage({ user }) {
     })(),
     myDaily.length ? React.createElement("div", { className: "c", style: { padding: 12, marginBottom: 12 } },
       React.createElement("div", { style: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: .5 } },
-        (myDaily[0].metric === 'jobs_to_billing' ? 'Jobs given for billing' : 'Invoices entered + emailed') + ' \u00b7 daily target ' + myDaily[0].target),
+        (myDaily[0].metric === 'jobs_to_billing' ? 'Jobs given for billing' : myDaily[0].metric === 'pods_uploaded' ? 'Banking PODs uploaded (signed & stamped)' : 'Invoices entered + emailed') + ' \u00b7 daily target ' + myDaily[0].target),
       React.createElement("div", { style: { fontSize: 28, fontWeight: 700, color: myDaily[0].hit ? "#2fb37a" : "#e0574f", lineHeight: 1.2 } },
         myDaily[0].done + ' / ' + myDaily[0].target, React.createElement("span", { style: { fontSize: 11, color: "#64748b", fontWeight: 400, marginLeft: 6 } }, 'today')),
       React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" } },
