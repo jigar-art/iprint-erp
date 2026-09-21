@@ -5873,7 +5873,9 @@ function JobDetail({
     project: j.project || '',
     client_email: j.client_email || '',
     remark: j.remark || '',
-    firm: j.firm || ''
+    firm: j.firm || '',
+    recce_date: j.recce_date || '',
+    install_date: j.install_date || ''
   });
   const [jfSaved, setJfSaved] = useState(() => ({
     client_name: j.client_name || '',
@@ -5888,7 +5890,9 @@ function JobDetail({
     project: j.project || '',
     client_email: j.client_email || '',
     remark: j.remark || '',
-    firm: j.firm || ''
+    firm: j.firm || '',
+    recce_date: j.recce_date || '',
+    install_date: j.install_date || ''
   }));
   const jfDirty = Object.keys(jfSaved).some(k => String(jf[k] == null ? '' : jf[k]) !== String(jfSaved[k] == null ? '' : jfSaved[k]));
   const setJF = (k, v) => {
@@ -5959,6 +5963,7 @@ function JobDetail({
       ...jf
     };
     if (!cleanFields.firm) delete cleanFields.firm;
+    ['recce_date', 'install_date'].forEach(k => { if (!cleanFields[k]) cleanFields[k] = null; });
     const ok = await updateJobFields(j.id, cleanFields);
     if (ok !== false) setJfSaved({ ...jf });
   };
@@ -6231,6 +6236,22 @@ function JobDetail({
     style: {
       fontSize: 10
     }
+  })), React.createElement(F, {
+    l: "Recce Date"
+  }, React.createElement("input", {
+    type: "date",
+    className: "in",
+    value: jf.recce_date || '',
+    onChange: e => setJF('recce_date', e.target.value),
+    style: { fontSize: 10 }
+  })), React.createElement(F, {
+    l: "Installation Date"
+  }, React.createElement("input", {
+    type: "date",
+    className: "in",
+    value: jf.install_date || '',
+    onChange: e => setJF('install_date', e.target.value),
+    style: { fontSize: 10 }
   })), canSeeRates && React.createElement(F, {
     l: "Client Email"
   }, React.createElement("input", {
@@ -13615,6 +13636,9 @@ function NewJobPage({
     mb: team[0]?.name || "",
     ls: "",
     pt: "50% Advance. Rest within 30 days.",
+    rcd: "",
+    ind: "",
+    nosite: false,
     remark: "",
     cgst: "",
     bname: ""
@@ -13906,6 +13930,7 @@ function NewJobPage({
       if (!f.cgst.trim()) missing.push("Client GST Number");
       if (!f.bname.trim()) missing.push("Billing Entity");
       if (!f.ls.trim()) missing.push("Lead Received By");
+      if ((((clients || []).find(c => c.id === f.cl) || {}).client_class || 'A') !== 'B' && !f.nosite && !f.ind) missing.push("Installation Date (or tick 'No site work')");
       if (missing.length > 0) {
         alert("⚠️ Please fill all mandatory fields:\n\n• " + missing.join("\n• "));
         return;
@@ -13936,6 +13961,8 @@ function NewJobPage({
       billing_name: f.bname || f.cn,
       client_gst: f.cgst,
       payment_terms: f.pt,
+      recce_date: f.nosite ? null : f.rcd || null,
+      install_date: f.nosite ? null : f.ind || null,
       status: isDraft ? "Draft" : "Active",
       po_file_url: poUrl ? [poUrl] : [],
       design_ref_urls: designUrls
@@ -14373,7 +14400,29 @@ function NewJobPage({
       ...p,
       pt: e.target.value
     }))
-  })), React.createElement(F, {
+  })), (((clients || []).find(c => c.id === f.cl) || {}).client_class || 'A') !== 'B' && React.createElement(F, {
+    l: "Recce Date (non-banking)"
+  }, React.createElement("input", {
+    type: "date",
+    className: "in",
+    value: f.rcd || '',
+    disabled: !!f.nosite,
+    onChange: e => sF(p => ({ ...p, rcd: e.target.value }))
+  })), (((clients || []).find(c => c.id === f.cl) || {}).client_class || 'A') !== 'B' && React.createElement(F, {
+    l: "Installation Date * (non-banking)"
+  }, React.createElement("div", null, React.createElement("input", {
+    type: "date",
+    className: "in",
+    value: f.ind || '',
+    disabled: !!f.nosite,
+    onChange: e => sF(p => ({ ...p, ind: e.target.value }))
+  }), React.createElement("label", {
+    style: { fontSize: 10, color: "#94a3b8", display: "flex", gap: 4, alignItems: "center", marginTop: 3, cursor: "pointer" }
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: !!f.nosite,
+    onChange: e => sF(p => ({ ...p, nosite: e.target.checked }))
+  }), "No site work (delivery only)"))), React.createElement(F, {
     l: "Remark"
   }, React.createElement("input", {
     className: "in",
@@ -28824,6 +28873,32 @@ function CliPage({
     }, React.createElement("strong", null, cj.length), " jobs"));
   }));
 }
+// ===== Invoice "Emailed" tag (2026-09-21) — counts toward the daily invoice target
+function EmailedTag({ b, user, setBatches, show }) {
+  if (!b || !b.bill_no) return null;
+  if (b.invoice_emailed_at) {
+    const d = new Date(b.invoice_emailed_at);
+    return React.createElement("span", {
+      title: 'Emailed ' + d.toLocaleString('en-IN') + (b.invoice_emailed_by ? ' by ' + b.invoice_emailed_by : ''),
+      style: { fontSize: 9, color: '#10b981', padding: '1px 4px' }
+    }, "\u2709\u2713");
+  }
+  const mark = async e => {
+    e.stopPropagation();
+    if (!confirm('Invoice ' + b.bill_no + ' emailed to the client?')) return;
+    const at = new Date().toISOString();
+    const by = user?.name || '';
+    const { error } = await sb.from('batches').update({ invoice_emailed_at: at, invoice_emailed_by: by }).eq('id', b.id);
+    if (error) { if (show) show('\u26a0\ufe0f ' + error.message, false); return; }
+    if (setBatches) setBatches(p => p.map(x => x.id === b.id ? { ...x, invoice_emailed_at: at, invoice_emailed_by: by } : x));
+    if (show) show('\u2709 ' + b.bill_no + ' marked emailed');
+  };
+  return React.createElement("button", {
+    type: "button", onClick: mark, title: 'Tap after emailing this invoice',
+    style: { fontSize: 9, padding: '1px 6px', borderRadius: 3, border: '1px solid #f59e0b66', background: 'transparent', color: '#f59e0b', cursor: 'pointer' }
+  }, "\u2709 Emailed?");
+}
+
 function AccPage({
   jobs,
   batches,
@@ -28984,7 +29059,8 @@ function AccPage({
         note: "Invoice: " + inv,
         bill_no: inv,
         status: "Done",
-        invoice_date: okDate
+        invoice_date: okDate,
+        billed_by: user?.name || ''
       };
       if (addBatchToJob) await addBatchToJob(bd);
     }
@@ -29026,8 +29102,9 @@ function AccPage({
       }) : null;
       const hist = Array.isArray(b.bill_no_history) ? b.bill_no_history : [];
       const histTip = hist.length > 0 ? `\n\nEdits: ${hist.length}\n` + hist.slice(-3).map(h => `• ${(h.at || '').slice(0, 16).replace('T', ' ')} — ${h.by || '?'}: ${h.old_no || '(empty)'} → ${h.new_no}`).join('\n') : '';
-      return React.createElement("span", {
-        key: b.id,
+      return React.createElement(React.Fragment, {
+        key: b.id
+      }, React.createElement("span", {
         title: (editable ? 'Click to edit · ' : '') + 'Invoice ' + b.bill_no + (b.invoice_date ? ' · ' + b.invoice_date : ' · no date') + (b.billed_by ? ' · by ' + b.billed_by : '') + histTip,
         onClick: editable ? () => setEditBatchInv({
           batch: b,
@@ -29050,7 +29127,12 @@ function AccPage({
           fontWeight: 700
         },
         title: `${hist.length} edit(s)`
-      }, "\u270E", hist.length) : null);
+      }, "\u270E", hist.length) : null), React.createElement(EmailedTag, {
+        b: b,
+        user: user,
+        setBatches: setBatches,
+        show: show
+      }));
     }), editable && React.createElement("div", {
       style: {
         display: 'flex',
@@ -32579,6 +32661,7 @@ function LangToggle({ onChange }) {
 // ===== My Score (added 2026-09-17) ========================================
 function MyScorePage({ user }) {
   const [rows, setRows] = React.useState(null);
+  const [daily, setDaily] = React.useState([]);
   const [month, setMonth] = React.useState(null);
   const [err, setErr] = React.useState('');
   const [, force] = React.useState(0);
@@ -32594,22 +32677,22 @@ function MyScorePage({ user }) {
         const m = await sb.from('v_tat_monthly').select('*').order('month', { ascending: false }).limit(60);
         setRows(r.data || []);
         setMonth(m.error ? [] : (m.data || []));
+        const dt = await sb.from('v_daily_target_progress').select('*').order('day', { ascending: false }).limit(120);
+        setDaily(dt.error ? [] : (dt.data || []));
       } catch (e) { setErr(e.message || 'Could not load score'); setRows([]); }
     })();
   }, []);
   if (err) return React.createElement("div", { className: "c", style: { padding: 16 } }, "⚠️ " + err);
   if (!rows) return React.createElement("div", { className: "c", style: { padding: 16 } }, "Loading…");
 
-  const mine = rows.filter(r => {
-    const k = (r.owner_key || '').toUpperCase();
-    return k === uname || uname.startsWith(k) || k.startsWith(uname.split(' ')[0]) ||
-           (r.reports_to || '').toUpperCase() === uname;
-  });
+  // Exact person match on the name before " - Role" (prefix matching let ANKIT see ANKITA's rows)
+  const baseName = v => (v || '').toUpperCase().split(/\s*[-(]/)[0].trim();
+  const meBase = baseName(uname);
+  const isMe = v => !!meBase && baseName(v) === meBase;
+  const mine = rows.filter(r => isMe(r.owner_key) || isMe(r.reports_to));
   const direct = mine.filter(r => (r.owner_key || '').toUpperCase() !== uname ? (r.reports_to || '').toUpperCase() === uname : true);
-  const myMonths = (month || []).filter(m => {
-    const k = (m.owner_key || '').toUpperCase();
-    return k === uname || uname.startsWith(k) || k.startsWith(uname.split(' ')[0]);
-  }).slice(0, 4);
+  const myMonths = (month || []).filter(m => isMe(m.owner_key)).slice(0, 4);
+  const myDaily = (daily || []).filter(d => isMe(d.person)).slice(0, 6);
 
   const card = (label, value, sub, color) => React.createElement("div", {
     className: "c", style: { padding: 12, minWidth: 130, flex: "1 1 130px" }
@@ -32622,6 +32705,16 @@ function MyScorePage({ user }) {
     React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 2px" } }, TL('My score')),
     React.createElement("p", { style: { fontSize: 12, color: "#64748b", margin: "0 0 12px" } },
       user?.name + " · practice period — scores are shown but not counted until October"),
+
+    myDaily.length ? React.createElement("div", { className: "c", style: { padding: 12, marginBottom: 12 } },
+      React.createElement("div", { style: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: .5 } },
+        (myDaily[0].metric === 'jobs_to_billing' ? 'Jobs given for billing' : 'Invoices entered + emailed') + ' \u00b7 daily target ' + myDaily[0].target),
+      React.createElement("div", { style: { fontSize: 28, fontWeight: 700, color: myDaily[0].hit ? "#2fb37a" : "#e0574f", lineHeight: 1.2 } },
+        myDaily[0].done + ' / ' + myDaily[0].target, React.createElement("span", { style: { fontSize: 11, color: "#64748b", fontWeight: 400, marginLeft: 6 } }, 'today')),
+      React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" } },
+        myDaily.slice(1).map(d => React.createElement("span", {
+          key: d.day, style: { fontSize: 10, padding: "2px 7px", borderRadius: 8, background: d.hit ? "#2fb37a22" : "#e0574f22", color: d.hit ? "#2fb37a" : "#e0574f" }
+        }, new Date(d.day + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' \u00b7 ' + d.done)))) : null,
 
     mine.length === 0
       ? React.createElement("div", { className: "c", style: { padding: 16, color: "#64748b" } }, TL('No jobs assigned'))
