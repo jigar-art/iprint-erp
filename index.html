@@ -20233,6 +20233,10 @@ function FabPage({
     _seenMatF.add(k);
     return true;
   }).sort((a, b) => a.name.localeCompare(b.name));
+  const matPickerList = allActiveMasters.map(m => ({
+    id: m.id,
+    internal_name: m.name
+  }));
   const FAB_FORWARD_USERS = ['JIGAR', 'CHANDNI', 'AMOL', 'PRATIK', 'SONU', 'ANKIT'];
   const userCanForward = (() => {
     const u = (user?.name || '').toUpperCase().trim();
@@ -21686,22 +21690,15 @@ function FabPage({
           display: "flex",
           gap: 2
         }
-      }, React.createElement("select", {
-        className: "in",
+      }, React.createElement(MaterialPicker, {
         value: row.material,
-        onChange: e => updateMaterial(it.id, ri, {
-          material: e.target.value
-        }),
-        style: {
-          fontSize: 9,
-          flex: 1
-        }
-      }, React.createElement("option", {
-        value: ""
-      }, "\u2014 pick \u2014"), allActiveMasters.map(m => React.createElement("option", {
-        key: m.id,
-        value: m.name
-      }, m.name, " (", m.unit, ")"))))), React.createElement(F, {
+        products: matPickerList,
+        compact: true,
+        placeholder: "Search material...",
+        onPick: picked => updateMaterial(it.id, ri, {
+          material: picked.internal_name
+        })
+      }))), React.createElement(F, {
         l: `Used ${unitLabel} *`
       }, React.createElement("input", {
         className: "in mn",
