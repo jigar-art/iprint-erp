@@ -15324,6 +15324,10 @@ function DeptPage({
     match: card.isLeading ? card.key === 'installation' ? j => jobLeading[j.id]?.leading === 'installation' && !STATUS_CARD_BY_KEY.accounts.statuses.includes(j.status) && !['No Bill', 'Cancelled'].includes(j.status) : j => jobLeading[j.id]?.leading === card.key : j => card.statuses.includes(j.status)
   }));
   const [ad, sad] = useState(tabs[0].id);
+  const [sel, setSel] = React.useState({});
+  React.useEffect(() => {
+    setSel({});
+  }, [ad, s]);
   React.useEffect(() => {
     try {
       const k = sessionStorage.getItem('dash_card_filter');
@@ -15427,6 +15431,58 @@ function DeptPage({
     else if (instWho === 'docs') rows = rows.filter(docMissing);
     return sortKey ? rows : rows.sort((a, b) => (lateDaysOf(b) ?? -1e9) - (lateDaysOf(a) ?? -1e9));
   })();
+  const showExport = ad !== 'accounts';
+  const selIds = penShown.filter(j => sel[j.id]);
+  const exportRows = selIds.length > 0 ? selIds : penShown;
+  const toggleAll = () => {
+    const allOn = penShown.length > 0 && penShown.every(j => sel[j.id]);
+    const ns = {};
+    if (!allOn) penShown.forEach(j => {
+      ns[j.id] = true;
+    });
+    setSel(ns);
+  };
+  const exportExcel = () => {
+    if (!window.XLSX) {
+      if (window._showToast) window._showToast('Excel library not ready \u2014 refresh', false);
+      return;
+    }
+    if (!exportRows.length) return;
+    const fmtDate = j => {
+      const dt = j.created_at ? new Date(j.created_at) : null;
+      return dt ? dt.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short'
+      }) : '';
+    };
+    const data = exportRows.map((j, i) => {
+      const jl = jobLeading[j.id];
+      const it = (j.batches || [])[0]?.items?.[0];
+      const row = {
+        'Sr': i + 1,
+        'Job': j.id,
+        'Date': fmtDate(j),
+        'Client': j.client_name || '',
+        'Product': it && it.internal_name || '',
+        'Source': jl && jl.source || '\u2014',
+        'Stage': jl && jl.all && jl.all.length ? jl.all.map(stageLabel).join(', ') : '\u2014',
+        'Status': j.status || ''
+      };
+      if (isInst) {
+        const r = delayMap.get(j.id);
+        row['Delay'] = r && r.due_at ? instDelayText(r).t : '';
+      }
+      row['Project'] = j.project || '';
+      row['Contact'] = j.contact_person || '';
+      return row;
+    });
+    const label = ad === null ? 'All jobs' : cur.l;
+    const ws = window.XLSX.utils.json_to_sheet(data);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, String(label).slice(0, 31));
+    window.XLSX.writeFile(wb, 'iPrint_' + String(label).replace(/[^a-zA-Z0-9]/g, '_') + '_' + new Date().toISOString().slice(0, 10) + '.xlsx');
+    if (window._showToast) window._showToast('Excel exported!');
+  };
   const ageBtn = (n, label) => React.createElement("button", {
     key: n, type: "button", onClick: () => setInstAge(n),
     style: { fontSize: 11, fontWeight: 700, padding: "3px 10px", marginLeft: 4, borderRadius: 6, cursor: "pointer",
@@ -15634,12 +15690,52 @@ function DeptPage({
       fontSize: 8,
       color: '#64748b'
     }
-  }, ad === null ? 'Click a card above to filter' : 'Granular rollup first · falls back to jobs.status')), React.createElement("div", {
+  }, ad === null ? 'Click a card above to filter' : 'Granular rollup first · falls back to jobs.status')), showExport && React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 8,
+      padding: "5px 8px",
+      flexWrap: "wrap"
+    }
+  }, React.createElement("label", {
+    style: {
+      fontSize: 9,
+      color: "#8b949e",
+      display: "flex",
+      alignItems: "center",
+      gap: 5,
+      cursor: "pointer"
+    }
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: penShown.length > 0 && penShown.every(j => sel[j.id]),
+    ref: el => {
+      if (el) el.indeterminate = selIds.length > 0 && selIds.length < penShown.length;
+    },
+    onChange: toggleAll
+  }), "Select all"), React.createElement("button", {
+    type: "button",
+    onClick: exportExcel,
+    disabled: !exportRows.length,
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      padding: "4px 12px",
+      borderRadius: 4,
+      cursor: exportRows.length ? "pointer" : "not-allowed",
+      border: "1px solid #10b98155",
+      background: exportRows.length ? "#10b98115" : "transparent",
+      color: "#4ade80",
+      opacity: exportRows.length ? 1 : 0.5
+    }
+  }, "\u2b07 Export Excel \u2014 ", selIds.length > 0 ? selIds.length + " selected" : "all " + penShown.length)), React.createElement("div", {
     style: {
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), isInst ? React.createElement("th", null, "Delay") : null, sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, showExport ? React.createElement("th", { style: { width: 26 } }) : null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), isInst ? React.createElement("th", null, "Delay") : null, sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
     const it = (j.batches || [])[0]?.items?.[0];
     const dt = j.created_at ? new Date(j.created_at) : null;
     const ds = dt ? dt.toLocaleDateString('en-IN', {
@@ -15649,7 +15745,14 @@ function DeptPage({
     const jl = jobLeading[j.id];
     return React.createElement("tr", {
       key: i
-    }, React.createElement("td", {
+    }, showExport ? React.createElement("td", {
+      style: { textAlign: "center" },
+      onClick: e => e.stopPropagation()
+    }, React.createElement("input", {
+      type: "checkbox",
+      checked: !!sel[j.id],
+      onChange: () => setSel(p => ({ ...p, [j.id]: !p[j.id] }))
+    })) : null, React.createElement("td", {
       className: "mn",
       style: {
         fontSize: 10,
