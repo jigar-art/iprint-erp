@@ -25327,9 +25327,12 @@ function GRNReceivePage({
     const n = (name || '').toLowerCase().split('(')[0].trim();
     if (!n) return '';
     let hit = '';
+    const exact = mats.find(m => (m.name || '').toLowerCase().trim() === n);
+    if (exact) return exact.name;
     for (const m of mats) {
-      const mn = (m.name || '').toLowerCase();
-      if (n === mn || n.includes(mn) || mn.includes(n)) {
+      const mn = (m.name || '').toLowerCase().trim();
+      if (mn.length < 4 || /^n\/?a$/.test(mn)) continue;
+      if (n.includes(mn) || mn.includes(n)) {
         hit = m.name;
         break;
       }
@@ -25399,6 +25402,21 @@ function GRNReceivePage({
       show('Select receiver', false);
       return;
     }
+    {
+      const isPlaceholderMat = s => /^\s*(na|n\/a|nil|none|-|\*)\s*$/i.test(s || '');
+      const bad = (gf.items_received || []).filter(x => !x.is_service && (+x.received_now || 0) > 0).map(x => {
+        if (!x.stock_material) return x.product + ': map to a stock material or mark as Service';
+        if (isPlaceholderMat(x.stock_material)) return x.product + ': "' + x.stock_material + '" is not a real material';
+        const mu = matUnit(x.stock_material);
+        const areaLine = x.per === 'ft\u00b2' || x.per === 'm\u00b2';
+        if (mu === 'roll' && !areaLine && !(+x.sqft_now > 0)) return x.product + ': enter SqFt received (roll stock is counted in ft\u00b2)';
+        return null;
+      }).filter(Boolean);
+      if (bad.length) {
+        alert('Cannot save receipt:\n\n' + bad.join('\n'));
+        return;
+      }
+    }
     setSaving(true);
     const grn_id = 'GRN' + Date.now();
     const nowIso = new Date().toISOString();
@@ -25449,6 +25467,8 @@ function GRNReceivePage({
         if (mu === 'roll' && isArea) {
           if (per === 'ft\u00b2') sqft = Math.round(recv * 100) / 100;
           else sqft = Math.round(recv * 10.7639 * 100) / 100;
+        } else if (mu === 'roll') {
+          sqft = Math.round((+x.sqft_now || 0) * 100) / 100;
         }
         const ordDisp = +x.ordered_display || 0;
         const qty = isArea ? ordDisp > 0 ? Math.round((+x.ordered_qty || 0) * recv / ordDisp * 100) / 100 : 0 : recv;
@@ -25850,7 +25870,7 @@ function GRNReceivePage({
     }, m.name, " (", m.unit || 'nos', ")"))), React.createElement("div", {
       style: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(4,1fr)',
+        gridTemplateColumns: _mu === 'roll' && !_isAreaLine ? 'repeat(5,1fr)' : 'repeat(4,1fr)',
         gap: 6,
         marginTop: 6,
         alignItems: 'end'
@@ -25915,7 +25935,29 @@ function GRNReceivePage({
         fontWeight: 700,
         color: remaining > 0 ? '#f59e0b' : '#4ade80'
       }
-    }, remaining)))));
+    }, remaining)), _mu === 'roll' && !_isAreaLine ? React.createElement("div", null, React.createElement("span", {
+      style: {
+        fontSize: 7,
+        color: '#f59e0b',
+        display: 'block'
+      }
+    }, "SqFt received *"), React.createElement("input", {
+      className: "in mn",
+      type: "number",
+      min: "0",
+      value: x.sqft_now || '',
+      onChange: e => setIt({
+        sqft_now: e.target.value
+      }),
+      placeholder: "ft\u00b2",
+      style: {
+        fontSize: 9,
+        padding: '2px 4px',
+        width: '100%',
+        textAlign: 'right',
+        borderColor: +x.sqft_now > 0 ? '#1a2030' : '#f59e0b'
+      }
+    })) : null)));
   })), React.createElement("div", {
     style: {
       marginBottom: 10
