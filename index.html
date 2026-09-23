@@ -49003,6 +49003,30 @@ const PC_STATUS = {
   cancelled: ['Cancelled', '#64748b']
 };
 const pcRupee = n => '\u20b9' + Number(n || 0).toLocaleString('en-IN');
+function pcActiveMins(startMs, endMs, qf, qt) {
+  const IST = 5.5 * 3600e3;
+  let t = startMs,
+    total = 0,
+    guard = 0;
+  while (t < endMs && guard++ < 400) {
+    const l = new Date(t + IST);
+    const midnight = t - (l.getUTCHours() * 3600e3 + l.getUTCMinutes() * 60e3 + l.getUTCSeconds() * 1e3 + l.getUTCMilliseconds());
+    const ws = midnight + qt * 3600e3,
+      we = midnight + qf * 3600e3;
+    if (t < ws) {
+      t = ws;
+      continue;
+    }
+    if (t >= we) {
+      t = midnight + 24 * 3600e3 + qt * 3600e3;
+      continue;
+    }
+    const e = Math.min(endMs, we);
+    total += e - t;
+    t = e;
+  }
+  return Math.round(total / 60000);
+}
 const pcDays = t => t ? Math.floor((Date.now() - new Date(t).getTime()) / 86400000) : 0;
 async function pcShrink(file, maxDim) {
   try {
@@ -49546,7 +49570,11 @@ function PettyCashPage({
     if (!lvl) return null;
     const start = lvl === 1 ? r.chain_started_at : lvl === 2 ? r.l1_approver_id ? r.l1_decided_at : r.chain_started_at : r.l2_approver_id ? r.l2_decided_at : r.l1_approver_id ? r.l1_decided_at : r.chain_started_at;
     if (!start) return null;
-    const mins = Math.max(0, Math.round((Date.now() - new Date(start).getTime()) / 60000));
+    const hh = v => {
+      const p = String(v || '').split(':');
+      return (parseInt(p[0], 10) || 0) + (parseInt(p[1], 10) || 0) / 60;
+    };
+    const mins = pcActiveMins(new Date(start).getTime(), Date.now(), cfg && cfg.quiet_from ? hh(cfg.quiet_from) : 22, cfg && cfg.quiet_to ? hh(cfg.quiet_to) : 8);
     const who = nm(lvl === 1 ? r.l1_approver_id : lvl === 2 ? r.l2_approver_id : r.l3_approver_id);
     return {
       mins,
@@ -49724,7 +49752,7 @@ function PettyCashPage({
         style: {
           color: w.late ? '#f47067' : '#94a3b8'
         }
-      }, "Waiting with ", w.who, " for ", fmtMins(w.mins), w.late ? ' - late (limit ' + slaMin + ' min)' : '')) : null;
+      }, "Waiting with ", w.who, " for ", fmtMins(w.mins), w.late ? ' - late (limit ' + slaMin + ' min, 10 pm-8 am not counted)' : '')) : null;
     })(), r.override_at ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#94a3b8'
