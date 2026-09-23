@@ -49224,7 +49224,8 @@ function PettyCashPage({
     }
     const f = data.fare != null ? pcRupee(data.fare) : 'no fare';
     const msg = {
-      auto_approved: '\u2705 ERP matched ' + f + ' on the ' + (data.app || 'app') + ' screenshot - collect cash from Shreya and book',
+      auto_approved: '\u2705 ERP matched ' + f + ' on the ' + (data.app || 'app') + ' screenshot - approved, collect cash from Shreya',
+      skipped: '\u2705 Sent for approval',
       sent_for_approval: '\u26a0\ufe0f Sent to your lead: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'screenshot did not match'),
       duplicate: '\u26a0\ufe0f This trip was already claimed - sent to your lead',
       auto_settled: '\u2705 Final fare ' + f + ' matches - closed',
@@ -49287,7 +49288,8 @@ function PettyCashPage({
       if (ok < form.files.length) show('\u26a0\ufe0f ' + (form.files.length - ok) + ' file(s) did not upload - add them from My requests', false);
     }
     setBusy(false);
-    if (form.kind === 'booking' && attachBills.lastIds && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + data.req_no + ' sent - ' + (PC_STATUS[data.status] || [data.status])[0]);
+    const appCats = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
+    if ((form.kind === 'booking' || form.kind === 'reimbursement' && appCats.includes(form.category)) && attachBills.lastIds && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + data.req_no + ' sent - ' + (PC_STATUS[data.status] || [data.status])[0]);
     setForm({
       kind: 'reimbursement',
       amount: '',
@@ -49675,7 +49677,15 @@ function PettyCashPage({
         color: '#64748b',
         lineHeight: 1.6
       }
-    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), r.kind === 'booking' && (r.trip_app || r.quote_fare != null) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), r.auto_verified ? '\u2713 ERP-verified ' : 'Screenshot: ', r.trip_app || 'app', r.quote_fare != null ? ' quote ' + pcRupee(r.quote_fare) : '', r.final_fare != null ? ', final ' + pcRupee(r.final_fare) : '', r.trip_ref ? ' \u00b7 ' + r.trip_ref : '') : null, r.kind === 'booking' && !r.auto_verified && r.ai_quote && r.ai_quote.reasons && r.ai_quote.reasons.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), r.kind === 'booking' && (r.trip_app || r.quote_fare != null) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), r.auto_verified ? '\u2713 ERP-verified ' : 'Screenshot: ', r.trip_app || 'app', r.quote_fare != null ? ' quote ' + pcRupee(r.quote_fare) : '', r.final_fare != null ? ', final ' + pcRupee(r.final_fare) : '', r.trip_ref ? ' \u00b7 ' + r.trip_ref : '') : null, r.kind === 'reimbursement' && r.auto_verified ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#10b981'
+      }
+    }, '\u2713', " ERP-verified app receipt", r.trip_ref ? ' \u00b7 ' + r.trip_ref : '')) : null, r.kind === 'reimbursement' && !r.auto_verified && r.ai_final && r.ai_final.reasons && r.ai_final.reasons.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f0b429'
+      }
+    }, "Needs approval: ", r.ai_final.reasons.join('; '))) : null, r.kind === 'booking' && !r.auto_verified && r.ai_quote && r.ai_quote.reasons && r.ai_quote.reasons.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#f0b429'
       }
@@ -49950,7 +49960,13 @@ function PettyCashPage({
     }, c)));
   })()), /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, form.kind === 'booking' ? 'Fare screenshot from the app (required)' : form.kind === 'reimbursement' ? 'Bill photo (required)' : 'Bill photo (add after spending)'), /*#__PURE__*/React.createElement("input", {
+  }, form.kind === 'booking' ? 'Fare screenshot from the app (required)' : form.kind === 'reimbursement' ? 'Bill photo (required)' : 'Bill photo (add after spending)'), form.kind === 'reimbursement' && ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'].includes(form.category) ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#10b981',
+      marginBottom: 6
+    }
+  }, "Attach the Porter / Wefast / Ola / Rapido trip screenshot. If the fare matches, it is approved instantly.") : null, /*#__PURE__*/React.createElement("input", {
     type: "file",
     accept: form.kind === 'booking' ? 'image/*' : 'image/*,application/pdf',
     multiple: form.kind !== 'booking',
