@@ -2794,7 +2794,7 @@ function MainApp({
         if (!a.error && a.data) adj = a.data.length;
       }
       if (dead) return;
-      setPettyPending(adj + r.data.filter(x => x.status === 'pending_l1' && x.l1_approver_id === me || x.status === 'pending_l2' && x.l2_approver_id === me || x.status === 'pending_l3' && x.l3_approver_id === me || cashier && x.status === 'approved').length);
+      setPettyPending(adj + r.data.filter(x => x.status === 'pending_l1' && x.l1_approver_id === me || x.status === 'pending_l2' && x.l2_approver_id === me || x.status === 'pending_l3' && x.l3_approver_id === me || c.data && c.data.l3_person_id === me && /^pending_l/.test(x.status) || cashier && x.status === 'approved').length);
     };
     loadPettyPending();
     const tmr = setInterval(loadPettyPending, 120000);
@@ -49537,7 +49537,24 @@ function PettyCashPage({
     });
   };
   const mine = reqs.filter(r => r.requester_id === me);
-  const queue = reqs.filter(r => r.status === 'pending_l1' && r.l1_approver_id === me || r.status === 'pending_l2' && r.l2_approver_id === me || r.status === 'pending_l3' && r.l3_approver_id === me);
+  const myTurn = r => r.status === 'pending_l1' && r.l1_approver_id === me || r.status === 'pending_l2' && r.l2_approver_id === me || r.status === 'pending_l3' && r.l3_approver_id === me;
+  const isL3 = !!cfg && me === cfg.l3_person_id;
+  const queue = reqs.filter(r => myTurn(r) || isL3 && /^pending_l/.test(r.status)).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const slaMin = cfg && cfg.approval_sla_minutes || 30;
+  const waitInfo = r => {
+    const lvl = r.status === 'pending_l1' ? 1 : r.status === 'pending_l2' ? 2 : r.status === 'pending_l3' ? 3 : 0;
+    if (!lvl) return null;
+    const start = lvl === 1 ? r.chain_started_at : lvl === 2 ? r.l1_approver_id ? r.l1_decided_at : r.chain_started_at : r.l2_approver_id ? r.l2_decided_at : r.l1_approver_id ? r.l1_decided_at : r.chain_started_at;
+    if (!start) return null;
+    const mins = Math.max(0, Math.round((Date.now() - new Date(start).getTime()) / 60000));
+    const who = nm(lvl === 1 ? r.l1_approver_id : lvl === 2 ? r.l2_approver_id : r.l3_approver_id);
+    return {
+      mins,
+      who,
+      late: mins > slaMin
+    };
+  };
+  const fmtMins = m => m < 60 ? m + ' min' : Math.floor(m / 60) + 'h ' + m % 60 + 'm';
   const needsExtra = r => r.kind === 'booking' && r.status === 'paid' && r.final_fare != null && Number(r.final_fare) > Math.round(Number(r.quote_fare || r.amount) * 110) / 100 && !r.extra_approved_at;
   const extraQueue = reqs.filter(r => needsExtra(r) && (r.l1_approver_id || r.l2_approver_id || r.l3_approver_id) === me);
   const toPay = reqs.filter(r => r.status === 'approved');
@@ -49701,7 +49718,18 @@ function PettyCashPage({
       style: {
         color: '#f47067'
       }
-    }, "Reason: ", r.l3_remark || r.l2_remark || r.l1_remark)) : null), /*#__PURE__*/React.createElement("div", {
+    }, "Reason: ", r.l3_remark || r.l2_remark || r.l1_remark)) : null, (() => {
+      const w = waitInfo(r);
+      return w ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: w.late ? '#f47067' : '#94a3b8'
+        }
+      }, "Waiting with ", w.who, " for ", fmtMins(w.mins), w.late ? ' - late (limit ' + slaMin + ' min)' : '')) : null;
+    })(), r.override_at ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#94a3b8'
+      }
+    }, "Approved directly by ", nm(r.override_by))) : null), /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
         gap: 6,
@@ -49725,7 +49753,7 @@ function PettyCashPage({
       disabled: busy,
       style: btn('#10b981'),
       onClick: () => approve(r)
-    }, "Approve"), /*#__PURE__*/React.createElement("button", {
+    }, myTurn(r) ? 'Approve' : 'Approve now (skip ' + nm(r.status === 'pending_l1' ? r.l1_approver_id : r.l2_approver_id) + ')'), /*#__PURE__*/React.createElement("button", {
       disabled: busy,
       style: btn('#f47067', '#1a0505'),
       onClick: () => reject(r)
