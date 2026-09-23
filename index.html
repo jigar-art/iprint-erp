@@ -49099,6 +49099,7 @@ function PettyCashPage({
     firm: '',
     note: ''
   });
+  const [jobInfo, setJobInfo] = useState([]);
   const [catQ, setCatQ] = useState('');
   const [catOpen, setCatOpen] = useState(false);
   const [addFor, setAddFor] = useState(null);
@@ -49136,6 +49137,47 @@ function PettyCashPage({
       if (data && data[0]) setCash(data[0]);
     });
   }, [isCashier, isAdmin, reqs]);
+  const jobNums = form.jobs.split(/[\s,/&]+/).map(x => x.trim().split('-')[0]).filter(x => /^\d+$/.test(x));
+  const closedSt = cfg && cfg.job_closed_statuses || ['Billing Done', 'Cancelled', 'Cash Pending', 'Cash Received'];
+  const exemptCats = cfg && cfg.job_exempt_categories || ['Office Pantry', 'Office Expense', 'Bank Work', 'Mobile Recharge', 'Repairs / Maintenance'];
+  useEffect(() => {
+    let dead = false;
+    const nums = jobNums.slice(0, 6);
+    if (!nums.length) {
+      setJobInfo([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      const out = [];
+      for (const n of nums) {
+        const {
+          data
+        } = await sb.from('jobs').select('id,client_name,project,status').like('id', n + '-%').order('id', {
+          ascending: false
+        }).limit(5);
+        const rows = data || [];
+        const open = rows.filter(r => !closedSt.includes(r.status));
+        if (!rows.length) out.push({
+          n,
+          ok: false,
+          text: 'Job ' + n + ' is not in the ERP - check the number'
+        });else if (!open.length) out.push({
+          n,
+          ok: false,
+          text: 'Job ' + n + ' is closed (' + rows[0].status + ') - cannot book expenses to it'
+        });else out.push({
+          n,
+          ok: true,
+          text: open[0].id + ' \u00b7 ' + (open[0].client_name || '') + (open[0].project ? ' - ' + open[0].project : '') + ' \u00b7 ' + open[0].status
+        });
+      }
+      if (!dead) setJobInfo(out);
+    }, 450);
+    return () => {
+      dead = true;
+      clearTimeout(t);
+    };
+  }, [form.jobs]);
   const billsOf = id => bills.filter(b => b.request_id === id);
   const nm = id => id ? names[id] || '\u2014' : '\u2014';
   const setF = (k, v) => setForm(p => ({
@@ -49204,6 +49246,15 @@ function PettyCashPage({
     }
     if (!form.category && form.kind !== 'booking') {
       show('Pick a category - type a word like auto, porter or dinner', false);
+      return;
+    }
+    if (!jobNums.length && !(form.kind !== 'booking' && exemptCats.includes(form.category))) {
+      show('Job number is required. Only office expenses (' + exemptCats.join(', ') + ') can go without a job.', false);
+      return;
+    }
+    const badJob = jobInfo.find(j => !j.ok);
+    if (badJob) {
+      show('\u26a0\ufe0f ' + badJob.text, false);
       return;
     }
     if (form.kind === 'reimbursement' && !form.files.length) {
@@ -49802,15 +49853,26 @@ function PettyCashPage({
     }
   }), /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, "Job number(s) - leave blank for office expense"), /*#__PURE__*/React.createElement("input", {
+  }, "Job number(s) - required", form.kind !== 'booking' ? ' (blank only for office expenses)' : ''), /*#__PURE__*/React.createElement("input", {
     value: form.jobs,
     onChange: e => setF('jobs', e.target.value),
     placeholder: "e.g. 12297, 12301",
     style: {
       ...inp,
+      marginBottom: jobInfo.length ? 6 : 12
+    }
+  }), jobInfo.length ? /*#__PURE__*/React.createElement("div", {
+    style: {
       marginBottom: 12
     }
-  }), form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
+  }, jobInfo.map(j => /*#__PURE__*/React.createElement("div", {
+    key: j.n,
+    style: {
+      fontSize: 12,
+      color: j.ok ? '#10b981' : '#f47067',
+      lineHeight: 1.6
+    }
+  }, j.ok ? '\u2713 ' : '\u2717 ', j.text))) : null, form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: '#64748b',
@@ -49907,13 +49969,13 @@ function PettyCashPage({
       padding: '12px',
       fontSize: 14
     }
-  }, busy ? form.kind === 'booking' ? 'Checking screenshot\u2026' : 'Sending\u2026' : form.kind === 'booking' ? 'Check screenshot and request cash' : 'Send for approval'), !form.jobs.trim() ? /*#__PURE__*/React.createElement("div", {
+  }, busy ? form.kind === 'booking' ? 'Checking screenshot\u2026' : 'Sending\u2026' : form.kind === 'booking' ? 'Check screenshot and request cash' : 'Send for approval'), !jobNums.length ? /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: '#64748b',
       marginTop: 8
     }
-  }, "No job number = office expense, shared across the three firms at month end.") : null) : null, tab === 'mine' ? mine.length ? mine.map(r => row(r, {
+  }, "No job number is allowed only for office expenses: ", exemptCats.join(', '), ". They are shared across the three firms at month end.") : null) : null, tab === 'mine' ? mine.length ? mine.map(r => row(r, {
     cancel: true
   })) : empty('No requests yet. Use Request cash to raise one.') : null, tab === 'approve' ? /*#__PURE__*/React.createElement(React.Fragment, null, queue.length > 1 ? /*#__PURE__*/React.createElement("button", {
     disabled: busy,
