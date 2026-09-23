@@ -2785,10 +2785,16 @@ function MainApp({
     const loadPettyPending = async () => {
       const me = user && user.id;
       if (!me) return;
-      const [c, r] = await Promise.all([sb.from('petty_cash_config').select('cashier_id,cashier_backup_id').eq('id', 1).maybeSingle(), sb.from('petty_cash_requests').select('status,l1_approver_id,l2_approver_id,l3_approver_id').in('status', ['pending_l1', 'pending_l2', 'pending_l3', 'approved'])]);
+      const [c, r] = await Promise.all([sb.from('petty_cash_config').select('cashier_id,cashier_backup_id,l3_person_id').eq('id', 1).maybeSingle(), sb.from('petty_cash_requests').select('status,l1_approver_id,l2_approver_id,l3_approver_id').in('status', ['pending_l1', 'pending_l2', 'pending_l3', 'approved'])]);
       if (dead || r.error || !r.data) return;
       const cashier = c.data && (c.data.cashier_id === me || c.data.cashier_backup_id === me);
-      setPettyPending(r.data.filter(x => x.status === 'pending_l1' && x.l1_approver_id === me || x.status === 'pending_l2' && x.l2_approver_id === me || x.status === 'pending_l3' && x.l3_approver_id === me || cashier && x.status === 'approved').length);
+      let adj = 0;
+      if (c.data && c.data.l3_person_id === me) {
+        const a = await sb.from('petty_cash_adjustments').select('id').eq('status', 'pending');
+        if (!a.error && a.data) adj = a.data.length;
+      }
+      if (dead) return;
+      setPettyPending(adj + r.data.filter(x => x.status === 'pending_l1' && x.l1_approver_id === me || x.status === 'pending_l2' && x.l2_approver_id === me || x.status === 'pending_l3' && x.l3_approver_id === me || cashier && x.status === 'approved').length);
     };
     loadPettyPending();
     const tmr = setInterval(loadPettyPending, 120000);
@@ -49042,6 +49048,25 @@ async function pcUploadBill(file, me, reqId, maxDim) {
     _upOverlay.pop();
   }
 }
+const PC_DENOMS = ['2000', '500', '200', '100', '50', '20', '10'];
+async function pcUploadPath(file, path) {
+  _upOverlay.push();
+  try {
+    const f = await compressImage(file);
+    const {
+      error
+    } = await sb.storage.from('petty-cash-bills').upload(path, f, {
+      contentType: f.type || undefined
+    });
+    if (error) {
+      if (window._showToast) window._showToast('\u26a0\ufe0f Photo upload failed: ' + error.message, false);
+      return null;
+    }
+    return path;
+  } finally {
+    _upOverlay.pop();
+  }
+}
 function PettyCashPage({
   user,
   show
@@ -49064,6 +49089,16 @@ function PettyCashPage({
     category: '',
     files: []
   });
+  const [cs, setCs] = useState(null);
+  const [cnt, setCnt] = useState({});
+  const [closePhoto, setClosePhoto] = useState(null);
+  const [adjReason, setAdjReason] = useState('');
+  const [recount, setRecount] = useState(false);
+  const [top, setTop] = useState({
+    amount: '',
+    firm: '',
+    note: ''
+  });
   const [catQ, setCatQ] = useState('');
   const [catOpen, setCatOpen] = useState(false);
   const [addFor, setAddFor] = useState(null);
@@ -49085,6 +49120,8 @@ function PettyCashPage({
       });
       setNames(m);
     }
+    const st = await sb.rpc('erp_pc_close_status');
+    setCs(st.error ? null : st.data || null);
   }, [me, show]);
   useEffect(() => {
     load();
@@ -49325,6 +49362,126 @@ function PettyCashPage({
     if (!ok) return;
     if (r.kind === 'booking' && stage === 'final' && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
     load();
+  };
+  const cntNotes = () => {
+    const o = {};
+    PC_DENOMS.forEach(d => {
+      o[d] = parseInt(cnt[d] || 0, 10) || 0;
+    });
+    o.coins = Math.round((parseFloat(cnt.coins || 0) || 0) * 100) / 100;
+    return o;
+  };
+  const cntTotal = (() => {
+    const o = cntNotes();
+    return PC_DENOMS.reduce((a, d) => a + o[d] * Number(d), 0) + o.coins;
+  })();
+  const cntDiff = cs ? Math.round((cntTotal - Number(cs.expected)) * 100) / 100 : 0;
+  const uploadClosePhoto = async () => {
+    if (!closePhoto) {
+      show('Attach a photo of the counted cash', false);
+      return null;
+    }
+    return await pcUploadPath(closePhoto, me + '/close/' + cs.today + '/' + Date.now() + '.jpg');
+  };
+  const closeDay = async () => {
+    setBusy(true);
+    const path = await uploadClosePhoto();
+    if (!path) {
+      setBusy(false);
+      return;
+    }
+    const {
+      data,
+      error
+    } = await sb.rpc('erp_pc_close_day', {
+      p_notes: cntNotes(),
+      p_photo: path
+    });
+    setBusy(false);
+    if (error) {
+      show('\u26a0\ufe0f ' + error.message, false);
+      return;
+    }
+    show('\u2705 ' + data);
+    setCnt({});
+    setClosePhoto(null);
+    setRecount(false);
+    load();
+  };
+  const sendAdjust = async () => {
+    if (!adjReason.trim()) {
+      show('Write why the cash does not match', false);
+      return;
+    }
+    if (!confirm('Send a difference of ' + pcRupee(cntDiff) + ' to Jigar for approval?')) return;
+    setBusy(true);
+    const path = await uploadClosePhoto();
+    if (!path) {
+      setBusy(false);
+      return;
+    }
+    const {
+      data,
+      error
+    } = await sb.rpc('erp_pc_request_adjust', {
+      p_notes: cntNotes(),
+      p_photo: path,
+      p_reason: adjReason.trim()
+    });
+    setBusy(false);
+    if (error) {
+      show('\u26a0\ufe0f ' + error.message, false);
+      return;
+    }
+    show('\u2705 ' + data);
+    setAdjReason('');
+    setClosePhoto(null);
+    load();
+  };
+  const decideAdjust = async (a, approve) => {
+    let remark = null;
+    if (!approve) {
+      remark = prompt('Why reject? Shreya will have to recount');
+      if (!remark || !remark.trim()) return;
+    } else if (!confirm('Approve ' + (a.difference < 0 ? 'cash short ' : 'cash over ') + pcRupee(Math.abs(a.difference)) + '? It will be booked as an adjustment.')) return;
+    rpc('erp_pc_decide_adjust', {
+      p_id: a.id,
+      p_approve: approve,
+      p_remark: remark
+    }, approve ? 'Difference approved' : 'Rejected');
+  };
+  const viewPath = async p => {
+    const {
+      data,
+      error
+    } = await sb.storage.from('petty-cash-bills').createSignedUrl(p, 600);
+    if (error) {
+      show('\u26a0\ufe0f ' + error.message, false);
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
+  };
+  const addTopup = async () => {
+    const amt = parseFloat(top.amount);
+    if (!amt || amt <= 0) {
+      show('Enter the amount received', false);
+      return;
+    }
+    if (!top.firm) {
+      show("Pick which firm's bank the cash came from", false);
+      return;
+    }
+    if (!confirm('Record ' + pcRupee(amt) + ' cash received from ' + top.firm + ' bank?')) return;
+    const ok = await rpc('erp_pc_add_topup', {
+      p_amount: amt,
+      p_firm: top.firm,
+      p_note: top.note.trim() || null
+    }, 'Cash received ' + pcRupee(amt));
+    if (ok) setTop({
+      amount: '',
+      firm: '',
+      note: ''
+    });
   };
   const mine = reqs.filter(r => r.requester_id === me);
   const queue = reqs.filter(r => r.status === 'pending_l1' && r.l1_approver_id === me || r.status === 'pending_l2' && r.l2_approver_id === me || r.status === 'pending_l3' && r.l3_approver_id === me);
@@ -49596,7 +49753,7 @@ function PettyCashPage({
       flexWrap: 'wrap',
       marginBottom: 12
     }
-  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", {
+  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", {
     style: card
   }, /*#__PURE__*/React.createElement("label", {
     style: lbl
@@ -49767,13 +49924,307 @@ function PettyCashPage({
       marginBottom: 10,
       padding: 12
     }
-  }, "Approve all ready (", queue.filter(r => r.kind === 'advance' || billsOf(r.id).length).length, ") - ", pcRupee(queue.reduce((s, r) => s + Number(r.amount), 0))) : null, extraQueue.map(r => row(r, {
+  }, "Approve all ready (", queue.filter(r => r.kind === 'advance' || billsOf(r.id).length).length, ") - ", pcRupee(queue.reduce((s, r) => s + Number(r.amount), 0))) : null, cs && cs.is_approver && cs.pending_adjust ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...card,
+      borderColor: '#f0b429'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: '#e2e8f0'
+    }
+  }, "Cash ", cs.pending_adjust.difference < 0 ? 'short' : 'over', " ", pcRupee(Math.abs(cs.pending_adjust.difference))), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: '#f0b429'
+    }
+  }, "Needs your approval")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: '#cbd5e1',
+      margin: '6px 0'
+    }
+  }, cs.pending_adjust.reason), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#64748b',
+      lineHeight: 1.6
+    }
+  }, "Counted ", pcRupee(cs.pending_adjust.counted_total), " vs ERP ", pcRupee(cs.pending_adjust.expected_total), " ", '\u00b7', " ", cs.pending_adjust.adj_date, " ", '\u00b7', " by ", nm(cs.pending_adjust.requested_by), /*#__PURE__*/React.createElement("br", null), PC_DENOMS.filter(d => cs.pending_adjust.notes[d]).map(d => '\u20b9' + d + ' \u00d7 ' + cs.pending_adjust.notes[d]).join(', '), cs.pending_adjust.notes.coins ? ', coins ' + pcRupee(cs.pending_adjust.notes.coins) : ''), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    style: ghost,
+    onClick: () => viewPath(cs.pending_adjust.photo_path)
+  }, "Cash photo"), /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    style: btn('#10b981'),
+    onClick: () => decideAdjust(cs.pending_adjust, true)
+  }, "Approve"), /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    style: btn('#f47067', '#1a0505'),
+    onClick: () => decideAdjust(cs.pending_adjust, false)
+  }, "Reject"))) : null, extraQueue.map(r => row(r, {
     who: true,
     extra: true
   })), queue.length ? queue.map(r => row(r, {
     who: true,
     approve: true
-  })) : extraQueue.length ? null : empty('Nothing waiting for you.')) : null, tab === 'desk' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  })) : extraQueue.length || cs && cs.is_approver && cs.pending_adjust ? null : empty('Nothing waiting for you.')) : null, tab === 'desk' ? /*#__PURE__*/React.createElement(React.Fragment, null, cs && cs.gate ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...card,
+      borderColor: '#f47067',
+      color: '#fca5a5',
+      fontSize: 13
+    }
+  }, cs.gate) : null, cs && cs.is_cashier ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...card,
+      borderColor: cs.today_count && !recount ? '#10b981' : '#1a2030'
+    }
+  }, cs.today_count && !recount ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#10b981',
+      fontWeight: 700,
+      fontSize: 13
+    }
+  }, '\u2713', " Day closed ", '\u00b7', " ", pcRupee(cs.today_count.counted_total), " counted ", '\u00b7', " ", new Date(cs.today_count.counted_at).toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit'
+  })), /*#__PURE__*/React.createElement("button", {
+    style: ghost,
+    onClick: () => setRecount(true)
+  }, "Recount")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: '#e2e8f0',
+      marginBottom: 4
+    }
+  }, "Close the day"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#64748b',
+      marginBottom: 10
+    }
+  }, "Count the cash in the box before leaving. It must match the ERP."), cs.pending_adjust ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#f0b429',
+      marginBottom: 10
+    }
+  }, "Difference of ", pcRupee(cs.pending_adjust.difference), " is waiting for Jigar's approval.") : null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+      gap: 8
+    }
+  }, PC_DENOMS.map(d => /*#__PURE__*/React.createElement("label", {
+    key: d,
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      fontSize: 13,
+      color: '#cbd5e1'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 52
+    }
+  }, '\u20b9', d, " ", '\u00d7'), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "numeric",
+    min: "0",
+    value: cnt[d] || '',
+    onChange: e => setCnt(p => ({
+      ...p,
+      [d]: e.target.value
+    })),
+    style: {
+      ...inp,
+      padding: '8px 10px'
+    }
+  }))), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      fontSize: 13,
+      color: '#cbd5e1'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 52
+    }
+  }, "Coins ", '\u20b9'), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    min: "0",
+    value: cnt.coins || '',
+    onChange: e => setCnt(p => ({
+      ...p,
+      coins: e.target.value
+    })),
+    style: {
+      ...inp,
+      padding: '8px 10px'
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      margin: '12px 0 4px',
+      fontSize: 13,
+      color: '#cbd5e1'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Counted"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700
+    }
+  }, pcRupee(cntTotal))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: 13,
+      color: '#cbd5e1'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "ERP says"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700
+    }
+  }, pcRupee(cs.expected))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      margin: '4px 0 10px',
+      fontSize: 13,
+      color: cntDiff === 0 ? '#10b981' : '#f47067',
+      fontWeight: 700
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Difference"), /*#__PURE__*/React.createElement("span", null, cntDiff === 0 ? 'Matches' : (cntDiff > 0 ? '+' : '-') + pcRupee(Math.abs(cntDiff)))), /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Photo of the counted cash (required)"), /*#__PURE__*/React.createElement("input", {
+    type: "file",
+    accept: "image/*",
+    onChange: e => setClosePhoto((e.target.files || [])[0] || null),
+    style: {
+      fontSize: 12,
+      color: '#94a3b8',
+      marginBottom: 10
+    }
+  }), cntDiff === 0 ? /*#__PURE__*/React.createElement("button", {
+    disabled: busy || cntTotal === 0 && Number(cs.expected) !== 0,
+    onClick: closeDay,
+    style: {
+      ...btn('#10b981'),
+      width: '100%',
+      padding: 12
+    }
+  }, "Close the day") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("input", {
+    value: adjReason,
+    onChange: e => setAdjReason(e.target.value),
+    placeholder: "Recount first. If still different, say why.",
+    style: {
+      ...inp,
+      marginBottom: 8
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    onClick: sendAdjust,
+    style: {
+      ...btn('#f0b429', '#1a1200'),
+      width: '100%',
+      padding: 12
+    }
+  }, "Send ", pcRupee(Math.abs(cntDiff)), " difference to Jigar")), recount ? /*#__PURE__*/React.createElement("button", {
+    style: {
+      ...ghost,
+      marginTop: 8
+    },
+    onClick: () => setRecount(false)
+  }, "Cancel recount") : null)) : null, cs && cs.is_cashier ? /*#__PURE__*/React.createElement("div", {
+    style: card
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: '#e2e8f0',
+      marginBottom: 8
+    }
+  }, "Cash received"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    placeholder: "Amount ₹",
+    value: top.amount,
+    onChange: e => setTop(p => ({
+      ...p,
+      amount: e.target.value
+    })),
+    style: {
+      ...inp,
+      flex: '1 1 110px'
+    }
+  }), /*#__PURE__*/React.createElement("select", {
+    value: top.firm,
+    onChange: e => setTop(p => ({
+      ...p,
+      firm: e.target.value
+    })),
+    style: {
+      ...inp,
+      flex: '1 1 150px'
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "From which bank?"), /*#__PURE__*/React.createElement("option", {
+    value: "JXT"
+  }, "Juxtapose"), /*#__PURE__*/React.createElement("option", {
+    value: "JPP"
+  }, "Jyoti Print & Pack"), /*#__PURE__*/React.createElement("option", {
+    value: "VHD"
+  }, "Versahue"))), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Note (optional) - e.g. Kotak withdrawal",
+    value: top.note,
+    onChange: e => setTop(p => ({
+      ...p,
+      note: e.target.value
+    })),
+    style: {
+      ...inp,
+      margin: '8px 0'
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    onClick: addTopup,
+    style: {
+      ...btn('#38bdf8'),
+      width: '100%',
+      padding: 10
+    }
+  }, "Record cash received")) : null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: '#94a3b8',
