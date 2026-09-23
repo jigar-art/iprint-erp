@@ -2779,6 +2779,24 @@ function MainApp({
       clearInterval(tmr);
     };
   }, [user && user.id, pg]);
+  const [pettyPending, setPettyPending] = useState(0);
+  useEffect(() => {
+    let dead = false;
+    const loadPettyPending = async () => {
+      const me = user && user.id;
+      if (!me) return;
+      const [c, r] = await Promise.all([sb.from('petty_cash_config').select('cashier_id,cashier_backup_id').eq('id', 1).maybeSingle(), sb.from('petty_cash_requests').select('status,l1_approver_id,l2_approver_id,l3_approver_id').in('status', ['pending_l1', 'pending_l2', 'pending_l3', 'approved'])]);
+      if (dead || r.error || !r.data) return;
+      const cashier = c.data && (c.data.cashier_id === me || c.data.cashier_backup_id === me);
+      setPettyPending(r.data.filter(x => x.status === 'pending_l1' && x.l1_approver_id === me || x.status === 'pending_l2' && x.l2_approver_id === me || x.status === 'pending_l3' && x.l3_approver_id === me || cashier && x.status === 'approved').length);
+    };
+    loadPettyPending();
+    const tmr = setInterval(loadPettyPending, 120000);
+    return () => {
+      dead = true;
+      clearInterval(tmr);
+    };
+  }, [user && user.id, pg]);
   const [quotePending, setQuotePending] = useState(0);
   const [quoteRows, setQuoteRows] = useState([]);
   const loadQuotes = React.useCallback(async () => {
@@ -2845,6 +2863,12 @@ function MainApp({
     id: "leave",
     l: "Leave",
     e: "\ud83c\udf34",
+    roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"],
+    hideUsers: ["CHANDNI"]
+  }, {
+    id: "petty",
+    l: "Petty Cash",
+    e: "\ud83d\udcb5",
     roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"],
     hideUsers: ["CHANDNI"]
   }, {
@@ -3097,7 +3121,7 @@ function MainApp({
       overflowY: "auto"
     }
   }, nav.map(n => {
-    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
+    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
         const lvKey = 'myprs_last_viewed_' + uname;
@@ -3522,6 +3546,9 @@ function MainApp({
     show: show,
     updateJobStatus: updateJobStatus
   }), pg === "leave" && React.createElement(LeavePage, {
+    user: user,
+    show: show
+  }), pg === "petty" && React.createElement(PettyCashPage, {
     user: user,
     show: show
   }), pg === "quotes" && React.createElement(QuotesPage, {
@@ -48955,6 +48982,818 @@ function QuotesPage({
       }
     }, busy === r.id ? "..." : "Mark sent"))));
   }));
+}
+// ===== Petty Cash requests (2026-09-23): request -> L1 lead -> L2 Amol -> L3 Jigar -> Shreya pays -> settle with bills
+const PC_CATS = [['Travel - Local', 'auto rickshaw taxi ola uber rapido cab train metro local bus conveyance travelling site visit recce'], ['Travel - Outstation', 'outstation pune hyderabad bangalore chennai delhi goa flight hotel stay sayal out of city'], ['Courier - Wefast', 'wefast bike delivery dunzo borzo document delivery sample drop'], ['Courier - Porter', 'porter tempo mini truck 3 wheeler material pickup drop'], ['Transport / Cargo', 'bus parcel air cargo cargo lr transport luggage parcel office ltt swargate courier booking'], ['Food - Site/Late Night', 'dinner lunch nasta breakfast food meal late night sunday work tiffin'], ['Office Pantry', 'bisleri water zepto blinkit tea coffee milk sugar handwash napkin tissue pantry'], ['Mobile Recharge', 'mobile recharge phone data sim'], ['Bank Work', 'bank cheque deposit bank visit'], ['Labour', 'labour hamal loading unloading helper mazdoor'], ['Site Material / Hardware', 'hardware screw bond fevicol tape scraper led light wire cable drill bit nails material purchase'], ['Printing Consumables', 'spirit surgical clinical cloth coolant ink acetone cleaning solution wipe machine'], ['Repairs / Maintenance', 'repair plumber electrician ac fitting tiles carpenter maintenance fix service'], ['Parking / Toll', 'parking toll fastag'], ['Sample / Catalogue Buy', 'sample catalogue swatch book shade card'], ['Office Expense', 'office stationery garbage courier xerox printout chair adapter misc office'], ['Other', 'other not listed']];
+const PC_STATUS = {
+  verifying: ['Checking screenshot', '#38bdf8'],
+  pending_l1: ['Waiting for lead', '#f0b429'],
+  pending_l2: ['Waiting for Amol', '#f0b429'],
+  pending_l3: ['Waiting for Jigar', '#f0b429'],
+  approved: ['Approved - collect cash', '#38bdf8'],
+  paid: ['Cash given - submit bills', '#a78bfa'],
+  settled: ['Closed', '#10b981'],
+  rejected: ['Rejected', '#f47067'],
+  cancelled: ['Cancelled', '#64748b']
+};
+const pcRupee = n => '\u20b9' + Number(n || 0).toLocaleString('en-IN');
+const pcDays = t => t ? Math.floor((Date.now() - new Date(t).getTime()) / 86400000) : 0;
+async function pcShrink(file, maxDim) {
+  try {
+    if (!/^image\//.test(file.type || '')) return file;
+    const bmp = await createImageBitmap(file);
+    const sc = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(bmp.width * sc);
+    cv.height = Math.round(bmp.height * sc);
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.85));
+    return blob ? new File([blob], 'screenshot.jpg', {
+      type: 'image/jpeg'
+    }) : file;
+  } catch (e) {
+    return file;
+  }
+}
+async function pcUploadBill(file, me, reqId, maxDim) {
+  if (!file) return null;
+  if (file.size > 10 * 1048576) {
+    if (window._showToast) window._showToast('\u26a0\ufe0f ' + file.name + ' is over 10 MB', false);
+    return null;
+  }
+  _upOverlay.push();
+  try {
+    const toSend = maxDim ? await pcShrink(file, maxDim) : await compressImage(file);
+    const rawExt = String(file.name || '').split('.').pop().toLowerCase();
+    const ext = toSend !== file ? 'jpg' : /^[a-z0-9]{1,5}$/.test(rawExt) ? rawExt : 'jpg';
+    const path = `${me}/${reqId}/${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    const {
+      error
+    } = await sb.storage.from('petty-cash-bills').upload(path, toSend, {
+      contentType: toSend.type || undefined
+    });
+    if (error) {
+      if (window._showToast) window._showToast('\u26a0\ufe0f Bill upload failed: ' + error.message, false);
+      return null;
+    }
+    return path;
+  } finally {
+    _upOverlay.pop();
+  }
+}
+function PettyCashPage({
+  user,
+  show
+}) {
+  const me = user?.id || null;
+  const uname = (user?.name || '').toUpperCase();
+  const isAdmin = (user?.role || '') === 'admin';
+  const [cfg, setCfg] = useState(null);
+  const [reqs, setReqs] = useState([]);
+  const [bills, setBills] = useState([]);
+  const [names, setNames] = useState({});
+  const [cash, setCash] = useState(null);
+  const [tab, setTab] = useState('new');
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    kind: 'reimbursement',
+    amount: '',
+    purpose: '',
+    jobs: '',
+    category: '',
+    files: []
+  });
+  const [catQ, setCatQ] = useState('');
+  const [catOpen, setCatOpen] = useState(false);
+  const [addFor, setAddFor] = useState(null);
+  const [addAmt, setAddAmt] = useState('');
+  const isCashier = !!cfg && (me === cfg.cashier_id || me === cfg.cashier_backup_id);
+  const seeAll = isAdmin || (user?.role || '') === 'accounts';
+  const load = useCallback(async () => {
+    if (!me) return;
+    const [c, r, b, t] = await Promise.all([sb.from('petty_cash_config').select('*').eq('id', 1).maybeSingle(), sb.from('petty_cash_requests').select('*').order('created_at', {
+      ascending: false
+    }).limit(500), sb.from('petty_cash_bills').select('*').order('uploaded_at'), sb.from('team_members').select('id,name')]);
+    if (c.error) show('\u26a0\ufe0f Settings: ' + c.error.message, false);else setCfg(c.data);
+    if (r.error) show('\u26a0\ufe0f Requests: ' + r.error.message, false);else setReqs(r.data || []);
+    if (!b.error) setBills(b.data || []);
+    if (!t.error) {
+      const m = {};
+      (t.data || []).forEach(x => {
+        m[x.id] = String(x.name || '').split(' - ')[0];
+      });
+      setNames(m);
+    }
+  }, [me, show]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  useEffect(() => {
+    if (!isCashier && !isAdmin) return;
+    sb.from('v_petty_cash_daily').select('date,closing').order('date', {
+      ascending: false
+    }).limit(1).then(({
+      data
+    }) => {
+      if (data && data[0]) setCash(data[0]);
+    });
+  }, [isCashier, isAdmin, reqs]);
+  const billsOf = id => bills.filter(b => b.request_id === id);
+  const nm = id => id ? names[id] || '\u2014' : '\u2014';
+  const setF = (k, v) => setForm(p => ({
+    ...p,
+    [k]: v
+  }));
+  const attachBills = async (reqId, files, amount, stage) => {
+    let ok = 0;
+    const ids = [];
+    for (const f of files) {
+      const path = await pcUploadBill(f, me, reqId, stage === 'quote' || stage === 'final' ? 1200 : null);
+      if (!path) continue;
+      const {
+        data,
+        error
+      } = await sb.from('petty_cash_bills').insert({
+        request_id: reqId,
+        file_path: path,
+        stage: stage || 'bill',
+        amount: files.length === 1 && amount ? parseFloat(amount) : null
+      }).select('id').single();
+      if (error) show('\u26a0\ufe0f Bill not saved: ' + error.message, false);else {
+        ok++;
+        ids.push(data.id);
+      }
+    }
+    attachBills.lastIds = ids;
+    return ok;
+  };
+  const checkFare = async billId => {
+    setBusy(true);
+    const {
+      data,
+      error
+    } = await sb.functions.invoke('verify-fare-screenshot', {
+      body: {
+        bill_id: billId
+      }
+    });
+    setBusy(false);
+    if (error || !data) {
+      show('\u26a0\ufe0f Screenshot check failed - sent to your lead instead', false);
+      return;
+    }
+    const f = data.fare != null ? pcRupee(data.fare) : 'no fare';
+    const msg = {
+      auto_approved: '\u2705 ERP matched ' + f + ' on the ' + (data.app || 'app') + ' screenshot - collect cash from Shreya and book',
+      sent_for_approval: '\u26a0\ufe0f Sent to your lead: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'screenshot did not match'),
+      duplicate: '\u26a0\ufe0f This trip was already claimed - sent to your lead',
+      auto_settled: '\u2705 Final fare ' + f + ' matches - closed',
+      ready_to_close: '\u2705 Final fare ' + f + ' accepted - settle the difference with Shreya',
+      needs_extra_approval: '\u26a0\ufe0f Final fare ' + f + ' is over 10% above the quote - your lead must approve the extra',
+      unreadable: '\u26a0\ufe0f ERP could not read the fare - Shreya will enter it'
+    }[data.result] || 'Result: ' + data.result;
+    show(msg, !/^\u26a0/.test(msg));
+  };
+  const submit = async () => {
+    const amt = parseFloat(form.amount);
+    if (!amt || amt <= 0) {
+      show('Enter the amount', false);
+      return;
+    }
+    if (!form.purpose.trim()) {
+      show('Write what the cash is for', false);
+      return;
+    }
+    if (!form.category && form.kind !== 'booking') {
+      show('Pick a category - type a word like auto, porter or dinner', false);
+      return;
+    }
+    if (form.kind === 'reimbursement' && !form.files.length) {
+      show('Attach the bill photo - reimbursements need proof', false);
+      return;
+    }
+    if (form.kind === 'booking' && form.files.length !== 1) {
+      show('Attach one screenshot of the fare from the app', false);
+      return;
+    }
+    const jobs = form.jobs.split(/[\s,/&]+/).map(s => s.trim().split('-')[0]).filter(s => /^\d+$/.test(s));
+    setBusy(true);
+    const {
+      data,
+      error
+    } = await sb.from('petty_cash_requests').insert({
+      kind: form.kind,
+      amount: amt,
+      purpose: form.purpose.trim(),
+      job_ids: jobs.length ? jobs : null,
+      category: form.category && form.category !== 'Other' ? form.category : null
+    }).select('id,req_no,status').single();
+    if (error) {
+      setBusy(false);
+      show('\u26a0\ufe0f Could not send: ' + error.message, false);
+      return;
+    }
+    if (form.files.length) {
+      const ok = await attachBills(data.id, form.files, form.kind === 'reimbursement' ? form.amount : null, form.kind === 'booking' ? 'quote' : 'bill');
+      if (ok < form.files.length) show('\u26a0\ufe0f ' + (form.files.length - ok) + ' file(s) did not upload - add them from My requests', false);
+    }
+    setBusy(false);
+    if (form.kind === 'booking' && attachBills.lastIds && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + data.req_no + ' sent - ' + (PC_STATUS[data.status] || [data.status])[0]);
+    setForm({
+      kind: 'reimbursement',
+      amount: '',
+      purpose: '',
+      jobs: '',
+      category: '',
+      files: []
+    });
+    setCatQ('');
+    setCatOpen(false);
+    setTab('mine');
+    load();
+  };
+  const rpc = async (fn, args, okMsg) => {
+    setBusy(true);
+    const {
+      data,
+      error
+    } = await sb.rpc(fn, args);
+    setBusy(false);
+    if (error) {
+      show('\u26a0\ufe0f ' + error.message, false);
+      return false;
+    }
+    show('\u2705 ' + (okMsg || data));
+    load();
+    return true;
+  };
+  const approve = r => rpc('erp_pc_action', {
+    p_id: r.id,
+    p_action: 'Approved',
+    p_remark: null
+  }, r.req_no + ' approved');
+  const reject = r => {
+    const why = prompt('Reason for rejecting ' + r.req_no);
+    if (!why || !why.trim()) return;
+    rpc('erp_pc_action', {
+      p_id: r.id,
+      p_action: 'Rejected',
+      p_remark: why.trim()
+    }, r.req_no + ' rejected');
+  };
+  const approveExtra = r => {
+    if (confirm('Approve final fare ' + pcRupee(r.final_fare) + ' (quote ' + pcRupee(r.quote_fare || r.amount) + ') for ' + nm(r.requester_id) + '?')) rpc('erp_pc_approve_extra', {
+      p_id: r.id
+    }, 'Extra fare approved');
+  };
+  const cancelReq = r => {
+    if (confirm('Cancel ' + r.req_no + '?')) rpc('erp_pc_cancel', {
+      p_id: r.id
+    }, r.req_no + ' cancelled');
+  };
+  const markPaid = r => {
+    if (confirm('Hand ' + pcRupee(r.amount) + ' cash to ' + nm(r.requester_id) + ' and mark ' + r.req_no + ' paid?')) rpc('erp_pc_mark_paid', {
+      p_id: r.id
+    }, r.req_no + (r.kind === 'advance' ? ' - advance given' : ' - paid and closed'));
+  };
+  const settle = r => {
+    if (r.kind === 'booking') {
+      let fare = r.final_fare;
+      if (fare == null) {
+        const v = prompt('ERP could not read the final fare. Enter the fare shown on the completed-trip screenshot for ' + r.req_no);
+        if (v === null) return;
+        fare = parseFloat(v);
+        if (!fare || fare <= 0) {
+          show('Enter the fare', false);
+          return;
+        }
+      }
+      const diff = Number(r.amount) - Number(fare);
+      if (!confirm(diff > 0 ? 'Collect ' + pcRupee(diff) + ' change from ' + nm(r.requester_id) + ' and close?' : diff < 0 ? 'Pay ' + pcRupee(-diff) + ' extra to ' + nm(r.requester_id) + ' and close?' : 'Close ' + r.req_no + '?')) return;
+      rpc('erp_pc_settle', {
+        p_id: r.id,
+        p_returned: diff,
+        p_remark: null
+      }, r.req_no + ' closed - ' + pcRupee(fare) + ' booked');
+      return;
+    }
+    const v = prompt('Cash returned by ' + nm(r.requester_id) + ' for ' + r.req_no + ' (advance ' + pcRupee(r.amount) + '). Enter 0 if all spent.', '0');
+    if (v === null) return;
+    const ret = parseFloat(v);
+    if (isNaN(ret) || ret < 0) {
+      show('Enter a number, 0 or more', false);
+      return;
+    }
+    rpc('erp_pc_settle', {
+      p_id: r.id,
+      p_returned: ret,
+      p_remark: null
+    }, r.req_no + ' closed - ' + pcRupee(r.amount - ret) + ' booked');
+  };
+  const viewBills = async r => {
+    const bs = billsOf(r.id);
+    if (!bs.length) {
+      show('No bills attached yet', false);
+      return;
+    }
+    const w = window.open('', '_blank');
+    for (const b of bs) {
+      const {
+        data,
+        error
+      } = await sb.storage.from('petty-cash-bills').createSignedUrl(b.file_path, 600);
+      if (error) {
+        show('\u26a0\ufe0f ' + error.message, false);
+        continue;
+      }
+      if (bs.length === 1 && w) {
+        w.location = data.signedUrl;
+        return;
+      }
+      if (w) w.document.write('<p style="font-family:sans-serif">' + (b.amount ? pcRupee(b.amount) : 'Bill') + '</p><img src="' + data.signedUrl + '" style="max-width:100%;margin-bottom:16px"/>');
+    }
+  };
+  const uploadMore = async (r, files) => {
+    if (!files.length) return;
+    setBusy(true);
+    const stage = r.kind === 'booking' ? r.status === 'paid' ? 'final' : 'quote' : 'bill';
+    const ok = await attachBills(r.id, Array.from(files).slice(0, r.kind === 'booking' ? 1 : 20), addAmt, stage);
+    setBusy(false);
+    setAddFor(null);
+    setAddAmt('');
+    if (!ok) return;
+    if (r.kind === 'booking' && stage === 'final' && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
+    load();
+  };
+  const mine = reqs.filter(r => r.requester_id === me);
+  const queue = reqs.filter(r => r.status === 'pending_l1' && r.l1_approver_id === me || r.status === 'pending_l2' && r.l2_approver_id === me || r.status === 'pending_l3' && r.l3_approver_id === me);
+  const needsExtra = r => r.kind === 'booking' && r.status === 'paid' && r.final_fare != null && Number(r.final_fare) > Math.round(Number(r.quote_fare || r.amount) * 110) / 100 && !r.extra_approved_at;
+  const extraQueue = reqs.filter(r => needsExtra(r) && (r.l1_approver_id || r.l2_approver_id || r.l3_approver_id) === me);
+  const toPay = reqs.filter(r => r.status === 'approved');
+  const advOut = reqs.filter(r => r.status === 'paid').sort((a, b) => new Date(a.paid_at) - new Date(b.paid_at));
+  const approveAll = async () => {
+    const ready = queue.filter(r => r.kind === 'advance' || billsOf(r.id).length);
+    const skipped = queue.length - ready.length;
+    if (!ready.length) {
+      show('Nothing ready - every request here is missing its bill', false);
+      return;
+    }
+    if (!confirm('Approve ' + ready.length + ' request(s) totalling ' + pcRupee(ready.reduce((s, r) => s + Number(r.amount), 0)) + '?' + (skipped ? '\n' + skipped + ' without bills will be skipped.' : ''))) return;
+    setBusy(true);
+    let ok = 0,
+      fail = 0;
+    for (const r of ready) {
+      const {
+        error
+      } = await sb.rpc('erp_pc_action', {
+        p_id: r.id,
+        p_action: 'Approved',
+        p_remark: null
+      });
+      if (error) fail++;else ok++;
+    }
+    setBusy(false);
+    show((fail ? '\u26a0\ufe0f ' : '\u2705 ') + ok + ' approved' + (fail ? ', ' + fail + ' failed' : '') + (skipped ? ', ' + skipped + ' skipped (no bill)' : ''), !fail);
+    load();
+  };
+  const card = {
+    background: '#0c1017',
+    border: '1px solid #1a2030',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10
+  };
+  const inp = {
+    width: '100%',
+    background: '#070a10',
+    border: '1px solid #1a2030',
+    borderRadius: 8,
+    color: '#e2e8f0',
+    padding: '10px 12px',
+    fontSize: 14,
+    boxSizing: 'border-box'
+  };
+  const lbl = {
+    fontSize: 11,
+    color: '#64748b',
+    marginBottom: 4,
+    display: 'block'
+  };
+  const btn = (bg, fg) => ({
+    background: bg,
+    color: fg || '#04110c',
+    border: 'none',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: busy ? 'wait' : 'pointer',
+    opacity: busy ? .6 : 1
+  });
+  const ghost = {
+    background: 'transparent',
+    color: '#94a3b8',
+    border: '1px solid #1a2030',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 12,
+    cursor: 'pointer'
+  };
+  const tabBtn = (id, label, n) => /*#__PURE__*/React.createElement("button", {
+    key: id,
+    onClick: () => setTab(id),
+    style: {
+      flex: 1,
+      minWidth: 90,
+      background: tab === id ? '#10b981' : 'transparent',
+      color: tab === id ? '#04110c' : '#94a3b8',
+      border: '1px solid ' + (tab === id ? '#10b981' : '#1a2030'),
+      borderRadius: 8,
+      padding: '9px 6px',
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: 'pointer'
+    }
+  }, label, n ? ' (' + n + ')' : '');
+  const chain = r => [[r.l1_approver_id, r.l1_decided_at], [r.l2_approver_id, r.l2_decided_at], [r.l3_approver_id, r.l3_decided_at]].filter(x => x[0]).map(x => nm(x[0]) + (x[1] ? ' \u2713' : r.rejected_by === x[0] ? ' \u2717' : '')).join('  \u203a  ') || 'No approval needed';
+  const row = (r, opts = {}) => {
+    const st = PC_STATUS[r.status] || [r.status, '#94a3b8'];
+    const bs = billsOf(r.id);
+    const billed = bs.reduce((s, b) => s + Number(b.amount || 0), 0);
+    const late = r.status === 'paid' && pcDays(r.paid_at) > (cfg?.advance_open_days || 3);
+    const canAdd = !['settled', 'rejected', 'cancelled'].includes(r.status) && (r.requester_id === me || isCashier);
+    return /*#__PURE__*/React.createElement("div", {
+      key: r.id,
+      style: {
+        ...card,
+        borderColor: late ? '#f47067' : '#1a2030'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 8,
+        alignItems: 'baseline'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 700,
+        fontSize: 14,
+        color: '#e2e8f0'
+      }
+    }, pcRupee(r.amount), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 400,
+        color: '#94a3b8',
+        fontSize: 12
+      }
+    }, r.kind === 'advance' ? 'advance' : r.kind === 'booking' ? 'booking' : 'reimbursement', opts.who ? ' for ' + nm(r.requester_id) : '')), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        fontWeight: 700,
+        color: st[1],
+        whiteSpace: 'nowrap'
+      }
+    }, st[0])), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: '#cbd5e1',
+        margin: '6px 0'
+      }
+    }, r.purpose), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: '#64748b',
+        lineHeight: 1.6
+      }
+    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), r.kind === 'booking' && (r.trip_app || r.quote_fare != null) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), r.auto_verified ? '\u2713 ERP-verified ' : 'Screenshot: ', r.trip_app || 'app', r.quote_fare != null ? ' quote ' + pcRupee(r.quote_fare) : '', r.final_fare != null ? ', final ' + pcRupee(r.final_fare) : '', r.trip_ref ? ' \u00b7 ' + r.trip_ref : '') : null, r.kind === 'booking' && !r.auto_verified && r.ai_quote && r.ai_quote.reasons && r.ai_quote.reasons.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f0b429'
+      }
+    }, "Needs approval: ", r.ai_quote.reasons.join('; '))) : null, needsExtra(r) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f0b429'
+      }
+    }, "Final fare over 10% above quote - waiting for lead")) : null, r.status === 'paid' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: late ? '#f47067' : '#a78bfa'
+      }
+    }, "Given ", pcDays(r.paid_at), " day(s) ago", late ? ' - overdue, submit ' + (r.kind === 'booking' ? 'completed-trip screenshot' : 'bills') : '')) : null, r.status === 'settled' && r.kind === 'advance' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), "Spent ", pcRupee(r.spent_amount), ", returned ", pcRupee(r.returned_amount)) : null, r.status === 'rejected' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f47067'
+      }
+    }, "Reason: ", r.l3_remark || r.l2_remark || r.l1_remark)) : null), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6,
+        flexWrap: 'wrap',
+        marginTop: 10
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      style: ghost,
+      onClick: () => viewBills(r)
+    }, "Bills (", bs.length, ")", billed ? ' ' + pcRupee(billed) : ''), canAdd ? /*#__PURE__*/React.createElement("button", {
+      style: r.kind === 'booking' && r.status === 'paid' && r.final_fare == null ? btn('#a78bfa', '#1a1033') : ghost,
+      onClick: () => {
+        setAddFor(addFor === r.id ? null : r.id);
+        setAddAmt('');
+      }
+    }, r.kind === 'booking' ? r.status === 'paid' ? 'Upload completed-trip screenshot' : 'Add screenshot' : 'Add bill') : null, opts.extra ? /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#f0b429', '#1a1200'),
+      onClick: () => approveExtra(r)
+    }, "Approve extra fare") : null, opts.approve ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#10b981'),
+      onClick: () => approve(r)
+    }, "Approve"), /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#f47067', '#1a0505'),
+      onClick: () => reject(r)
+    }, "Reject")) : null, opts.pay ? /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#38bdf8'),
+      onClick: () => markPaid(r)
+    }, "Mark paid ", pcRupee(r.amount)) : null, opts.settle ? /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#a78bfa'),
+      onClick: () => settle(r)
+    }, r.kind === 'booking' ? 'Close booking' : 'Close advance') : null, opts.cancel && ['verifying', 'pending_l1', 'pending_l2', 'pending_l3', 'approved'].includes(r.status) ? /*#__PURE__*/React.createElement("button", {
+      style: ghost,
+      onClick: () => cancelReq(r)
+    }, "Cancel") : null), addFor === r.id ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 10,
+        display: 'flex',
+        gap: 6,
+        flexWrap: 'wrap',
+        alignItems: 'center'
+      }
+    }, r.kind !== 'booking' ? /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      inputMode: "decimal",
+      placeholder: "Bill amount ₹",
+      value: addAmt,
+      onChange: e => setAddAmt(e.target.value),
+      style: {
+        ...inp,
+        width: 140
+      }
+    }) : null, /*#__PURE__*/React.createElement("input", {
+      type: "file",
+      accept: "image/*,application/pdf",
+      multiple: true,
+      onChange: e => uploadMore(r, e.target.files),
+      style: {
+        fontSize: 12,
+        color: '#94a3b8'
+      }
+    })) : null);
+  };
+  const empty = t => /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...card,
+      color: '#64748b',
+      fontSize: 13,
+      textAlign: 'center'
+    }
+  }, t);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 720,
+      margin: '0 auto',
+      padding: 12
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 18,
+      color: '#e2e8f0',
+      margin: '4px 0 12px'
+    }
+  }, "Petty cash"), cash && (isCashier || isAdmin) ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...card,
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#94a3b8',
+      fontSize: 12
+    }
+  }, "Cash in box as per ERP"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#e2e8f0',
+      fontWeight: 700,
+      fontSize: 16
+    }
+  }, pcRupee(cash.closing))) : null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 12
+    }
+  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", {
+    style: card
+  }, /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "What kind?"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginBottom: 12,
+      flexWrap: 'wrap'
+    }
+  }, [['booking', 'Porter / Ola / Rapido / Wefast'], ['reimbursement', 'I already paid - get it back'], ['advance', 'I need cash before spending']].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    onClick: () => setF('kind', k),
+    style: {
+      flex: '1 1 30%',
+      minWidth: 96,
+      background: form.kind === k ? '#10b98122' : 'transparent',
+      color: form.kind === k ? '#10b981' : '#94a3b8',
+      border: '1px solid ' + (form.kind === k ? '#10b981' : '#1a2030'),
+      borderRadius: 8,
+      padding: '10px 8px',
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: 'pointer'
+    }
+  }, l))), /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Amount (₹)"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "decimal",
+    value: form.amount,
+    onChange: e => setF('amount', e.target.value),
+    style: {
+      ...inp,
+      marginBottom: 12
+    }
+  }), /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "What is it for?"), /*#__PURE__*/React.createElement("input", {
+    value: form.purpose,
+    onChange: e => setF('purpose', e.target.value),
+    placeholder: "e.g. Auto to JPMC Powai site and back",
+    style: {
+      ...inp,
+      marginBottom: 12
+    }
+  }), /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Job number(s) - leave blank for office expense"), /*#__PURE__*/React.createElement("input", {
+    value: form.jobs,
+    onChange: e => setF('jobs', e.target.value),
+    placeholder: "e.g. 12297, 12301",
+    style: {
+      ...inp,
+      marginBottom: 12
+    }
+  }), form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#64748b',
+      marginBottom: 12
+    }
+  }, "Enter the exact fare shown in the app. The ERP reads your screenshot - if it matches, it's approved instantly and Shreya gives you the cash.") : null, form.kind !== 'booking' ? /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Category") : null, form.kind === 'booking' ? null : form.category && !catOpen ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...inp,
+      marginBottom: 12,
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderColor: '#10b981'
+    }
+  }, /*#__PURE__*/React.createElement("span", null, form.category), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setCatOpen(true);
+      setCatQ('');
+    },
+    style: {
+      ...ghost,
+      padding: '4px 10px'
+    }
+  }, "Change")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: catQ,
+    autoFocus: catOpen,
+    onFocus: () => setCatOpen(true),
+    onChange: e => {
+      setCatQ(e.target.value);
+      setCatOpen(true);
+    },
+    placeholder: "Type to search: auto, porter, dinner, spirit, parking",
+    style: {
+      ...inp,
+      marginBottom: 8
+    }
+  }), (() => {
+    const q = catQ.trim().toLowerCase();
+    const hits = PC_CATS.filter(([c, k]) => !q || q.split(/\s+/).every(w => (c + ' ' + k).toLowerCase().includes(w)));
+    const list = hits.length ? hits : PC_CATS.filter(([c]) => c === 'Other');
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 6
+      }
+    }, !hits.length ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: '100%',
+        fontSize: 11,
+        color: '#64748b'
+      }
+    }, "No match for \"", catQ, "\" - pick Other and describe it above") : null, list.map(([c]) => /*#__PURE__*/React.createElement("button", {
+      key: c,
+      onClick: () => {
+        setF('category', c);
+        setCatOpen(false);
+        setCatQ('');
+      },
+      style: {
+        background: form.category === c ? '#10b98122' : '#070a10',
+        color: form.category === c ? '#10b981' : '#cbd5e1',
+        border: '1px solid ' + (form.category === c ? '#10b981' : '#1a2030'),
+        borderRadius: 16,
+        padding: '7px 12px',
+        fontSize: 12,
+        cursor: 'pointer'
+      }
+    }, c)));
+  })()), /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, form.kind === 'booking' ? 'Fare screenshot from the app (required)' : form.kind === 'reimbursement' ? 'Bill photo (required)' : 'Bill photo (add after spending)'), /*#__PURE__*/React.createElement("input", {
+    type: "file",
+    accept: form.kind === 'booking' ? 'image/*' : 'image/*,application/pdf',
+    multiple: form.kind !== 'booking',
+    onChange: e => setF('files', Array.from(e.target.files || [])),
+    style: {
+      fontSize: 13,
+      color: '#94a3b8',
+      marginBottom: 14
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    onClick: submit,
+    style: {
+      ...btn('#10b981'),
+      width: '100%',
+      padding: '12px',
+      fontSize: 14
+    }
+  }, busy ? form.kind === 'booking' ? 'Checking screenshot\u2026' : 'Sending\u2026' : form.kind === 'booking' ? 'Check screenshot and request cash' : 'Send for approval'), !form.jobs.trim() ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#64748b',
+      marginTop: 8
+    }
+  }, "No job number = office expense, shared across the three firms at month end.") : null) : null, tab === 'mine' ? mine.length ? mine.map(r => row(r, {
+    cancel: true
+  })) : empty('No requests yet. Use Request cash to raise one.') : null, tab === 'approve' ? /*#__PURE__*/React.createElement(React.Fragment, null, queue.length > 1 ? /*#__PURE__*/React.createElement("button", {
+    disabled: busy,
+    onClick: approveAll,
+    style: {
+      ...btn('#10b981'),
+      width: '100%',
+      marginBottom: 10,
+      padding: 12
+    }
+  }, "Approve all ready (", queue.filter(r => r.kind === 'advance' || billsOf(r.id).length).length, ") - ", pcRupee(queue.reduce((s, r) => s + Number(r.amount), 0))) : null, extraQueue.map(r => row(r, {
+    who: true,
+    extra: true
+  })), queue.length ? queue.map(r => row(r, {
+    who: true,
+    approve: true
+  })) : extraQueue.length ? null : empty('Nothing waiting for you.')) : null, tab === 'desk' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#94a3b8',
+      margin: '4px 0 8px'
+    }
+  }, "Approved - hand over cash (", toPay.length, ")"), toPay.length ? toPay.map(r => row(r, {
+    who: true,
+    pay: isCashier
+  })) : empty('No approved requests to pay.'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#94a3b8',
+      margin: '14px 0 8px'
+    }
+  }, "Advances and bookings out - close when bills or trip screenshots are in (", advOut.length, ", ", pcRupee(advOut.reduce((s, r) => s + Number(r.amount), 0)), ")"), advOut.length ? advOut.map(r => row(r, {
+    who: true,
+    settle: isCashier
+  })) : empty('No advances outstanding.')) : null, tab === 'all' ? reqs.length ? reqs.map(r => row(r, {
+    who: true
+  })) : empty('No requests yet.') : null);
 }
 function LeavePage({
   user,
