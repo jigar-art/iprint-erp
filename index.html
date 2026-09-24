@@ -417,7 +417,7 @@ const validInvDate = (d, show) => {
   }
   return s;
 };
-const ALL_ST_NEW = ['Draft', 'Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
+const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
   if (!status) return null;
   const s = String(status).trim();
@@ -6987,7 +6987,7 @@ function JobDetail({
         }
       }, d)));
     }))) : null;
-  })(), j.status === 'Draft' && !j.tat_plan_approved_at ? React.createElement(JobTatApproval, {
+  })(), ['Draft', 'Quotation Sent', 'PO Pending'].includes(j.status) && !j.tat_plan_approved_at && (j.status === 'Draft' || j.tat_plan_required) ? React.createElement(JobTatApproval, {
     job: j,
     user: user
   }) : null, React.createElement(JobTatTracker, {
@@ -14086,7 +14086,7 @@ function NewJobPage({
       tat_plan_approved_by: tatOk ? user?.name || '' : null,
       tat_plan_approved_at: tatOk ? new Date().toISOString() : null,
       tat_plan_reason: tatOk ? tatReason.trim() || null : null,
-      status: isDraft ? "Draft" : "Active",
+      status: isDraft ? "Quotation Sent" : "Active",
       po_file_url: poUrl ? [poUrl] : [],
       design_ref_urls: designUrls
     };
@@ -15249,7 +15249,7 @@ function NewJobPage({
       borderColor: "#64748b"
     },
     disabled: submitting
-  }, submitting ? "⏳..." : "💾 Save Draft"), React.createElement("button", {
+  }, submitting ? "⏳..." : "💾 Save as Quotation"), React.createElement("button", {
     className: "b bp",
     onClick: () => sub(false),
     style: {
@@ -30844,7 +30844,7 @@ function BOQImportPage({
           billing_name: f.cn,
           client_gst: f.cgst || "",
           payment_terms: f.pt,
-          status: "Draft"
+          status: "Quotation Sent"
         };
         const batchId = "B" + uid();
         const batchData = {
@@ -30966,7 +30966,7 @@ function BOQImportPage({
         billing_name: f.cn,
         client_gst: f.cgst || "",
         payment_terms: f.pt,
-        status: "Draft"
+        status: "Quotation Sent"
       };
       const batchId = "B" + uid();
       const batchData = {
