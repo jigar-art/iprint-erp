@@ -3544,7 +3544,9 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && pbIsAdmin(user) && React.createElement(PointBriefAdmin, {
+  }) : null, pg === "myscore" && React.createElement(MyBlockersCard, {
+    user: user
+  }), pg === "myscore" && pbIsAdmin(user) && React.createElement(PointBriefAdmin, {
     user: user
   }), pg === "myscore" && React.createElement(MyScorePage, {
     user: user
@@ -6991,7 +6993,10 @@ function JobDetail({
         }
       }, d)));
     }))) : null;
-  })(), ['Draft', 'Quotation Sent', 'PO Pending'].includes(j.status) && !j.tat_plan_approved_at && (j.status === 'Draft' || j.tat_plan_required) ? React.createElement(JobTatApproval, {
+  })(), React.createElement(JobBlockers, {
+    job: j,
+    user: user
+  }), ['Draft', 'Quotation Sent', 'PO Pending'].includes(j.status) && !j.tat_plan_approved_at && (j.status === 'Draft' || j.tat_plan_required) ? React.createElement(JobTatApproval, {
     job: j,
     user: user
   }) : null, React.createElement(JobTatTracker, {
@@ -33209,6 +33214,136 @@ function PointBriefAdmin({ user }) {
           React.createElement("td", { style: { padding: '5px 6px', fontWeight: 700, whiteSpace: 'nowrap' } }, k),
           React.createElement("td", { style: { padding: '5px 6px', whiteSpace: 'nowrap', color: x.acc ? '#4ade80' : x.chg.length ? '#f59e0b' : '#64748b' } }, x.acc ? '✓ ' + f(x.acc.responded_at) : x.chg.length ? '✎ change requested' : 'not yet'),
           React.createElement("td", { style: { padding: '5px 6px', color: '#cbd5e1' } }, x.chg.map(c => f(c.responded_at) + ' — ' + c.comment).join(' | '))); })))) : null);
+}
+// ── Not ready / Blocked (fairness rules 1-2, 2026-09-24) ──
+const BLK_STAGES = {
+  print: ['Printing - In House', 'Printing · In-House', 'Printing - Outsource', 'Printing · Outsource'],
+  fab: ['Fabrication - In House', 'Fabrication · In-House', 'Fabrication - Outsource', 'Fabrication · Outsource'],
+  inst: ['Installation WIP']
+};
+const BLK_REASONS = [
+  ['PR_FILE', 'print', 'not_ready', 'File / artwork not received or wrong', 'Design'],
+  ['PR_DETAILS', 'print', 'not_ready', 'Job details incomplete (size, qty, material)', 'Client servicing'],
+  ['PR_MATERIAL', 'print', 'blocked', 'Material not available', 'Murli'],
+  ['PR_INK', 'print', 'blocked', 'Ink / consumable not available', 'Murli'],
+  ['PR_MACHINE', 'print', 'blocked', 'Machine breakdown', 'Nobody (Harish confirms)'],
+  ['PR_CLIENT', 'print', 'blocked', 'Client on hold', 'Client servicing', true],
+  ['FB_FILE', 'fab', 'not_ready', 'Drawing / file not received', 'Design'],
+  ['FB_PRINT', 'fab', 'not_ready', 'Print not received from printing', 'Harish'],
+  ['FB_MATERIAL', 'fab', 'blocked', 'Material / hardware not available', 'Murli'],
+  ['FB_MACHINE', 'fab', 'blocked', 'Machine / tool breakdown', 'Nobody (Harish confirms)'],
+  ['FB_CLIENT', 'fab', 'blocked', 'Client on hold', 'Client servicing', true],
+  ['IN_MATERIAL', 'inst', 'not_ready', 'Material not delivered to site', 'Murli'],
+  ['IN_DAMAGED', 'inst', 'not_ready', 'Wrong or damaged item from production', 'Harish'],
+  ['IN_SITE', 'inst', 'blocked', 'Site not ready / civil work pending', 'Client servicing', true],
+  ['IN_CLIENT', 'inst', 'blocked', 'Client hold / access not given', 'Client servicing', true]
+];
+const blkGroup = st => Object.keys(BLK_STAGES).find(k => BLK_STAGES[k].includes(st)) || null;
+const blkName = k => k === 'NONE' ? 'Nobody (system fault)' : (k || '').charAt(0) + (k || '').slice(1).toLowerCase();
+const blkWhen = d => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+const blkEod = d => { const x = new Date(new Date(d).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })); return x.toDateString(); };
+function BlockerRow({ b, me, onAct, busy }) {
+  const adm = ['JIGAR', 'AMOL'].includes(me);
+  const isCharged = me === b.charged_to || (b.charged_to === 'NONE' && me === 'HARISH');
+  const sameDay = blkEod(b.raised_at) === blkEod(new Date());
+  const effStatus = b.status === 'open' && !sameDay ? 'confirmed (auto)' : b.status;
+  const col = { open: '#f59e0b', confirmed: '#4ade80', 'confirmed (auto)': '#4ade80', disputed: '#f87171', rejected: '#94a3b8' }[effStatus] || '#94a3b8';
+  const sb2 = { padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' };
+  return React.createElement("div", { style: { border: '1px solid #1f2937', borderRadius: 8, padding: 8, marginTop: 6, background: '#0a0f1a' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { fontSize: 12, color: '#e2e8f0' } }, (b.kind === 'not_ready' ? '⏸ Not ready — ' : '⛔ Blocked — ') + b.reason),
+      React.createElement("span", { style: { fontSize: 11, color: col, fontWeight: 700 } }, b.cleared_at ? 'cleared ' + blkWhen(b.cleared_at) : effStatus)),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 3 } },
+      'Job ' + b.job_id + ' · ' + b.stage_status + ' · raised by ' + blkName(b.raised_by) + ' ' + blkWhen(b.raised_at) + ' · time charged to ' + blkName(b.charged_to),
+      b.note ? ' · "' + b.note + '"' : '', b.dispute_reason ? ' · disputed: "' + b.dispute_reason + '"' : ''),
+    b.proof_url ? React.createElement("a", { href: b.proof_url, target: '_blank', rel: 'noreferrer', style: { fontSize: 11, color: '#60a5fa' } }, '📎 proof') : null,
+    React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+      !b.cleared_at && (me === b.raised_by || adm || ['HARISH', 'KULDEEP'].includes(me)) ? React.createElement("button", { type: 'button', disabled: busy, style: { ...sb2, borderColor: '#22c55e' }, onClick: () => onAct(b.id, 'clear') }, '✓ Clear — work can continue') : null,
+      b.status === 'open' && sameDay && (isCharged || adm) ? React.createElement("button", { type: 'button', disabled: busy, style: { ...sb2, borderColor: '#22c55e' }, onClick: () => onAct(b.id, 'confirm') }, 'Confirm') : null,
+      b.status === 'open' && sameDay && isCharged ? React.createElement("button", { type: 'button', disabled: busy, style: { ...sb2, borderColor: '#f87171' }, onClick: () => { const r = prompt('Why is this not your delay?'); if (r && r.trim()) onAct(b.id, 'dispute', r.trim()); } }, 'Dispute') : null,
+      b.status === 'disputed' && adm ? React.createElement("button", { type: 'button', disabled: busy, style: { ...sb2, borderColor: '#22c55e' }, onClick: () => onAct(b.id, 'accept') }, 'Accept blocker') : null,
+      b.status === 'disputed' && adm ? React.createElement("button", { type: 'button', disabled: busy, style: { ...sb2, borderColor: '#f87171' }, onClick: () => onAct(b.id, 'reject') }, 'Reject blocker') : null));
+}
+function JobBlockers({ job, user }) {
+  const me = pbKey(user);
+  const grp = blkGroup(job && job.status);
+  const [rows, setRows] = React.useState(null);
+  const [mode, setMode] = React.useState(null);
+  const [code, setCode] = React.useState('');
+  const [note, setNote] = React.useState('');
+  const [file, setFile] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const load = () => sb.from('job_blockers').select('*').eq('job_id', job.id).order('raised_at', { ascending: false }).then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { if (job && job.id) load(); }, [job && job.id, job && job.status]);
+  if (!job || rows === null) return null;
+  if (!grp && !rows.length) return null;
+  const open = rows.find(b => !b.cleared_at && b.stage_status === job.status && ['open', 'confirmed', 'disputed'].includes(b.status));
+  const opts = BLK_REASONS.filter(r => r[1] === grp && r[2] === mode);
+  const sel = BLK_REASONS.find(r => r[0] === code);
+  const act = async (id, action, text) => {
+    setBusy(true); setErr('');
+    const r = await sb.rpc('erp_blocker_act', { p_id: id, p_action: action, p_text: text || null });
+    setBusy(false); if (r.error) { setErr(r.error.message); return; } load();
+  };
+  const raise = async () => {
+    if (!code) { setErr('Pick a reason'); return; }
+    if (sel && sel[5] && !file) { setErr('Attach the email / WhatsApp screenshot'); return; }
+    setBusy(true); setErr('');
+    let proof = null;
+    if (file) { proof = await uploadFile(file, 'blocker-proof'); if (!proof) { setBusy(false); setErr('Screenshot upload failed'); return; } }
+    const r = await sb.rpc('erp_blocker_raise', { p_job: job.id, p_code: code, p_note: note || null, p_proof: proof });
+    setBusy(false); if (r.error) { setErr(r.error.message); return; }
+    setMode(null); setCode(''); setNote(''); setFile(null); load();
+  };
+  const bt = (c) => ({ padding: '6px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + c, background: c + '22' });
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginTop: 8 } },
+    React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "⛔ Not ready / Blocked"),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Stuck because of someone else? Record it here — the waiting time is taken off your clock and charged to them once they confirm (auto-confirms at end of day)."),
+    open ? React.createElement(BlockerRow, { b: open, me, onAct: act, busy })
+    : grp ? (mode ? React.createElement("div", { style: { marginTop: 8 } },
+        React.createElement("select", { className: "in", value: code, onChange: e => setCode(e.target.value), style: { width: '100%' } },
+          React.createElement("option", { value: '' }, mode === 'not_ready' ? '— What is missing from the handover? —' : '— What is blocking you? —'),
+          opts.map(r => React.createElement("option", { key: r[0], value: r[0] }, r[3] + '  →  time charged to ' + r[4]))),
+        React.createElement("input", { className: "in", value: note, onChange: e => setNote(e.target.value), placeholder: 'Short note (optional)', style: { width: '100%', marginTop: 6 } }),
+        sel && sel[5] ? React.createElement("div", { style: { marginTop: 6, fontSize: 11, color: '#fde68a' } }, 'Screenshot of the email / WhatsApp to the client * ',
+          React.createElement("input", { type: 'file', accept: 'image/*,.pdf', onChange: e => setFile(e.target.files[0] || null) })) : null,
+        React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 8 } },
+          React.createElement("button", { type: 'button', disabled: busy, style: bt('#f59e0b'), onClick: raise }, busy ? '…' : 'Record'),
+          React.createElement("button", { type: 'button', disabled: busy, style: bt('#64748b'), onClick: () => { setMode(null); setCode(''); setErr(''); } }, 'Cancel')))
+      : React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' } },
+          React.createElement("button", { type: 'button', style: bt('#60a5fa'), onClick: () => setMode('not_ready') }, '⏸ Not ready (incomplete handover)'),
+          React.createElement("button", { type: 'button', style: bt('#f87171'), onClick: () => setMode('blocked') }, '⛔ Blocked'),
+          React.createElement("span", { style: { fontSize: 10, color: '#64748b', alignSelf: 'center' } }, 'Not ready: within 2 working hours of the job reaching you'))) : null,
+    rows.filter(b => b !== open).slice(0, 5).map(b => React.createElement(BlockerRow, { key: b.id, b, me, onAct: act, busy })),
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+function MyBlockersCard({ user }) {
+  const me = pbKey(user);
+  const adm = ['JIGAR', 'AMOL'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const load = () => {
+    let q = sb.from('job_blockers').select('*').order('raised_at', { ascending: false }).limit(200);
+    q.then(r => setRows(r.error ? [] : (r.data || [])));
+  };
+  React.useEffect(load, []);
+  if (!rows) return null;
+  const today = blkEod(new Date());
+  const toConfirm = rows.filter(b => b.status === 'open' && blkEod(b.raised_at) === today && (b.charged_to === me || (b.charged_to === 'NONE' && me === 'HARISH')));
+  const mine = rows.filter(b => b.raised_by === me && !b.cleared_at);
+  const disputes = adm ? rows.filter(b => b.status === 'disputed') : [];
+  if (!toConfirm.length && !mine.length && !disputes.length) return null;
+  const act = async (id, action, text) => { setBusy(true); setErr(''); const r = await sb.rpc('erp_blocker_act', { p_id: id, p_action: action, p_text: text || null }); setBusy(false); if (r.error) setErr(r.error.message); else load(); };
+  const sec = (title, list) => list.length ? React.createElement("div", { style: { marginTop: 8 } }, React.createElement("div", { style: { fontSize: 11.5, fontWeight: 800, color: '#cbd5e1' } }, title + ' (' + list.length + ')'),
+    list.map(b => React.createElement(BlockerRow, { key: b.id, b, me, onAct: act, busy }))) : null;
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 10 } },
+    React.createElement("b", { style: { color: '#e3a008', fontSize: 13 } }, "⛔ Blockers"),
+    sec('Charged to you — confirm or dispute today (auto-confirms at end of day)', toConfirm),
+    sec('Raised by you — still open', mine),
+    sec('Disputes waiting for Jigar / Amol', disputes),
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
 function MyScorePage({ user }) {
   const [rows, setRows] = React.useState(null);
