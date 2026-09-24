@@ -49551,7 +49551,7 @@ function PettyCashPage({
     const msg = {
       auto_approved: '\u2705 ERP matched ' + f + ' on the ' + (data.app || 'app') + ' screenshot - approved, collect cash from Shreya',
       skipped: '\u2705 Sent for approval',
-      sent_for_approval: '\u26a0\ufe0f Sent to your lead: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'screenshot did not match'),
+      sent_for_approval: '\u26a0\ufe0f Screenshot not accepted: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'it did not match') + '. Tap "Add bill" on your request to upload the correct trip screenshot, or wait for your lead.',
       duplicate: '\u26a0\ufe0f This trip was already claimed - sent to your lead',
       auto_settled: '\u2705 Final fare ' + f + ' matches - closed',
       ready_to_close: '\u2705 Final fare ' + f + ' accepted - settle the difference with Shreya',
@@ -49738,7 +49738,9 @@ function PettyCashPage({
     setAddFor(null);
     setAddAmt('');
     if (!ok) return;
-    if (r.kind === 'booking' && stage === 'final' && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
+    const appCatsU = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
+    const lastId = attachBills.lastIds[attachBills.lastIds.length - 1];
+    if (r.kind === 'booking' && stage === 'final' && lastId) await checkFare(lastId);else if (r.kind === 'reimbursement' && appCatsU.includes(r.category) && /^pending_l/.test(r.status) && lastId) await checkFare(lastId);else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
     load();
   };
   const cntNotes = () => {
@@ -50027,7 +50029,11 @@ function PettyCashPage({
       style: {
         color: '#10b981'
       }
-    }, '\u2713', " ERP-verified app receipt", r.trip_ref ? ' \u00b7 ' + r.trip_ref : '')) : null, r.kind === 'reimbursement' && !r.auto_verified && r.ai_final && r.ai_final.reasons && r.ai_final.reasons.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, '\u2713', " ERP-verified app receipt", r.trip_ref ? ' \u00b7 ' + r.trip_ref : '')) : null, r.kind === 'reimbursement' && !r.auto_verified && r.ai_final && r.ai_final.reasons && r.ai_final.reasons.length ? r.requester_id === me && /^pending_l/.test(r.status) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f47067'
+      }
+    }, "Screenshot not accepted: ", r.ai_final.reasons.join('; '), ". Tap \"Add bill\" below to upload the correct trip screenshot - it will be checked again.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#f0b429'
       }
