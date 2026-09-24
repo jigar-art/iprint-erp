@@ -13730,7 +13730,12 @@ function NewJobPage({
   const [tatOk, setTatOk] = useState(false);
   const [tatReason, setTatReason] = useState('');
   const tatClient = (clients || []).find(c => c.id === f.cl) || {};
-  const tatCls = tatClient.client_class || 'A';
+  // Job category (2026-09-24): picked per job at entry by a TAT editor; defaults to the client's usual category
+  const [jcls, setJcls] = useState('');
+  const [jclsTapped, setJclsTapped] = useState(false);
+  const [cityType, setCityType] = useState('');
+  useEffect(() => { setJcls(''); setJclsTapped(false); }, [f.cl]);
+  const tatCls = jcls || tatClient.client_class || 'A';
   const tatOpts = { installDate: f.nosite ? '' : f.ind, recceDate: f.nosite ? '' : f.rcd, nosite: !!f.nosite };
   useEffect(() => {
     sb.from('sla_config').select('client_class,stage_budgets').then(r => {
@@ -14029,7 +14034,9 @@ function NewJobPage({
       if (!f.cgst.trim()) missing.push("Client GST Number");
       if (!f.bname.trim()) missing.push("Billing Entity");
       if (!f.ls.trim()) missing.push("Lead Received By");
-      if ((((clients || []).find(c => c.id === f.cl) || {}).client_class || 'A') !== 'B' && !f.nosite && !f.ind) missing.push("Installation Date (or tick 'No site work')");
+      if (tatCls !== 'B' && !f.nosite && !f.ind) missing.push("Installation Date (or tick 'No site work')");
+      if (isTatEditor(user) && !jclsTapped) missing.push("Job category (A / B / C / D) — tap to confirm, above the TAT plan");
+      if (!f.nosite && !cityType) missing.push("Site city — Metro or Other city");
       if (missing.length > 0) {
         alert("⚠️ Please fill all mandatory fields:\n\n• " + missing.join("\n• "));
         return;
@@ -14074,6 +14081,8 @@ function NewJobPage({
       payment_terms: f.pt,
       recce_date: f.nosite ? null : f.rcd || null,
       install_date: f.nosite ? null : f.ind || null,
+      job_class: tatCls,
+      site_city_type: f.nosite ? null : cityType || null,
       tat_plan_approved_by: tatOk ? user?.name || '' : null,
       tat_plan_approved_at: tatOk ? new Date().toISOString() : null,
       tat_plan_reason: tatOk ? tatReason.trim() || null : null,
@@ -14526,7 +14535,7 @@ function NewJobPage({
       ...p,
       pt: e.target.value
     }))
-  })), (((clients || []).find(c => c.id === f.cl) || {}).client_class || 'A') !== 'B' && React.createElement(F, {
+  })), tatCls !== 'B' && React.createElement(F, {
     l: "Recce Date (non-banking)"
   }, React.createElement("input", {
     type: "date",
@@ -14534,7 +14543,7 @@ function NewJobPage({
     value: f.rcd || '',
     disabled: !!f.nosite,
     onChange: e => sF(p => ({ ...p, rcd: e.target.value }))
-  })), (((clients || []).find(c => c.id === f.cl) || {}).client_class || 'A') !== 'B' && React.createElement(F, {
+  })), tatCls !== 'B' && React.createElement(F, {
     l: "Installation Date * (non-banking)"
   }, React.createElement("div", null, React.createElement("input", {
     type: "date",
@@ -14974,7 +14983,10 @@ function NewJobPage({
     }
   }, fmt(tot.t)), React.createElement("td", {
     colSpan: 2
-  })))))), tatRows.length ? React.createElement(TatPlanPanel, {
+  })))))), f.cl ? React.createElement(JobCategoryPicker, {
+    value: tatCls, clientCls: tatClient.client_class || 'A', tapped: jclsTapped, canEdit: isTatEditor(user),
+    onPick: v => { setJcls(v); setJclsTapped(true); }, cityType, setCityType, nosite: !!f.nosite
+  }) : null, tatRows.length ? React.createElement(TatPlanPanel, {
     rows: tatRows, setRows: setTatRows, cls: tatCls, opts: tatOpts,
     ok: tatOk, setOk: setTatOk, reason: tatReason, setReason: setTatReason, canEdit: isTatEditor(user)
   }) : null, React.createElement("div", {
@@ -33384,6 +33396,35 @@ function buildTatRows(cls, budgets, clientName, opts) {
   });
 }
 // Only these people may change TAT days or edit a plan later (DB enforces the same list)
+// Job category + site city picker for New Job (TAT v4, 2026-09-24)
+const JOB_CATS = [
+  { k: 'A', t: 'Design trade', d: 'Architects, interior firms, corporates' },
+  { k: 'B', t: 'Banking & finance', d: 'Banks, ATM, NBFC branch rollouts' },
+  { k: 'C', t: 'Projects in parts', d: 'Large projects billed in parts' },
+  { k: 'D', t: 'Small prepaid', d: 'Individuals, one-time clients' }
+];
+function JobCategoryPicker({ value, clientCls, tapped, canEdit, onPick, cityType, setCityType, nosite }) {
+  const btn = (on, warn) => ({ padding: '6px 8px', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontSize: 11,
+    border: '1px solid ' + (on ? '#e3a008' : warn ? '#f59e0b' : '#1f2937'), background: on ? '#e3a00822' : '#0a0f1a', color: '#e2e8f0' });
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 8 } },
+    React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 4 } }, "Job category *"),
+    React.createElement("div", { style: { fontSize: 10, color: '#94a3b8', marginBottom: 6 } },
+      canEdit ? (tapped ? "Category confirmed — every department's TAT follows it."
+                        : "Client usually: " + clientCls + " — tap a category to confirm (the client's is pre-selected).")
+              : "Category " + value + " (client's usual). Only Ruchita, Ankita, Amol or Jigar can change it."),
+    React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 6 } },
+      JOB_CATS.map(c => React.createElement("button", {
+        key: c.k, type: "button", disabled: !canEdit, onClick: () => onPick(c.k),
+        style: { ...btn(value === c.k, canEdit && !tapped && value === c.k), opacity: !canEdit && value !== c.k ? 0.4 : 1 }
+      }, React.createElement("b", null, c.k + " · " + c.t), React.createElement("div", { style: { fontSize: 9, color: '#94a3b8' } }, c.d)))),
+    nosite ? null : React.createElement("div", { style: { marginTop: 8 } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 4 } }, "Site city *"),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        [['metro', 'Metro — recce within 2 days'], ['other', 'Other city — recce within 3 days']].map(([k, t]) =>
+          React.createElement("button", { key: k, type: "button", onClick: () => setCityType(k), style: btn(cityType === k, !cityType) }, t))),
+      React.createElement("div", { style: { fontSize: 9, color: '#64748b', marginTop: 4 } },
+        "Metro = Mumbai, Delhi NCR, Bengaluru, Chennai, Kolkata, Hyderabad, Pune, Ahmedabad")));
+}
 function isTatEditor(user) {
   const b = ((user && user.name) || '').toUpperCase().split(/\s*[-(]/)[0].trim();
   return ['JIGAR', 'AMOL', 'RUCHITA', 'ANKITA'].includes(b);
