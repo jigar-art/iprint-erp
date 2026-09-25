@@ -49425,6 +49425,7 @@ function PettyCashPage({
     note: ''
   });
   const [jobInfo, setJobInfo] = useState([]);
+  const [pays, setPays] = useState([]);
   const [rev, setRev] = useState([]);
   const [revOther, setRevOther] = useState({});
   const [revFilter, setRevFilter] = useState('possible_duplicate');
@@ -49449,6 +49450,8 @@ function PettyCashPage({
       });
       setNames(m);
     }
+    const pm = await sb.from('petty_cash_payments').select('request_id,amount,paid_at');
+    if (!pm.error) setPays(pm.data || []);
     const st = await sb.rpc('erp_pc_close_status');
     setCs(st.error ? null : st.data || null);
     if (st.data && (st.data.is_cashier || st.data.is_approver) || (user?.role || '') === 'admin') {
@@ -49533,6 +49536,7 @@ function PettyCashPage({
     };
   }, [form.jobs]);
   const billsOf = id => bills.filter(b => b.request_id === id);
+  const paidOf = r => pays.filter(p => p.request_id === r.id).reduce((a, p) => a + Number(p.amount), 0);
   const nm = id => id ? names[id] || '\u2014' : '\u2014';
   const setF = (k, v) => setForm(p => ({
     ...p,
@@ -49697,9 +49701,23 @@ function PettyCashPage({
     }, r.req_no + ' cancelled');
   };
   const markPaid = r => {
-    if (confirm('Hand ' + pcRupee(r.amount) + ' cash to ' + nm(r.requester_id) + ' and mark ' + r.req_no + ' paid?')) rpc('erp_pc_mark_paid', {
+    const bal = Number(r.amount) - paidOf(r);
+    const v = prompt('Cash you are giving to ' + nm(r.requester_id) + ' now for ' + r.req_no + (paidOf(r) ? ' (approved ' + pcRupee(r.amount) + ', already given ' + pcRupee(paidOf(r)) + ')' : ' (approved ' + pcRupee(r.amount) + ')') + '.\nChange it if you have less cash.', String(bal));
+    if (v === null) return;
+    const amt = parseFloat(v);
+    if (!amt || amt <= 0 || amt > bal) {
+      show('Enter an amount between 1 and ' + pcRupee(bal), false);
+      return;
+    }
+    rpc('erp_pc_mark_paid', {
+      p_id: r.id,
+      p_amount: amt
+    }, amt < bal ? pcRupee(amt) + ' given - balance ' + pcRupee(bal - amt) + ' still to pay' : r.req_no + ' fully paid');
+  };
+  const closeBalance = r => {
+    if (confirm('Stop at ' + pcRupee(paidOf(r)) + ' already given? ' + r.req_no + ' will be treated as ' + pcRupee(paidOf(r)) + ' and the balance will not be paid.')) rpc('erp_pc_close_balance', {
       p_id: r.id
-    }, r.req_no + (r.kind === 'advance' ? ' - advance given' : ' - paid and closed'));
+    }, r.req_no + ' closed at ' + pcRupee(paidOf(r)));
   };
   const settle = r => {
     if (r.kind === 'booking') {
@@ -49713,7 +49731,7 @@ function PettyCashPage({
           return;
         }
       }
-      const diff = Number(r.amount) - Number(fare);
+      const diff = paidOf(r) - Number(fare);
       if (!confirm(diff > 0 ? 'Collect ' + pcRupee(diff) + ' change from ' + nm(r.requester_id) + ' and close?' : diff < 0 ? 'Pay ' + pcRupee(-diff) + ' extra to ' + nm(r.requester_id) + ' and close?' : 'Close ' + r.req_no + '?')) return;
       rpc('erp_pc_settle', {
         p_id: r.id,
@@ -49722,7 +49740,7 @@ function PettyCashPage({
       }, r.req_no + ' closed - ' + pcRupee(fare) + ' booked');
       return;
     }
-    const v = prompt('Cash returned by ' + nm(r.requester_id) + ' for ' + r.req_no + ' (advance ' + pcRupee(r.amount) + '). Enter 0 if all spent.', '0');
+    const v = prompt('Cash returned by ' + nm(r.requester_id) + ' for ' + r.req_no + ' (advance given ' + pcRupee(paidOf(r)) + '). Enter 0 if all spent.', '0');
     if (v === null) return;
     const ret = parseFloat(v);
     if (isNaN(ret) || ret < 0) {
@@ -49733,7 +49751,7 @@ function PettyCashPage({
       p_id: r.id,
       p_returned: ret,
       p_remark: null
-    }, r.req_no + ' closed - ' + pcRupee(r.amount - ret) + ' booked');
+    }, r.req_no + ' closed - ' + pcRupee(paidOf(r) - ret) + ' booked');
   };
   const viewBills = async r => {
     const bs = billsOf(r.id);
@@ -50126,7 +50144,15 @@ function PettyCashPage({
       style: {
         color: '#94a3b8'
       }
-    }, "Approved directly by ", nm(r.override_by))) : null), /*#__PURE__*/React.createElement("div", {
+    }, "Approved directly by ", nm(r.override_by))) : null, r.status === 'approved' && paidOf(r) > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f0b429'
+      }
+    }, "Paid ", pcRupee(paidOf(r)), " of ", pcRupee(r.amount), " - balance ", pcRupee(Number(r.amount) - paidOf(r)), " still to pay")) : null, r.approved_amount && Number(r.approved_amount) !== Number(r.amount) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#94a3b8'
+      }
+    }, "Approved ", pcRupee(r.approved_amount), ", closed at ", pcRupee(r.amount), " given")) : null), /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
         gap: 6,
@@ -50158,7 +50184,11 @@ function PettyCashPage({
       disabled: busy,
       style: btn('#38bdf8'),
       onClick: () => markPaid(r)
-    }, "Mark paid ", pcRupee(r.amount)) : null, opts.settle ? /*#__PURE__*/React.createElement("button", {
+    }, paidOf(r) > 0 ? 'Pay balance ' + pcRupee(Number(r.amount) - paidOf(r)) : 'Mark paid ' + pcRupee(r.amount)) : null, opts.pay && paidOf(r) > 0 ? /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: ghost,
+      onClick: () => closeBalance(r)
+    }, "No balance - close at ", pcRupee(paidOf(r))) : null, opts.settle ? /*#__PURE__*/React.createElement("button", {
       disabled: busy,
       style: btn('#a78bfa'),
       onClick: () => settle(r)
