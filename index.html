@@ -49425,6 +49425,9 @@ function PettyCashPage({
     note: ''
   });
   const [jobInfo, setJobInfo] = useState([]);
+  const [rev, setRev] = useState([]);
+  const [revOther, setRevOther] = useState({});
+  const [revFilter, setRevFilter] = useState('possible_duplicate');
   const [catQ, setCatQ] = useState('');
   const [catOpen, setCatOpen] = useState(false);
   const [addFor, setAddFor] = useState(null);
@@ -49448,6 +49451,32 @@ function PettyCashPage({
     }
     const st = await sb.rpc('erp_pc_close_status');
     setCs(st.error ? null : st.data || null);
+    if (st.data && (st.data.is_cashier || st.data.is_approver) || (user?.role || '') === 'admin') {
+      const rv = await sb.from('expenses').select('id,date,amount,paid_to,description,category,firm,job_id,job_ids,needs_review,notes,sheet_ref,source').not('needs_review', 'is', null).neq('needs_review', 'unmatched_claim').order('date').limit(1000);
+      if (!rv.error) {
+        setRev(rv.data || []);
+        const ids = [],
+          reqs2 = [];
+        (rv.data || []).forEach(x => {
+          const m = /duplicate of (REQ:)?([A-Z0-9:\-r]+)/.exec(x.notes || '');
+          if (m) (m[1] ? reqs2 : ids).push(m[2]);
+        });
+        const om = {};
+        if (ids.length) {
+          const o = await sb.from('expenses').select('id,date,amount,paid_to,description').in('id', ids);
+          (o.data || []).forEach(x => {
+            om[x.id] = x.date + ' \u00b7 ' + (x.paid_to || '') + ' \u00b7 ' + pcRupee(x.amount) + ' \u00b7 ' + (x.description || '');
+          });
+        }
+        if (reqs2.length) {
+          const o = await sb.from('petty_cash_requests').select('req_no,amount,purpose,created_at').in('req_no', reqs2);
+          (o.data || []).forEach(x => {
+            om[x.req_no] = 'ERP request ' + x.req_no + ' \u00b7 ' + pcRupee(x.amount) + ' \u00b7 ' + x.purpose;
+          });
+        }
+        setRevOther(om);
+      }
+    }
   }, [me, show]);
   useEffect(() => {
     load();
@@ -49863,6 +49892,39 @@ function PettyCashPage({
       note: ''
     });
   };
+  const revFlags = x => String(x.needs_review || '').split(',').filter(Boolean);
+  const revCount = t => rev.filter(x => revFlags(x).includes(t)).length;
+  const revUpdate = async (x, patch, dropFlag, okMsg) => {
+    const flags = revFlags(x).filter(f => f !== dropFlag);
+    setBusy(true);
+    const {
+      error
+    } = await sb.from('expenses').update({
+      ...patch,
+      needs_review: flags.length ? flags.join(',') : null
+    }).eq('id', x.id);
+    setBusy(false);
+    if (error) {
+      show('\u26a0\ufe0f ' + error.message, false);
+      return;
+    }
+    show('\u2705 ' + okMsg);
+    load();
+  };
+  const revDelete = async x => {
+    if (!confirm('Delete ' + pcRupee(x.amount) + ' ' + (x.paid_to || '') + ' (' + x.date + ') as a duplicate? The cash in box goes up by ' + pcRupee(x.amount) + '.')) return;
+    setBusy(true);
+    const {
+      error
+    } = await sb.from('expenses').delete().eq('id', x.id);
+    setBusy(false);
+    if (error) {
+      show('\u26a0\ufe0f ' + error.message, false);
+      return;
+    }
+    show('\u2705 Duplicate removed');
+    load();
+  };
   const mine = reqs.filter(r => r.requester_id === me);
   const myTurn = r => r.status === 'pending_l1' && r.l1_approver_id === me || r.status === 'pending_l2' && r.l2_approver_id === me || r.status === 'pending_l3' && r.l3_approver_id === me;
   const isL3 = !!cfg && me === cfg.l3_person_id;
@@ -50177,7 +50239,7 @@ function PettyCashPage({
       flexWrap: 'wrap',
       marginBottom: 12
     }
-  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", {
+  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, isCashier || isAdmin ? tabBtn('review', 'Review', rev.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", {
     style: card
   }, /*#__PURE__*/React.createElement("label", {
     style: lbl
@@ -50683,7 +50745,124 @@ function PettyCashPage({
   }, "Advances and bookings out - close when bills or trip screenshots are in (", advOut.length, ", ", pcRupee(advOut.reduce((s, r) => s + Number(r.amount), 0)), ")"), advOut.length ? advOut.map(r => row(r, {
     who: true,
     settle: isCashier
-  })) : empty('No advances outstanding.')) : null, tab === 'all' ? reqs.length ? reqs.map(r => row(r, {
+  })) : empty('No advances outstanding.')) : null, tab === 'review' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, [['possible_duplicate', 'Possible duplicates'], ['multi_firm', 'Pick firm'], ['uncategorised', 'No category']].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    onClick: () => setRevFilter(k),
+    style: {
+      background: revFilter === k ? '#f0b42922' : 'transparent',
+      color: revFilter === k ? '#f0b429' : '#94a3b8',
+      border: '1px solid ' + (revFilter === k ? '#f0b429' : '#1a2030'),
+      borderRadius: 16,
+      padding: '6px 12px',
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: 'pointer'
+    }
+  }, l, " (", revCount(k), ")"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#64748b',
+      marginBottom: 8
+    }
+  }, revFilter === 'possible_duplicate' ? 'Check your vouchers. Same payment written twice \u2192 Delete. Different payment \u2192 Keep.' : revFilter === 'multi_firm' ? 'These lines have jobs from different firms. Pick which firm pays.' : 'Pick what the money was spent on.'), rev.filter(x => revFlags(x).includes(revFilter)).map(x => {
+    const m = /duplicate of (?:REQ:)?([A-Z0-9:\-r]+)|repeat of ([^|]+)/.exec(x.notes || '');
+    const other = m ? m[1] ? revOther[m[1]] || m[1] : m[2] : null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: x.id,
+      style: card
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 700,
+        color: '#e2e8f0'
+      }
+    }, pcRupee(x.amount), " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 400,
+        color: '#94a3b8',
+        fontSize: 12
+      }
+    }, x.paid_to, " ", '\u00b7', " ", x.date)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 11,
+        color: '#64748b'
+      }
+    }, x.sheet_ref || x.id)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: '#cbd5e1',
+        margin: '6px 0'
+      }
+    }, x.description), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: '#64748b',
+        lineHeight: 1.6
+      }
+    }, x.job_ids && x.job_ids.length ? 'Jobs ' + x.job_ids.join(', ') + ' \u00b7 ' : '', x.firm || 'no firm yet', " ", '\u00b7', " ", x.category, revFilter === 'possible_duplicate' && other ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#f0b429'
+      }
+    }, "Possibly the same as: ", other)) : null), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6,
+        flexWrap: 'wrap',
+        marginTop: 10
+      }
+    }, revFilter === 'possible_duplicate' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#10b981'),
+      onClick: () => revUpdate(x, {}, 'possible_duplicate', 'Kept')
+    }, "Keep - different payment"), /*#__PURE__*/React.createElement("button", {
+      disabled: busy,
+      style: btn('#f47067', '#1a0505'),
+      onClick: () => revDelete(x)
+    }, "Delete - duplicate")) : null, revFilter === 'multi_firm' ? ['JXT', 'JPP', 'VHD', 'SHARED'].map(f => /*#__PURE__*/React.createElement("button", {
+      key: f,
+      disabled: busy,
+      style: btn('#38bdf8'),
+      onClick: () => revUpdate(x, {
+        firm: f
+      }, 'multi_firm', 'Firm set to ' + f)
+    }, f === 'SHARED' ? 'Shared' : f)) : null, revFilter === 'uncategorised' ? /*#__PURE__*/React.createElement("select", {
+      defaultValue: "",
+      disabled: busy,
+      onChange: e => {
+        const c = e.target.value;
+        if (!c) return;
+        const why = prompt('What was it for? (optional - leave blank to keep "' + (x.description || '') + '")', '');
+        revUpdate(x, why && why.trim() ? {
+          category: c,
+          description: why.trim()
+        } : {
+          category: c
+        }, 'uncategorised', 'Category set');
+      },
+      style: {
+        ...inp,
+        width: 'auto',
+        padding: '8px 10px'
+      }
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "Choose category"), PC_CATS.filter(([c]) => c !== 'Other').map(([c]) => /*#__PURE__*/React.createElement("option", {
+      key: c,
+      value: c
+    }, c))) : null));
+  }), !rev.filter(x => revFlags(x).includes(revFilter)).length ? empty('Nothing left here.') : null) : null, tab === 'all' ? reqs.length ? reqs.map(r => row(r, {
     who: true
   })) : empty('No requests yet.') : null);
 }
