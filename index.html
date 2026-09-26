@@ -2840,13 +2840,16 @@ function MainApp({
   }, [loadQuotes, pg]);
   // ===== Install Delay tray (2026-09-21): Recce / Installation WIP / IC Pending vs TAT
   const [instRows, setInstRows] = useState([]);
+  const [slaRows, setSlaRows] = useState([]); // every open job's current-stage due date (Age / Delay columns, 2026-09-26)
   const [bankDocs, setBankDocs] = useState([]);
   const [instDelayCount, setInstDelayCount] = useState(0);
   const loadInstDelay = React.useCallback(async () => {
     const uname = (user && user.name || '').toUpperCase();
     if (!uname) return;
-    const { data, error } = await sb.from('v_job_sla').select('job_id,client_name,client_class,status,owner_person,owner_label,stage_entered_at,due_at,rag,days_in_stage,coordinator').in('status', ['Recee', 'Installation WIP', 'IC Pending']);
-    if (error || !data) return;
+    const { data: allSla, error } = await sb.from('v_job_sla').select('job_id,client_name,client_class,status,owner_person,owner_label,stage_entered_at,due_at,rag,days_in_stage,coordinator');
+    if (error || !allSla) return;
+    setSlaRows(allSla);
+    const data = allSla.filter(r => ['Recee', 'Installation WIP', 'IC Pending'].includes(r.status));
     setInstRows(data);
     const bd = await sb.from('v_banking_docs').select('job_id,client_name,project,status,delivered_at,installed_at,pod_ok,pod_late,pod_due,image_needed,image_ok,image_late,image_due,vendor_direct,pod_required,pod_backlog,image_backlog,image_owner');
     if (!bd.error && bd.data) setBankDocs(bd.data);
@@ -3354,6 +3357,7 @@ function MainApp({
     items: items,
     osItems: osItems,
     delayRows: instRows,
+    slaRows: slaRows,
     bankDocs: bankDocs
   }), pg === "grn" && React.createElement(GRNPage, {
     grn: grnData,
@@ -15320,6 +15324,7 @@ function DeptPage({
   items,
   osItems,
   delayRows,
+  slaRows,
   bankDocs
 }) {
   const ALL_ST = ALL_ST_NEW;
@@ -15422,6 +15427,8 @@ function DeptPage({
     if (k === 'status') return j.status || '';
     if (k === 'project') return j.project || '';
     if (k === 'contact') return j.contact_person || '';
+    if (k === 'age') { const a = ageDaysOf(j); return a == null ? '' : String(100000 + a); }
+    if (k === 'delay') { const h = delayHoursOf(j); return h == null ? '' : String(Math.round(1000000 + h)); }
     return '';
   };
   const sortTh = (k, label) => React.createElement("th", {
@@ -15471,6 +15478,17 @@ function DeptPage({
     (delayRows || []).forEach(r => m.set(r.job_id, r));
     return m;
   }, [delayRows]);
+  const slaMap = React.useMemo(() => {
+    const m = new Map();
+    (slaRows || []).forEach(r => m.set(r.job_id, r));
+    return m;
+  }, [slaRows]);
+  const ageDaysOf = j => j.created_at ? Math.floor((Date.now() - new Date(j.created_at).getTime()) / 86400000) : null;
+  const delayHoursOf = j => {
+    const r = slaMap.get(j.id);
+    if (!r || !r.due_at || r.status !== j.status) return null;
+    return (Date.now() - new Date(r.due_at).getTime()) / 3600000;
+  };
   const lateDaysOf = j => {
     const r = delayMap.get(j.id);
     if (!r || !r.due_at) return null;
@@ -15522,9 +15540,10 @@ function DeptPage({
         'Stage': jl && jl.all && jl.all.length ? jl.all.map(stageLabel).join(', ') : '\u2014',
         'Status': j.status || ''
       };
-      if (isInst) {
-        const r = delayMap.get(j.id);
-        row['Delay'] = r && r.due_at ? instDelayText(r).t : '';
+      row['Age (days)'] = ageDaysOf(j) ?? '';
+      {
+        const r = slaMap.get(j.id);
+        row['Delay'] = r && r.due_at && r.status === j.status ? instDelayText(r).t : '';
       }
       row['Project'] = j.project || '';
       row['Contact'] = j.contact_person || '';
@@ -15789,7 +15808,7 @@ function DeptPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, showExport ? React.createElement("th", { style: { width: 26 } }) : null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), isInst ? React.createElement("th", null, "Delay") : null, sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, showExport ? React.createElement("th", { style: { width: 26 } }) : null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('age', "Age"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), sortTh('delay', "Delay"), sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
     const it = (j.batches || [])[0]?.items?.[0];
     const dt = j.created_at ? new Date(j.created_at) : null;
     const ds = dt ? dt.toLocaleDateString('en-IN', {
@@ -15826,6 +15845,9 @@ function DeptPage({
         whiteSpace: "nowrap"
       }
     }, ds), React.createElement("td", {
+      className: "mn",
+      style: { fontSize: 9, whiteSpace: "nowrap", color: (() => { const a = ageDaysOf(j); return a == null ? '#475569' : a > 60 ? '#e0574f' : a > 30 ? '#e3a008' : '#94a3b8'; })() }
+    }, (() => { const a = ageDaysOf(j); return a == null ? '\u2014' : a + 'd'; })()), React.createElement("td", {
       style: {
         fontSize: 10
       }
@@ -15879,7 +15901,12 @@ function DeptPage({
         background: (sc[j.status] || '#64748b') + '20',
         color: sc[j.status] || '#64748b'
       }
-    }, j.status))), isInst ? React.createElement("td", { style: { whiteSpace: "nowrap" } }, (() => {
+    }, j.status))), !isInst ? React.createElement("td", { style: { whiteSpace: "nowrap" } }, (() => {
+      const r = slaMap.get(j.id);
+      if (!r || !r.due_at || r.status !== j.status) return React.createElement("span", { style: { fontSize: 8, color: "#475569" } }, "\u2014");
+      const d = instDelayText(r);
+      return React.createElement("span", { className: "bd", title: 'Current stage due ' + new Date(r.due_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + (r.owner_label ? ' · ' + r.owner_label : ''), style: { background: d.c + "20", color: d.c, fontSize: 9, fontWeight: 700 } }, d.t);
+    })()) : React.createElement("td", { style: { whiteSpace: "nowrap" } }, (() => {
       const r = delayMap.get(j.id);
       if (!r || !r.due_at) return React.createElement("span", { style: { fontSize: 8, color: "#475569" } }, "\u2014");
       const d = instDelayText(r);
@@ -15888,7 +15915,7 @@ function DeptPage({
         React.createElement("span", { className: "bd", style: { background: d.c + "20", color: d.c, fontSize: 9, fontWeight: 700 } }, d.t),
         bd ? docTag('POD', bd.pod_ok, bd.pod_late, bd.pod_required === false) : null,
         bd && bd.image_needed ? docTag('Image', bd.image_ok, bd.image_late, false) : null);
-    })()) : null, React.createElement("td", {
+    })()), React.createElement("td", {
       style: {
         fontSize: 10,
         color: "#64748b"
