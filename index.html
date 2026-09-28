@@ -49441,6 +49441,7 @@ function PettyCashPage({
   });
   const [jobInfo, setJobInfo] = useState([]);
   const [pays, setPays] = useState([]);
+  const [pre, setPre] = useState(null);
   const [rev, setRev] = useState([]);
   const [revOther, setRevOther] = useState({});
   const [revFilter, setRevFilter] = useState('possible_duplicate');
@@ -49550,6 +49551,95 @@ function PettyCashPage({
       clearTimeout(t);
     };
   }, [form.jobs]);
+  const appCatsF = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
+  const preNeeded = form.files.length > 0 && (form.kind === 'booking' || form.kind === 'reimbursement' && appCatsF.includes(form.category));
+  const preKey = preNeeded ? form.files[0].name + '|' + form.files[0].size + '|' + form.files[0].lastModified : '';
+  useEffect(() => {
+    if (!preKey) {
+      setPre(null);
+      return;
+    }
+    if (pre && pre.key === preKey) return;
+    let dead = false;
+    setPre({
+      key: preKey,
+      loading: true
+    });
+    (async () => {
+      try {
+        const f = form.files[0];
+        const toSend = /^image\//.test(f.type || '') ? await pcShrink(f, 1200) : f;
+        const path = me + '/precheck/' + Date.now() + (toSend.type === 'application/pdf' ? '.pdf' : '.jpg');
+        const up = await sb.storage.from('petty-cash-bills').upload(path, toSend, {
+          contentType: toSend.type || undefined
+        });
+        if (up.error) throw new Error(up.error.message);
+        const {
+          data,
+          error
+        } = await sb.functions.invoke('verify-fare-screenshot', {
+          body: {
+            precheck_path: path
+          }
+        });
+        if (error) throw new Error(error.message);
+        if (!dead) setPre({
+          key: preKey,
+          ...(data || {})
+        });
+      } catch (e) {
+        if (!dead) setPre({
+          key: preKey,
+          error: String(e.message || e)
+        });
+      }
+    })();
+    return () => {
+      dead = true;
+    };
+  }, [preKey]);
+  const preIssues = (() => {
+    if (!pre || pre.loading || pre.key !== preKey) return [];
+    const out = [];
+    const amt = parseFloat(form.amount);
+    const goods = pre.service === 'goods_delivery' || /porter|wefast|borzo/i.test(pre.app || '');
+    if (pre.error && pre.fare == null) {
+      out.push({
+        red: true,
+        text: 'Could not read this screenshot. Make sure the fare is clearly visible.'
+      });
+      return out;
+    }
+    if (pre.screen === 'not_a_ride_app') out.push({
+      red: true,
+      text: "This doesn't look like a Porter / Ola / Rapido / Wefast screen."
+    });
+    if (form.kind === 'reimbursement' && pre.screen === 'quote') out.push({
+      red: true,
+      text: 'This is a price list. Attach the screen after booking (driver assigned) or the completed trip.'
+    });
+    if (pre.fare == null) out.push({
+      red: true,
+      text: 'No fare found in the screenshot.'
+    });else if (amt && Math.abs(pre.fare - amt) > 1) out.push({
+      red: true,
+      fix: pre.fare,
+      text: 'Screenshot shows ' + pcRupee(pre.fare) + ' but you entered ' + pcRupee(amt) + '.' + (amt > pre.fare ? ' Extra costs like parking or toll? Raise a separate request for them with their own receipt.' : '')
+    });
+    if (!goods && pre.screen === 'quote' && pre.fare != null && pre.cheapest_fare != null && pre.cheapest_fare < pre.fare) out.push({
+      red: false,
+      text: 'A cheaper option ' + (pre.cheapest_option || '') + ' ' + pcRupee(pre.cheapest_fare) + ' was on screen. Choose it, or your lead must approve.'
+    });
+    if (pre.confidence === 'low') out.push({
+      red: false,
+      text: 'The screenshot is unclear.'
+    });
+    if (pre.dup) out.push({
+      red: true,
+      text: 'This screenshot was already used on ' + pre.dup + '.'
+    });
+    return out;
+  })();
   const billsOf = id => bills.filter(b => b.request_id === id);
   const paidOf = r => pays.filter(p => p.request_id === r.id).reduce((a, p) => a + Number(p.amount), 0);
   const nm = id => id ? names[id] || '\u2014' : '\u2014';
@@ -49639,6 +49729,11 @@ function PettyCashPage({
       show('Attach one screenshot of the fare from the app', false);
       return;
     }
+    if (preNeeded && pre && pre.loading) {
+      show('Wait a moment - still checking the screenshot', false);
+      return;
+    }
+    if (preNeeded && preIssues.length && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
     const jobs = form.jobs.split(/[\s,/&]+/).map(s => s.trim().split('-')[0]).filter(s => /^\d+$/.test(s));
     setBusy(true);
     const {
@@ -50532,7 +50627,39 @@ function PettyCashPage({
       color: '#94a3b8',
       marginBottom: 14
     }
-  }), /*#__PURE__*/React.createElement("button", {
+  }), preNeeded && pre ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      border: '1px solid ' + (pre.loading ? '#1a2030' : preIssues.some(x => x.red) ? '#f47067' : preIssues.length ? '#f0b429' : '#10b981'),
+      borderRadius: 10,
+      padding: '10px 12px',
+      marginBottom: 14,
+      fontSize: 13
+    }
+  }, pre.loading ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#94a3b8'
+    }
+  }, "Checking the screenshot...") : !preIssues.length ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#10b981',
+      fontWeight: 700
+    }
+  }, '\u2713', " Screenshot shows ", pcRupee(pre.fare), pre.app && pre.app !== 'unknown' ? ' (' + pre.app + ')' : '', pre.trip_id ? ' \u00b7 ' + pre.trip_id : '', " - matches. It will be approved automatically.") : preIssues.map((x, k) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      color: x.red ? '#f47067' : '#f0b429',
+      marginBottom: 4,
+      fontWeight: 600
+    }
+  }, x.red ? '\u2717 ' : '! ', x.text, x.fix != null ? /*#__PURE__*/React.createElement("button", {
+    onClick: () => setF('amount', String(x.fix)),
+    style: {
+      ...btn('#10b981'),
+      marginLeft: 8,
+      padding: '4px 10px',
+      fontSize: 12
+    }
+  }, "Use ", pcRupee(x.fix)) : null))) : null, /*#__PURE__*/React.createElement("button", {
     disabled: busy,
     onClick: submit,
     style: {
