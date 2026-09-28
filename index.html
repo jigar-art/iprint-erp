@@ -1600,7 +1600,8 @@ function MainApp({
   const [prs, setPrs] = useState([]);
   const [pg, setPgRaw] = useState(() => {
     try {
-      return localStorage.getItem('erp_pg') || 'dash';
+      const _p = localStorage.getItem('erp_pg');
+      return _p && _p !== 'rem' ? _p : 'dash';
     } catch (e) {
       return 'dash';
     }
@@ -2962,12 +2963,6 @@ function MainApp({
     roles: ["admin", "production", "dispatch", "accounts", "printing"],
     users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "SHREYA", "MURLI", "MANOJ", "ABHIJIT", "ANKIT", "SONU", "PRATIK", "SHAHAJAD", "ANIL", "HARISH"]
   }, {
-    id: "rem",
-    l: "PO Reminders",
-    e: "⏰",
-    roles: ["admin", "sales", "accounts"],
-    users: ["JIGAR", "AMOL", "CHANDNI", "RUCHITA", "ANKITA"]
-  }, {
     id: "cli",
     l: "Clients",
     e: "👥",
@@ -3130,7 +3125,7 @@ function MainApp({
       overflowY: "auto"
     }
   }, nav.map(n => {
-    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'rem' ? (osItems || []).filter(o => o.po_status === 'Pending').length + (reqs || []).filter(r => r.po_status === 'Pending').length : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
+    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
         const lvKey = 'myprs_last_viewed_' + uname;
@@ -3438,13 +3433,6 @@ function MainApp({
     fl: fLogs,
     ol: osLogs,
     materialsV2: masterData.materialsV2 || []
-  }), pg === "rem" && React.createElement(RemPage, {
-    jobs: filteredJobs,
-    osItems: osItems,
-    setOsItems: setOsItems,
-    items: items,
-    reqs: reqs,
-    setReqs: setReqs
   }), pg === "cli" && React.createElement(CliPage, {
     clients: clients,
     jobs: filteredJobs,
