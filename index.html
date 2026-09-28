@@ -2278,6 +2278,26 @@ function MainApp({
       show('Status already "' + newStatus + '" — no change.', false);
       return;
     }
+    // Billing Done gate (2026-09-28): hard block while any batch that has
+    // line items is still without an invoice#. No exceptions (Jigar).
+    if (newStatus === 'Billing Done') {
+      const [bRes, liRes] = await Promise.all([
+        sb.from('batches').select('id,bill_no,note,date').eq('job_id', jobId),
+        sb.from('line_items').select('batch_id').eq('job_id', jobId)
+      ]);
+      if (bRes.error || liRes.error) {
+        show('⚠️ Could not verify batch invoices — try again. (' + ((bRes.error || liRes.error).message) + ')', false);
+        return;
+      }
+      const withItems = new Set((liRes.data || []).map(r => r.batch_id));
+      const unbilled = (bRes.data || []).filter(b => withItems.has(b.id) && !String(b.bill_no || '').trim());
+      if (unbilled.length) {
+        const names = unbilled.map(b => (b.note || 'Batch') + (b.date ? ' (' + b.date + ')' : '')).join('; ');
+        show('🔒 Cannot mark "' + jobId + '" Billing Done — ' + unbilled.length + ' batch(es) with items have no invoice#: ' + names, false);
+        console.warn('updateJobStatus blocked (Billing Done gate): job', jobId, 'unbilled batches', unbilled.map(b => b.id));
+        return;
+      }
+    }
     const reactJob = jobs.find(j => j.id === jobId);
     if (reactJob && reactJob.status !== dbRow.status) {
       setJobs(p => p.map(j => j.id === jobId ? {
@@ -29368,6 +29388,7 @@ function AccPage({
   const [tab, setTab] = useState('pending');
   const [invoices, setInvoices] = useState({});
   const [invoiceDates, setInvoiceDates] = useState({});
+  const [invBatchSel, setInvBatchSel] = useState({});
   const [editBatchInv, setEditBatchInv] = useState(null);
   const [sq, setSq] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -29495,10 +29516,34 @@ function AccPage({
     const okDate = validInvDate(invDate, show);
     if (!okDate) return;
     const jBatches = j.batches || [];
-    const emptyBatch = jBatches.find(b => !b.bill_no);
-    if (emptyBatch) {
-      saveBill(emptyBatch.id, inv);
-      if (updateBatchField) updateBatchField(emptyBatch.id, 'invoice_date', okDate);
+    const pendingItemBatches = jBatches.filter(b => !b.bill_no && (b.items || []).length > 0);
+    let targets = [];
+    if (pendingItemBatches.length > 1) {
+      const sel = invBatchSel[j.id] || '';
+      if (!sel) {
+        alert("This job has " + pendingItemBatches.length + " unbilled batches. Pick which batch this invoice is for.");
+        return;
+      }
+      targets = sel === '__all' ? pendingItemBatches : pendingItemBatches.filter(b => b.id === sel);
+      if (!targets.length) {
+        alert("Selected batch is no longer unbilled — pick again.");
+        return;
+      }
+    } else if (pendingItemBatches.length === 1) {
+      targets = pendingItemBatches;
+    } else {
+      const emptyBatch = jBatches.find(b => !b.bill_no);
+      if (emptyBatch) targets = [emptyBatch];
+    }
+    if (targets.length) {
+      for (const tb of targets) {
+        await saveBill(tb.id, inv);
+        if (updateBatchField) updateBatchField(tb.id, 'invoice_date', okDate);
+      }
+      setInvBatchSel(p => ({
+        ...p,
+        [j.id]: ''
+      }));
     } else {
       const bid = "B" + uid();
       const bd = {
@@ -29529,8 +29574,8 @@ function AccPage({
       alert("Add at least one invoice# first");
       return;
     }
-    updateJobStatus(j.id, 'Billing Done');
-    show("✅ " + j.id + " → Billing Done (" + existingInv.length + " invoice(s))");
+    const ok = await updateJobStatus(j.id, 'Billing Done');
+    if (ok) show("✅ " + j.id + " → Billing Done (" + existingInv.length + " invoice(s))");
   };
   const InvChips = ({
     j,
@@ -29590,7 +29635,32 @@ function AccPage({
         marginTop: invBatches.length ? 2 : 0,
         flexWrap: 'wrap'
       }
-    }, React.createElement("input", {
+    }, (() => {
+      const pend = (j.batches || []).filter(b => !b.bill_no && (b.items || []).length > 0);
+      if (pend.length < 2) return null;
+      return React.createElement("select", {
+        className: "in mn",
+        style: {
+          maxWidth: 170,
+          fontSize: 9,
+          padding: '2px 4px',
+          borderColor: invBatchSel[j.id] ? undefined : '#f59e0b'
+        },
+        value: invBatchSel[j.id] || '',
+        title: "Which batch is this invoice for?",
+        onChange: e => setInvBatchSel(p => ({
+          ...p,
+          [j.id]: e.target.value
+        }))
+      }, React.createElement("option", {
+        value: ""
+      }, "Batch? (" + pend.length + " unbilled)"), pend.map(b => React.createElement("option", {
+        key: b.id,
+        value: b.id
+      }, (b.note || 'Batch').slice(0, 40) + ' · ' + (b.date || '') + ' · ' + b.items.length + ' items')), React.createElement("option", {
+        value: "__all"
+      }, "All " + pend.length + " batches (one invoice)"));
+    })(), React.createElement("input", {
       className: "in mn",
       style: {
         width: 80,
