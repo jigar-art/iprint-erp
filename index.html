@@ -49557,7 +49557,7 @@ function PettyCashPage({
     ...p,
     [k]: v
   }));
-  const attachBills = async (reqId, files, amount, stage) => {
+  const attachBills = async (reqId, files, amount, stage, kindFor) => {
     let ok = 0;
     const ids = [];
     for (const f of files) {
@@ -49570,7 +49570,7 @@ function PettyCashPage({
         request_id: reqId,
         file_path: path,
         stage: stage || 'bill',
-        amount: files.length === 1 && amount ? parseFloat(amount) : null
+        amount: files.length === 1 && amount && kindFor === 'advance' ? parseFloat(amount) : null
       }).select('id').single();
       if (error) show('\u26a0\ufe0f Bill not saved: ' + error.message, false);else {
         ok++;
@@ -49657,7 +49657,7 @@ function PettyCashPage({
       return;
     }
     if (form.files.length) {
-      const ok = await attachBills(data.id, form.files, form.kind === 'reimbursement' ? form.amount : null, form.kind === 'booking' ? 'quote' : 'bill');
+      const ok = await attachBills(data.id, form.files, null, form.kind === 'booking' ? 'quote' : 'bill', form.kind);
       if (ok < form.files.length) show('\u26a0\ufe0f ' + (form.files.length - ok) + ' file(s) did not upload - add them from My requests', false);
     }
     setBusy(false);
@@ -49795,7 +49795,7 @@ function PettyCashPage({
     if (!files.length) return;
     setBusy(true);
     const stage = r.kind === 'booking' ? r.status === 'paid' ? 'final' : 'quote' : 'bill';
-    const ok = await attachBills(r.id, Array.from(files).slice(0, r.kind === 'booking' ? 1 : 20), addAmt, stage);
+    const ok = await attachBills(r.id, Array.from(files).slice(0, r.kind === 'booking' ? 1 : 20), addAmt, stage, r.kind);
     setBusy(false);
     setAddFor(null);
     setAddAmt('');
@@ -50177,7 +50177,7 @@ function PettyCashPage({
     }, /*#__PURE__*/React.createElement("button", {
       style: ghost,
       onClick: () => viewBills(r)
-    }, "Bills (", bs.length, ")", billed ? ' ' + pcRupee(billed) : ''), canAdd ? /*#__PURE__*/React.createElement("button", {
+    }, "Bills (", bs.length, ")", r.kind === 'advance' && billed ? ' \u00b7 spent ' + pcRupee(billed) : ''), canAdd ? /*#__PURE__*/React.createElement("button", {
       style: r.kind === 'booking' && r.status === 'paid' && r.final_fare == null ? btn('#a78bfa', '#1a1033') : ghost,
       onClick: () => {
         setAddFor(addFor === r.id ? null : r.id);
@@ -50218,7 +50218,7 @@ function PettyCashPage({
         flexWrap: 'wrap',
         alignItems: 'center'
       }
-    }, r.kind !== 'booking' ? /*#__PURE__*/React.createElement("input", {
+    }, r.kind === 'advance' ? /*#__PURE__*/React.createElement("input", {
       type: "number",
       inputMode: "decimal",
       placeholder: "Bill amount ₹",
