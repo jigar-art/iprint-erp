@@ -49705,6 +49705,34 @@ function PettyCashPage({
       p_remark: why.trim()
     }, r.req_no + ' rejected');
   };
+  const enterBillAmounts = async r => {
+    const missing = billsOf(r.id).filter(b => b.amount == null);
+    for (let k = 0; k < missing.length; k++) {
+      const b = missing[k];
+      const v = prompt('Amount on bill ' + (k + 1) + ' of ' + missing.length + ' for ' + r.req_no + ' (uploaded ' + new Date(b.uploaded_at).toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit'
+      }) + '). Tap "Bills" first if you need to look at it.');
+      if (v === null) break;
+      const amt = parseFloat(v);
+      if (isNaN(amt) || amt < 0) {
+        show('Enter a number', false);
+        break;
+      }
+      const {
+        error
+      } = await sb.from('petty_cash_bills').update({
+        amount: amt
+      }).eq('id', b.id);
+      if (error) {
+        show('\u26a0\ufe0f ' + error.message, false);
+        break;
+      }
+    }
+    load();
+  };
   const approveExtra = r => {
     if (confirm('Approve final fare ' + pcRupee(r.final_fare) + ' (quote ' + pcRupee(r.quote_fare || r.amount) + ') for ' + nm(r.requester_id) + '?')) rpc('erp_pc_approve_extra', {
       p_id: r.id
@@ -49793,6 +49821,16 @@ function PettyCashPage({
   };
   const uploadMore = async (r, files) => {
     if (!files.length) return;
+    if (r.kind === 'advance') {
+      if (!parseFloat(addAmt)) {
+        show('Enter the amount on the bill first, then choose the photo', false);
+        return;
+      }
+      if (files.length > 1) {
+        show('Add one bill at a time, with its amount', false);
+        return;
+      }
+    }
     setBusy(true);
     const stage = r.kind === 'booking' ? r.status === 'paid' ? 'final' : 'quote' : 'bill';
     const ok = await attachBills(r.id, Array.from(files).slice(0, r.kind === 'booking' ? 1 : 20), addAmt, stage, r.kind);
@@ -50159,7 +50197,21 @@ function PettyCashPage({
       style: {
         color: '#94a3b8'
       }
-    }, "Approved directly by ", nm(r.override_by))) : null, r.status === 'approved' && paidOf(r) > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, "Approved directly by ", nm(r.override_by))) : null, r.kind === 'advance' && ['approved', 'paid'].includes(r.status) ? (() => {
+      const given = paidOf(r);
+      const base = given > 0 ? given : Number(r.amount);
+      const missing = bs.filter(b => b.amount == null).length;
+      const left = base - billed;
+      return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: left > 0 ? '#a78bfa' : '#10b981'
+        }
+      }, "Advance ", pcRupee(base), " ", '\u00b7', " bills ", pcRupee(billed), " ", '\u00b7', " ", left >= 0 ? pcRupee(left) + ' still to account for' : pcRupee(-left) + ' spent over the advance', given === 0 ? ' (cash not given yet)' : ''), missing ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: '#f47067'
+        }
+      }, missing, " bill", missing > 1 ? 's' : '', " without amount - tap \"Enter bill amounts\"")) : null);
+    })() : null, r.status === 'approved' && paidOf(r) > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#f0b429'
       }
@@ -50177,7 +50229,10 @@ function PettyCashPage({
     }, /*#__PURE__*/React.createElement("button", {
       style: ghost,
       onClick: () => viewBills(r)
-    }, "Bills (", bs.length, ")", r.kind === 'advance' && billed ? ' \u00b7 spent ' + pcRupee(billed) : ''), canAdd ? /*#__PURE__*/React.createElement("button", {
+    }, "Bills (", bs.length, ")", r.kind === 'advance' && billed ? ' \u00b7 spent ' + pcRupee(billed) : ''), canAdd && r.kind === 'advance' && bs.some(b => b.amount == null) ? /*#__PURE__*/React.createElement("button", {
+      style: btn('#f47067', '#1a0505'),
+      onClick: () => enterBillAmounts(r)
+    }, "Enter bill amounts") : null, canAdd ? /*#__PURE__*/React.createElement("button", {
       style: r.kind === 'booking' && r.status === 'paid' && r.final_fare == null ? btn('#a78bfa', '#1a1033') : ghost,
       onClick: () => {
         setAddFor(addFor === r.id ? null : r.id);
@@ -50221,18 +50276,21 @@ function PettyCashPage({
     }, r.kind === 'advance' ? /*#__PURE__*/React.createElement("input", {
       type: "number",
       inputMode: "decimal",
-      placeholder: "Bill amount ₹",
+      placeholder: "Bill amount ₹ (required)",
       value: addAmt,
       onChange: e => setAddAmt(e.target.value),
       style: {
         ...inp,
-        width: 140
+        width: 170
       }
     }) : null, /*#__PURE__*/React.createElement("input", {
       type: "file",
       accept: "image/*,application/pdf",
-      multiple: true,
-      onChange: e => uploadMore(r, e.target.files),
+      multiple: r.kind !== 'advance',
+      onChange: e => {
+        uploadMore(r, e.target.files);
+        e.target.value = '';
+      },
       style: {
         fontSize: 12,
         color: '#94a3b8'
