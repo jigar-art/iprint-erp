@@ -49937,10 +49937,6 @@ function PettyCashPage({
   const uploadMore = async (r, files) => {
     if (!files.length) return;
     if (r.kind === 'advance') {
-      if (!parseFloat(addAmt)) {
-        show('Enter the amount on the bill first, then choose the photo', false);
-        return;
-      }
       if (files.length > 1) {
         show('Add one bill at a time, with its amount', false);
         return;
@@ -49955,7 +49951,19 @@ function PettyCashPage({
     if (!ok) return;
     const appCatsU = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
     const lastId = attachBills.lastIds[attachBills.lastIds.length - 1];
-    if (r.kind === 'booking' && stage === 'final' && lastId) await checkFare(lastId);else if (r.kind === 'reimbursement' && appCatsU.includes(r.category) && /^pending_l/.test(r.status) && lastId) await checkFare(lastId);else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
+    if (r.kind === 'booking' && stage === 'final' && lastId) await checkFare(lastId);else if (r.kind === 'reimbursement' && appCatsU.includes(r.category) && /^pending_l/.test(r.status) && lastId) await checkFare(lastId);else if (r.kind === 'advance' && lastId) {
+      show('Reading the bill...');
+      const {
+        data,
+        error
+      } = await sb.functions.invoke('verify-fare-screenshot', {
+        body: {
+          bill_id: lastId
+        }
+      });
+      if (error || !data) show('\u26a0\ufe0f Bill uploaded, but it could not be read - enter the amount with "Enter bill amounts"', false);else if (data.dup) show('\u2717 This receipt was already used on ' + data.dup + ' - it will NOT be counted on this advance', false);else if (data.reasons && data.reasons.length) show('\u26a0\ufe0f ' + data.reasons.join('; ') + ' - check the amount', false);else if (data.total != null) show('\u2705 Bill read: ' + pcRupee(data.total) + (data.ref ? ' (' + data.ref + ')' : ''));
+      load();
+    } else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
     load();
   };
   const cntNotes = () => {
@@ -50226,7 +50234,8 @@ function PettyCashPage({
   const row = (r, opts = {}) => {
     const st = PC_STATUS[r.status] || [r.status, '#94a3b8'];
     const bs = billsOf(r.id);
-    const billed = bs.reduce((s, b) => s + Number(b.amount || 0), 0);
+    const billed = bs.filter(b => !(b.ai && b.ai.dup)).reduce((s, b) => s + Number(b.amount || 0), 0);
+    const flagged = bs.filter(b => b.ai && b.ai.reasons && b.ai.reasons.length && r.kind === 'advance');
     const late = r.status === 'paid' && pcDays(r.paid_at) > (cfg?.advance_open_days || 3);
     const canAdd = !['settled', 'rejected', 'cancelled'].includes(r.status) && (r.requester_id === me || isCashier);
     return /*#__PURE__*/React.createElement("div", {
@@ -50325,7 +50334,13 @@ function PettyCashPage({
         style: {
           color: '#f47067'
         }
-      }, missing, " bill", missing > 1 ? 's' : '', " without amount - tap \"Enter bill amounts\"")) : null);
+      }, missing, " bill", missing > 1 ? 's' : '', " without amount - tap \"Enter bill amounts\"")) : null, flagged.map((b, k) => /*#__PURE__*/React.createElement(React.Fragment, {
+        key: k
+      }, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: b.ai.dup ? '#f47067' : '#f0b429'
+        }
+      }, "Bill ", pcRupee(b.amount || 0), ": ", b.ai.reasons.join('; ')))));
     })() : null, pays.some(p => p.request_id === r.id && p.mode === 'bank') ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#38bdf8'
@@ -50399,7 +50414,7 @@ function PettyCashPage({
     }, r.kind === 'advance' ? /*#__PURE__*/React.createElement("input", {
       type: "number",
       inputMode: "decimal",
-      placeholder: "Bill amount ₹ (required)",
+      placeholder: "Bill amount ₹ (optional - ERP reads it)",
       value: addAmt,
       onChange: e => setAddAmt(e.target.value),
       style: {
