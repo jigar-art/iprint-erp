@@ -33638,11 +33638,11 @@ function DutiesCard({ user }) {
 function JobCredit({ job, user }) {
   const me = pbKey(user);
   const [cls, setCls] = React.useState(job && job.job_class || null);
-  const [vals, setVals] = React.useState({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '' });
+  const [vals, setVals] = React.useState({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '', rectification_cause: job && job.rectification_cause || '' });
   const [err, setErr] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
-    setVals({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '' });
+    setVals({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '', rectification_cause: job && job.rectification_cause || '' });
     if (job && !job.job_class && job.client_id) sb.from('clients').select('client_class').eq('id', job.client_id).maybeSingle().then(r => setCls(r.data && r.data.client_class || 'A'));
     else setCls(job && job.job_class || 'A');
   }, [job && job.id]);
@@ -33650,7 +33650,8 @@ function JobCredit({ job, user }) {
   const designDone = job.designed_by || !/^Quotation|^PO Pending|^Design|^Active/.test(job.status || '');
   const isBank = cls === 'B';
   const up = [['Photo', job.image_uploaded_by], ['POD', job.pod_uploaded_by], ['IC', job.ic_uploaded_by], ['DC', job.dc_uploaded_by]].filter(x => x[1]);
-  if (!designDone && !isBank && !up.length) return null;
+  const isRect = job.status === 'Rectification' || !!job.rectification_cause;
+  if (!designDone && !isBank && !up.length && !isRect) return null;
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const set = async (field, v) => {
     setBusy(true); setErr('');
@@ -33668,6 +33669,8 @@ function JobCredit({ job, user }) {
     React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "🏷 Credit (point system)"),
     designDone ? picker('Designed by', 'designed_by', ['PRAJAKTA', 'VIKAS'], ['PRAJAKTA', 'AMOL', 'JIGAR'].includes(me), 'PRAJAKTA') : null,
     isBank ? picker('Banking site assigned to', 'bank_assignee', ['PRIYANKA', 'HARSHALA'], ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me), 'PRIYANKA') : null,
+    isRect ? picker('Rectification caused by', 'rectification_cause', ['DESIGN', 'PRINTING', 'FABRICATION', 'INSTALLATION', 'DISPATCH', 'CLIENT', 'OTHER'], ['POONAM', 'AMOL', 'JIGAR'].includes(me), null) : null,
+    isRect && !vals.rectification_cause ? React.createElement("div", { style: { fontSize: 10.5, color: '#f59e0b' } }, 'Record which department caused this rework — that lead then logs the quality incident.') : null,
     up.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'Uploaded by: ' + up.map(x => x[0] + ' — ' + nm(x[1])).join(' · ')) : null,
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5 } }, err) : null);
 }
