@@ -3556,7 +3556,9 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(DutiesCard, {
+  }) : null, pg === "myscore" && React.createElement(ScorecardCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(DutiesCard, {
     user: user
   }), pg === "myscore" && React.createElement(QualityIncidentsCard, {
     user: user
@@ -33698,6 +33700,57 @@ function JobDateChanges({ job, user }) {
         React.createElement("span", { style: { fontWeight: 700, color: r.client_requested ? '#4ade80' : '#e0574f' } }, r.client_requested ? 'client-requested' : 'counts'),
         can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+// ── Monthly scorecard (point system, 2026-09-29) — reads the hourly snapshot ──
+function ScorecardCard({ user }) {
+  const me = pbKey(user);
+  const [mOff, setMOff] = React.useState(0);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(null);
+  const monthDate = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - mOff); return d; })();
+  const iso = monthDate.getFullYear() + '-' + String(monthDate.getMonth() + 1).padStart(2, '0') + '-01';
+  React.useEffect(() => { setRows(null); sb.rpc('erp_my_scorecard', { p_month: iso }).then(r => setRows(r.error ? [] : (r.data || []))); }, [iso]);
+  if (rows === null) return null;
+  const mine = rows.find(r => r.person_key === me);
+  const others = rows.filter(r => r.person_key !== me).sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1));
+  if (!mine && !others.length) return null;
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  const bandC = { A: '#4ade80', B: '#60a5fa', C: '#f59e0b', D: '#e0574f' };
+  const practice = monthDate < new Date(2026, 9, 1);
+  const mLabel = monthDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  const part = (lbl, pts, max, note, c) => React.createElement("div", { style: { flex: '1 1 150px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: 8 } },
+    React.createElement("div", { style: { fontSize: 10, fontWeight: 800, color: c, textTransform: 'uppercase', letterSpacing: .4 } }, lbl),
+    React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: pts == null ? '#475569' : '#f8fafc' } }, pts == null ? '—' : Number(pts).toFixed(1), React.createElement("span", { style: { fontSize: 11, color: '#64748b', fontWeight: 600 } }, ' / ' + max)),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, note || ''));
+  const big = r => React.createElement("div", null,
+    React.createElement("div", { style: { display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginTop: 6 } },
+      React.createElement("span", { style: { fontSize: 30, fontWeight: 900, color: r.final_score == null ? '#475569' : '#f8fafc' } }, r.final_score == null ? '—' : Number(r.final_score).toFixed(1)),
+      React.createElement("span", { style: { fontSize: 13, color: '#64748b' } }, '/ 100'),
+      r.band ? React.createElement("span", { style: { fontSize: 13, fontWeight: 900, padding: '2px 10px', borderRadius: 999, background: bandC[r.band] + '22', color: bandC[r.band], border: '1px solid ' + bandC[r.band] } }, 'Band ' + r.band) : React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, 'not enough data yet'),
+      r.team_avg != null ? React.createElement("span", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'own ' + Number(r.own_score).toFixed(1) + ' × 80% + team ' + Number(r.team_avg).toFixed(1) + ' × 20%') : null),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } },
+      part('ERP entry', r.erp_pts, 25, r.erp_note, '#60a5fa'), part('On time', r.ot_pts, 30, r.ot_note, '#4ade80'),
+      part('Output', r.out_pts, 25, r.out_note, '#f59e0b'), part('Quality', r.q_pts, 20, r.q_note, '#a78bfa')),
+    React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } }, 'A part shown as — has too little data this month; the other parts are scaled to 100. Bands: A 85+ · B 70–84 · C 55–69 · D below 55.'));
+  const upd = (mine || others[0]) && (mine || others[0]).computed_at;
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #e3a00855' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { color: '#e3a008', fontSize: 14 } }, "🏆 Scorecard — " + mLabel + (practice ? ' (practice — not counted)' : '')),
+      React.createElement("div", { style: { display: 'flex', gap: 4 } }, [[0, 'This month'], [1, 'Last month']].map(([o, l]) => React.createElement("button", { key: o, type: 'button', onClick: () => setMOff(o), style: { padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (mOff === o ? '#e3a008' : '#334155'), background: mOff === o ? '#e3a008' : 'transparent', color: mOff === o ? '#111' : '#cbd5e1' } }, l)))),
+    upd ? React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 2 } }, 'Updated hourly · last ' + new Date(upd).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })) : null,
+    mine ? big(mine) : null,
+    others.length ? React.createElement("div", { style: { marginTop: 12 } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#cbd5e1', marginBottom: 4 } }, (['JIGAR', 'AMOL'].includes(me) ? 'Everyone' : 'Your team') + ' (' + others.length + ') — tap a name for details'),
+      React.createElement("div", { style: { overflowX: 'auto' } }, React.createElement("table", { style: { width: '100%', fontSize: 12, borderCollapse: 'collapse' } },
+        React.createElement("thead", null, React.createElement("tr", { style: { color: '#64748b', textAlign: 'left' } }, ['Name', 'Team', 'ERP', 'On time', 'Output', 'Quality', 'Score', 'Band'].map(h => React.createElement("th", { key: h, style: { padding: '4px 6px', fontWeight: 700 } }, h)))),
+        React.createElement("tbody", null, others.map(r => React.createElement(React.Fragment, { key: r.person_key },
+          React.createElement("tr", { onClick: () => setOpen(open === r.person_key ? null : r.person_key), style: { borderTop: '1px solid #1f2937', cursor: 'pointer' } },
+            React.createElement("td", { style: { padding: '5px 6px', fontWeight: 700 } }, nm(r.person_key)),
+            React.createElement("td", { style: { padding: '5px 6px', color: '#94a3b8' } }, r.team),
+            [r.erp_pts, r.ot_pts, r.out_pts, r.q_pts].map((v, i) => React.createElement("td", { key: i, className: 'mn', style: { padding: '5px 6px', color: v == null ? '#475569' : '#e2e8f0' } }, v == null ? '—' : Number(v).toFixed(1))),
+            React.createElement("td", { className: 'mn', style: { padding: '5px 6px', fontWeight: 800 } }, r.final_score == null ? '—' : Number(r.final_score).toFixed(1)),
+            React.createElement("td", { style: { padding: '5px 6px', fontWeight: 900, color: r.band ? bandC[r.band] : '#475569' } }, r.band || '—')),
+          open === r.person_key ? React.createElement("tr", null, React.createElement("td", { colSpan: 8, style: { padding: '0 6px 8px' } }, big(r))) : null)))))) : null);
 }
 function MyScorePage({ user }) {
   const [rows, setRows] = React.useState(null);
