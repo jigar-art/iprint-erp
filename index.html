@@ -50454,11 +50454,17 @@ function PettyCashPage({
       disabled: busy,
       style: btn('#f47067', '#1a0505'),
       onClick: () => reject(r)
-    }, "Reject")) : null, opts.pay ? /*#__PURE__*/React.createElement("button", {
+    }, "Reject")) : null, opts.pay && r.requester_id === me ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: '#f0b429',
+        alignSelf: 'center'
+      }
+    }, "Your own request - ", me === (cfg && cfg.cashier_id) ? 'Vidya (backup cashier)' : 'Shreya', " must mark it paid") : null, opts.pay && r.requester_id !== me ? /*#__PURE__*/React.createElement("button", {
       disabled: busy,
       style: btn('#38bdf8'),
       onClick: () => markPaid(r)
-    }, paidOf(r) > 0 ? 'Pay balance ' + pcRupee(Number(r.amount) - paidOf(r)) : 'Mark paid ' + pcRupee(r.amount)) : null, r.status === 'approved' && (isCashier || isAdmin) ? /*#__PURE__*/React.createElement("button", {
+    }, paidOf(r) > 0 ? 'Pay balance ' + pcRupee(Number(r.amount) - paidOf(r)) : 'Mark paid ' + pcRupee(r.amount)) : null, r.status === 'approved' && (isCashier || isAdmin) && (r.requester_id !== me || isAdmin) ? /*#__PURE__*/React.createElement("button", {
       disabled: busy,
       style: ghost,
       onClick: () => bankPaid(r)
