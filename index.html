@@ -7012,6 +7012,9 @@ function JobDetail({
   })(), React.createElement(JobCredit, {
     job: j,
     user: user
+  }), React.createElement(JobDateChanges, {
+    job: j,
+    user: user
   }), React.createElement(JobBlockers, {
     job: j,
     user: user
@@ -33665,6 +33668,36 @@ function JobCredit({ job, user }) {
     isBank ? picker('Banking site assigned to', 'bank_assignee', ['PRIYANKA', 'HARSHALA'], ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me), 'PRIYANKA') : null,
     up.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'Uploaded by: ' + up.map(x => x[0] + ' — ' + nm(x[1])).join(' · ')) : null,
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5 } }, err) : null);
+}
+// ── Recce / install date changes (Poonam "dates not moved", 2026-09-28) ──
+function JobDateChanges({ job, user }) {
+  const me = pbKey(user);
+  const can = ['POONAM', 'PRIYANKA', 'RUCHITA', 'AMOL', 'JIGAR'].includes(me);
+  const [rows, setRows] = React.useState([]);
+  const [err, setErr] = React.useState('');
+  const load = () => sb.from('job_date_changes').select('*').eq('job_id', job.id).order('changed_at', { ascending: false }).then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { if (job && job.id) load(); }, [job && job.id, job && job.install_date, job && job.recce_date]);
+  if (!job || !rows.length) return null;
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const fd = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
+  const mark = async (id, v) => {
+    const reason = v ? prompt('Who at the client asked for this change, and when? (e.g. "Hiren, email 28 Sep")') : null;
+    if (v && !(reason && reason.trim())) return;
+    setErr('');
+    const r = await sb.rpc('erp_date_change_mark', { p_id: id, p_client: v, p_reason: reason || null });
+    if (r.error) setErr(r.error.message); else load();
+  };
+  const counted = rows.filter(r => !r.client_requested).length;
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginTop: 8 } },
+    React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "📅 Date changes (" + rows.length + ")" + (counted ? ' — ' + counted + ' count against the plan' : ' — all client-requested')),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Recce / installation dates moved after entry. Mark it client-requested (with who asked) and it won't count."),
+    rows.map(r => React.createElement("div", { key: r.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px solid #1f2937', padding: '6px 0', fontSize: 11.5 } },
+      React.createElement("span", { style: { color: '#e2e8f0' } }, (r.field === 'install_date' ? 'Install' : 'Recce') + ': ' + fd(r.old_date) + ' → ' + fd(r.new_date) + ' · by ' + nm(r.changed_by) + ' · ' + new Date(r.changed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+        r.client_requested && r.reason ? React.createElement("span", { style: { color: '#94a3b8' } }, ' · client: "' + r.reason + '"') : null),
+      React.createElement("span", { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+        React.createElement("span", { style: { fontWeight: 700, color: r.client_requested ? '#4ade80' : '#e0574f' } }, r.client_requested ? 'client-requested' : 'counts'),
+        can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
 function MyScorePage({ user }) {
   const [rows, setRows] = React.useState(null);
