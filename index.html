@@ -3556,7 +3556,9 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(QualityIncidentsCard, {
+  }) : null, pg === "myscore" && React.createElement(DutiesCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(QualityIncidentsCard, {
     user: user
   }), pg === "myscore" && React.createElement(MyBlockersCard, {
     user: user
@@ -33518,6 +33520,110 @@ function QualityIncidentsCard({ user }) {
     sec('Against you (this and last month)', mine, false),
     sec(adm ? 'Disputes waiting for you' : '', disputes, true),
     isLead ? sec('Your team (this and last month)', teamRows.filter(q => q.status !== 'disputed' || !adm), true) : null,
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+// ── Duties checklist (point system Output for Shreya / Vidya / Murli, 2026-09-28) ──
+function dutyPeriod(freq, dueDay, now) {
+  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const d = new Date(ist.getFullYear(), ist.getMonth(), ist.getDate());
+  const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  let due;
+  if (freq === 'daily') due = new Date(d);
+  else if (freq === 'monthly') due = new Date(d.getFullYear(), d.getMonth(), dueDay || 7);
+  else if (freq === 'tuesday') { due = new Date(mon); due.setDate(mon.getDate() + 1); }
+  else { due = new Date(mon); due.setDate(mon.getDate() + 5); }
+  due.setHours(19, 0, 0, 0);
+  return { due, ist };
+}
+function dutyExpected(def, now) {
+  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const first = new Date(Math.max(new Date(ist.getFullYear(), ist.getMonth(), 1).getTime(), new Date(2026, 8, 28).getTime())); // count from go-live (28 Sep 2026)
+  let n = 0;
+  for (let x = new Date(first); x <= ist; x.setDate(x.getDate() + 1)) {
+    const due = new Date(x); due.setHours(19, 0, 0, 0);
+    if (due > ist) break;
+    const dow = x.getDay();
+    if (def.freq === 'daily' && dow !== 0) n++;
+    else if (def.freq === 'tuesday' && dow === 2) n++;
+    else if (def.freq === 'weekly' && dow === 6) n++;
+    else if (def.freq === 'monthly' && x.getDate() === (def.due_day || 7)) n++;
+  }
+  return n;
+}
+function DutiesCard({ user }) {
+  const me = pbKey(user);
+  const adm = ['JIGAR', 'AMOL'].includes(me);
+  const [defs, setDefs] = React.useState(null);
+  const [done, setDone] = React.useState([]);
+  const [who, setWho] = React.useState(null);
+  const [form, setForm] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const load = () => {
+    sb.from('duty_defs').select('*').eq('active', true).order('sort').then(r => setDefs(r.error ? [] : (r.data || [])));
+    const since = new Date(); since.setDate(1); since.setHours(0, 0, 0, 0); since.setMonth(since.getMonth() - 1);
+    sb.from('duty_done').select('*').gte('done_at', since.toISOString()).order('done_at', { ascending: false }).then(r => setDone(r.error ? [] : (r.data || [])));
+  };
+  React.useEffect(load, []);
+  if (!defs) return null;
+  const people = [...new Set(defs.map(d => d.person_key))];
+  const target = adm ? (who || people[0]) : me;
+  const mine = defs.filter(d => d.person_key === target);
+  if (!mine.length) return null;
+  const now = new Date();
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  const monthKey = now.toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+  const submit = async () => {
+    const d = form.def;
+    if (d.proof === 'file' && !form.file) { setErr('Attach the file / screenshot as proof'); return; }
+    if (d.proof === 'note' && !form.note.trim()) { setErr('Add a short note'); return; }
+    setBusy(true); setErr('');
+    let proof = null;
+    if (form.file) { proof = await uploadFile(form.file, 'duty-proof'); if (!proof) { setBusy(false); setErr('Upload failed'); return; } }
+    const r = await sb.rpc('erp_duty_mark', { p_code: d.code, p_note: form.note.trim() || null, p_proof: proof });
+    setBusy(false);
+    if (r.error) { setErr(r.error.message); return; }
+    setForm(null); load();
+  };
+  let got = 0, max = 0;
+  const rows = mine.map(d => {
+    const { due } = dutyPeriod(d.freq, d.due_day, now);
+    const dueMs = Date.parse(due.getFullYear() + '-' + String(due.getMonth() + 1).padStart(2, '0') + '-' + String(due.getDate()).padStart(2, '0') + 'T19:00:00+05:30');
+    const cur = done.find(x => x.code === d.code && Math.abs(new Date(x.due_at).getTime() - dueMs) < 60000);
+    const exp = dutyExpected(d, now);
+    const onTime = done.filter(x => x.code === d.code && x.on_time && new Date(x.due_at).getTime() <= Date.now() && new Date(x.due_at).toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7) === monthKey).length;
+    const share = exp ? Math.min(1, onTime / exp) : 1;
+    got += share * Number(d.points); max += Number(d.points);
+    return { d, due, dueMs, cur, exp, onTime };
+  });
+  const freqLbl = { daily: 'Daily', weekly: 'Weekly (Sat)', tuesday: 'Every Tuesday', monthly: 'Monthly' };
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 10 } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { color: '#e3a008', fontSize: 13 } }, "📋 Duties — " + nm(target)),
+      adm ? React.createElement("div", { style: { display: 'flex', gap: 4 } }, people.map(p => React.createElement("button", { key: p, type: 'button', onClick: () => setWho(p), style: { padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (p === target ? '#e3a008' : '#334155'), background: p === target ? '#e3a008' : 'transparent', color: p === target ? '#111' : '#cbd5e1' } }, nm(p)))) : null,
+      React.createElement("span", { style: { fontSize: 12, color: '#cbd5e1' } }, 'This month so far: ', React.createElement("b", { style: { color: '#fde68a' } }, got.toFixed(1) + ' / ' + max), ' pts')),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Mark each duty done on time, with proof. Late or missing = no points for that period."),
+    rows.map(({ d, due, dueMs, cur, exp, onTime }) => {
+      const overdue = !cur && Date.now() > dueMs;
+      const st = cur ? (cur.on_time ? '✓ done on time' : '✓ done late') : overdue ? '✗ missed' : 'pending';
+      const c = cur ? (cur.on_time ? '#4ade80' : '#f59e0b') : overdue ? '#e0574f' : '#94a3b8';
+      return React.createElement("div", { key: d.code, style: { border: '1px solid #1f2937', borderRadius: 8, padding: 8, marginTop: 6, background: '#0a0f1a' } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+          React.createElement("b", { style: { fontSize: 12, color: '#e2e8f0' } }, d.label + '  · ' + d.points + ' pts'),
+          React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: c } }, st)),
+        React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } },
+          freqLbl[d.freq] + ' · due ' + due.toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' }) + ' 7:00 pm · this month ' + onTime + ' of ' + exp + ' on time',
+          cur && cur.note ? ' · "' + cur.note + '"' : '', cur && cur.proof_url ? ' · ' : '', cur && cur.proof_url ? React.createElement("a", { href: cur.proof_url, target: '_blank', rel: 'noreferrer', style: { color: '#60a5fa' } }, '📎 proof') : null),
+        !cur && (target === me || adm) ? (form && form.def.code === d.code
+          ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 6 } },
+              React.createElement("input", { className: 'in', value: form.note, onChange: e => setForm({ ...form, note: e.target.value }), placeholder: d.proof === 'note' ? 'What was done? *' : 'Note (optional)' }),
+              React.createElement("div", { style: { fontSize: 11, color: d.proof === 'file' ? '#fde68a' : '#94a3b8' } }, d.proof === 'file' ? 'Proof file / screenshot * ' : 'Proof (optional) ',
+                React.createElement("input", { type: 'file', accept: 'image/*,.pdf,.xlsx,.xls,.csv', onChange: e => setForm({ ...form, file: e.target.files[0] || null }) })),
+              React.createElement("div", { style: { display: 'flex', gap: 6 } },
+                React.createElement("button", { type: 'button', disabled: busy, onClick: submit, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, busy ? '…' : '✓ Mark done'),
+                React.createElement("button", { type: 'button', disabled: busy, onClick: () => { setForm(null); setErr(''); }, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, 'Cancel')))
+          : React.createElement("button", { type: 'button', onClick: () => { setForm({ def: d, note: '', file: null }); setErr(''); }, style: { marginTop: 6, padding: '4px 11px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + (overdue ? '#e0574f' : '#22c55e'), background: (overdue ? '#e0574f' : '#22c55e') + '22' } }, overdue ? 'Mark done (late)' : 'Mark done')) : null);
+    }),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
 function MyScorePage({ user }) {
