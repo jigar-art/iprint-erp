@@ -3556,7 +3556,9 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(MyBlockersCard, {
+  }) : null, pg === "myscore" && React.createElement(QualityIncidentsCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(MyBlockersCard, {
     user: user
   }), pg === "myscore" && pbIsAdmin(user) && React.createElement(PointBriefAdmin, {
     user: user
@@ -33428,6 +33430,94 @@ function MyBlockersCard({ user }) {
     sec('Charged to you — confirm or dispute today (auto-confirms at end of day)', toConfirm),
     sec('Raised by you — still open', mine),
     sec('Disputes waiting for Jigar / Amol', disputes),
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+// ── Quality incidents (point system Quality 20, 2026-09-28) ──
+const QI_REASONS = {
+  'Printing': ['Reprint — wrong colour', 'Reprint — wrong size / crop', 'Reprint — damaged / defect', 'Wrong material used'],
+  'Fabrication': ['Rework — measurement error', 'Rework — finishing defect', 'Wrong material / hardware used'],
+  'Installation': ['Return visit — incomplete work', 'Snag reported by client', 'Damage at site'],
+  'Dispatch': ['Wrong item delivered', 'Short delivery', 'Damaged in transit (packing)'],
+  'Design': ['Our-error revision', 'Wrong file sent to production'],
+  'Estimation': ['Quote error — rate / quantity', 'Wrong spec in quote'],
+  'Client servicing': ['Docket returned incomplete', 'Wrong information to client', 'Client complaint'],
+  'Banking servicing': ['Wrong photo uploaded', 'Site missed', 'Client complaint'],
+  'Accounts': ['Invoice rejected by client', 'Wrong entry / amount', 'Statutory deadline missed']
+};
+const qiReasonsFor = team => { const k = Object.keys(QI_REASONS).find(t => (team || '').startsWith(t)); return (k ? QI_REASONS[k] : []).concat(['Other (explain in note)']); };
+function QualityIncidentsCard({ user }) {
+  const me = pbKey(user);
+  const adm = ['JIGAR', 'AMOL'].includes(me);
+  const [rep, setRep] = React.useState(null);
+  const [rows, setRows] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  const [f, setF] = React.useState({ person: '', reason: '', job: '', note: '' });
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+  const load = () => {
+    sb.from('score_reporting').select('*').then(r => setRep(r.error ? [] : (r.data || [])));
+    const since = new Date(); since.setDate(1); since.setHours(0, 0, 0, 0); since.setMonth(since.getMonth() - 1);
+    sb.from('quality_incidents').select('*').gte('logged_at', since.toISOString()).order('logged_at', { ascending: false }).then(r => setRows(r.error ? [] : (r.data || [])));
+  };
+  React.useEffect(load, []);
+  if (!rep) return null;
+  const team = rep.filter(r => adm ? r.person_key !== me : r.lead_key === me);
+  const isLead = team.length > 0;
+  const mine = rows.filter(r => r.person_key === me);
+  const teamRows = rows.filter(r => team.some(t => t.person_key === r.person_key));
+  const disputes = adm ? rows.filter(r => r.status === 'disputed') : [];
+  if (!isLead && !mine.length && !disputes.length) return null;
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  const sel = team.find(t => t.person_key === f.person);
+  const act = async (id, action, text) => { setBusy(true); setErr(''); const r = await sb.rpc('erp_incident_act', { p_id: id, p_action: action, p_text: text || null }); setBusy(false); if (r.error) setErr(r.error.message); else load(); };
+  const log = async () => {
+    if (!f.person || !f.reason) { setErr('Pick the person and the reason'); return; }
+    if (f.reason.startsWith('Other') && !f.note.trim()) { setErr('Explain "Other" in the note'); return; }
+    setBusy(true); setErr(''); setMsg('');
+    const r = await sb.rpc('erp_incident_log', { p_person: f.person, p_reason: f.reason, p_job: f.job.trim() || null, p_note: f.note.trim() || null });
+    setBusy(false);
+    if (r.error) { setErr(r.error.message); return; }
+    setMsg('Logged: −5 Quality for ' + nm(f.person) + '. They can dispute within 3 days.');
+    setF({ person: '', reason: '', job: '', note: '' }); setOpen(false); load();
+  };
+  const stC = { active: '#e0574f', disputed: '#f59e0b', upheld: '#e0574f', voided: '#64748b', withdrawn: '#64748b' };
+  const when = d => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const Row = ({ q, showWho }) => {
+    const canDispute = q.person_key === me && q.status === 'active' && (Date.now() - new Date(q.logged_at).getTime()) < 3 * 86400000;
+    const btn = c => ({ padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid ' + c, background: c + '22' });
+    return React.createElement("div", { style: { border: '1px solid #1f2937', borderRadius: 8, padding: 8, marginTop: 6, background: '#0a0f1a' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+        React.createElement("b", { style: { fontSize: 12, color: '#e2e8f0' } }, (showWho ? nm(q.person_key) + ' — ' : '') + q.reason + (['active', 'upheld', 'disputed'].includes(q.status) ? '  (−' + q.points + ')' : '')),
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: stC[q.status] } }, q.status)),
+      React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 3 } },
+        (q.job_id ? 'Job ' + q.job_id + ' · ' : '') + 'logged by ' + nm(q.logged_by) + ' ' + when(q.logged_at), q.note ? ' · "' + q.note + '"' : '', q.dispute_reason ? ' · disputed: "' + q.dispute_reason + '"' : ''),
+      React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+        canDispute ? React.createElement("button", { type: 'button', disabled: busy, style: btn('#f59e0b'), onClick: () => { const r = prompt('Why is this incident wrong?'); if (r && r.trim()) act(q.id, 'dispute', r.trim()); } }, 'Dispute') : null,
+        (q.logged_by === me || adm) && ['active', 'disputed'].includes(q.status) ? React.createElement("button", { type: 'button', disabled: busy, style: btn('#64748b'), onClick: () => { if (confirm('Withdraw this incident?')) act(q.id, 'withdraw'); } }, 'Withdraw') : null,
+        adm && q.status === 'disputed' ? React.createElement("button", { type: 'button', disabled: busy, style: btn('#e0574f'), onClick: () => act(q.id, 'uphold') }, 'Uphold (−' + q.points + ')') : null,
+        adm && q.status === 'disputed' ? React.createElement("button", { type: 'button', disabled: busy, style: btn('#2fb37a'), onClick: () => act(q.id, 'void') }, 'Void') : null));
+  };
+  const sec = (t, list, who) => list.length ? React.createElement("div", { style: { marginTop: 8 } }, React.createElement("div", { style: { fontSize: 11.5, fontWeight: 800, color: '#cbd5e1' } }, t + ' (' + list.length + ')'), list.slice(0, 15).map(q => React.createElement(Row, { key: q.id, q, showWho: who }))) : null;
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 10 } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { color: '#e3a008', fontSize: 13 } }, "⚠ Quality incidents"),
+      isLead ? React.createElement("button", { type: 'button', onClick: () => { setOpen(!open); setErr(''); setMsg(''); }, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#e0574f22' } }, open ? 'Cancel' : '+ Log incident (−5)') : null),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Quality starts at 20 each month. Each incident is −5. The person can dispute within 3 days; Amol or Jigar decides."),
+    open ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 8 } },
+      React.createElement("select", { className: "in", value: f.person, onChange: e => setF({ ...f, person: e.target.value, reason: '' }) },
+        React.createElement("option", { value: '' }, '— Who? —'),
+        team.map(t => React.createElement("option", { key: t.person_key, value: t.person_key }, nm(t.person_key) + ' · ' + t.team))),
+      React.createElement("select", { className: "in", value: f.reason, disabled: !f.person, onChange: e => setF({ ...f, reason: e.target.value }) },
+        React.createElement("option", { value: '' }, '— What went wrong? —'),
+        qiReasonsFor(sel && sel.team).map(r => React.createElement("option", { key: r, value: r }, r))),
+      React.createElement("input", { className: "in", value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no. (optional, e.g. 12302-2627)' }),
+      React.createElement("input", { className: "in", value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Note (what happened)' }),
+      React.createElement("button", { type: 'button', disabled: busy, onClick: log, style: { padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#e0574f' } }, busy ? '…' : 'Log incident')) : null,
+    msg ? React.createElement("div", { style: { color: '#4ade80', fontSize: 11.5, marginTop: 6 } }, msg) : null,
+    sec('Against you (this and last month)', mine, false),
+    sec(adm ? 'Disputes waiting for you' : '', disputes, true),
+    isLead ? sec('Your team (this and last month)', teamRows.filter(q => q.status !== 'disputed' || !adm), true) : null,
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
 function MyScorePage({ user }) {
