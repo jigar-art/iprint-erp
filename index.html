@@ -7009,7 +7009,10 @@ function JobDetail({
         }
       }, d)));
     }))) : null;
-  })(), React.createElement(JobBlockers, {
+  })(), React.createElement(JobCredit, {
+    job: j,
+    user: user
+  }), React.createElement(JobBlockers, {
     job: j,
     user: user
   }), ['Draft', 'Quotation Sent', 'PO Pending'].includes(j.status) && !j.tat_plan_approved_at && (j.status === 'Draft' || j.tat_plan_required) ? React.createElement(JobTatApproval, {
@@ -33625,6 +33628,43 @@ function DutiesCard({ user }) {
           : React.createElement("button", { type: 'button', onClick: () => { setForm({ def: d, note: '', file: null }); setErr(''); }, style: { marginTop: 6, padding: '4px 11px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + (overdue ? '#e0574f' : '#22c55e'), background: (overdue ? '#e0574f' : '#22c55e') + '22' } }, overdue ? 'Mark done (late)' : 'Mark done')) : null);
     }),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+// ── Credit strip in job detail (point system, 2026-09-28): Designed by · banking Assigned to · who uploaded ──
+function JobCredit({ job, user }) {
+  const me = pbKey(user);
+  const [cls, setCls] = React.useState(job && job.job_class || null);
+  const [vals, setVals] = React.useState({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '' });
+  const [err, setErr] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    setVals({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '' });
+    if (job && !job.job_class && job.client_id) sb.from('clients').select('client_class').eq('id', job.client_id).maybeSingle().then(r => setCls(r.data && r.data.client_class || 'A'));
+    else setCls(job && job.job_class || 'A');
+  }, [job && job.id]);
+  if (!job) return null;
+  const designDone = job.designed_by || !/^Quotation|^PO Pending|^Design|^Active/.test(job.status || '');
+  const isBank = cls === 'B';
+  const up = [['Photo', job.image_uploaded_by], ['POD', job.pod_uploaded_by], ['IC', job.ic_uploaded_by], ['DC', job.dc_uploaded_by]].filter(x => x[1]);
+  if (!designDone && !isBank && !up.length) return null;
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const set = async (field, v) => {
+    setBusy(true); setErr('');
+    const r = await sb.rpc('erp_set_credit', { p_job: job.id, p_field: field, p_person: v || null });
+    setBusy(false);
+    if (r.error) { setErr(r.error.message); return; }
+    setVals(p => ({ ...p, [field]: v })); job[field] = v || null;
+  };
+  const chip = (on, can) => ({ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: can ? 'pointer' : 'default', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#94a3b8', opacity: !can && !on ? 0.5 : 1 });
+  const picker = (label, field, opts, can, dflt) => React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+    React.createElement("span", { style: { fontSize: 11, color: '#94a3b8', minWidth: 110 } }, label),
+    opts.map(o => React.createElement("button", { key: o, type: 'button', disabled: !can || busy, onClick: () => can && set(field, o), style: chip((vals[field] || dflt) === o, can) }, nm(o))),
+    !vals[field] && dflt ? React.createElement("span", { style: { fontSize: 10, color: '#64748b' } }, '(not set — counts as ' + nm(dflt) + ')') : null);
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginTop: 8, display: 'grid', gap: 6 } },
+    React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "🏷 Credit (point system)"),
+    designDone ? picker('Designed by', 'designed_by', ['PRAJAKTA', 'VIKAS'], ['PRAJAKTA', 'AMOL', 'JIGAR'].includes(me), 'PRAJAKTA') : null,
+    isBank ? picker('Banking site assigned to', 'bank_assignee', ['PRIYANKA', 'HARSHALA'], ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me), 'PRIYANKA') : null,
+    up.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'Uploaded by: ' + up.map(x => x[0] + ' — ' + nm(x[1])).join(' · ')) : null,
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5 } }, err) : null);
 }
 function MyScorePage({ user }) {
   const [rows, setRows] = React.useState(null);
