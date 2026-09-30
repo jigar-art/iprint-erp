@@ -49874,6 +49874,8 @@ function PettyCashPage({
     purpose: '',
     jobs: '',
     category: '',
+    meal: '',
+    mealCtx: '',
     files: []
   });
   const [cs, setCs] = useState(null);
@@ -50222,6 +50224,41 @@ function PettyCashPage({
     }[data.result] || 'Result: ' + data.result;
     show(msg, !/^\u26a0/.test(msg));
   };
+  const MEAL_CAT = 'Food - Site/Late Night';
+  const mealCfg = cfg && cfg.meal_rates || null;
+  const hhmmNow = () => {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  };
+  const hadNightDinnerWithin = hours => {
+    const cutoff = Date.now() - hours * 3600000;
+    return reqs.some(r => r.requester_id === me && r.category === MEAL_CAT && (r.meal_kind === 'dinner' || /night dinner/i.test(r.purpose || '')) && r.mealctx === 'mumbai_night' && new Date(r.created_at).getTime() >= cutoff);
+  };
+  // returns {amount} or {block:'reason'} or null (no rule)
+  const mealResolve = (meal, ctx) => {
+    if (!mealCfg || !meal || !ctx) return null;
+    if (ctx === 'outstation') {
+      const a = mealCfg.outstation && mealCfg.outstation[meal];
+      return a != null ? { amount: a } : null;
+    }
+    if (ctx === 'mumbai_night') {
+      const m = mealCfg.mumbai_night && mealCfg.mumbai_night[meal];
+      if (!m) return { block: 'No ' + meal + ' allowance is defined for a Mumbai night claim.' };
+      const now = hhmmNow();
+      if (m.from && m.to && (now < m.from || now > m.to)) return { block: meal.charAt(0).toUpperCase() + meal.slice(1) + ' can only be claimed between ' + m.from + ' and ' + m.to + ' (now ' + now + ').' };
+      if (m.requires_night_dinner_hours && !hadNightDinnerWithin(m.requires_night_dinner_hours)) return { block: meal.charAt(0).toUpperCase() + meal.slice(1) + ' unlocks only if you claimed a night dinner in the last ' + m.requires_night_dinner_hours + ' hours.' };
+      return { amount: m.amount };
+    }
+    return null;
+  };
+  const applyMeal = (meal, ctx) => {
+    setForm(pp => {
+      const nx = { ...pp, meal: meal, mealCtx: ctx };
+      const res = mealResolve(meal, ctx);
+      if (res && res.amount != null) nx.amount = String(res.amount);
+      return nx;
+    });
+  };
   const submit = async () => {
     const amt = parseFloat(form.amount);
     if (!amt || amt <= 0) {
@@ -50235,6 +50272,13 @@ function PettyCashPage({
     if (!form.category && form.kind !== 'booking') {
       show('Pick a category - type a word like auto, porter or dinner', false);
       return;
+    }
+    if (form.category === MEAL_CAT && form.meal && form.mealCtx) {
+      const mres = mealResolve(form.meal, form.mealCtx);
+      if (mres && mres.block) {
+        show('\u26a0\ufe0f ' + mres.block, false);
+        return;
+      }
     }
     if (!jobNums.length && !(form.kind !== 'booking' && exemptCats.includes(form.category))) {
       show('Job number is required. Only office expenses (' + exemptCats.join(', ') + ') can go without a job.', false);
@@ -50268,7 +50312,9 @@ function PettyCashPage({
       amount: amt,
       purpose: form.purpose.trim(),
       job_ids: jobs.length ? jobs : null,
-      category: form.category && form.category !== 'Other' ? form.category : null
+      category: form.category && form.category !== 'Other' ? form.category : null,
+      meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
+      mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
@@ -50288,6 +50334,8 @@ function PettyCashPage({
       purpose: '',
       jobs: '',
       category: '',
+      meal: '',
+      mealCtx: '',
       files: []
     });
     setCatQ('');
@@ -51075,7 +51123,83 @@ function PettyCashPage({
     }
   }, l))), /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, "Amount (₹)"), /*#__PURE__*/React.createElement("input", {
+  }, "Amount (₹)"), form.category === 'Food - Site/Late Night' && cfg && cfg.meal_rates ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      border: '1px solid #1a2030',
+      borderRadius: 10,
+      padding: '10px 12px',
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#94a3b8',
+      marginBottom: 8
+    }
+  }, "Meal allowance - pick where, then the meal, to auto-fill the amount"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginBottom: 8
+    }
+  }, [['outstation', 'Outstation'], ['mumbai_night', 'Mumbai - Night']].map(o => /*#__PURE__*/React.createElement("button", {
+    key: o[0],
+    onClick: () => applyMeal(form.meal, o[0]),
+    style: {
+      flex: 1,
+      background: form.mealCtx === o[0] ? '#10b98122' : '#070a10',
+      color: form.mealCtx === o[0] ? '#10b981' : '#cbd5e1',
+      border: '1px solid ' + (form.mealCtx === o[0] ? '#10b981' : '#1a2030'),
+      borderRadius: 8,
+      padding: '8px 6px',
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: 'pointer'
+    }
+  }, o[1]))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, ['breakfast', 'lunch', 'dinner'].map(mk => {
+    const avail = form.mealCtx ? mealResolve(mk, form.mealCtx) : null;
+    const off = !form.mealCtx || avail == null;
+    return /*#__PURE__*/React.createElement("button", {
+      key: mk,
+      disabled: off,
+      onClick: () => applyMeal(mk, form.mealCtx),
+      style: {
+        flex: 1,
+        background: form.meal === mk ? '#10b98122' : '#070a10',
+        color: off ? '#4b5563' : form.meal === mk ? '#10b981' : '#cbd5e1',
+        border: '1px solid ' + (form.meal === mk ? '#10b981' : '#1a2030'),
+        borderRadius: 8,
+        padding: '8px 6px',
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: off ? 'not-allowed' : 'pointer',
+        textTransform: 'capitalize'
+      }
+    }, mk);
+  })), form.meal && form.mealCtx && (() => {
+    const r = mealResolve(form.meal, form.mealCtx);
+    if (r && r.block) return /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: '#f0b429',
+        fontSize: 12,
+        marginTop: 8,
+        fontWeight: 600
+      }
+    }, '\u26a0\ufe0f ' + r.block);
+    if (r && r.amount != null) return /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: '#10b981',
+        fontSize: 12,
+        marginTop: 8
+      }
+    }, 'Auto-filled ' + pcRupee(r.amount) + ' - you can change it if needed.');
+    return null;
+  })()) : null, /*#__PURE__*/React.createElement("input", {
     type: "number",
     inputMode: "decimal",
     value: form.amount,
