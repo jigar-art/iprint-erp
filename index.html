@@ -50340,6 +50340,12 @@ function PettyCashPage({
         show('Enter a number', false);
         break;
       }
+      const aiRead = b.ai && b.ai.total != null ? Number(b.ai.total) : null;
+      const adv = Number(r.amount) || 0;
+      const warns = [];
+      if (aiRead != null && Math.abs(aiRead - amt) > 1) warns.push('The photo was read as ' + pcRupee(aiRead) + ', but you typed ' + pcRupee(amt) + '.');
+      if (adv > 0 && amt > adv * 3) warns.push('That is much more than the ' + pcRupee(adv) + ' advance for this request.');
+      if (warns.length && !confirm('\u26a0\ufe0f Please double-check bill ' + (k + 1) + ':\n\n- ' + warns.join('\n- ') + '\n\nTap OK only if ' + pcRupee(amt) + ' is really the amount on the bill.')) continue;
       const {
         error
       } = await sb.from('petty_cash_bills').update({
