@@ -34411,9 +34411,10 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
       const urls = [];
       for (const f of files) {
         const path = 'install/' + sel + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
-        const up = await sb.storage.from('uploads').upload(path, f, { upsert: false });
+        const toUp = typeof compressImage === 'function' && /^image\//.test(f.type || '') ? await compressImage(f) : f;
+        const up = await sb.storage.from('Uploads').upload(path, toUp, { upsert: false, contentType: toUp.type || undefined });
         if (up.error) throw up.error;
-        const pub = sb.storage.from('uploads').getPublicUrl(path);
+        const pub = sb.storage.from('Uploads').getPublicUrl(path);
         urls.push(pub?.data?.publicUrl || path);
       }
       const row = {
