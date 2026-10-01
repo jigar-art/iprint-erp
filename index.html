@@ -49541,6 +49541,25 @@ function QuotesPage({
   const [tab, setTab] = useState('open');
   const [dept, setDept] = useState('All');
   const [busy, setBusy] = useState(0);
+  // Auto-refresh: every 60 s while the tab is visible, and immediately when the user comes back to it.
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'visible' && reloadRef.current) reloadRef.current();
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    const iv = setInterval(tick, 60000);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', tick);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', tick);
+    };
+  }, []);
   const uname = (user && user.name || '').toUpperCase();
   const mineOnly = r => {
     if (isBoss) return true;
@@ -49637,7 +49656,7 @@ function QuotesPage({
       fontSize: 10,
       color: "#64748b"
     }
-  }, "Same-day rule: received before 5:00 pm \u2192 due 5:00 pm today"), React.createElement("button", {
+  }, "Same-day rule: received before 5:00 pm \u2192 due 5:00 pm today \u00b7 auto-refreshes every minute"), React.createElement("button", {
     onClick: () => reload && reload(),
     style: {
       marginLeft: "auto",
