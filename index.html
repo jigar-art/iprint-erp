@@ -33751,9 +33751,19 @@ function ScorecardCard({ user }) {
   const [mOff, setMOff] = React.useState(0);
   const [rows, setRows] = React.useState(null);
   const [open, setOpen] = React.useState(null);
+  const [prev, setPrev] = React.useState(null);
   const monthDate = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - mOff); return d; })();
   const iso = monthDate.getFullYear() + '-' + String(monthDate.getMonth() + 1).padStart(2, '0') + '-01';
-  React.useEffect(() => { setRows(null); sb.rpc('erp_my_scorecard', { p_month: iso }).then(r => setRows(r.error ? [] : (r.data || []))); }, [iso]);
+  React.useEffect(() => { setRows(null); setPrev(null); sb.rpc('erp_my_scorecard', { p_month: iso }).then(r => setRows(r.error ? [] : (r.data || []))); }, [iso]);
+  // Early in a month (no score yet): also fetch last month so the person always sees a score
+  React.useEffect(() => {
+    if (mOff !== 0 || !rows) return;
+    const m = rows.find(r => r.person_key === me);
+    if (m && m.final_score != null) return;
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    const p = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+    sb.rpc('erp_my_scorecard', { p_month: p }).then(r => { const x = (r.data || []).find(y => y.person_key === me); setPrev(x || null); });
+  }, [rows, mOff]);
   if (rows === null) return null;
   const mine = rows.find(r => r.person_key === me);
   const others = rows.filter(r => r.person_key !== me).sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1));
@@ -33783,6 +33793,11 @@ function ScorecardCard({ user }) {
       React.createElement("div", { style: { display: 'flex', gap: 4 } }, [[0, 'This month'], [1, 'Last month']].map(([o, l]) => React.createElement("button", { key: o, type: 'button', onClick: () => setMOff(o), style: { padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (mOff === o ? '#e3a008' : '#334155'), background: mOff === o ? '#e3a008' : 'transparent', color: mOff === o ? '#111' : '#cbd5e1' } }, l)))),
     upd ? React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 2 } }, 'Updated hourly · last ' + new Date(upd).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })) : null,
     mine ? big(mine) : null,
+    mOff === 0 && mine && mine.final_score == null ? React.createElement("div", { style: { marginTop: 10, border: '1px dashed #e3a00866', borderRadius: 8, padding: 10 } },
+      React.createElement("div", { style: { fontSize: 12.5, color: '#fde68a', fontWeight: 700 } }, "\u23f3 " + mLabel + " scoring has just started \u2014 your first score appears after a few working days of entries. Log your work in the ERP every day."),
+      prev ? React.createElement("div", { style: { marginTop: 8 } },
+        React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, "Meanwhile, your " + new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toLocaleDateString('en-IN', { month: 'long' }) + " score (practice \u2014 not counted):"),
+        big(prev)) : null) : null,
     others.length ? React.createElement("div", { style: { marginTop: 12 } },
       React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#cbd5e1', marginBottom: 4 } }, (['JIGAR', 'AMOL'].includes(me) ? 'Everyone' : 'Your team') + ' (' + others.length + ') — tap a name for details'),
       React.createElement("div", { style: { overflowX: 'auto' } }, React.createElement("table", { style: { width: '100%', fontSize: 12, borderCollapse: 'collapse' } },
