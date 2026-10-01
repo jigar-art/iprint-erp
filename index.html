@@ -33502,6 +33502,9 @@ function QualityIncidentsCard({ user }) {
   const [rows, setRows] = React.useState([]);
   const [open, setOpen] = React.useState(false);
   const [f, setF] = React.useState({ person: '', reason: '', job: '', note: '' });
+  // 1 Oct 2026: reasons come from the person's department quality categories (database)
+  const [qr, setQr] = React.useState([]);
+  React.useEffect(() => { setQr([]); if (f.person) sb.rpc('erp_incident_reasons', { p_person: f.person }).then(r => setQr(r.error ? [] : (r.data || []))); }, [f.person]);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
   const [msg, setMsg] = React.useState('');
@@ -33553,14 +33556,14 @@ function QualityIncidentsCard({ user }) {
     React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
       React.createElement("b", { style: { color: '#e3a008', fontSize: 13 } }, "⚠ Quality incidents"),
       isLead ? React.createElement("button", { type: 'button', onClick: () => { setOpen(!open); setErr(''); setMsg(''); }, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#e0574f22' } }, open ? 'Cancel' : '+ Log incident (−5)') : null),
-    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Quality starts at 20 each month. Each incident is −5. The person can dispute within 3 days; Amol or Jigar decides."),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Quality is 20 points split by department (e.g. Printing: Waste 10 + Errors 10). Each incident costs its category's points. The person can dispute within 3 days; Amol or Jigar decides."),
     open ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 8 } },
       React.createElement("select", { className: "in", value: f.person, onChange: e => setF({ ...f, person: e.target.value, reason: '' }) },
         React.createElement("option", { value: '' }, '— Who? —'),
         team.map(t => React.createElement("option", { key: t.person_key, value: t.person_key }, nm(t.person_key) + ' · ' + t.team))),
       React.createElement("select", { className: "in", value: f.reason, disabled: !f.person, onChange: e => setF({ ...f, reason: e.target.value }) },
         React.createElement("option", { value: '' }, '— What went wrong? —'),
-        qiReasonsFor(sel && sel.team).map(r => React.createElement("option", { key: r, value: r }, r))),
+        qr.map(r => React.createElement("option", { key: r.code, value: r.code }, r.label + ' (\u2212' + r.per_incident + ', max ' + r.cap + ')'))),
       React.createElement("input", { className: "in", value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no. (optional, e.g. 12302-2627)' }),
       React.createElement("input", { className: "in", value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Note (what happened)' }),
       React.createElement("button", { type: 'button', disabled: busy, onClick: log, style: { padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#e0574f' } }, busy ? '…' : 'Log incident')) : null,
