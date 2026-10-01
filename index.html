@@ -3556,7 +3556,9 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(ScorecardCard, {
+  }) : null, pg === "myscore" && React.createElement(ScoreSendCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(ScorecardCard, {
     user: user
   }), pg === "myscore" && React.createElement(HowMyScore, {
     user: user
@@ -33793,6 +33795,51 @@ function ScorecardCard({ user }) {
             React.createElement("td", { className: 'mn', style: { padding: '5px 6px', fontWeight: 800 } }, r.final_score == null ? '—' : Number(r.final_score).toFixed(1)),
             React.createElement("td", { style: { padding: '5px 6px', fontWeight: 900, color: r.band ? bandC[r.band] : '#475569' } }, r.band || '—')),
           open === r.person_key ? React.createElement("tr", null, React.createElement("td", { colSpan: 8, style: { padding: '0 6px 8px' } }, big(r))) : null)))))) : null);
+}
+// ── One-tap WhatsApp scorecards (admin, 2026-10-01): each tap opens WhatsApp with the message pre-filled ──
+function ScoreSendCard({ user }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [preview, setPreview] = React.useState(null);
+  const [ph, setPh] = React.useState({});
+  const [err, setErr] = React.useState('');
+  const load = () => sb.rpc('erp_daily_score_texts').then(r => { if (r.error) { setErr(r.error.message); setRows([]); } else setRows(r.data || []); });
+  React.useEffect(() => { if (['JIGAR', 'AMOL'].includes(me)) load(); }, []);
+  if (!['JIGAR', 'AMOL'].includes(me) || !rows) return null;
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  const sent = rows.filter(r => r.sent_at).length, ready = rows.filter(r => r.phone).length;
+  const send = async r => {
+    window.open('https://wa.me/' + r.phone + '?text=' + encodeURIComponent(r.msg), '_blank');
+    const x = await sb.rpc('erp_score_wa_mark', { p_key: r.person_key, p_kind: r.kind });
+    if (x.error) setErr(x.error.message); else setRows(rs => rs.map(y => y === r ? { ...y, sent_at: new Date().toISOString() } : y));
+  };
+  const savePhone = async k => {
+    setErr('');
+    const x = await sb.rpc('erp_set_phone', { p_key: k, p_phone: ph[k] || '' });
+    if (x.error) setErr(x.error.message); else load();
+  };
+  const btn = (c, solid) => ({ padding: '4px 11px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: solid ? '#111' : '#fff', border: '1px solid ' + c, background: solid ? c : c + '22' });
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 10, border: '1px solid #25d36655' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }, onClick: () => setOpen(!open) },
+      React.createElement("b", { style: { color: '#25d366', fontSize: 13 } }, "📤 Send today's scorecards on WhatsApp"),
+      React.createElement("span", { style: { fontSize: 12, color: '#cbd5e1' } }, '✓ ' + sent + ' / ' + ready + ' sent' + (rows.length > ready ? ' · ' + (rows.length - ready) + ' need a number' : '') + ' · ' + (open ? '▲' : '▼'))),
+    open ? React.createElement("div", { style: { marginTop: 8 } },
+      React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginBottom: 6 } }, "Tap Send — WhatsApp opens with the message already written in their language. Press send there, then come back for the next one. Sent rows are remembered for today."),
+      rows.map((r, i) => React.createElement("div", { key: r.person_key + r.kind, style: { borderTop: '1px solid #1f2937', padding: '6px 0' } },
+        React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          React.createElement("b", { style: { fontSize: 12.5, minWidth: 92 } }, nm(r.person_key)),
+          React.createElement("span", { style: { fontSize: 10.5, padding: '1px 7px', borderRadius: 999, border: '1px solid #334155', color: '#94a3b8' } }, (r.kind === 'team' ? 'team summary · ' : '') + (r.lang === 'hi' ? 'हिन्दी' : 'English')),
+          r.phone ? React.createElement("span", { style: { fontSize: 11, color: '#64748b' } }, '+' + r.phone) : null,
+          React.createElement("span", { style: { flex: 1 } }),
+          React.createElement("button", { type: 'button', onClick: () => setPreview(preview === i ? null : i), style: btn('#64748b') }, preview === i ? 'Hide' : 'Preview'),
+          r.phone
+            ? React.createElement("button", { type: 'button', onClick: () => send(r), style: r.sent_at ? btn('#22c55e') : btn('#25d366', true) }, r.sent_at ? '✓ Sent — send again' : 'Send on WhatsApp')
+            : React.createElement("span", { style: { display: 'flex', gap: 4 } },
+                React.createElement("input", { className: 'in', placeholder: '10-digit mobile', value: ph[r.person_key] || '', onChange: e => setPh({ ...ph, [r.person_key]: e.target.value }), style: { width: 120, fontSize: 12 } }),
+                React.createElement("button", { type: 'button', onClick: () => savePhone(r.person_key), style: btn('#f59e0b') }, 'Save'))),
+        preview === i ? React.createElement("pre", { style: { whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 12, background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: 8, marginTop: 6, color: '#e2e8f0' } }, r.msg) : null))) : null,
+    err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
 function MyScorePage({ user }) {
   const [rows, setRows] = React.useState(null);
