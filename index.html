@@ -15466,26 +15466,6 @@ function DeptPage({
     },
     onClick: () => sortBy(k)
   }, label, sortIcon(k));
-  const pen = useMemo(() => {
-    const rows = jobs.filter(j => {
-      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
-      if (ad === null) return true;
-      return cur.match(j);
-    });
-    if (!sortKey) return rows;
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return rows.sort((a, b) => {
-      const va = String(sortVal(a, sortKey)).trim();
-      const vb = String(sortVal(b, sortKey)).trim();
-      if (!va && !vb) return 0;
-      if (!va) return 1;
-      if (!vb) return -1;
-      return va.localeCompare(vb, undefined, {
-        numeric: true,
-        sensitivity: 'base'
-      }) * dir;
-    });
-  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir]);
   // Installation delay vs TAT (2026-09-21) — same data as the Install Delay page
   const [instAge, setInstAge] = useState(0);
   const [instWho, setInstWho] = useState('all');
@@ -15516,6 +15496,27 @@ function DeptPage({
     if (!r || !r.due_at || r.status !== j.status) return null;
     return (Date.now() - new Date(r.due_at).getTime()) / 3600000;
   };
+  // 2026-10-02: moved below ageDaysOf/delayHoursOf/slaMap - sorting by Age or Delay read them before they were defined and crashed the page
+  const pen = useMemo(() => {
+    const rows = jobs.filter(j => {
+      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
+      if (ad === null) return true;
+      return cur.match(j);
+    });
+    if (!sortKey) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return rows.sort((a, b) => {
+      const va = String(sortVal(a, sortKey)).trim();
+      const vb = String(sortVal(b, sortKey)).trim();
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return va.localeCompare(vb, undefined, {
+        numeric: true,
+        sensitivity: 'base'
+      }) * dir;
+    });
+  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap]);
   const lateDaysOf = j => {
     const r = delayMap.get(j.id);
     if (!r || !r.due_at) return null;
