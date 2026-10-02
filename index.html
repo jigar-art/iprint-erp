@@ -2867,8 +2867,14 @@ function MainApp({
   const loadInstDelay = React.useCallback(async () => {
     const uname = (user && user.name || '').toUpperCase();
     if (!uname) return;
-    const { data: allSla, error } = await sb.from('v_job_sla').select('job_id,client_name,client_class,status,owner_person,owner_label,stage_entered_at,due_at,rag,days_in_stage,coordinator');
-    if (error || !allSla) return;
+    // 2026-10-02: page through v_job_sla - it has >1000 rows and PostgREST returns max 1000, so random jobs lost their Delay
+    const allSla = [];
+    for (let from = 0; from < 20000; from += 1000) {
+      const { data: pg, error } = await sb.from('v_job_sla').select('job_id,client_name,client_class,status,owner_person,owner_label,stage_entered_at,due_at,rag,days_in_stage,coordinator').order('job_id').range(from, from + 999);
+      if (error || !pg) return;
+      allSla.push(...pg);
+      if (pg.length < 1000) break;
+    }
     setSlaRows(allSla);
     const data = allSla.filter(r => ['Recee', 'Installation WIP', 'IC Pending'].includes(r.status));
     setInstRows(data);
