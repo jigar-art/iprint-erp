@@ -3439,6 +3439,7 @@ function MainApp({
     sp: setPg
   }), pg === "disp" && React.createElement(DispPage, {
     logs: dLogs,
+    setDLogs: setDLogs,
     delBoys: delBoys,
     agencies: agencies,
     addNewAgency: addNewAgency,
@@ -23302,6 +23303,7 @@ function AccountsDocsMissing({ jobs }) {
 
 function DispPage({
   logs,
+  setDLogs,
   delBoys,
   agencies,
   addNewAgency,
@@ -23310,6 +23312,23 @@ function DispPage({
   jobs,
   show
 }) {
+  // 2 Oct 2026: reload dispatches from the database every time this page opens (the list was loaded once at login)
+  React.useEffect(() => {
+    if (!setDLogs) return;
+    let alive = true;
+    (async () => {
+      let all = [], from = 0;
+      for (;;) {
+        const r = await sb.from('dispatch_logs').select('*').order('id').range(from, from + 999);
+        if (r.error || !r.data) return;
+        all = all.concat(r.data);
+        if (r.data.length < 1000) break;
+        from += 1000;
+      }
+      if (alive) setDLogs(all);
+    })();
+    return () => { alive = false; };
+  }, []);
   const [sortKey, setSortKey] = React.useState(null);
   const [sortDir, setSortDir] = React.useState('asc');
   const sortBy = k => {
@@ -23545,8 +23564,10 @@ function DispPage({
   };
   const filtered = useMemo(() => {
     const q = dq.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter(l => String(l.job_id || "").toLowerCase().includes(q) || String(l.dispatch_type || "").toLowerCase().includes(q) || String(l.delivery_boy || "").toLowerCase().includes(q) || String(l.vehicle || "").toLowerCase().includes(q) || String(l.lr_no || "").toLowerCase().includes(q) || String(l.challan_no || "").toLowerCase().includes(q) || String(l.installer || "").toLowerCase().includes(q) || String(l.courier_name || "").toLowerCase().includes(q) || String(l.vendor_name || "").toLowerCase().includes(q) || String(l.batch_no || "").toLowerCase().includes(q) || String(l.date || "").toLowerCase().includes(q));
+    // newest first by default (date, then time entered)
+    const newest = arr => [...arr].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    if (!q) return newest(logs);
+    return newest(logs).filter(l => String(l.job_id || "").toLowerCase().includes(q) || String(l.dispatch_type || "").toLowerCase().includes(q) || String(l.delivery_boy || "").toLowerCase().includes(q) || String(l.vehicle || "").toLowerCase().includes(q) || String(l.lr_no || "").toLowerCase().includes(q) || String(l.challan_no || "").toLowerCase().includes(q) || String(l.installer || "").toLowerCase().includes(q) || String(l.courier_name || "").toLowerCase().includes(q) || String(l.vendor_name || "").toLowerCase().includes(q) || String(l.batch_no || "").toLowerCase().includes(q) || String(l.date || "").toLowerCase().includes(q));
   }, [dq, logs]);
   return React.createElement("div", {
     style: {
