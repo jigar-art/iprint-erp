@@ -49631,30 +49631,79 @@ function QuotesPage({
   };
   const visible = (rows || []).filter(mineOnly).filter(r => dept === 'All' || r.department === dept);
   const open = visible.filter(r => r.status === 'Pending');
-  const done = visible.filter(r => r.status !== 'Pending');
+  const done = visible.filter(r => r.status !== 'Pending').sort((x, y) => (y.needs_review ? 1 : 0) - (x.needs_review ? 1 : 0));
+  const nReview = done.filter(r => r.needs_review).length;
   const list = tab === 'open' ? open : done;
   const nRed = open.filter(r => r.sla_state === 'red').length;
   const nAmber = open.filter(r => r.sla_state === 'amber').length;
   const nLate = done.filter(r => r.was_late).length;
-  const markSent = async r => {
-    if (!window.confirm('Mark as sent: ' + (r.client_name || '') + '?\n\nThis stops the SLA clock and is recorded against your name.')) return;
-    setBusy(r.id);
-    const {
-      error
-    } = await sb.from('quote_requests').update({
-      status: 'Sent',
-      sent_at: new Date().toISOString(),
-      sent_by: uname,
-      updated_at: new Date().toISOString()
-    }).eq('id', r.id);
-    setBusy(0);
-    if (error) {
-      show('Could not update: ' + error.message, false);
+  // Mark sent needs proof (2 Oct 2026): email is checked server-side against estimation@'s sent quote mails;
+  // WhatsApp / other mailbox / phone need a note and go to Amol/Jigar for review.
+  const [proofFor, setProofFor] = useState(null);
+  const [pf, setPf] = useState({ method: 'email', job: '', note: '' });
+  const markSent = r => {
+    setPf({ method: 'email', job: r.job_no || '', note: '' });
+    setProofFor(r);
+  };
+  const submitProof = async () => {
+    const r = proofFor;
+    if (!r) return;
+    if (pf.method !== 'email' && pf.note.trim().length < 5) {
+      show('Add a note: who it was sent to and how', false);
       return;
     }
-    show('Marked sent', true);
+    setBusy(r.id);
+    const { data, error } = await sb.rpc('mark_quote_sent', {
+      p_id: r.id, p_method: pf.method, p_note: pf.note.trim() || null, p_job_no: pf.job.trim() || null, p_user: uname
+    });
+    setBusy(0);
+    if (error) {
+      const m = (error.message || '').replace(/^[A-Z_]+:\s*/, '');
+      show(/NO_QUOTE_MAIL/.test(error.message || '') ? 'No quote mail found: ' + m + '. Send it from estimation@ first, or pick another method.' : 'Could not mark sent: ' + m, false);
+      return;
+    }
+    setProofFor(null);
+    show(data && data.verified ? 'Verified \u2713 ' + (data.subject || '') : 'Marked sent \u2014 sent to Amol/Jigar for review', true);
     if (reload) reload();
   };
+  const reviewSend = async (r, action) => {
+    if (action === 'reopen' && !window.confirm('Reopen ' + (r.client_name || '') + '? The SLA clock restarts from the original due time.')) return;
+    setBusy(r.id);
+    const { error } = await sb.rpc('review_quote_send', { p_id: r.id, p_action: action, p_user: uname });
+    setBusy(0);
+    if (error) { show('Could not update: ' + error.message, false); return; }
+    show(action === 'verify' ? 'Send verified' : 'Reopened', true);
+    if (reload) reload();
+  };
+  const METHODS = [['email', 'Email from estimation@ (auto-checked)'], ['whatsapp', 'WhatsApp'], ['other_mailbox', "Amol's / Jigar's mailbox"], ['phone', 'Phone / in person']];
+  const inp = { width: '100%', boxSizing: 'border-box', padding: '7px 9px', fontSize: 12, background: '#060810', color: '#e2e8f0', border: '1px solid #1a2030', borderRadius: 6 };
+  const proofModal = proofFor && React.createElement("div", {
+    onClick: () => busy ? null : setProofFor(null),
+    style: { position: 'fixed', inset: 0, background: '#000a', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }
+  }, React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: { width: '100%', maxWidth: 420, background: '#0b0f1a', border: '1px solid #1a2030', borderRadius: 10, padding: 16 }
+  }, React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: '#e2e8f0' } }, "Mark sent \u2014 ", proofFor.client_name || ''),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '4px 0 12px' } }, proofFor.subject),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginBottom: 6 } }, "How was the quote sent?"),
+    METHODS.map(([k, label]) => React.createElement("label", {
+      key: k, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#e2e8f0', padding: '5px 0', cursor: 'pointer' }
+    }, React.createElement("input", { type: 'radio', name: 'qmethod', checked: pf.method === k, onChange: () => setPf({ ...pf, method: k }) }), label)),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '10px 0 4px' } },
+      pf.method === 'email' ? "Job no on the quote mail (needed if the quote went in a new mail)" : "Job no (optional)"),
+    React.createElement("input", { value: pf.job, onChange: e => setPf({ ...pf, job: e.target.value }), placeholder: 'e.g. 12391', inputMode: 'numeric', style: inp }),
+    pf.method !== 'email' && React.createElement(React.Fragment, null,
+      React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '10px 0 4px' } }, "Note \u2014 who it was sent to, and how (required)"),
+      React.createElement("input", { value: pf.note, onChange: e => setPf({ ...pf, note: e.target.value }), placeholder: 'e.g. PDF sent to Amit Nandi on WhatsApp 4:30 pm', style: inp }),
+      React.createElement("div", { style: { fontSize: 10, color: '#fbbf24', marginTop: 6 } }, "\u26a0 Not verifiable \u2014 Amol or Jigar will review this.")),
+    pf.method === 'email' && React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } },
+      "Checked against quote mails sent from estimation@ (with attachment, PFA, or \u201cJob no \u2026 Quote\u201d)."),
+    React.createElement("div", { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 } },
+      React.createElement("button", { onClick: () => setProofFor(null), disabled: !!busy,
+        style: { padding: '6px 12px', fontSize: 11, background: '#0b0f1a', color: '#94a3b8', border: '1px solid #1a2030', borderRadius: 6, cursor: 'pointer' } }, "Cancel"),
+      React.createElement("button", { onClick: submitProof, disabled: !!busy,
+        style: { padding: '6px 12px', fontSize: 11, background: '#e3a008', color: '#060810', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' } },
+        busy ? '...' : pf.method === 'email' ? 'Check & mark sent' : 'Mark sent (unverified)'))));
   const dropIt = async r => {
     const why = window.prompt('Reason for closing without a quote:');
     if (!why) return;
@@ -49698,7 +49747,7 @@ function QuotesPage({
     style: {
       padding: 12
     }
-  }, React.createElement("div", {
+  }, proofModal, React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -49755,7 +49804,7 @@ function QuotesPage({
       background: tab === t ? "#e3a00820" : "#0b0f1a",
       color: tab === t ? "#e3a008" : "#94a3b8"
     }
-  }, t === 'open' ? 'Open (' + open.length + ')' : 'Closed (' + done.length + ')')), ['All', 'Estimation', 'Design'].map(d => React.createElement("button", {
+  }, t === 'open' ? 'Open (' + open.length + ')' : 'Closed (' + done.length + (nReview ? ' \u00b7 ' + nReview + ' to review' : '') + ')')), ['All', 'Estimation', 'Design'].map(d => React.createElement("button", {
     key: d,
     onClick: () => setDept(d),
     style: {
@@ -49861,7 +49910,51 @@ function QuotesPage({
         color: "#38bdf8",
         textDecoration: "none"
       }
-    }, "Open mail"), r.status === 'Pending' && React.createElement("span", {
+    }, "Open mail"), r.status === 'Sent' && r.sent_method && React.createElement("span", {
+      title: r.sent_proof || '',
+      style: {
+        fontSize: 9,
+        padding: "1px 7px",
+        borderRadius: 9,
+        background: r.needs_review ? "#fbbf2420" : "#10b98120",
+        color: r.needs_review ? "#fbbf24" : "#34d399",
+        maxWidth: 320,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, r.needs_review ? '\u26a0 Unverified \u00b7 ' + r.sent_method.replace('_', ' ') + ': ' + (r.sent_proof || '') : '\u2713 ' + (r.sent_method === 'auto-email' ? 'Auto' : 'Verified') + ' \u00b7 ' + (r.sent_proof || 'email')), r.status === 'Sent' && r.needs_review && isBoss && React.createElement("span", {
+      style: {
+        marginLeft: "auto",
+        display: "flex",
+        gap: 6
+      }
+    }, React.createElement("button", {
+      disabled: busy === r.id,
+      onClick: () => reviewSend(r, 'reopen'),
+      style: {
+        padding: "3px 9px",
+        fontSize: 10,
+        background: "#0b0f1a",
+        color: "#f47067",
+        border: "1px solid #f4706755",
+        borderRadius: 5,
+        cursor: "pointer"
+      }
+    }, "Reopen"), React.createElement("button", {
+      disabled: busy === r.id,
+      onClick: () => reviewSend(r, 'verify'),
+      style: {
+        padding: "3px 9px",
+        fontSize: 10,
+        background: "#10b981",
+        color: "#060810",
+        border: "none",
+        borderRadius: 5,
+        fontWeight: 700,
+        cursor: "pointer"
+      }
+    }, busy === r.id ? "..." : "Verify")), r.status === 'Pending' && React.createElement("span", {
       style: {
         marginLeft: "auto",
         display: "flex",
