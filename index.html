@@ -34499,6 +34499,21 @@ function CrewPicker({ team, value, onChange }) {
     }));
 }
 
+// Previous stage before the job entered `cur` (2026-10-02): Recce done / Rectification done send the job back there
+async function erpPrevStage(jobId, cur, fallback) {
+  try {
+    const r = await sb.from('job_status_history').select('to_status,changed_at').eq('job_id', jobId).order('changed_at', { ascending: false }).limit(60);
+    const rows = (r && r.data) || [];
+    const i = rows.findIndex(x => x.to_status === cur);
+    if (i >= 0) {
+      for (let k = i + 1; k < rows.length; k++) {
+        const st = rows[k].to_status;
+        if (st && st !== cur && !['Cancelled', 'Draft', 'Recee', 'Rectification'].includes(st) && ALL_ST_NEW.includes(st)) return st;
+      }
+    }
+  } catch (e) {}
+  return fallback;
+}
 function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [sel, setSel] = React.useState('');
   const [selB, setSelB] = React.useState([]);
@@ -34509,32 +34524,40 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [files, setFiles] = React.useState([]);
   const [crew, setCrew] = React.useState([]);
   const [busy, setBusy] = React.useState(false);
+  // Work type (2026-10-02, Jigar): site crew logs Recce/Survey, Supervision, Rectification as well as Installation
+  const [wt, setWt] = React.useState('Installation');
+  const [siteName, setSiteName] = React.useState('');
+  const NOJOB = '__nojob__';
   const [, force] = React.useState(0);
 
-  const mine = (jobs || []).filter(j =>
-    ['Installation WIP', 'Recee', 'In Transit', 'IC Pending', 'DC Pending'].includes(j.status));
+  const WT_ST = { 'Installation': ['Installation WIP', 'In Transit', 'IC Pending', 'DC Pending'], 'Supervision': ['Installation WIP', 'In Transit'], 'Rectification': ['Rectification'] };
+  const SURVEY_CLOSED = ['Cancelled', 'Cash Received', 'Billing Done', 'Billing Pending', 'Given for Billing', 'No Bill', 'Delivered', 'IC Pending', 'DC Pending', 'Cash Pending'];
+  const mine = (jobs || []).filter(j => wt === 'Recce/Survey' ? !SURVEY_CLOSED.includes(j.status) : (WT_ST[wt] || []).includes(j.status))
+    .sort((a, b) => wt === 'Recce/Survey' ? ((b.status === 'Recee') - (a.status === 'Recee')) : 0);
   // Batch-level completion (2026-09-21): a job moves on only when every batch is installed.
   // A batch counts as done when marked installed or already invoiced (part-billed earlier).
   const selJob = mine.find(j => j.id === sel);
   const jobBatches = (selJob && selJob.batches) || [];
   const batchDone = b => !!b.installed_at || doneLocal.includes(b.id) || !!(b.bill_no || '').trim();
   const pendingBatches = jobBatches.filter(b => !batchDone(b));
-  const multiBatch = jobBatches.length > 1;
-  const effBatches = multiBatch ? selB : pendingBatches.map(b => b.id);
+  const multiBatch = wt === 'Installation' && jobBatches.length > 1;
+  const effBatches = wt !== 'Installation' ? [] : multiBatch ? selB : pendingBatches.map(b => b.id);
+  const doneLabel = wt === 'Installation' ? TL('Mark complete') : (wt === 'Recce/Survey' && selJob && selJob.status === 'Recee') ? 'Recce done' : (wt === 'Rectification' && selJob) ? 'Rectification done' : '';
   const batchLabel = b => [b.note || 'Batch', b.date ? new Date(b.date + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '', b.site_unique_id || b.atm_id || '', (b.delivery_address || '').slice(0, 40)].filter(Boolean).join(' \u00b7 ');
 
   const save = async (markComplete) => {
     if (!sel) { show(T('Select a job'), false); return; }
+    if (sel === NOJOB && !siteName.trim()) { show('Client / site name required', false); return; }
     if (!startT || !endT) { show(TL('Start time') + ' + ' + TL('End time') + ' ' + T('required'), false); return; }
     if (!report.trim()) { show(TL('Report') + ' ' + T('required'), false); return; }
     if (!files.length) { show(TL('Photos') + ' ' + T('required'), false); return; }
-    if (!crew.length) { show(TL('Installed by') + ' ' + T('required'), false); return; }
+    if (!crew.length) { show((wt === 'Installation' ? TL('Installed by') : 'Done by') + ' ' + T('required'), false); return; }
     if (multiBatch && !selB.length) { show(TL('Select batch') + ' ' + T('required'), false); return; }
     setBusy(true);
     try {
       const urls = [];
       for (const f of files) {
-        const path = 'install/' + sel + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
+        const path = 'install/' + (sel === NOJOB ? 'survey' : sel) + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
         const toUp = typeof compressImage === 'function' && /^image\//.test(f.type || '') ? await compressImage(f) : f;
         const up = await sb.storage.from('Uploads').upload(path, toUp, { upsert: false, contentType: toUp.type || undefined });
         if (up.error) throw up.error;
@@ -34542,7 +34565,9 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         urls.push(pub?.data?.publicUrl || path);
       }
       const row = {
-        job_id: sel,
+        job_id: sel === NOJOB ? null : sel,
+        work_type: wt,
+        site_name: sel === NOJOB ? siteName.trim() : null,
         date: new Date().toISOString().slice(0, 10),
         person: crew[0] || user?.name || '',
         crew: crew,
@@ -34550,30 +34575,38 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         end_time: endT,
         report: report.trim(),
         photo_urls: urls,
-        site_complete: !!markComplete,
+        site_complete: wt === 'Installation' && !!markComplete,
         batch_ids: effBatches.length ? effBatches : null
       };
       const ins = await sb.from('install_logs').insert(row);
       if (ins.error) throw ins.error;
-      let remaining = pendingBatches.length;
-      if (markComplete && effBatches.length) {
-        const at = new Date().toISOString();
-        const by = crew.join(', ');
-        const ub = await sb.from('batches').update({ installed_at: at, installed_by: by }).in('id', effBatches);
-        if (ub.error) throw ub.error;
-        setDoneLocal(p => [...p, ...effBatches]);
-        if (setBatches) setBatches(p => p.map(b => effBatches.includes(b.id) ? { ...b, installed_at: at, installed_by: by } : b));
-        remaining = pendingBatches.filter(b => !effBatches.includes(b.id)).length;
-      }
-      if (markComplete && remaining === 0 && updateJobStatus) {
-        try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
-        show('✅ ' + T('Saved'), true);
-      } else if (markComplete) {
-        show('✅ ' + effBatches.length + ' batch(es) installed \u00b7 ' + remaining + ' still pending \u2014 job stays in Installation', true);
+      if (wt === 'Installation') {
+        let remaining = pendingBatches.length;
+        if (markComplete && effBatches.length) {
+          const at = new Date().toISOString();
+          const by = crew.join(', ');
+          const ub = await sb.from('batches').update({ installed_at: at, installed_by: by }).in('id', effBatches);
+          if (ub.error) throw ub.error;
+          setDoneLocal(p => [...p, ...effBatches]);
+          if (setBatches) setBatches(p => p.map(b => effBatches.includes(b.id) ? { ...b, installed_at: at, installed_by: by } : b));
+          remaining = pendingBatches.filter(b => !effBatches.includes(b.id)).length;
+        }
+        if (markComplete && remaining === 0 && updateJobStatus) {
+          try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
+          show('✅ ' + T('Saved'), true);
+        } else if (markComplete) {
+          show('✅ ' + effBatches.length + ' batch(es) installed \u00b7 ' + remaining + ' still pending \u2014 job stays in Installation', true);
+        } else {
+          show('✅ ' + T('Saved'), true);
+        }
+      } else if (markComplete && sel !== NOJOB && updateJobStatus && selJob) {
+        const nxt = await erpPrevStage(sel, selJob.status, wt === 'Rectification' ? 'Billing Pending' : 'Quotation Sent');
+        try { await updateJobStatus(sel, nxt); } catch (e) {}
+        show('✅ ' + wt + ' saved · job moved back to ' + nxt, true);
       } else {
-        show('✅ ' + T('Saved'), true);
+        show('✅ ' + T('Saved') + (sel === NOJOB ? ' · sent to Quote Pending' : ''), true);
       }
-      setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setCrew([]);
+      setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setCrew([]); setSiteName('');
     } catch (e) {
       show('⚠️ ' + (e.message || 'Save failed'), false);
     }
@@ -34585,13 +34618,24 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
 
   return React.createElement("div", { style: { padding: 4, maxWidth: 560 } },
     React.createElement(LangToggle, { onChange: () => force(x => x + 1) }),
-    React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 10px" } }, TL('Installation')),
+    React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 10px" } }, wt === 'Installation' ? TL('Installation') : wt),
+    React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 } },
+      ['Installation', 'Recce/Survey', 'Supervision', 'Rectification'].map(w => React.createElement("button", {
+        key: w, type: "button", className: "b",
+        onClick: () => { setWt(w); setSel(''); setSelB([]); setSiteName(''); },
+        style: { padding: "8px 12px", fontSize: 13, borderColor: wt === w ? "#10b981" : undefined, color: wt === w ? "#10b981" : undefined, fontWeight: wt === w ? 600 : 400 }
+      }, w))),
 
     F(TL('Job'), React.createElement("select", {
       className: "in", value: sel, onChange: e => { setSel(e.target.value); setSelB([]); }, style: { width: "100%", padding: 10, fontSize: 14 }
     }, React.createElement("option", { value: "" }, "— " + T('Select a job') + " —"),
+       wt === 'Recce/Survey' ? React.createElement("option", { value: NOJOB }, "No job yet (new enquiry)") : null,
        mine.map(j => React.createElement("option", { key: j.id, value: j.id },
-         j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || ''))))),
+         j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || '') + (wt !== 'Installation' ? ' · ' + j.status : ''))))),
+
+    sel === NOJOB ? F('Client / site name *', React.createElement("input", {
+      className: "in", value: siteName, onChange: e => setSiteName(e.target.value),
+      placeholder: "e.g. HDFC Andheri branch", style: { width: "100%", padding: 10, fontSize: 14 } })) : null,
 
     multiBatch ? F(TL('Select batch') + ' * (' + (jobBatches.length - pendingBatches.length) + '/' + jobBatches.length + ' done)',
       React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
@@ -34608,7 +34652,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
           }), React.createElement("span", null, batchLabel(b) + (done ? (b.installed_at || doneLocal.includes(b.id) ? ' \u00b7 \u2713 installed' : ' \u00b7 \u2713 billed') : '')));
         }))) : null,
 
-    F(TL('Installed by') + ' *', React.createElement(CrewPicker, { team: team, value: crew, onChange: setCrew })),
+    F((wt === 'Installation' ? TL('Installed by') : 'Done by') + ' *', React.createElement(CrewPicker, { team: team, value: crew, onChange: setCrew })),
 
     React.createElement("div", { style: { display: "flex", gap: 8 } },
       React.createElement("div", { style: { flex: 1 } }, F(TL('Start time'), React.createElement("input", {
@@ -34618,7 +34662,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
 
     F(TL('Report'), React.createElement("textarea", {
       className: "in", value: report, onChange: e => setReport(e.target.value),
-      placeholder: T('What was done on site'),
+      placeholder: wt === 'Recce/Survey' ? 'Measurements, site conditions, access, power' : wt === 'Supervision' ? 'Who installed, what was checked, issues' : wt === 'Rectification' ? 'What was wrong and what was fixed' : T('What was done on site'),
       style: { width: "100%", minHeight: 70, padding: 10, fontSize: 14, fontFamily: "inherit" } })),
 
     F(TL('Photos'), React.createElement("input", {
@@ -34630,9 +34674,9 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
     React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
       React.createElement("button", { className: "b", disabled: busy, onClick: () => save(false),
         style: { flex: 1, padding: 12, fontSize: 14 } }, busy ? '…' : TL('Save')),
-      React.createElement("button", { className: "b", disabled: busy, onClick: () => save(true),
+      doneLabel ? React.createElement("button", { className: "b", disabled: busy, onClick: () => save(true),
         style: { flex: 1, padding: 12, fontSize: 14, borderColor: "#2fb37a", color: "#2fb37a", fontWeight: 600 } },
-        busy ? '…' : TL('Mark complete')))
+        busy ? '…' : doneLabel) : null)
   );
 }
 
