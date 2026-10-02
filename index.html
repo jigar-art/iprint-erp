@@ -398,7 +398,7 @@ const removeFromJsonArray = async (table, id, field, itemToRemove) => {
 };
 const DEPTS = ["Estimate", "Design", "Production", "Printing", "Fabrication", "Dispatch", "Installation", "Accounts"];
 const DC = ["#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#dc2626", "#10b981", "#059669", "#06b6d4"];
-const BILLING_TEAM = ['PRACHI', 'SHREYA', 'APARNA', 'VIDYA', 'JIGAR', 'CHANDNI'];
+const BILLING_TEAM = ['PRACHI', 'SHREYA', 'APARNA', 'VIDYA', 'JIGAR', 'CHANDNI', 'AMOL'];
 const canEditInvoice2 = user => {
   const u = (user?.name || '').toUpperCase();
   return BILLING_TEAM.some(n => u.includes(n));
@@ -2993,7 +2993,7 @@ function MainApp({
     l: "Accounts",
     e: "🧾",
     roles: ["admin", "accounts", "sales"],
-    users: ["JIGAR", "CHANDNI", "APARNA", "SHREYA", "VIDYA", "PRACHI"]
+    users: ["JIGAR", "AMOL", "CHANDNI", "APARNA", "SHREYA", "VIDYA", "PRACHI"]
   }, {
     id: "expenses",
     l: "Expenses",
