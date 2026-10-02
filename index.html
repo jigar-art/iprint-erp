@@ -23948,7 +23948,8 @@ function DispPage({
       React.createElement("td", { style: { fontSize: 10 } }, isNew && t.dc_made_at ? fmt(t.dc_made_at) + ' \u2192 ' + fmt(t.dispatched_at || l.created_at) : '\u2014', isNew ? late(t.dispatch_late_days) : null),
       React.createElement("td", { style: { fontSize: 10 } }, l.delivered_at
         ? React.createElement(React.Fragment, null, fmt(l.delivered_at), React.createElement("div", { style: { color: "#94a3b8" } }, 'rcvd: ' + (l.received_by || '')))
-        : isNew ? React.createElement(React.Fragment, null, React.createElement("button", { className: "b bs", style: { fontSize: 9, padding: "2px 8px" }, onClick: () => markDelivered(l) }, "\u2713 Delivered"), late(t.deliver_late_days)) : '\u2014',
+        : isNew ? React.createElement(React.Fragment, null, React.createElement("button", { className: "b bs", style: { fontSize: 9, padding: "2px 8px" }, onClick: () => markDelivered(l) }, "\u2713 Delivered"), late(t.deliver_late_days),
+          t.deliver_due ? React.createElement("div", { style: { color: "#94a3b8" } }, 'due ' + fmt(t.deliver_due) + (l.distance_km ? ' \u00b7 ' + l.distance_km + ' km' : '')) : null) : '\u2014',
         l.delivered_at && isNew ? late(t.deliver_late_days) : null),
       React.createElement("td", { style: { fontSize: 10 } }, l.pod_url
         ? React.createElement(React.Fragment, null, React.createElement("a", { href: l.pod_url, target: "_blank", rel: "noreferrer", style: { color: "#4ade80" } }, "\u2713 view"), l.signed_uploaded_at ? React.createElement("div", { style: { color: "#94a3b8" } }, fmt(l.signed_uploaded_at)) : null, isNew ? late(t.upload_late_days) : null)
