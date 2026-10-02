@@ -2321,6 +2321,21 @@ function MainApp({
         return;
       }
     }
+    // Delivery gate (2026-10-02, Jigar option A): a dispatched job reaches Installation WIP / Delivered only
+    // after delivery is confirmed (received by + date + photo). Database trigger erp_jobs_dispatch_gate enforces the same.
+    if ((newStatus === 'Installation WIP' || newStatus === 'Delivered') && ERP_DELIVERY_GATE_FROM.includes(dbRow.status)) {
+      const [vd, dl] = await Promise.all([
+        sb.from('jobs').select('vendor_direct').eq('id', jobId).single(),
+        sb.from('dispatch_logs').select('id,date,dispatch_mode,courier_name,lr_no,delivered_at,received_by,dc_id,created_at').eq('job_id', jobId).not('dc_id', 'is', null).order('created_at', { ascending: false })
+      ]);
+      if (!(vd.data && vd.data.vendor_direct) && !dl.error) {
+        const dlogs = dl.data || [];
+        if (dlogs.length && !dlogs.some(l => l.delivered_at && String(l.received_by || '').trim())) {
+          const okDel = await erpConfirmDeliveryBox(jobId, dlogs[0]);
+          if (!okDel) return;
+        }
+      }
+    }
     const WEIGHMENT_EXEMPT_INTRANSIT = ['HARISH'];
     const fabHandover = newStatus === 'In Transit' && WEIGHMENT_EXEMPT_INTRANSIT.some(t => _uname === t || _uname.startsWith(t + ' '));
     if ((newStatus === 'In Transit' || newStatus === 'Delivered') && !fabHandover) {
@@ -34506,6 +34521,59 @@ function CrewPicker({ team, value, onChange }) {
     }));
 }
 
+// ===== Delivery gate (2026-10-02) =====
+const ERP_DELIVERY_GATE_FROM = ['Active', 'Quotation Sent', 'PO Pending', 'Designing - In House', 'Designing - Outsource',
+  'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit'];
+// Plain-DOM box so it can be opened from inside updateJobStatus. Resolves true once the dispatch log is marked delivered.
+function erpConfirmDeliveryBox(jobId, log) {
+  return new Promise(resolve => {
+    const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+    const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const via = [log.dispatch_mode, log.courier_name, log.lr_no ? 'LR ' + log.lr_no : ''].filter(Boolean).join(' \u00b7 ');
+    ov.innerHTML = '<div style="background:#0f141d;border:1px solid #1f2937;border-radius:12px;max-width:420px;width:100%;padding:18px;color:#e2e8f0;font-size:13px">' +
+      '<div style="font-size:16px;font-weight:700;margin-bottom:4px">Confirm delivery \u2014 ' + esc(jobId) + '</div>' +
+      '<div style="color:#94a3b8;margin-bottom:12px">Dispatched ' + esc(log.date || '') + (via ? ' \u00b7 ' + esc(via) : '') + '. The job can go to Installation only after the material has reached the site.</div>' +
+      '<label style="display:block;color:#94a3b8;font-size:11px;margin-bottom:3px">Delivered on *</label>' +
+      '<input id="erpDelDate" type="date" class="in" max="' + today + '" value="' + today + '" style="width:100%;padding:9px;margin-bottom:10px">' +
+      '<label style="display:block;color:#94a3b8;font-size:11px;margin-bottom:3px">Received by (name at site) *</label>' +
+      '<input id="erpDelWho" class="in" placeholder="Name of the person who received it" style="width:100%;padding:9px;margin-bottom:10px">' +
+      '<label style="display:block;color:#94a3b8;font-size:11px;margin-bottom:3px">Proof photo (material at site / signed DC / courier delivered screen) *</label>' +
+      '<input id="erpDelFile" type="file" accept="image/*,application/pdf" class="in" style="width:100%;padding:7px;margin-bottom:8px">' +
+      '<div id="erpDelErr" style="color:#e0574f;min-height:16px;margin-bottom:8px"></div>' +
+      '<div style="display:flex;gap:8px"><button id="erpDelCancel" class="b" style="flex:1;padding:10px">Cancel</button>' +
+      '<button id="erpDelSave" class="b" style="flex:1;padding:10px;border-color:#2fb37a;color:#2fb37a;font-weight:600">Confirm delivered</button></div></div>';
+    document.body.appendChild(ov);
+    const $ = id => ov.querySelector('#' + id);
+    const close = v => { try { ov.remove(); } catch (e) {} document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') close(false); };
+    document.addEventListener('keydown', onKey);
+    $('erpDelCancel').onclick = () => close(false);
+    $('erpDelSave').onclick = async () => {
+      const d = $('erpDelDate').value, who = $('erpDelWho').value.trim(), f = ($('erpDelFile').files || [])[0];
+      const err = m => { $('erpDelErr').textContent = m; };
+      if (!d || d > today) return err('Pick the delivery date (not in the future).');
+      if (!who) return err('Enter who received it.');
+      if (!f) return err('Attach a proof photo.');
+      const btn = $('erpDelSave'); btn.disabled = true; btn.textContent = 'Saving\u2026';
+      try {
+        const toUp = typeof compressImage === 'function' && /^image\//.test(f.type || '') ? await compressImage(f) : f;
+        const path = 'delivery/' + jobId + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
+        const up = await sb.storage.from('Uploads').upload(path, toUp, { upsert: false, contentType: toUp.type || undefined });
+        if (up.error) throw up.error;
+        const url = (sb.storage.from('Uploads').getPublicUrl(path).data || {}).publicUrl || path;
+        const at = d === today ? new Date().toISOString() : new Date(d + 'T12:00:00+05:30').toISOString();
+        const u = await sb.from('dispatch_logs').update({ delivered_at: at, received_by: who, pod_photo_url: url }).eq('id', log.id);
+        if (u.error) throw u.error;
+        close(true);
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Confirm delivered';
+        err('Could not save: ' + (e.message || e));
+      }
+    };
+  });
+}
 // Previous stage before the job entered `cur` (2026-10-02): Recce done / Rectification done send the job back there
 async function erpPrevStage(jobId, cur, fallback) {
   try {
