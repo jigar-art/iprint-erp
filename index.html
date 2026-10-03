@@ -34592,6 +34592,7 @@ async function erpPrevStage(jobId, cur, fallback) {
 }
 function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [sel, setSel] = React.useState('');
+  const [jq, setJq] = React.useState(''); // 3 Oct 2026: search jobs by number / client / project
   const [selB, setSelB] = React.useState([]);
   const [doneLocal, setDoneLocal] = React.useState([]);
   const [startT, setStartT] = React.useState('');
@@ -34702,12 +34703,19 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         style: { padding: "8px 12px", fontSize: 13, borderColor: wt === w ? "#10b981" : undefined, color: wt === w ? "#10b981" : undefined, fontWeight: wt === w ? 600 : 400 }
       }, w))),
 
-    F(TL('Job'), React.createElement("select", {
+    F(TL('Job'), React.createElement("div", null,
+     React.createElement("input", {
+      className: "in", type: "search", value: jq, onChange: e => setJq(e.target.value),
+      placeholder: "\uD83D\uDD0D Search job no., client or project", style: { width: "100%", padding: 10, fontSize: 14, marginBottom: 6 }
+     }),
+     jq.trim() ? React.createElement("div", { style: { fontSize: 11.5, color: "#94a3b8", marginBottom: 4 } },
+       mine.filter(j => [j.id, j.client_name, j.project, j.location, j.city].join(' ').toLowerCase().includes(jq.trim().toLowerCase())).length + " matching job(s)") : null,
+     React.createElement("select", {
       className: "in", value: sel, onChange: e => { setSel(e.target.value); setSelB([]); }, style: { width: "100%", padding: 10, fontSize: 14 }
     }, React.createElement("option", { value: "" }, "— " + T('Select a job') + " —"),
        wt === 'Recce/Survey' ? React.createElement("option", { value: NOJOB }, "No job yet (new enquiry)") : null,
-       mine.map(j => React.createElement("option", { key: j.id, value: j.id },
-         j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || '') + (wt !== 'Installation' ? ' · ' + j.status : ''))))),
+       mine.filter(j => j.id === sel || !jq.trim() || [j.id, j.client_name, j.project, j.location, j.city].join(' ').toLowerCase().includes(jq.trim().toLowerCase())).map(j => React.createElement("option", { key: j.id, value: j.id },
+         j.id + ' · ' + (j.client_name || '') + ' · ' + (j.project || '') + (wt !== 'Installation' ? ' · ' + j.status : '')))))),
 
     sel === NOJOB ? F('Client / site name *', React.createElement("input", {
       className: "in", value: siteName, onChange: e => setSiteName(e.target.value),
