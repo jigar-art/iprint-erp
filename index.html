@@ -34613,7 +34613,13 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
 
   const WT_ST = { 'Installation': ['Installation WIP', 'In Transit', 'IC Pending', 'DC Pending'], 'Supervision': ['Installation WIP', 'In Transit'], 'Rectification': ['Rectification'] };
   const SURVEY_CLOSED = ['Cancelled', 'Cash Received', 'Billing Done', 'Billing Pending', 'Given for Billing', 'No Bill', 'Delivered', 'IC Pending', 'DC Pending', 'Cash Pending'];
-  const mine = (jobs || []).filter(j => wt === 'Recce/Survey' ? !SURVEY_CLOSED.includes(j.status) : (WT_ST[wt] || []).includes(j.status))
+  // 3 Oct 2026: Supervision / Rectification can be logged on any active job found by search (site work often continues after billing starts)
+  const jqx = (jq || '').trim().toLowerCase();
+  const anyStageWT = wt === 'Supervision' || wt === 'Rectification';
+  const mine = (jobs || []).filter(j => wt === 'Recce/Survey' ? !SURVEY_CLOSED.includes(j.status)
+      : (WT_ST[wt] || []).includes(j.status)
+        || (anyStageWT && jqx && j.status !== 'Cancelled' && [j.id, j.client_name, j.project, j.location, j.city].join(' ').toLowerCase().includes(jqx))
+        || (anyStageWT && j.id === sel))
     .sort((a, b) => wt === 'Recce/Survey' ? ((b.status === 'Recee') - (a.status === 'Recee')) : 0);
   // Batch-level completion (2026-09-21): a job moves on only when every batch is installed.
   // A batch counts as done when marked installed or already invoiced (part-billed earlier).
