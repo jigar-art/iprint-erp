@@ -1431,7 +1431,11 @@ function MyTasksFloatingWidget({
     style: {
       flex: 1
     }
-  }, t.task_text), t.linked_job_id && React.createElement("span", {
+  }, t.task_text), t.due_date && React.createElement("span", {
+    style: { fontSize: 9, padding: '1px 5px', borderRadius: 3, fontWeight: 700, whiteSpace: 'nowrap',
+      background: t.due_date < new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10) ? '#7f1d1d' : '#3b2f0b',
+      color: t.due_date < new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10) ? '#fecaca' : '#fde68a' }
+  }, (t.due_date < new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10) ? 'OVERDUE \u00b7 ' : 'Due ') + new Date(t.due_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })), t.linked_job_id && React.createElement("span", {
     style: {
       fontSize: 8,
       padding: '1px 4px',
@@ -1668,7 +1672,7 @@ function MainApp({
     let cancelled = false;
     const fetchTasks = async () => {
       try {
-        const [taskRes, invRes] = await Promise.all([sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
+        const [taskRes, invRes] = await Promise.all([sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
           ascending: true
         }).limit(200), sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,added_by,created_at').eq('added_by', uname).gte('created_at', todayISO).order('created_at', {
           ascending: false
@@ -1699,7 +1703,7 @@ function MainApp({
     try {
       const {
         data
-      } = await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
+      } = await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
         ascending: true
       }).limit(200);
       setMyTasks(data || []);
@@ -42152,6 +42156,55 @@ function WorkLogView({ jobs, prs, salesActs, team, user }) {
 
   return h('div', null, tabBar, view === 'daily' ? dailyView : boardView, blindNote);
 }
+// ── One-off assigned tasks with a deadline (3 Oct 2026) ──
+function AssignTaskCard({ team, show }) {
+  const today = new Date(); const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const plus = n => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+  const [f, setF] = React.useState({ user: '', text: '', due: plus(3), job: '' });
+  const [rows, setRows] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [showDone, setShowDone] = React.useState(false);
+  const load = () => sb.rpc('erp_assigned_tasks').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { load(); }, []);
+  const assign = async () => {
+    setBusy(true);
+    const r = await sb.rpc('erp_assign_task', { p_user: f.user, p_text: f.text, p_due: f.due, p_job: f.job.trim() || null });
+    setBusy(false);
+    if (r.error) { show(r.error.message, false); return; }
+    show('\u2705 Task assigned to ' + f.user.split(' - ')[0]);
+    setF({ user: '', text: '', due: plus(3), job: '' }); load();
+  };
+  const cancel = async id => { if (!confirm('Cancel this task?')) return; const r = await sb.rpc('erp_cancel_assigned', { p_id: id }); if (r.error) show(r.error.message, false); else load(); };
+  const fd = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' }) : '';
+  const open = rows.filter(r => !['done', 'cancelled'].includes(r.status));
+  const closed = rows.filter(r => ['done', 'cancelled'].includes(r.status));
+  const chip = (lbl, n) => React.createElement("button", { type: 'button', className: 'b', onClick: () => setF(p => ({ ...p, due: plus(n) })), style: { padding: '4px 9px', fontSize: 11, borderColor: f.due === plus(n) ? '#e3a008' : undefined, color: f.due === plus(n) ? '#e3a008' : undefined } }, lbl);
+  const row = r => React.createElement("div", { key: r.id, style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '7px 10px', borderRadius: 8, marginTop: 5, background: '#0a0f1a', border: '1px solid ' + (r.overdue ? '#e0574f88' : '#1f2937') } },
+    React.createElement("b", { style: { fontSize: 12, minWidth: 90 } }, r.user_name.split(' - ')[0]),
+    React.createElement("span", { style: { flex: 1, fontSize: 12.5 } }, r.task_text, r.linked_job_id ? React.createElement("span", { style: { fontSize: 10.5, color: '#85b7eb', marginLeft: 6 } }, '#' + r.linked_job_id) : null),
+    React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: r.status === 'done' ? '#4ade80' : r.overdue ? '#f87171' : '#fbbf24' } },
+      r.status === 'done' ? '\u2713 done ' + (r.done_at ? new Date(r.done_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '') : r.status === 'cancelled' ? 'cancelled' : (r.overdue ? 'OVERDUE \u00b7 was due ' : 'due ') + fd(r.due_date) + (r.status === 'stuck' ? ' \u00b7 stuck' : '')),
+    React.createElement("span", { style: { fontSize: 10, color: '#64748b' } }, 'by ' + (r.assigned_by || '') + ' \u00b7 ' + fd(r.assigned_on)),
+    !['done', 'cancelled'].includes(r.status) ? React.createElement("button", { type: 'button', className: 'b', onClick: () => cancel(r.id), style: { padding: '2px 8px', fontSize: 10.5 } }, 'Cancel') : null);
+  return React.createElement("div", { style: { background: '#0f172a', border: '1px solid #e3a00855', borderRadius: 12, padding: 12, marginBottom: 14 } },
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008', marginBottom: 8 } }, "\uD83D\uDCCC Assign a one-time task (with a deadline)"),
+    React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) 2fr', gap: 8 } },
+      React.createElement("select", { className: 'in', value: f.user, onChange: e => setF({ ...f, user: e.target.value }) },
+        React.createElement("option", { value: '' }, '\u2014 assign to \u2014'), (team || []).map(t => React.createElement("option", { key: t.name, value: t.name }, t.name))),
+      React.createElement("input", { className: 'in', value: f.text, onChange: e => setF({ ...f, text: e.target.value }), placeholder: "Task, e.g. Get COP from running project of ANJ Waterstone" })),
+    React.createElement("div", { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 } },
+      React.createElement("span", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'Due by'),
+      React.createElement("input", { className: 'in', type: 'date', value: f.due, min: iso(today), onChange: e => setF({ ...f, due: e.target.value }), style: { width: 150 } }),
+      chip('Today', 0), chip('+1 day', 1), chip('+3 days', 3), chip('+7 days', 7),
+      React.createElement("input", { className: 'in', value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no. (optional)', style: { width: 140 } }),
+      React.createElement("span", { style: { flex: 1 } }),
+      React.createElement("button", { type: 'button', disabled: busy || !f.user || !f.text.trim(), onClick: assign, style: { padding: '8px 16px', borderRadius: 8, fontWeight: 800, background: '#e3a008', color: '#111', border: 'none', cursor: 'pointer', opacity: busy || !f.user || !f.text.trim() ? .5 : 1 } }, busy ? '\u2026' : '+ Assign')),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#64748b', marginTop: 6 } }, "Appears in their My Tasks today and stays there every day until they tick it done. Overdue tasks turn red here and for them."),
+    open.length ? React.createElement("div", { style: { marginTop: 10 } }, React.createElement("div", { style: { fontSize: 12, fontWeight: 700, color: '#cbd5e1' } }, 'Open (' + open.length + ')' + (open.filter(r => r.overdue).length ? ' \u00b7 ' + open.filter(r => r.overdue).length + ' overdue' : '')), open.map(row)) : null,
+    closed.length ? React.createElement("div", { style: { marginTop: 8 } },
+      React.createElement("button", { type: 'button', className: 'b', onClick: () => setShowDone(!showDone), style: { fontSize: 11, padding: '3px 9px' } }, (showDone ? 'Hide' : 'Show') + ' completed / cancelled (' + closed.length + ')'),
+      showDone ? closed.map(row) : null) : null);
+}
 function ReportsPage({
   user,
   jobs,
@@ -42433,7 +42486,7 @@ function ReportsPage({
       const {
         data,
         error
-      } = await sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note,is_quantified,task_type,target_count,actual_count').gte('task_date', startDate).order('task_date', {
+      } = await sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note,is_quantified,task_type,target_count,actual_count,due_date').gte('task_date', startDate).order('task_date', {
         ascending: false
       }).order('created_at', {
         ascending: false
@@ -42499,7 +42552,7 @@ function ReportsPage({
       ascending: false
     }).limit(500), sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at', {
       ascending: false
-    }), sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count,client_kind').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0, 10)).lte('task_date', todayISO).order('task_date', {
+    }), sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count,client_kind,due_date').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0, 10)).lte('task_date', todayISO).order('task_date', {
       ascending: false
     }).order('created_at', {
       ascending: true
@@ -42557,7 +42610,7 @@ function ReportsPage({
         const {
           data: pastUnfinished,
           error: yErr
-        } = await sb.from('daily_tasks').select('id,task_text,task_date,linked_job_id,linked_site_id,status,source,source_task_id').eq('user_name', uname).lt('task_date', todayISO).in('status', ['pending', 'stuck']).neq('source', 'recurring');
+        } = await sb.from('daily_tasks').select('id,task_text,task_date,linked_job_id,linked_site_id,status,source,source_task_id,due_date').eq('user_name', uname).lt('task_date', todayISO).in('status', ['pending', 'stuck']).neq('source', 'recurring');
         if (cancelled) return;
         if (!yErr && pastUnfinished && pastUnfinished.length > 0) {
           const parentTextById = new Map();
@@ -42595,7 +42648,8 @@ function ReportsPage({
               source_task_id: t.id,
               linked_job_id: t.linked_job_id || null,
               linked_site_id: t.linked_site_id || null,
-              added_by: uname
+              added_by: uname,
+              due_date: t.due_date || null
             });
           });
         }
@@ -45843,7 +45897,7 @@ function ReportsPage({
         }
       }, "No tracked activity ", periodBounds.label.toLowerCase(), "."));
     }));
-  })()), !loading && tab === 'duties' && isTeamViewer && React.createElement("div", null, React.createElement("div", {
+  })()), !loading && tab === 'duties' && isTeamViewer && React.createElement("div", null, React.createElement(AssignTaskCard, { team: team, show: show }), React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'baseline',
