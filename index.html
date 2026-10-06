@@ -7311,7 +7311,7 @@ function JobDetail({
       const {
         data,
         error
-      } = await sb.from('vendors').select('id,name,category,gstin,address,phone,state,contact_person,active').eq('active', true).order('name');
+      } = await sb.from('vendors').select('id,name,category,gstin,address,phone,state,contact_person,active,' + VENDOR_BANK_COLS).eq('active', true).order('name');
       setVendors(error ? [] : data || []);
     };
     const filteredVendors = React.useMemo(() => {
@@ -7525,6 +7525,14 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       }
       if (!prf.vendor_id && !prf.vendor_name) {
         show('Select or enter a vendor', false);
+        return;
+      }
+      if (!prf.vendor_id) {
+        show('Select the vendor from the list (add it with + Add New Vendor if missing)', false);
+        return;
+      }
+      if (!vendorKycComplete((vendors || []).find(x => x.id === prf.vendor_id))) {
+        show('\u26a0\ufe0f Fill vendor bank details + cancelled cheque' + (vendorGstValid(prf.vendor_gstin) ? '' : ' + PAN') + ' and click Save Bank Details first', false);
         return;
       }
       if (!prf.items.some(x => x.product)) {
@@ -8483,7 +8491,16 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         fontSize: 7,
         color: "#64748b"
       }
-    }, "GSTIN: ", prf.vendor_gstin)), showAddVendor && React.createElement("div", {
+    }, "GSTIN: ", prf.vendor_gstin)), prf.vendor_id && React.createElement(VendorBankPanel, {
+      key: prf.vendor_id,
+      vendor: (vendors || []).find(x => x.id === prf.vendor_id),
+      user,
+      show,
+      onSaved: d => setVendors(p => (p || []).map(x => x.id === d.id ? {
+        ...x,
+        ...d
+      } : x))
+    }), showAddVendor && React.createElement("div", {
       style: {
         background: "#060810",
         border: "1px solid #f59e0b33",
@@ -26361,6 +26378,442 @@ function GRNReceivePage({
     }, "\xB7 ", pr.received_notes)));
   })));
 }
+const VENDOR_KYC_CUTOFF = '2026-10-06T10:14:21.010Z';
+const VENDOR_BANK_COLS = 'pan,bank_ac_holder,bank_ac_last4,bank_ifsc,bank_name,bank_cheque_path,bank_filled_by,bank_verified,bank_verified_by';
+const vendorGstValid = g => /^[0-9]{2}[A-Z0-9]{13}$/.test(String(g || '').trim().toUpperCase());
+const vendorKycComplete = v => !!(v && v.bank_ac_holder && v.bank_ac_last4 && v.bank_ifsc && v.bank_name && v.bank_cheque_path && (vendorGstValid(v.gstin) || v.pan));
+const vendorBankAdmin = u => ['admin', 'accounts'].includes(String(u?.role || '').toLowerCase()) || String(u?.name || '').toUpperCase() === 'JIGAR';
+const vendorKycBlocksPO = (pr, vk) => !pr.po_no && !!pr.created_at && new Date(pr.created_at) >= new Date(VENDOR_KYC_CUTOFF) && !(vk && vk.bank_verified);
+async function vendorUploadCheque(file, user, vendorId) {
+  if (!file) return null;
+  if (!user?.id) {
+    if (window._showToast) window._showToast('\u26a0\ufe0f Not logged in', false);
+    return null;
+  }
+  if (file.size > 10 * 1048576) {
+    if (window._showToast) window._showToast('\u26a0\ufe0f Cheque file is over 10 MB', false);
+    return null;
+  }
+  _upOverlay.push();
+  try {
+    const isPdf = /pdf$/i.test(file.type || '') || /\.pdf$/i.test(file.name || '');
+    const toSend = isPdf ? file : await compressImage(file);
+    const ext = isPdf ? 'pdf' : 'jpg';
+    const path = `${user.id}/${String(vendorId).replace(/[^A-Za-z0-9_-]/g, '_')}/${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    const {
+      error
+    } = await sb.storage.from('vendor-docs').upload(path, toSend, {
+      contentType: toSend.type || (isPdf ? 'application/pdf' : 'image/jpeg')
+    });
+    if (error) {
+      if (window._showToast) window._showToast('\u26a0\ufe0f Cheque upload failed: ' + error.message, false);
+      return null;
+    }
+    return path;
+  } finally {
+    _upOverlay.pop();
+  }
+}
+function VendorBankPanel({
+  vendor,
+  user,
+  show,
+  onSaved,
+  startEditing
+}) {
+  const admin = vendorBankAdmin(user);
+  const [editing, setEditing] = React.useState(!!startEditing);
+  const [f, setF] = React.useState({
+    pan: '',
+    holder: '',
+    ac: '',
+    ac2: '',
+    ifsc: '',
+    bank: ''
+  });
+  const [file, setFile] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  if (!vendor) return null;
+  const complete = vendorKycComplete(vendor);
+  const needPan = !vendorGstValid(vendor.gstin);
+  const lab = {
+    fontSize: 7,
+    color: '#64748b',
+    display: 'block',
+    marginBottom: 2
+  };
+  const inp = {
+    fontSize: 9,
+    padding: '3px 4px',
+    width: '100%'
+  };
+  if (complete && !editing) {
+    return React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 6,
+        alignItems: 'center',
+        fontSize: 8,
+        margin: '2px 0 8px',
+        color: '#94a3b8'
+      }
+    }, React.createElement("span", null, "\uD83C\uDFE6 ", vendor.bank_name, " \u2022\u2022", vendor.bank_ac_last4, " \xB7 ", vendor.bank_ifsc, " \xB7 ", vendor.bank_ac_holder, vendor.pan ? ' \xB7 PAN ' + vendor.pan : ''), vendor.bank_verified ? React.createElement("span", {
+      style: {
+        color: '#4ade80',
+        fontWeight: 700
+      }
+    }, "\u2713 Bank verified", vendor.bank_verified_by ? ' by ' + vendor.bank_verified_by : '') : React.createElement("span", {
+      style: {
+        color: '#f59e0b',
+        fontWeight: 700
+      }
+    }, "\u23F3 Awaiting Accounts verification (PO blocked until verified)"), admin && React.createElement("button", {
+      type: 'button',
+      style: {
+        background: 'none',
+        border: '1px solid #334155',
+        color: '#94a3b8',
+        borderRadius: 4,
+        cursor: 'pointer',
+        fontSize: 8,
+        padding: '1px 6px'
+      },
+      onClick: () => setEditing(true)
+    }, "Edit"));
+  }
+  const locked = k => !admin && !!vendor[k];
+  const set = (k, v) => setF(p => ({
+    ...p,
+    [k]: v
+  }));
+  const save = async () => {
+    const ac = f.ac.replace(/[\s-]/g, '');
+    const ac2 = f.ac2.replace(/[\s-]/g, '');
+    const pan = f.pan.replace(/\s/g, '').toUpperCase();
+    const ifsc = f.ifsc.replace(/\s/g, '').toUpperCase();
+    if (ac && ac !== ac2) return show('Account numbers do not match', false);
+    if (ac && !/^[0-9]{9,18}$/.test(ac)) return show('Account number must be 9\u201318 digits', false);
+    if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) return show('IFSC format wrong (e.g. HDFC0001234)', false);
+    if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) return show('PAN format wrong (e.g. ABCDE1234F)', false);
+    if (!vendor.bank_cheque_path && !file) return show('Upload cancelled cheque photo', false);
+    setSaving(true);
+    try {
+      let chq = null;
+      if (file) {
+        chq = await vendorUploadCheque(file, user, vendor.id);
+        if (!chq) return;
+      }
+      const {
+        data,
+        error
+      } = await sb.rpc('vendor_fill_bank', {
+        p_id: vendor.id,
+        p_pan: pan || null,
+        p_holder: f.holder || null,
+        p_ac: ac || null,
+        p_ifsc: ifsc || null,
+        p_bank: f.bank || null,
+        p_cheque_path: chq
+      });
+      if (error) return show('\u26a0\ufe0f ' + error.message, false);
+      show('\u2705 Bank details saved \u2014 Accounts will verify before PO');
+      setEditing(false);
+      setFile(null);
+      setF({
+        pan: '',
+        holder: '',
+        ac: '',
+        ac2: '',
+        ifsc: '',
+        bank: ''
+      });
+      if (onSaved) onSaved(data);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const fld = (label, k, key, ph, extra) => React.createElement("div", {
+    style: {
+      flex: '1 1 150px'
+    }
+  }, React.createElement("label", {
+    style: lab
+  }, label), locked(key) ? React.createElement("input", {
+    className: "in",
+    style: inp,
+    disabled: true,
+    value: key === 'bank_ac_last4' ? '\u2022\u2022\u2022\u2022' + vendor[key] : vendor[key]
+  }) : React.createElement("input", {
+    className: "in",
+    style: inp,
+    value: f[k],
+    placeholder: admin && vendor[key] ? (key === 'bank_ac_last4' ? 'Current \u2022\u2022' : 'Current: ') + vendor[key] : ph,
+    onChange: e => set(k, e.target.value),
+    ...(extra || {})
+  }));
+  return React.createElement("div", {
+    style: {
+      background: '#1a1206',
+      border: '1px solid #f59e0b66',
+      borderRadius: 6,
+      padding: 8,
+      margin: '4px 0 8px'
+    }
+  }, React.createElement("p", {
+    style: {
+      fontSize: 8,
+      fontWeight: 700,
+      color: '#f59e0b',
+      marginBottom: 6
+    }
+  }, editing && complete ? '\uD83C\uDFE6 EDIT BANK DETAILS \u2014 ' + vendor.name + ' (will need re-verification)' : '\uD83C\uDFE6 BANK DETAILS REQUIRED \u2014 ' + vendor.name + ' (needed to submit PR)'), React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6
+    }
+  }, (needPan || vendor.pan) && fld('PAN' + (needPan ? ' * (no GSTIN)' : ''), 'pan', 'pan', 'ABCDE1234F', {
+    maxLength: 10
+  }), fld('A/C Holder Name *', 'holder', 'bank_ac_holder', 'As on cheque'), fld('A/C Number *', 'ac', 'bank_ac_last4', '9\u201318 digits', {
+    inputMode: 'numeric',
+    autoComplete: 'off'
+  }), !locked('bank_ac_last4') && fld('Confirm A/C Number *', 'ac2', '__none', 'Re-enter', {
+    inputMode: 'numeric',
+    autoComplete: 'off',
+    onPaste: e => e.preventDefault()
+  }), fld('IFSC *', 'ifsc', 'bank_ifsc', 'HDFC0001234', {
+    maxLength: 11
+  }), fld('Bank Name *', 'bank', 'bank_name', 'e.g. HDFC Bank'), React.createElement("div", {
+    style: {
+      flex: '1 1 150px'
+    }
+  }, React.createElement("label", {
+    style: lab
+  }, "Cancelled Cheque *", vendor.bank_cheque_path ? ' (uploaded)' : ''), locked('bank_cheque_path') ? React.createElement("span", {
+    style: {
+      fontSize: 8,
+      color: '#4ade80'
+    }
+  }, "\u2713 On file") : React.createElement("input", {
+    type: 'file',
+    accept: 'image/*,application/pdf',
+    style: {
+      fontSize: 8
+    },
+    onChange: e => setFile(e.target.files && e.target.files[0] || null)
+  }))), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      marginTop: 6
+    }
+  }, React.createElement("button", {
+    type: 'button',
+    className: 'b bp',
+    disabled: saving,
+    onClick: save,
+    style: {
+      fontSize: 9,
+      padding: '3px 10px'
+    }
+  }, saving ? 'Saving...' : '\uD83D\uDCBE Save Bank Details'), editing && complete && React.createElement("button", {
+    type: 'button',
+    className: 'b bs',
+    onClick: () => setEditing(false),
+    style: {
+      fontSize: 9,
+      padding: '3px 10px'
+    }
+  }, "Cancel")));
+}
+function VendorBankVerifyModal({
+  vendorId,
+  user,
+  show,
+  onClose,
+  onDone
+}) {
+  const [v, setV] = React.useState(null);
+  const [full, setFull] = React.useState('');
+  const [chqUrl, setChqUrl] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const load = React.useCallback(async () => {
+    const {
+      data,
+      error
+    } = await sb.from('vendors').select('id,name,gstin,' + VENDOR_BANK_COLS).eq('id', vendorId).single();
+    if (error) return show('\u26a0\ufe0f ' + error.message, false);
+    setV(data);
+    const r = await sb.rpc('vendor_bank_full', {
+      p_id: vendorId
+    });
+    setFull(r.error ? '' : r.data || '');
+    if (data.bank_cheque_path) {
+      const s = await sb.storage.from('vendor-docs').createSignedUrl(data.bank_cheque_path, 600);
+      setChqUrl(s.data?.signedUrl || '');
+    } else setChqUrl('');
+  }, [vendorId]);
+  React.useEffect(() => {
+    load();
+  }, [load]);
+  const verify = async () => {
+    setBusy(true);
+    const {
+      error
+    } = await sb.rpc('vendor_verify_bank', {
+      p_id: vendorId
+    });
+    setBusy(false);
+    if (error) return show('\u26a0\ufe0f ' + error.message, false);
+    show('\u2705 Bank details verified');
+    if (onDone) onDone();
+    onClose();
+  };
+  const row = (k, val) => React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      fontSize: 10,
+      padding: '3px 0',
+      borderBottom: '1px solid #1e293b'
+    }
+  }, React.createElement("span", {
+    style: {
+      width: 110,
+      color: '#64748b'
+    }
+  }, k), React.createElement("span", {
+    style: {
+      color: '#e2e8f0',
+      fontWeight: 600,
+      wordBreak: 'break-all'
+    }
+  }, val || '\u2014'));
+  const complete = vendorKycComplete(v);
+  return React.createElement("div", {
+    style: {
+      position: 'fixed',
+      inset: 0,
+      background: '#000a',
+      zIndex: 9999,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 12
+    },
+    onClick: onClose
+  }, React.createElement("div", {
+    style: {
+      background: '#0b1220',
+      border: '1px solid #334155',
+      borderRadius: 8,
+      padding: 14,
+      width: '100%',
+      maxWidth: 520,
+      maxHeight: '90vh',
+      overflowY: 'auto'
+    },
+    onClick: e => e.stopPropagation()
+  }, React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8
+    }
+  }, React.createElement("b", {
+    style: {
+      fontSize: 12,
+      color: '#f59e0b'
+    }
+  }, "\uD83C\uDFE6 Verify Vendor Bank Details"), React.createElement("button", {
+    type: 'button',
+    className: 'b bs',
+    onClick: onClose,
+    style: {
+      fontSize: 9,
+      padding: '2px 8px'
+    }
+  }, "\u2715")), !v ? React.createElement("p", {
+    style: {
+      fontSize: 10,
+      color: '#64748b'
+    }
+  }, "Loading...") : editing ? React.createElement(VendorBankPanel, {
+    vendor: v,
+    user,
+    show,
+    startEditing: true,
+    onSaved: () => {
+      setEditing(false);
+      load();
+      if (onDone) onDone();
+    }
+  }) : React.createElement(React.Fragment, null, row('Vendor', v.name), row('GSTIN', v.gstin), row('PAN', v.pan), row('A/C Holder', v.bank_ac_holder), row('A/C Number', full || (v.bank_ac_last4 ? '\u2022\u2022' + v.bank_ac_last4 : '')), row('IFSC', v.bank_ifsc), row('Bank', v.bank_name), row('Filled by', v.bank_filled_by), row('Status', v.bank_verified ? '\u2713 Verified by ' + (v.bank_verified_by || '?') : '\u23F3 Not verified'), React.createElement("div", {
+    style: {
+      margin: '8px 0'
+    }
+  }, chqUrl ? /\.pdf$/i.test(v.bank_cheque_path || '') ? React.createElement("a", {
+    href: chqUrl,
+    target: '_blank',
+    rel: 'noreferrer',
+    style: {
+      fontSize: 10,
+      color: '#06b6d4'
+    }
+  }, "\uD83D\uDCC4 Open cancelled cheque (PDF)") : React.createElement("a", {
+    href: chqUrl,
+    target: '_blank',
+    rel: 'noreferrer'
+  }, React.createElement("img", {
+    src: chqUrl,
+    alt: 'Cancelled cheque',
+    style: {
+      maxWidth: '100%',
+      borderRadius: 4,
+      border: '1px solid #334155'
+    }
+  })) : React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: '#ef4444'
+    }
+  }, "No cancelled cheque on file")), React.createElement("p", {
+    style: {
+      fontSize: 8,
+      color: '#94a3b8',
+      marginBottom: 8
+    }
+  }, "Check the name, A/C number and IFSC against the cheque photo. If possible, confirm by calling the vendor on a known number before verifying."), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6
+    }
+  }, !v.bank_verified && React.createElement("button", {
+    type: 'button',
+    className: 'b bp',
+    disabled: busy || !complete,
+    onClick: verify,
+    style: {
+      fontSize: 10,
+      padding: '5px 14px',
+      background: '#22c55e',
+      borderColor: '#22c55e',
+      color: '#000',
+      fontWeight: 700
+    }
+  }, busy ? 'Verifying...' : '\u2713 Verify Bank Details'), React.createElement("button", {
+    type: 'button',
+    className: 'b bs',
+    onClick: () => setEditing(true),
+    style: {
+      fontSize: 10,
+      padding: '5px 14px'
+    }
+  }, "\u270F\uFE0F Edit")))));
+}
 function POPage({
   prs,
   setPrs,
@@ -26374,6 +26827,23 @@ function POPage({
   const [poPreview, setPoPreview] = React.useState(null);
   const [tdsByPr, setTdsByPr] = React.useState({});
   const [searchQ, setSearchQ] = React.useState('');
+  const [vkyc, setVkyc] = React.useState({});
+  const [verifyVendor, setVerifyVendor] = React.useState(null);
+  const loadVkyc = React.useCallback(async () => {
+    const ids = [...new Set((prs || []).filter(p => !p.po_no && p.vendor_id).map(p => p.vendor_id))];
+    if (!ids.length) return setVkyc({});
+    const {
+      data
+    } = await sb.from('vendors').select('id,gstin,' + VENDOR_BANK_COLS).in('id', ids);
+    const m = {};
+    (data || []).forEach(v => {
+      m[v.id] = v;
+    });
+    setVkyc(m);
+  }, [prs]);
+  React.useEffect(() => {
+    loadVkyc();
+  }, [loadVkyc]);
   const STATUS_FILTERS = ['Approved', 'PO Generated', 'Completed', 'All'];
   const stCol = {
     'Approved': {
@@ -26418,6 +26888,10 @@ function POPage({
     return `${firmCode}/PO/${fy}/${next}`;
   };
   const generatePO = async pr => {
+    if (vendorKycBlocksPO(pr, vkyc[pr.vendor_id])) {
+      show('\u26a0\ufe0f Vendor bank details not verified \u2014 verify before generating PO', false);
+      return;
+    }
     setGenerating(pr.id);
     const poNo = pr.po_no || (await genPONo(pr.firm_code));
     const firm = FIRM_DATA[pr.firm_code] || FIRM_DATA.JXT;
@@ -26626,7 +27100,13 @@ function POPage({
         color: '#4ade80'
       } : {})
     }
-  }, f, f === 'Approved' ? ` (${prs.filter(p => p.status === 'Approved').length})` : '')))), poPreview && React.createElement("div", {
+  }, f, f === 'Approved' ? ` (${prs.filter(p => p.status === 'Approved').length})` : '')))), verifyVendor && React.createElement(VendorBankVerifyModal, {
+    vendorId: verifyVendor,
+    user,
+    show,
+    onClose: () => setVerifyVendor(null),
+    onDone: loadVkyc
+  }), poPreview && React.createElement("div", {
     style: {
       background: '#0a0f1a',
       border: '1px solid #06b6d444',
@@ -26860,10 +27340,21 @@ function POPage({
         color: '#b91c1c',
         fontWeight: 700
       }
-    }, "TDS ", pr.tds_pct, "%"), React.createElement("button", {
+    }, "TDS ", pr.tds_pct, "%"), vendorKycBlocksPO(pr, vkyc[pr.vendor_id]) && React.createElement("button", {
+      type: 'button',
+      className: "b bs",
+      onClick: () => vendorBankAdmin(user) ? setVerifyVendor(pr.vendor_id) : show('Ask Accounts to verify this vendor\u2019s bank details', false),
+      style: {
+        fontSize: 9,
+        padding: '4px 10px',
+        borderColor: '#f59e0b',
+        color: '#f59e0b',
+        fontWeight: 700
+      }
+    }, vendorKycComplete(vkyc[pr.vendor_id]) ? "\uD83C\uDFE6 Bank not verified \u2014 Verify" : "\uD83C\uDFE6 Bank details missing"), React.createElement("button", {
       className: "b bp",
       onClick: () => generatePO(pr),
-      disabled: generating === pr.id,
+      disabled: generating === pr.id || vendorKycBlocksPO(pr, vkyc[pr.vendor_id]),
       style: {
         fontSize: 10,
         padding: '5px 14px',
