@@ -3601,7 +3601,7 @@ function MainApp({
   }), pg === "myscore" && React.createElement(MyScorePage, {
     user: user
   }), pg === "install" && React.createElement(InstallPage, {
-    jobs: filteredJobs,
+    jobs: fullJobs,
     team: masterData.team,
     setBatches: setBatches,
     user: user,
@@ -35106,7 +35106,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const SURVEY_CLOSED = ['Cancelled', 'Cash Received', 'Billing Done', 'Billing Pending', 'Given for Billing', 'No Bill', 'Delivered', 'IC Pending', 'DC Pending', 'Cash Pending'];
   // 3 Oct 2026: Supervision / Rectification can be logged on any active job found by search (site work often continues after billing starts)
   const jqx = (jq || '').trim().toLowerCase();
-  const anyStageWT = wt === 'Supervision' || wt === 'Rectification';
+  const anyStageWT = wt !== 'Recce/Survey'; // 9 Oct 2026: also Installation (site work continues on billed / last-year jobs)
   const mine = (jobs || []).filter(j => wt === 'Recce/Survey' ? !SURVEY_CLOSED.includes(j.status)
       : (WT_ST[wt] || []).includes(j.status)
         || (anyStageWT && jqx && j.status !== 'Cancelled' && [j.id, j.client_name, j.project, j.location, j.city].join(' ').toLowerCase().includes(jqx))
@@ -35169,9 +35169,11 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
           if (setBatches) setBatches(p => p.map(b => effBatches.includes(b.id) ? { ...b, installed_at: at, installed_by: by } : b));
           remaining = pendingBatches.filter(b => !effBatches.includes(b.id)).length;
         }
-        if (markComplete && remaining === 0 && updateJobStatus) {
+        if (markComplete && remaining === 0 && updateJobStatus && selJob && ['Installation WIP', 'In Transit'].includes(selJob.status)) {
           try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
           show('✅ ' + T('Saved'), true);
+        } else if (markComplete && remaining === 0 && selJob) {
+          show('✅ ' + T('Saved') + ' \u00b7 job already at ' + selJob.status + ', stage not changed', true);
         } else if (markComplete) {
           show('✅ ' + effBatches.length + ' batch(es) installed \u00b7 ' + remaining + ' still pending \u2014 job stays in Installation', true);
         } else {
