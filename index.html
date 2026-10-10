@@ -9706,9 +9706,12 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
     },
     title: "Copy/Duplicate this batch",
     onClick: () => {
+      const _billed = !!String(b.bill_no || '').trim();
       setCopyBatch({
         batchId: b.id,
         bi: bi + 1,
+        billed: _billed,
+        mode: _billed ? 'copy' : 'move',
         items: (b.items || []).map(it => ({
           ...it,
           selected: true
@@ -11163,12 +11166,34 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       fontWeight: 700,
       color: "#3b82f6"
     }
-  }, "\uD83D\uDCCB Copy from Batch ", copyBatch.bi, " \u2014 Select items to include"), React.createElement("div", {
+  }, copyBatch.mode === 'move' ? "\u2702\uFE0F Split / Move items out of Batch " : "\uD83D\uDCCB Copy from Batch ", copyBatch.bi, " \u2014 Select items"), React.createElement("div", {
     style: {
       display: "flex",
       gap: 4
     }
   }, React.createElement("button", {
+    className: "b bs" + (copyBatch.mode === 'move' ? " bp" : ""),
+    style: {
+      fontSize: 8,
+      opacity: copyBatch.billed ? 0.4 : 1
+    },
+    disabled: copyBatch.billed,
+    title: copyBatch.billed ? 'This batch is already invoiced - items cannot be moved out of it. Use Copy.' : 'Move the selected items to a new batch (removed from this batch). Use this to invoice part of a batch.',
+    onClick: () => setCopyBatch(p => ({
+      ...p,
+      mode: 'move'
+    }))
+  }, "\u2702\uFE0F Move (split)"), React.createElement("button", {
+    className: "b bs" + (copyBatch.mode === 'copy' ? " bp" : ""),
+    style: {
+      fontSize: 8
+    },
+    title: 'Duplicate the selected items into a new batch (reprint / repeat order). The original stays as it is.',
+    onClick: () => setCopyBatch(p => ({
+      ...p,
+      mode: 'copy'
+    }))
+  }, "\uD83D\uDCCB Copy (repeat)"), React.createElement("button", {
     className: "b bs",
     style: {
       fontSize: 8
@@ -11277,6 +11302,60 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           return;
         }
         const srcBatch = j.batches?.find(x => x.id === copyBatch.batchId);
+        // Split / Move (2026-10-10): moving items out of an unbilled batch
+        // instead of copying them, so no duplicate is left behind to block
+        // Billing Done. Item ids, dept ticks and photos are kept.
+        if (copyBatch.mode === 'move') {
+          if (String(srcBatch?.bill_no || '').trim()) {
+            show('🔒 Batch ' + copyBatch.bi + ' is already invoiced - items cannot be moved out. Use Copy.', false);
+            return;
+          }
+          if (selItems.length === copyBatch.items.length) {
+            show('All items selected - nothing to split. Untick the items that should stay in Batch ' + copyBatch.bi + '.', false);
+            return;
+          }
+          const mvBid = "B" + uid();
+          const mbd = {
+            id: mvBid,
+            job_id: j.id,
+            date: td(),
+            note: (srcBatch?.note || 'Batch ' + copyBatch.bi) + ' (Split)',
+            bill_no: '',
+            status: 'New',
+            atm_id: srcBatch?.atm_id || '',
+            site_unique_id: srcBatch?.site_unique_id || '',
+            po_number: srcBatch?.po_number || '',
+            client_po_number: srcBatch?.client_po_number || '',
+            billing_address: srcBatch?.billing_address || '',
+            delivery_address: srcBatch?.delivery_address || '',
+            created_by: user?.name || ''
+          };
+          const {
+            error: mbErr
+          } = await sb.from('batches').insert(mbd);
+          if (mbErr) {
+            show('⚠️ Failed: ' + mbErr.message, false);
+            return;
+          }
+          setBatches(p => [mbd, ...p]);
+          const mvIds = selItems.map(it => it.id);
+          const {
+            error: mvErr
+          } = await sb.from('line_items').update({
+            batch_id: mvBid
+          }).in('id', mvIds).eq('batch_id', copyBatch.batchId);
+          if (mvErr) {
+            show('⚠️ New batch created but items not moved: ' + mvErr.message + ' - delete the empty batch and retry.', false);
+            return;
+          }
+          setItems(p => p.map(i => mvIds.includes(i.id) ? {
+            ...i,
+            batch_id: mvBid
+          } : i));
+          setCopyBatch(null);
+          show('✂️ ' + mvIds.length + ' item(s) moved to a new batch. ' + (copyBatch.items.length - mvIds.length) + ' stay in Batch ' + copyBatch.bi + '.');
+          return;
+        }
         const newBid = "B" + uid();
         const bd = {
           id: newBid,
@@ -11345,7 +11424,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         show('⚠️ Error: ' + e.message, false);
       }
     }
-  }, "\uD83D\uDCCB Create Copy (", copyBatch.items.filter(it => it.selected).length, " items)"), React.createElement("button", {
+  }, copyBatch.mode === 'move' ? "\u2702\uFE0F Move to new batch (" : "\uD83D\uDCCB Create Copy (", copyBatch.items.filter(it => it.selected).length, " items)"), React.createElement("button", {
     className: "b",
     onClick: () => setCopyBatch(null)
   }, "Cancel"))), sa ? (() => {
