@@ -26594,7 +26594,7 @@ function VendorBankPanel({
     }
   }, React.createElement("label", {
     style: lab
-  }, "Cancelled Cheque", vendor.bank_cheque_path ? ' \u2713 uploaded' : ' \u2014 not needed now, Accounts need it before verifying'), locked('bank_cheque_path') ? React.createElement("span", {
+  }, "Cancelled Cheque (optional)", vendor.bank_cheque_path ? ' \u2713 uploaded' : ''), locked('bank_cheque_path') ? React.createElement("span", {
     style: {
       fontSize: 8,
       color: '#4ade80'
@@ -26784,13 +26784,13 @@ function VendorBankVerifyModal({
       fontSize: 9,
       color: '#f59e0b'
     }
-  }, "No cancelled cheque yet \u2014 required before you can verify")), React.createElement("p", {
+  }, "No cancelled cheque on file \u2014 optional, verify from the A/C details")), React.createElement("p", {
     style: {
       fontSize: 8,
       color: '#94a3b8',
       marginBottom: 8
     }
-  }, "Check the name, A/C number and IFSC against the cheque photo. If possible, confirm by calling the vendor on a known number before verifying. Staff can save bank details without the cheque, but it must be on file before you verify."), React.createElement("div", {
+  }, "Where a cheque is uploaded, check the name, A/C number and IFSC against it. Where there is no cheque, confirm the A/C number and IFSC by calling the vendor on a number you already have \u2014 not one sent along with the bank details."), React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6
@@ -26798,8 +26798,7 @@ function VendorBankVerifyModal({
   }, !v.bank_verified && React.createElement("button", {
     type: 'button',
     className: 'b bp',
-    disabled: busy || !complete || !v.bank_cheque_path,
-    title: v.bank_cheque_path ? '' : 'Cancelled cheque must be uploaded before verifying',
+    disabled: busy || !complete,
     onClick: verify,
     style: {
       fontSize: 10,
