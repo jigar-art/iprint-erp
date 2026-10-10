@@ -2287,17 +2287,17 @@ function MainApp({
     if (newStatus === 'Billing Done') {
       const [bRes, liRes] = await Promise.all([
         sb.from('batches').select('id,bill_no,note,date').eq('job_id', jobId),
-        sb.from('line_items').select('batch_id').eq('job_id', jobId)
+        sb.from('line_items').select('batch_id,no_bill').eq('job_id', jobId)
       ]);
       if (bRes.error || liRes.error) {
         show('⚠️ Could not verify batch invoices — try again. (' + ((bRes.error || liRes.error).message) + ')', false);
         return;
       }
-      const withItems = new Set((liRes.data || []).map(r => r.batch_id));
+      const withItems = new Set((liRes.data || []).filter(r => !r.no_bill).map(r => r.batch_id));
       const unbilled = (bRes.data || []).filter(b => withItems.has(b.id) && !String(b.bill_no || '').trim());
       if (unbilled.length) {
         const names = unbilled.map(b => (b.note || 'Batch') + (b.date ? ' (' + b.date + ')' : '')).join('; ');
-        show('🔒 Cannot mark "' + jobId + '" Billing Done — ' + unbilled.length + ' batch(es) with items have no invoice#: ' + names, false);
+        show('🔒 Cannot mark "' + jobId + '" Billing Done — ' + unbilled.length + ' batch(es) with items have no invoice#: ' + names + '. Add the invoice#, or tap ⊘ No Bill on that batch / item in the Invoices column.', false);
         console.warn('updateJobStatus blocked (Billing Done gate): job', jobId, 'unbilled batches', unbilled.map(b => b.id));
         return;
       }
@@ -2474,6 +2474,33 @@ function MainApp({
       ...updates
     } : i));
   }, [show]);
+  // No Bill marking (2026-10-10): Accounts marks free / not-to-be-invoiced
+  // items so the Billing Done lock ignores them. Logged with name + time.
+  const markNoBill = useCallback(async (itemIds, flag) => {
+    if (!itemIds || !itemIds.length) return false;
+    const upd = flag ? {
+      no_bill: true,
+      no_bill_by: user?.name || '',
+      no_bill_at: new Date().toISOString()
+    } : {
+      no_bill: false,
+      no_bill_by: null,
+      no_bill_at: null
+    };
+    const {
+      error
+    } = await sb.from('line_items').update(upd).in('id', itemIds);
+    if (error) {
+      show("⚠️ No Bill save FAILED: " + error.message, false);
+      return false;
+    }
+    setItems(p => p.map(i => itemIds.includes(i.id) ? {
+      ...i,
+      ...upd
+    } : i));
+    show(flag ? "⊘ " + itemIds.length + " item(s) marked No Bill" : "↺ " + itemIds.length + " item(s) back to billable");
+    return true;
+  }, [show, user]);
   const addLineItem = useCallback(async itemData => {
     const {
       error
@@ -3499,7 +3526,8 @@ function MainApp({
     sm: setModal,
     user: user,
     setBatches: setBatches,
-    updateBatchField: updateBatchField
+    updateBatchField: updateBatchField,
+    markNoBill: markNoBill
   }), pg === "expenses" && React.createElement(ExpensesPage, {
     expenses: expenses,
     addExpense: addExpense,
@@ -29944,9 +29972,11 @@ function AccPage({
   sm,
   user,
   setBatches,
-  updateBatchField
+  updateBatchField,
+  markNoBill
 }) {
   const [tab, setTab] = useState('pending');
+  const [nbOpen, setNbOpen] = useState({});
   const [invoices, setInvoices] = useState({});
   const [invoiceDates, setInvoiceDates] = useState({});
   const [invBatchSel, setInvBatchSel] = useState({});
@@ -30077,7 +30107,7 @@ function AccPage({
     const okDate = validInvDate(invDate, show);
     if (!okDate) return;
     const jBatches = j.batches || [];
-    const pendingItemBatches = jBatches.filter(b => !b.bill_no && (b.items || []).length > 0);
+    const pendingItemBatches = jBatches.filter(b => !b.bill_no && (b.items || []).some(it => !it.no_bill));
     let targets = [];
     if (pendingItemBatches.length > 1) {
       const sel = invBatchSel[j.id] || '';
@@ -30138,6 +30168,110 @@ function AccPage({
     const ok = await updateJobStatus(j.id, 'Billing Done');
     if (ok) show("✅ " + j.id + " → Billing Done (" + existingInv.length + " invoice(s))");
   };
+  const NB_C = '#94a3b8';
+  const noBillBlock = j => {
+    const ub = (j.batches || []).filter(b => !String(b.bill_no || '').trim() && (b.items || []).length > 0);
+    if (!ub.length || !markNoBill) return null;
+    const money = n => '\u20B9' + Math.round(+n || 0).toLocaleString('en-IN');
+    return React.createElement("div", {
+      style: {
+        marginTop: 3,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2
+      }
+    }, ub.map(b => {
+      const its = b.items || [];
+      const live = its.filter(it => !it.no_bill);
+      const allNB = live.length === 0;
+      const amt = live.reduce((s, it) => s + (+it.amount || 0), 0);
+      const k = j.id + '|' + b.id;
+      const open = !!nbOpen[k];
+      return React.createElement("div", {
+        key: b.id,
+        style: {
+          fontSize: 9,
+          border: '1px dashed ' + (allNB ? NB_C + '66' : '#f59e0b66'),
+          borderRadius: 4,
+          padding: '2px 4px'
+        }
+      }, React.createElement("div", {
+        style: {
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+          flexWrap: 'wrap'
+        }
+      }, React.createElement("span", {
+        style: {
+          color: allNB ? NB_C : '#f59e0b',
+          fontWeight: 600
+        },
+        title: 'Batch without invoice# (' + its.length + ' items)'
+      }, allNB ? '⊘ No Bill: ' : 'Unbilled: ', (b.note || 'Batch').slice(0, 28), b.date ? ' · ' + b.date : '', ' · ', live.length, '/', its.length, ' items · ', money(amt)), React.createElement("button", {
+        className: "b bs",
+        style: {
+          fontSize: 8,
+          padding: '1px 5px'
+        },
+        onClick: () => setNbOpen(p => ({
+          ...p,
+          [k]: !open
+        }))
+      }, open ? 'Hide items' : 'Items'), allNB ? React.createElement("button", {
+        className: "b bs",
+        style: {
+          fontSize: 8,
+          padding: '1px 5px'
+        },
+        title: 'Make this batch billable again',
+        onClick: () => markNoBill(its.map(it => it.id), false)
+      }, "\u21BA Undo") : React.createElement("button", {
+        className: "b bs",
+        style: {
+          fontSize: 8,
+          padding: '1px 5px',
+          color: NB_C,
+          borderColor: NB_C + '88'
+        },
+        title: 'This whole batch will not be invoiced (sample / free / duplicate). Logged with your name.',
+        onClick: () => {
+          if (!confirm('Mark the whole batch "' + (b.note || 'Batch') + '" (' + live.length + ' items, ' + money(amt) + ') as NO BILL?\n\nIt will not be invoiced and will not block Billing Done. Recorded against your name.')) return;
+          markNoBill(live.map(it => it.id), true);
+        }
+      }, "\u2298 No Bill")), open && its.map(it => React.createElement("div", {
+        key: it.id,
+        style: {
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+          paddingLeft: 8,
+          color: it.no_bill ? NB_C : undefined,
+          textDecoration: it.no_bill ? 'line-through' : 'none'
+        },
+        title: it.no_bill ? 'No Bill by ' + (it.no_bill_by || '?') + (it.no_bill_at ? ' · ' + String(it.no_bill_at).slice(0, 16).replace('T', ' ') : '') : ''
+      }, React.createElement("span", {
+        style: {
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          maxWidth: 200
+        }
+      }, it.client_name || it.internal_name || 'Item', it.qty ? ' × ' + (+it.qty) : ''), React.createElement("span", {
+        className: "mn"
+      }, money(it.amount)), React.createElement("button", {
+        className: "b bs",
+        style: {
+          fontSize: 8,
+          padding: '0 4px',
+          textDecoration: 'none'
+        },
+        onClick: () => markNoBill([it.id], !it.no_bill)
+      }, it.no_bill ? '\u21BA Bill' : '\u2298 No Bill'))));
+    }));
+  };
   const InvChips = ({
     j,
     editable
@@ -30197,7 +30331,7 @@ function AccPage({
         flexWrap: 'wrap'
       }
     }, (() => {
-      const pend = (j.batches || []).filter(b => !b.bill_no && (b.items || []).length > 0);
+      const pend = (j.batches || []).filter(b => !b.bill_no && (b.items || []).some(it => !it.no_bill));
       if (pend.length < 2) return null;
       return React.createElement("select", {
         className: "in mn",
@@ -30218,7 +30352,7 @@ function AccPage({
       }, "Batch? (" + pend.length + " unbilled)"), pend.map(b => React.createElement("option", {
         key: b.id,
         value: b.id
-      }, (b.note || 'Batch').slice(0, 40) + ' · ' + (b.date || '') + ' · ' + b.items.length + ' items')), React.createElement("option", {
+      }, (b.note || 'Batch').slice(0, 40) + ' · ' + (b.date || '') + ' · ' + b.items.filter(it => !it.no_bill).length + ' items')), React.createElement("option", {
         value: "__all"
       }, "All " + pend.length + " batches (one invoice)"));
     })(), React.createElement("input", {
@@ -30259,7 +30393,7 @@ function AccPage({
         whiteSpace: 'nowrap'
       },
       onClick: () => addInvoice(j)
-    }, "\u2795 Add")));
+    }, "\u2795 Add")), editable && noBillBlock(j));
   };
   return React.createElement("div", {
     style: {
