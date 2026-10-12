@@ -15510,13 +15510,22 @@ function DeptPage({
   const [editVend, setEditVend] = React.useState(null);
   React.useEffect(() => {
     sb.from('vendors').select('id,name').eq('active', true).order('name').then(({ data }) => setVendList(data || []));
+    // banking-site vendor names entered in Banking CRM (Priyanka / Harshala), keyed by bare job no
+    sb.from('v_bank_vendor_by_job').select('job_no,vendors').then(({ data, error }) => {
+      if (error) { console.warn('bank vendors load failed:', error.message); return; }
+      const m = {};
+      (data || []).forEach(r => { m[r.job_no] = r.vendors; });
+      setBankVend(m);
+    });
   }, []);
+  const [bankVend, setBankVend] = React.useState({});
+  const bankVendOf = j => bankVend[String(j.id || '').split('-')[0]] || '';
   const vendName = React.useMemo(() => {
     const m = {};
     vendList.forEach(v => { m[v.id] = v.name; });
     return m;
   }, [vendList]);
-  const vendOf = j => j.install_vendor_id ? vendName[j.install_vendor_id] || j.install_vendor_id : '';
+  const vendOf = j => j.install_vendor_id ? vendName[j.install_vendor_id] || j.install_vendor_id : bankVendOf(j);
   const [showReassignModal, setShowReassignModal] = React.useState(false);
   const [reassignSelected, setReassignSelected] = React.useState({});
   const [reassignDirection, setReassignDirection] = React.useState('to-outsource');
@@ -15679,7 +15688,7 @@ function DeptPage({
         sensitivity: 'base'
       }) * dir;
     });
-  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap, vendName]);
+  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap, vendName, bankVend]);
   const lateDaysOf = j => {
     const r = delayMap.get(j.id);
     if (!r || !r.due_at) return null;
@@ -16127,10 +16136,11 @@ function DeptPage({
       },
       style: { fontSize: 9, padding: "2px 4px", width: 150 }
     }, React.createElement("option", { value: "" }, "\u2014 No vendor \u2014"), vendList.map(v => React.createElement("option", { key: v.id, value: v.id }, v.name))) : React.createElement("span", {
-      title: "Click to set installation vendor",
+      title: j.install_vendor_id ? vendOf(j) + " \u2014 click to change" : bankVendOf(j) ? "From Banking CRM sites: " + bankVendOf(j) + " \u2014 click to set ERP vendor" : "Click to set installation vendor",
+      "data-vend": "1",
       onClick: () => setEditVend(j.id),
-      style: { cursor: "pointer", fontWeight: vendOf(j) ? 600 : 400, color: vendOf(j) ? "#c4b5fd" : "#475569", borderBottom: "1px dashed #47556988" }
-    }, vendOf(j) ? vendOf(j).slice(0, 22) : "+ Set vendor")) : null, React.createElement("td", {
+      style: { cursor: "pointer", fontWeight: vendOf(j) ? 600 : 400, color: j.install_vendor_id ? "#c4b5fd" : bankVendOf(j) ? "#5eead4" : "#475569", borderBottom: "1px dashed #47556988" }
+    }, vendOf(j) ? (vendOf(j).length > 26 ? vendOf(j).slice(0, 25) + "\u2026" : vendOf(j)) : "+ Set vendor")) : null, React.createElement("td", {
       style: {
         fontSize: 10
       }
