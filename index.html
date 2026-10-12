@@ -15505,27 +15505,6 @@ function DeptPage({
   updateJobFields
 }) {
   const ALL_ST = ALL_ST_NEW;
-  // 2026-10-12: installation vendor per job (jobs.install_vendor_id -> vendors.id)
-  const [vendList, setVendList] = React.useState([]);
-  const [editVend, setEditVend] = React.useState(null);
-  React.useEffect(() => {
-    sb.from('vendors').select('id,name').eq('active', true).order('name').then(({ data }) => setVendList(data || []));
-    // banking-site vendor names entered in Banking CRM (Priyanka / Harshala), keyed by bare job no
-    sb.from('v_bank_vendor_by_job').select('job_no,vendors').then(({ data, error }) => {
-      if (error) { console.warn('bank vendors load failed:', error.message); return; }
-      const m = {};
-      (data || []).forEach(r => { m[r.job_no] = r.vendors; });
-      setBankVend(m);
-    });
-  }, []);
-  const [bankVend, setBankVend] = React.useState({});
-  const bankVendOf = j => bankVend[String(j.id || '').split('-')[0]] || '';
-  const vendName = React.useMemo(() => {
-    const m = {};
-    vendList.forEach(v => { m[v.id] = v.name; });
-    return m;
-  }, [vendList]);
-  const vendOf = j => j.install_vendor_id ? vendName[j.install_vendor_id] || j.install_vendor_id : bankVendOf(j);
   const [showReassignModal, setShowReassignModal] = React.useState(false);
   const [reassignSelected, setReassignSelected] = React.useState({});
   const [reassignDirection, setReassignDirection] = React.useState('to-outsource');
@@ -15625,7 +15604,7 @@ function DeptPage({
     if (k === 'status') return j.status || '';
     if (k === 'project') return j.project || '';
     if (k === 'contact') return j.contact_person || '';
-    if (k === 'vendor') return vendOf(j);
+    if (k === 'vendor') return (vendMap.get(j.id) || {}).n || '';
     if (k === 'age') { const a = ageDaysOf(j); return a == null ? '' : String(100000 + a); }
     if (k === 'delay') { const h = delayHoursOf(j); return h == null ? '' : String(Math.round(1000000 + h)); }
     return '';
@@ -15642,6 +15621,40 @@ function DeptPage({
   const [instAge, setInstAge] = useState(0);
   const [instWho, setInstWho] = useState('all');
   const isInst = ad === 'installation';
+  // 2026-10-12: installation vendor per job — jobs.install_vendor_id (ERP) else banking_sites.vendor_name (via v_job_install_vendor)
+  const [vendMap, setVendMap] = useState(() => new Map());
+  const [vendList, setVendList] = useState(null);
+  const [editVend, setEditVend] = useState(null);
+  React.useEffect(() => {
+    if (!isInst) return;
+    let off = false;
+    (async () => {
+      const m = new Map();
+      for (let from = 0; from < 20000; from += 1000) {
+        const { data, error } = await sb.from('v_job_install_vendor').select('job_id,vendor_name,src').order('job_id').range(from, from + 999);
+        if (error) { console.warn('vendor map load failed:', error.message); break; }
+        (data || []).forEach(r => m.set(r.job_id, { n: r.vendor_name, src: r.src }));
+        if (!data || data.length < 1000) break;
+      }
+      if (!off) setVendMap(m);
+    })();
+    return () => { off = true; };
+  }, [isInst]);
+  const openVendEdit = jid => {
+    setEditVend(jid);
+    if (!vendList) sb.from('vendors').select('id,name').eq('active', true).order('name').then(({ data, error }) => {
+      if (error) { if (window._showToast) window._showToast('Vendor list failed: ' + error.message, false); return; }
+      setVendList(data || []);
+    });
+  };
+  const saveVend = async (jid, vid) => {
+    setEditVend(null);
+    if (!updateJobFields) return;
+    const ok = await updateJobFields(jid, { install_vendor_id: vid || null });
+    if (!ok) return;
+    const v = (vendList || []).find(x => x.id === vid);
+    setVendMap(p => { const m = new Map(p); if (v) m.set(jid, { n: v.name, src: 'erp' }); else m.delete(jid); return m; });
+  };
   const docByJob = React.useMemo(() => {
     const m = new Map();
     (bankDocs || []).forEach(d => m.set(d.job_id, d));
@@ -15671,7 +15684,7 @@ function DeptPage({
   // 2026-10-02: moved below ageDaysOf/delayHoursOf/slaMap - sorting by Age or Delay read them before they were defined and crashed the page
   const pen = useMemo(() => {
     const rows = jobs.filter(j => {
-      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase()) && !vendOf(j).toLowerCase().includes(s.toLowerCase())) return false;
+      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase()) && !(isInst && ((vendMap.get(j.id) || {}).n || '').toLowerCase().includes(s.toLowerCase()))) return false;
       if (ad === null) return true;
       return cur.match(j);
     });
@@ -15688,7 +15701,7 @@ function DeptPage({
         sensitivity: 'base'
       }) * dir;
     });
-  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap, vendName, bankVend]);
+  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap, vendMap]);
   const lateDaysOf = j => {
     const r = delayMap.get(j.id);
     if (!r || !r.due_at) return null;
@@ -15746,7 +15759,7 @@ function DeptPage({
         row['Delay'] = r && r.due_at && r.status === j.status ? instDelayText(r).t : '';
       }
       row['Project'] = j.project || '';
-      if (isInst) row['Vendor'] = vendOf(j);
+      if (isInst) row['Vendor'] = (vendMap.get(j.id) || {}).n || '';
       row['Contact'] = j.contact_person || '';
       return row;
     });
@@ -16122,25 +16135,23 @@ function DeptPage({
         color: "#64748b"
       }
     }, j.project?.slice(0, 22)), isInst ? React.createElement("td", {
-      style: { fontSize: 10, whiteSpace: "nowrap" },
-      onClick: e => e.stopPropagation()
+      style: { fontSize: 10, whiteSpace: "nowrap" }
     }, editVend === j.id ? React.createElement("select", {
       className: "in",
       autoFocus: true,
       defaultValue: j.install_vendor_id || "",
+      disabled: !vendList,
+      onChange: e => saveVend(j.id, e.target.value),
       onBlur: () => setEditVend(null),
-      onChange: async e => {
-        const v = e.target.value || null;
-        setEditVend(null);
-        if (v !== (j.install_vendor_id || null) && updateJobFields) await updateJobFields(j.id, { install_vendor_id: v });
-      },
       style: { fontSize: 9, padding: "2px 4px", width: 150 }
-    }, React.createElement("option", { value: "" }, "\u2014 No vendor \u2014"), vendList.map(v => React.createElement("option", { key: v.id, value: v.id }, v.name))) : React.createElement("span", {
-      title: j.install_vendor_id ? vendOf(j) + " \u2014 click to change" : bankVendOf(j) ? "From Banking CRM sites: " + bankVendOf(j) + " \u2014 click to set ERP vendor" : "Click to set installation vendor",
-      "data-vend": "1",
-      onClick: () => setEditVend(j.id),
-      style: { cursor: "pointer", fontWeight: vendOf(j) ? 600 : 400, color: j.install_vendor_id ? "#c4b5fd" : bankVendOf(j) ? "#5eead4" : "#475569", borderBottom: "1px dashed #47556988" }
-    }, vendOf(j) ? (vendOf(j).length > 26 ? vendOf(j).slice(0, 25) + "\u2026" : vendOf(j)) : "+ Set vendor")) : null, React.createElement("td", {
+    }, React.createElement("option", { value: "" }, vendList ? "\u2014 none \u2014" : "Loading\u2026"), (vendList || []).map(v => React.createElement("option", { key: v.id, value: v.id }, v.name))) : (() => {
+      const v = vendMap.get(j.id);
+      return React.createElement("span", {
+        onClick: () => openVendEdit(j.id),
+        title: v ? (v.src === 'banking' ? 'From banking site sheet \u2014 click to set ERP vendor' : 'Click to change vendor') : 'Click to set vendor',
+        style: { cursor: "pointer", color: v ? (v.src === 'banking' ? "#94a3b8" : "#e2e8f0") : "#475569", fontStyle: v && v.src === 'banking' ? "italic" : "normal", borderBottom: "1px dashed #33415588" }
+      }, v ? String(v.n).slice(0, 26) : "+ set");
+    })()) : null, React.createElement("td", {
       style: {
         fontSize: 10
       }
