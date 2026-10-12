@@ -15501,9 +15501,22 @@ function DeptPage({
   osItems,
   delayRows,
   slaRows,
-  bankDocs
+  bankDocs,
+  updateJobFields
 }) {
   const ALL_ST = ALL_ST_NEW;
+  // 2026-10-12: installation vendor per job (jobs.install_vendor_id -> vendors.id)
+  const [vendList, setVendList] = React.useState([]);
+  const [editVend, setEditVend] = React.useState(null);
+  React.useEffect(() => {
+    sb.from('vendors').select('id,name').eq('active', true).order('name').then(({ data }) => setVendList(data || []));
+  }, []);
+  const vendName = React.useMemo(() => {
+    const m = {};
+    vendList.forEach(v => { m[v.id] = v.name; });
+    return m;
+  }, [vendList]);
+  const vendOf = j => j.install_vendor_id ? vendName[j.install_vendor_id] || j.install_vendor_id : '';
   const [showReassignModal, setShowReassignModal] = React.useState(false);
   const [reassignSelected, setReassignSelected] = React.useState({});
   const [reassignDirection, setReassignDirection] = React.useState('to-outsource');
@@ -15603,6 +15616,7 @@ function DeptPage({
     if (k === 'status') return j.status || '';
     if (k === 'project') return j.project || '';
     if (k === 'contact') return j.contact_person || '';
+    if (k === 'vendor') return vendOf(j);
     if (k === 'age') { const a = ageDaysOf(j); return a == null ? '' : String(100000 + a); }
     if (k === 'delay') { const h = delayHoursOf(j); return h == null ? '' : String(Math.round(1000000 + h)); }
     return '';
@@ -15648,7 +15662,7 @@ function DeptPage({
   // 2026-10-02: moved below ageDaysOf/delayHoursOf/slaMap - sorting by Age or Delay read them before they were defined and crashed the page
   const pen = useMemo(() => {
     const rows = jobs.filter(j => {
-      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase())) return false;
+      if (s && !j.id?.toLowerCase().includes(s.toLowerCase()) && !j.client_name?.toLowerCase().includes(s.toLowerCase()) && !vendOf(j).toLowerCase().includes(s.toLowerCase())) return false;
       if (ad === null) return true;
       return cur.match(j);
     });
@@ -15665,7 +15679,7 @@ function DeptPage({
         sensitivity: 'base'
       }) * dir;
     });
-  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap]);
+  }, [jobs, cur, s, ad, jobLeading, sortKey, sortDir, slaMap, vendName]);
   const lateDaysOf = j => {
     const r = delayMap.get(j.id);
     if (!r || !r.due_at) return null;
@@ -15723,6 +15737,7 @@ function DeptPage({
         row['Delay'] = r && r.due_at && r.status === j.status ? instDelayText(r).t : '';
       }
       row['Project'] = j.project || '';
+      if (isInst) row['Vendor'] = vendOf(j);
       row['Contact'] = j.contact_person || '';
       return row;
     });
@@ -15985,7 +16000,7 @@ function DeptPage({
       overflowX: "auto",
       maxHeight: "calc(100vh-200px)"
     }
-  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, showExport ? React.createElement("th", { style: { width: 26 } }) : null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('age', "Age"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), sortTh('delay', "Delay"), sortTh('project', "Project"), sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
+  }, React.createElement("table", null, React.createElement("thead", null, React.createElement("tr", null, showExport ? React.createElement("th", { style: { width: 26 } }) : null, sortTh('job', "Job"), sortTh('date', "Date"), sortTh('age', "Age"), sortTh('client', "Client"), sortTh('product', "Product"), React.createElement("th", null, "Source"), React.createElement("th", null, "Stage"), sortTh('status', "Status"), sortTh('delay', "Delay"), sortTh('project', "Project"), isInst ? sortTh('vendor', "Vendor") : null, sortTh('contact', "Contact"), React.createElement("th", null, "Change Status"))), React.createElement("tbody", null, penShown.map((j, i) => {
     const it = (j.batches || [])[0]?.items?.[0];
     const dt = j.created_at ? new Date(j.created_at) : null;
     const ds = dt ? dt.toLocaleDateString('en-IN', {
@@ -16097,7 +16112,25 @@ function DeptPage({
         fontSize: 10,
         color: "#64748b"
       }
-    }, j.project?.slice(0, 22)), React.createElement("td", {
+    }, j.project?.slice(0, 22)), isInst ? React.createElement("td", {
+      style: { fontSize: 10, whiteSpace: "nowrap" },
+      onClick: e => e.stopPropagation()
+    }, editVend === j.id ? React.createElement("select", {
+      className: "in",
+      autoFocus: true,
+      defaultValue: j.install_vendor_id || "",
+      onBlur: () => setEditVend(null),
+      onChange: async e => {
+        const v = e.target.value || null;
+        setEditVend(null);
+        if (v !== (j.install_vendor_id || null) && updateJobFields) await updateJobFields(j.id, { install_vendor_id: v });
+      },
+      style: { fontSize: 9, padding: "2px 4px", width: 150 }
+    }, React.createElement("option", { value: "" }, "\u2014 No vendor \u2014"), vendList.map(v => React.createElement("option", { key: v.id, value: v.id }, v.name))) : React.createElement("span", {
+      title: "Click to set installation vendor",
+      onClick: () => setEditVend(j.id),
+      style: { cursor: "pointer", fontWeight: vendOf(j) ? 600 : 400, color: vendOf(j) ? "#c4b5fd" : "#475569", borderBottom: "1px dashed #47556988" }
+    }, vendOf(j) ? vendOf(j).slice(0, 22) : "+ Set vendor")) : null, React.createElement("td", {
       style: {
         fontSize: 10
       }
