@@ -25749,6 +25749,17 @@ function GRNReceivePage({
       show('Select receiver', false);
       return;
     }
+    if (!(gf.invoice_no || '').trim()) {
+      show('Enter the vendor invoice / challan number', false);
+      return;
+    }
+    {
+      const _t = new Date(); const _ti = _t.getFullYear() + '-' + String(_t.getMonth() + 1).padStart(2, '0') + '-' + String(_t.getDate()).padStart(2, '0');
+      const _po = receiving && receiving.po_generated_at ? new Date(receiving.po_generated_at) : null;
+      const _pi = _po ? _po.getFullYear() + '-' + String(_po.getMonth() + 1).padStart(2, '0') + '-' + String(_po.getDate()).padStart(2, '0') : '';
+      if (!gf.received_at || gf.received_at > _ti) { show('Received date cannot be in the future', false); return; }
+      if (_pi && gf.received_at < _pi) { show('Received date cannot be before the PO date (' + _pi + ')', false); return; }
+    }
     {
       const isPlaceholderMat = s => /^\s*(na|n\/a|nil|none|-|\*)\s*$/i.test(s || '');
       const bad = (gf.items_received || []).filter(x => !x.is_service && (+x.received_now || 0) > 0).map(x => {
