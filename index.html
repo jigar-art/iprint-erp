@@ -3612,6 +3612,8 @@ function MainApp({
     user: user
   }) : null, pg === "myscore" && React.createElement(DayPlanCard, {
     user: user
+  }), pg === "myscore" && React.createElement(CrewAssignCard, {
+    user: user
   }), pg === "myscore" && React.createElement(BankAssignCard, {
     user: user
   }), pg === "myscore" && React.createElement(AtRiskCard, {
@@ -34636,6 +34638,57 @@ function JobDateChanges({ job, user }) {
         React.createElement("span", { style: { fontWeight: 700, color: r.client_requested ? '#4ade80' : '#e0574f' } }, r.client_requested ? 'client-requested' : 'counts'),
         can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+// ── v4.1 Site crew per job (2026-10-14): who actually goes to site; crew share the job's installation items ──
+const SITE_CREW = ['KULDEEP', 'SHIV', 'KAIF', 'MUSTAFA', 'RASHID', 'SAHIL', 'JAGDISH', 'VENDOR'];
+function CrewAssignCard({ user }) {
+  const me = pbKey(user);
+  const can = ['POONAM', 'PRIYANKA', 'KULDEEP', 'AMOL', 'JIGAR'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [sel, setSel] = React.useState({});
+  const [crew, setCrew] = React.useState({});
+  const [filt, setFilt] = React.useState('none');
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_crew_assign_list').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { if (can) load(); }, [can]);
+  if (!can || !rows) return null;
+  const nm = k => k === 'VENDOR' ? 'Vendor' : k.charAt(0) + k.slice(1).toLowerCase();
+  const none = rows.filter(r => !(r.site_crew && r.site_crew.length));
+  const list = filt === 'none' ? none : filt === 'late' ? rows.filter(r => r.late) : rows;
+  const picked = list.filter(r => sel[r.job_id]).map(r => r.job_id);
+  const crewPicked = SITE_CREW.filter(k => crew[k]);
+  const assign = async () => {
+    if (!picked.length || !crewPicked.length) { setMsg('Tick jobs and at least one crew name'); return; }
+    setBusy(true); setMsg('');
+    const r = await sb.rpc('erp_set_crew', { p_jobs: picked, p_crew: crewPicked });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setMsg('✓ crew set on ' + r.data + ' job(s)'); setSel({}); load();
+  };
+  const pill = on => ({ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#cbd5e1' });
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12 } },
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008' } }, "👷 Site crew — who is going to each site"),
+    React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, none.length + ' open site jobs have no crew. The crew you set share the job’s recce / installation / rectification deadline in the point system. Pick "Vendor" when a partner does the site.'),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 } },
+      [['none', 'No crew (' + none.length + ')'], ['late', 'Late (' + rows.filter(r => r.late).length + ')'], ['all', 'All (' + rows.length + ')']].map(f =>
+        React.createElement("button", { key: f[0], type: 'button', onClick: () => { setFilt(f[0]); setSel({}); }, style: pill(filt === f[0]) }, f[1]))),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8, position: 'sticky', top: 0, background: '#111827', padding: '4px 0', zIndex: 1 } },
+      React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 4 } },
+        React.createElement("input", { type: 'checkbox', checked: list.length > 0 && picked.length === list.length, onChange: e => { const o = {}; if (e.target.checked) list.forEach(r => { o[r.job_id] = true; }); setSel(o); } }), picked.length + ' jobs'),
+      React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, 'crew:'),
+      SITE_CREW.map(k => React.createElement("button", { key: k, type: 'button', onClick: () => setCrew(p => ({ ...p, [k]: !p[k] })), style: pill(!!crew[k]) }, nm(k))),
+      React.createElement("button", { type: 'button', disabled: busy, onClick: assign, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, busy ? '…' : 'Set crew'),
+      msg ? React.createElement("span", { style: { fontSize: 12, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null),
+    React.createElement("div", { style: { maxHeight: 420, overflowY: 'auto' } },
+      list.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b', padding: 8 } }, 'Nothing here.') :
+      list.map(r => React.createElement("label", { key: r.job_id, style: { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderTop: '1px solid #1f2937', fontSize: 12, cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: !!sel[r.job_id], onChange: e => setSel(p => ({ ...p, [r.job_id]: e.target.checked })) }),
+        React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: 58 } }, r.job_id),
+        React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (r.client_class === 'B' ? '🏦 ' : '') + (r.client_name || '') + (r.project ? ' · ' + r.project : '')),
+        React.createElement("span", { style: { color: '#94a3b8', fontSize: 11 } }, r.status),
+        r.late ? React.createElement("span", { style: { color: '#e0574f', fontWeight: 700, fontSize: 11 } }, 'late') : null,
+        React.createElement("span", { style: { color: (r.site_crew && r.site_crew.length) ? '#4ade80' : '#f59e0b', fontSize: 11, minWidth: 80, textAlign: 'right' } }, (r.site_crew && r.site_crew.length) ? r.site_crew.map(nm).join(', ') : 'no crew')))));
 }
 // ── v4.1 Daily plan (2026-10-14): close today by 7 pm, plan next working day by 9 pm ──
 function DayPlanCard({ user }) {
