@@ -3619,6 +3619,8 @@ function MainApp({
     user: user
   }) : null, pg === "complaints" && React.createElement(ComplaintsPage, {
     user: user
+  }), pg === "myscore" && React.createElement(RegisterCard, {
+    user: user
   }), pg === "myscore" && React.createElement(DayPlanCard, {
     user: user
   }), pg === "myscore" && React.createElement(CrewAssignCard, {
@@ -34857,6 +34859,49 @@ function CrewAssignCard({ user, onCount }) {
         React.createElement("span", { style: { color: '#94a3b8', fontSize: 11 } }, r.status),
         r.late ? React.createElement("span", { style: { color: '#e0574f', fontWeight: 700, fontSize: 11 } }, 'late') : null,
         React.createElement("span", { style: { color: (r.site_crew && r.site_crew.length) ? '#4ade80' : '#f59e0b', fontSize: 11, minWidth: 80, textAlign: 'right' } }, (r.site_crew && r.site_crew.length) ? r.site_crew.map(nm).join(', ') : 'no crew')))));
+}
+// ── v4.2 Daily register (2026-10-14): who worked, who did not — Jigar / Amol only ──
+function RegisterCard({ user }) {
+  const me = pbKey(user);
+  const can = ['JIGAR', 'AMOL'].includes(me);
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const [day, setDay] = React.useState(() => { const d = new Date(); if (d.getHours() < 12) d.setDate(d.getDate() - 1); if (d.getDay() === 0) d.setDate(d.getDate() - 1); return iso(d); });
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(true);
+  React.useEffect(() => { if (can) { setRows(null); sb.rpc('erp_daily_register', { p_day: day }).then(r => setRows(r.error ? [] : (r.data || []))); } }, [day, can]);
+  if (!can) return null;
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const t = v => v ? new Date(v).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—';
+  const shift = n => { const d = new Date(day + 'T12:00'); d.setDate(d.getDate() + n); setDay(iso(d)); };
+  const idle = (rows || []).filter(r => r.flag === 'NO ERP ACTIVITY');
+  const th = { textAlign: 'left', padding: '5px 6px', fontSize: 10.5, color: '#94a3b8', borderBottom: '1px solid #334155', whiteSpace: 'nowrap' };
+  const td = { padding: '5px 6px', fontSize: 11.5, borderBottom: '1px solid #1f2937', whiteSpace: 'nowrap' };
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12 } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008', cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + "👥 Daily register — who worked"),
+      React.createElement("div", { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+        React.createElement("button", { type: 'button', onClick: () => shift(-1), style: { padding: '2px 9px', borderRadius: 6, border: '1px solid #334155', background: '#1f2937', color: '#fff', cursor: 'pointer' } }, '‹'),
+        React.createElement("input", { type: 'date', className: 'in', value: day, onChange: e => setDay(e.target.value), style: { fontSize: 12, padding: '3px 6px' } }),
+        React.createElement("button", { type: 'button', onClick: () => shift(1), style: { padding: '2px 9px', borderRadius: 6, border: '1px solid #334155', background: '#1f2937', color: '#fff', cursor: 'pointer' } }, '›'))),
+    !open ? null : rows === null ? React.createElement("div", { style: { fontSize: 12, color: '#64748b', padding: 8 } }, 'Loading…') :
+    React.createElement("div", null,
+      React.createElement("div", { style: { fontSize: 11.5, color: idle.length ? '#fca5a5' : '#4ade80', margin: '4px 0 8px' } }, idle.length ? '🔴 No ERP activity: ' + idle.map(r => nm(r.person)).join(', ') : 'Everyone logged some work.'),
+      React.createElement("div", { style: { overflowX: 'auto' } },
+        React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse' } },
+          React.createElement("thead", null, React.createElement("tr", null,
+            ['Person', 'First', 'Last', 'Actions', 'Moves', 'Site', 'Prod', 'Emails', 'Cleared', 'New late', 'Open late', 'Plan', 'Done', 'Not done', 'Open', 'Flag'].map(h => React.createElement("th", { key: h, style: th }, h)))),
+          React.createElement("tbody", null, rows.map(r => React.createElement("tr", { key: r.person, style: { background: r.flag === 'NO ERP ACTIVITY' ? '#e0574f14' : 'transparent' } },
+            React.createElement("td", { style: { ...td, fontWeight: 700, color: '#e2e8f0' } }, nm(r.person)),
+            React.createElement("td", { style: td }, t(r.first_at)), React.createElement("td", { style: td }, t(r.last_at)),
+            React.createElement("td", { style: td }, r.actions), React.createElement("td", { style: td }, r.stage_moves), React.createElement("td", { style: td }, r.site_logs),
+            React.createElement("td", { style: td }, r.prod_logs), React.createElement("td", { style: td }, r.emails_sent),
+            React.createElement("td", { style: { ...td, color: r.cleared ? '#4ade80' : '#64748b', fontWeight: 700 } }, r.cleared),
+            React.createElement("td", { style: { ...td, color: r.newly_late ? '#f59e0b' : '#64748b' } }, r.newly_late),
+            React.createElement("td", { style: { ...td, color: r.open_late ? '#e0574f' : '#64748b' } }, r.open_late),
+            React.createElement("td", { style: { ...td, color: r.planned_ahead ? '#4ade80' : '#64748b' } }, r.plan_lines + (r.planned_ahead ? ' ✓' : '')),
+            React.createElement("td", { style: td }, r.plan_done), React.createElement("td", { style: td }, r.plan_not_done),
+            React.createElement("td", { style: { ...td, color: r.plan_open ? '#f59e0b' : '#64748b' } }, r.plan_open),
+            React.createElement("td", { style: { ...td, color: r.flag === 'NO ERP ACTIVITY' ? '#f87171' : '#f59e0b', fontWeight: 700 } }, r.flag || ''))))))));
 }
 // ── v4.1 Daily plan (2026-10-14): close today by 7 pm, plan next working day by 9 pm ──
 function DayPlanCard({ user }) {
