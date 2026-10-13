@@ -7573,6 +7573,14 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         show('Add at least one item', false);
         return;
       }
+      if (!prf.expected_delivery) {
+        show('Enter "Material required by" — the date you need this material / job work (Jigar can change it at approval)', false);
+        return;
+      }
+      {
+        const _t = new Date(); const _ti = _t.getFullYear() + '-' + String(_t.getMonth() + 1).padStart(2, '0') + '-' + String(_t.getDate()).padStart(2, '0');
+        if (prf.expected_delivery < _ti) { show('"Material required by" cannot be in the past', false); return; }
+      }
       const missingUnit = prf.items.findIndex(x => x.product && !x.unit_mode);
       if (missingUnit >= 0) {
         show(`Select a unit for item ${missingUnit + 1} (${prf.items[missingUnit].product.slice(0, 30)})`, false);
@@ -8739,7 +8747,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         display: "block",
         marginBottom: 2
       }
-    }, "Expected Delivery"), React.createElement("input", {
+    }, "Material required by *"), React.createElement("input", {
       className: "in",
       type: "date",
       value: prf.expected_delivery,
@@ -28702,6 +28710,7 @@ function ApprovalsPage({
   const [rejReason, setRejReason] = React.useState('');
   const [processing, setProcessing] = React.useState(null);
   const [waButtons, setWaButtons] = React.useState({});
+  const [reqBy, setReqBy] = React.useState({});
   const [billingRequests, setBillingRequests] = React.useState([]);
   const [billingSitesMap, setBillingSitesMap] = React.useState({});
   const [decidingBR, setDecidingBR] = React.useState(null);
@@ -28786,13 +28795,19 @@ function ApprovalsPage({
     return `❌ *PR Rejected — ${pr.pr_no}*\n\nYour Purchase Request has been rejected by Jigar.\n\n*Vendor:* ${pr.vendor_name}\n*Reason:* ${pr.rejection_reason || 'Please check with Jigar for details'}\n\nPlease revise and resubmit from the ERP. You can edit the PR and resubmit for approval.`;
   };
   const approvePR = async pr => {
+    const _rb = reqBy[pr.id] || pr.expected_delivery || '';
+    if (!_rb) {
+      show('Set "Required by" before approving — this is the deadline the PO is measured against', false);
+      return;
+    }
     setProcessing(pr.id);
     const nowIso = new Date().toISOString();
     const updates = {
       status: 'Approved',
       approved_by: user?.name || 'Jigar',
       approved_at: nowIso,
-      last_status_change_at: nowIso
+      last_status_change_at: nowIso,
+      expected_delivery: _rb
     };
     const {
       error
@@ -29564,7 +29579,15 @@ function ApprovalsPage({
         borderColor: '#3b82f6',
         color: '#3b82f6'
       }
-    }, "\uD83D\uDCC4 Preview"), React.createElement("button", {
+    }, "\uD83D\uDCC4 Preview"), React.createElement("label", {
+      style: { fontSize: 10, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4 }
+    }, "Required by", React.createElement("input", {
+      type: "date",
+      className: "in",
+      value: reqBy[pr.id] || pr.expected_delivery || '',
+      onChange: e => setReqBy(p => ({ ...p, [pr.id]: e.target.value })),
+      style: { fontSize: 10, padding: '3px 4px', borderColor: (reqBy[pr.id] || pr.expected_delivery) ? undefined : '#e0574f' }
+    })), React.createElement("button", {
       className: "b bp",
       onClick: () => approvePR(pr),
       disabled: processing === pr.id,
