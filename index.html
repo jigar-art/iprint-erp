@@ -3610,7 +3610,11 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(ScoreSendCard, {
+  }) : null, pg === "myscore" && React.createElement(BankAssignCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(AtRiskCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(ScoreSendCard, {
     user: user
   }), pg === "myscore" && React.createElement(ScorecardCard, {
     user: user
@@ -34530,11 +34534,11 @@ function DutiesCard({ user }) {
 function JobCredit({ job, user }) {
   const me = pbKey(user);
   const [cls, setCls] = React.useState(job && job.job_class || null);
-  const [vals, setVals] = React.useState({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '', rectification_cause: job && job.rectification_cause || '' });
+  const [vals, setVals] = React.useState({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '', rectification_cause: job && job.rectification_cause || '', rectification_person: job && job.rectification_person || '' });
   const [err, setErr] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
-    setVals({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '', rectification_cause: job && job.rectification_cause || '' });
+    setVals({ designed_by: job && job.designed_by || '', bank_assignee: job && job.bank_assignee || '', rectification_cause: job && job.rectification_cause || '', rectification_person: job && job.rectification_person || '' });
     if (job && !job.job_class && job.client_id) sb.from('clients').select('client_class').eq('id', job.client_id).maybeSingle().then(r => setCls(r.data && r.data.client_class || 'A'));
     else setCls(job && job.job_class || 'A');
   }, [job && job.id]);
@@ -34542,7 +34546,7 @@ function JobCredit({ job, user }) {
   const designDone = job.designed_by || !/^Quotation|^PO Pending|^Design|^Active/.test(job.status || '');
   const isBank = cls === 'B';
   const up = [['Photo', job.image_uploaded_by], ['POD', job.pod_uploaded_by], ['IC', job.ic_uploaded_by], ['DC', job.dc_uploaded_by]].filter(x => x[1]);
-  const isRect = job.status === 'Rectification' || !!job.rectification_cause;
+  const isRect = ['Rectification', 'Installation WIP', 'Delivered', 'IC Pending', 'DC Pending', 'Billing Pending', 'Given for Billing'].includes(job.status) || !!job.rectification_cause;
   if (!designDone && !isBank && !up.length && !isRect) return null;
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const set = async (field, v) => {
@@ -34561,8 +34565,9 @@ function JobCredit({ job, user }) {
     React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "🏷 Credit (point system)"),
     designDone ? picker('Designed by', 'designed_by', ['PRAJAKTA', 'VIKAS'], ['PRAJAKTA', 'AMOL', 'JIGAR'].includes(me), 'PRAJAKTA') : null,
     isBank ? picker('Banking site assigned to', 'bank_assignee', ['PRIYANKA', 'HARSHALA'], ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me), 'PRIYANKA') : null,
-    isRect ? picker('Rectification caused by', 'rectification_cause', ['DESIGN', 'PRINTING', 'FABRICATION', 'INSTALLATION', 'DISPATCH', 'CLIENT', 'OTHER'], ['POONAM', 'AMOL', 'JIGAR'].includes(me), null) : null,
-    isRect && !vals.rectification_cause ? React.createElement("div", { style: { fontSize: 10.5, color: '#f59e0b' } }, 'Record which department caused this rework — that lead then logs the quality incident.') : null,
+    isRect ? picker('Rectification caused by', 'rectification_cause', ['DESIGN', 'PRINTING', 'FABRICATION', 'INSTALLATION', 'DISPATCH', 'CLIENT', 'OTHER'], ['POONAM', 'PRIYANKA', 'AMOL', 'JIGAR'].includes(me), null) : null,
+    isRect && vals.rectification_cause && RECT_PEOPLE[vals.rectification_cause] ? picker('Person responsible', 'rectification_person', RECT_PEOPLE[vals.rectification_cause], ['POONAM', 'PRIYANKA', 'AMOL', 'JIGAR'].includes(me), null) : null,
+    isRect && (!vals.rectification_cause || (RECT_PEOPLE[vals.rectification_cause] && !vals.rectification_person)) ? React.createElement("div", { style: { fontSize: 10.5, color: '#f59e0b' } }, job.status === 'Rectification' ? 'Rework job: record the department and the person responsible. The person gets a quality incident (5 pts, can be disputed).' : 'Before moving this job to Rectification, record who caused the rework (department + person). The ERP will block the move without it.') : null,
     up.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'Uploaded by: ' + up.map(x => x[0] + ' — ' + nm(x[1])).join(' · ')) : null,
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5 } }, err) : null);
 }
@@ -34595,6 +34600,94 @@ function JobDateChanges({ job, user }) {
         React.createElement("span", { style: { fontWeight: 700, color: r.client_requested ? '#4ade80' : '#e0574f' } }, r.client_requested ? 'client-requested' : 'counts'),
         can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
+}
+// ── v4.1 point system (2026-10-14): Rectification people, banking bulk assign, At-risk list ──
+const RECT_PEOPLE = {
+  DESIGN: ['PRAJAKTA', 'VIKAS'],
+  PRINTING: ['PRATIK', 'ABHIJIT', 'ANKIT', 'SHAHAJAD', 'SONU'],
+  FABRICATION: ['HARISH', 'ANIL', 'HIMANSHU', 'PRINCE', 'SANKET', 'UMESH'],
+  INSTALLATION: ['POONAM', 'PRIYANKA', 'HARSHALA', 'KULDEEP', 'SHIV', 'KAIF', 'MUSTAFA', 'RASHID', 'SAHIL', 'JAGDISH', 'VENDOR'],
+  DISPATCH: ['MURLI', 'MANOJ', 'MANISH']
+};
+function BankAssignCard({ user }) {
+  const me = pbKey(user);
+  const can = ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [sel, setSel] = React.useState({});
+  const [filt, setFilt] = React.useState('unassigned');
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_bank_assign_list').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { if (can) load(); }, [can]);
+  if (!can || !rows) return null;
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '—';
+  const seen = new Set();
+  const all = rows.filter(r => !seen.has(r.job_id) && seen.add(r.job_id)).sort((a, b) => (b.late_items - a.late_items) || String(a.oldest_due || '9').localeCompare(String(b.oldest_due || '9')));
+  const un = all.filter(r => !r.bank_assignee);
+  const list = filt === 'unassigned' ? un : filt === 'all' ? all : all.filter(r => r.bank_assignee === filt);
+  const picked = list.filter(r => sel[r.job_id]).map(r => r.job_id);
+  const cnt = k => all.filter(r => r.bank_assignee === k).length;
+  const assign = async who => {
+    if (!picked.length) return;
+    setBusy(true); setMsg('');
+    const r = await sb.rpc('erp_bank_assign_bulk', { p_jobs: picked, p_person: who });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setMsg('✓ ' + r.data + ' job(s) assigned to ' + nm(who));
+    setSel({}); load();
+  };
+  const btn = (on) => ({ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#cbd5e1' });
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12 } },
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008' } }, "🏦 Banking jobs — assign Priyanka / Harshala"),
+    React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, un.length ? un.length + ' open banking jobs not assigned. Unassigned jobs count as Priyanka’s in the point system — assign each one to whoever is handling it.' : 'All open banking jobs are assigned.'),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 } },
+      [['unassigned', 'Not assigned (' + un.length + ')'], ['PRIYANKA', 'Priyanka (' + cnt('PRIYANKA') + ')'], ['HARSHALA', 'Harshala (' + cnt('HARSHALA') + ')'], ['all', 'All (' + all.length + ')']].map(f =>
+        React.createElement("button", { key: f[0], type: 'button', onClick: () => { setFilt(f[0]); setSel({}); }, style: btn(filt === f[0]) }, f[1]))),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8, position: 'sticky', top: 0, background: '#111827', padding: '4px 0', zIndex: 1 } },
+      React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 4 } },
+        React.createElement("input", { type: 'checkbox', checked: list.length > 0 && picked.length === list.length, onChange: e => { const o = {}; if (e.target.checked) list.forEach(r => { o[r.job_id] = true; }); setSel(o); } }), 'Select all'),
+      React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, picked.length + ' selected →'),
+      ['PRIYANKA', 'HARSHALA'].map(w => React.createElement("button", { key: w, type: 'button', disabled: busy || !picked.length, onClick: () => assign(w), style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: picked.length ? 'pointer' : 'default', color: '#fff', border: '1px solid #22c55e', background: picked.length ? '#15803d' : '#1f2937', opacity: picked.length ? 1 : 0.5 } }, busy ? '…' : 'Assign to ' + nm(w))),
+      msg ? React.createElement("span", { style: { fontSize: 12, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null),
+    React.createElement("div", { style: { maxHeight: 420, overflowY: 'auto' } },
+      list.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b', padding: 8 } }, 'Nothing here.') :
+      list.map(r => React.createElement("label", { key: r.job_id, style: { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderTop: '1px solid #1f2937', fontSize: 12, cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: !!sel[r.job_id], onChange: e => setSel(p => ({ ...p, [r.job_id]: e.target.checked })) }),
+        React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: 58 } }, r.job_id),
+        React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (r.client_name || '') + (r.project ? ' · ' + r.project : '')),
+        React.createElement("span", { style: { color: '#94a3b8', fontSize: 11 } }, r.status),
+        r.late_items ? React.createElement("span", { style: { color: '#e0574f', fontWeight: 700, fontSize: 11 } }, r.late_items + ' late') : null,
+        React.createElement("span", { style: { color: r.bank_assignee ? '#4ade80' : '#f59e0b', fontSize: 11, minWidth: 62, textAlign: 'right' } }, r.bank_assignee ? nm(r.bank_assignee) : 'not set')))));
+}
+function AtRiskCard({ user }) {
+  const [rows, setRows] = React.useState(null);
+  const [all, setAll] = React.useState(false);
+  React.useEffect(() => { sb.rpc('erp_my_at_risk').then(r => setRows(r.error ? [] : (r.data || []))); }, []);
+  if (!rows) return null;
+  const now = Date.now();
+  const late = rows.filter(r => new Date(r.due_at).getTime() < now);
+  const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
+  const today = rows.filter(r => { const t = new Date(r.due_at).getTime(); return t >= now && t <= endToday.getTime(); });
+  const soon = rows.filter(r => new Date(r.due_at).getTime() > endToday.getTime());
+  const kindLbl = { stage: '', bank_pod: 'POD · ', bank_image: 'Installed image · ', po: 'PO not inwarded · ', quote: 'Quote · ' };
+  const fd = d => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const open = r => { if (['stage', 'bank_pod', 'bank_image'].includes(r.kind) && window._navigateToRecord) window._navigateToRecord('job', r.ref); };
+  const card = (label, n, color) => React.createElement("div", { style: { flex: '1 1 90px', padding: 8, borderRadius: 8, background: color + '1a', border: '1px solid ' + color + '55' } },
+    React.createElement("div", { style: { fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' } }, label),
+    React.createElement("div", { style: { fontSize: 22, fontWeight: 800, color } }, n));
+  const shown = all ? rows : rows.slice(0, 25);
+  const saved = Math.round(late.reduce((a, r) => a + Number(r.weight || 0), 0));
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12 } },
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008' } }, "⏰ At risk — clear these first"),
+    React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, rows.length ? 'Your jobs that are late or due in the next 2 days, oldest first. Each late day costs points until it is cleared (full penalty at 5 days late).' : 'Nothing late or due in the next 2 days. 👍'),
+    rows.length ? React.createElement("div", { style: { display: 'flex', gap: 6, marginBottom: 8 } }, card('Late', late.length, '#e0574f'), card('Due today', today.length, '#f59e0b'), card('Due tomorrow', soon.length, '#60a5fa')) : null,
+    late.length ? React.createElement("div", { style: { fontSize: 11.5, color: '#fca5a5', marginBottom: 6 } }, 'Late items weigh ' + saved + ' item-equivalents right now — clearing them stops the penalty growing.') : null,
+    shown.map((r, i) => { const lt = new Date(r.due_at).getTime() < now; return React.createElement("div", { key: r.kind + r.ref + i, onClick: () => open(r), style: { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderTop: '1px solid #1f2937', fontSize: 12, cursor: ['stage', 'bank_pod', 'bank_image'].includes(r.kind) ? 'pointer' : 'default' } },
+      React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: 58 } }, r.ref),
+      React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (kindLbl[r.kind] || '') + (r.kind === 'stage' ? r.stage : '') + (r.client_name ? ' · ' + r.client_name : '')),
+      React.createElement("span", { style: { color: lt ? '#e0574f' : '#f59e0b', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' } }, lt ? r.days_late + ' d late' : 'due ' + fd(r.due_at))); }),
+    rows.length > 25 ? React.createElement("button", { type: 'button', onClick: () => setAll(!all), style: { marginTop: 6, padding: '4px 11px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, all ? 'Show less' : 'Show all ' + rows.length) : null,
+    rows.length && rows[0].computed_at ? React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } }, 'Updated hourly · last ' + fd(rows[0].computed_at)) : null);
 }
 // ── Monthly scorecard (point system, 2026-09-29) — reads the hourly snapshot ──
 function ScorecardCard({ user }) {
