@@ -2959,6 +2959,11 @@ function MainApp({
     e: "\u23f1",
     roles: ["admin", "sales", "production", "designer"]
   }, {
+    id: "complaints",
+    l: "Complaints",
+    e: "\ud83d\udce3",
+    roles: ["admin", "sales", "production", "accounts", "printing", "fabrication", "dispatch", "designer"]
+  }, {
     id: "myscore",
     l: "My Score",
     e: "\ud83c\udfaf",
@@ -3612,7 +3617,9 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(CommitGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(DayPlanCard, {
+  }) : null, pg === "complaints" && React.createElement(ComplaintsPage, {
+    user: user
+  }), pg === "myscore" && React.createElement(DayPlanCard, {
     user: user
   }), pg === "myscore" && React.createElement(CrewAssignCard, {
     user: user
@@ -34641,6 +34648,88 @@ function JobDateChanges({ job, user }) {
         can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
+// ── v4.2 Complaint register (2026-10-14): reply in 4 working hrs, resolve in 2 working days; email complaints confirmed by Jigar ──
+const CMP_STAFF = ['APARNA', 'PRIYANKA', 'HARSHALA', 'POONAM', 'RUCHITA', 'ANKITA', 'VIDYA', 'SHREYA', 'PRACHI', 'PRAJAKTA', 'VIKAS', 'MURLI', 'MANOJ', 'KULDEEP', 'HARISH', 'PRATIK', 'AMOL'];
+function ComplaintsPage({ user }) {
+  const me = pbKey(user);
+  const boss = ['JIGAR', 'AMOL'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [filt, setFilt] = React.useState(me === 'JIGAR' ? 'review' : 'open');
+  const [form, setForm] = React.useState(null);
+  const [note, setNote] = React.useState({});
+  const [pick, setPick] = React.useState({});
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_complaints_list', { p_days: 60 }).then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { load(); }, []);
+  if (!rows) return React.createElement("div", { className: "c", style: { padding: 16 } }, "Loading…");
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '—';
+  const now = Date.now();
+  const fd = d => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+  const isOpen = r => r.status === 'open' || r.status === 'replied';
+  const replyLate = r => !r.first_reply_at ? new Date(r.reply_due).getTime() < now : new Date(r.first_reply_at) > new Date(r.reply_due);
+  const resolveLate = r => !r.resolved_at ? new Date(r.resolve_due).getTime() < now : new Date(r.resolved_at) > new Date(r.resolve_due);
+  const review = rows.filter(r => r.needs_review && r.status !== 'not_complaint');
+  const open = rows.filter(r => !r.needs_review && isOpen(r));
+  const lists = { review, open, mine: open.filter(r => r.owner === me), late: open.filter(r => replyLate(r) || resolveLate(r)), done: rows.filter(r => r.status === 'resolved') };
+  const list = lists[filt] || [];
+  const act = async (r, action, extra) => {
+    setMsg('');
+    const res = await sb.rpc('erp_complaint_act', { p_id: r.id, p_action: action, p_note: (extra && extra.note) || null, p_person: (extra && extra.person) || null });
+    if (res.error) { setMsg('⚠️ ' + res.error.message); return; }
+    setNote(p => ({ ...p, [r.id]: '' })); load();
+  };
+  const create = async () => {
+    setMsg('');
+    const r = await sb.rpc('erp_complaint_create', { p_client: form.client || '', p_job: form.job || '', p_channel: form.channel, p_subject: form.subject || '', p_desc: form.desc || '', p_owner: form.owner || null });
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setForm(null); setMsg('✓ Complaint #' + r.data + ' logged'); load();
+  };
+  const pill = on => ({ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#cbd5e1' });
+  const btn = c => ({ padding: '3px 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + c, background: c + '22' });
+  const tag = (txt, c) => React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: c, border: '1px solid ' + c + '66', borderRadius: 6, padding: '1px 6px', whiteSpace: 'nowrap' } }, txt);
+  const inp = { className: 'in', style: { fontSize: 12, padding: '5px 7px' } };
+  return React.createElement("div", { style: { padding: 4 } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 } },
+      React.createElement("h2", { style: { fontSize: 18, margin: '4px 0' } }, "📣 Complaints"),
+      React.createElement("button", { type: 'button', onClick: () => setForm(form ? null : { channel: 'call' }), style: { padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#111', border: '1px solid #e3a008', background: '#e3a008' } }, form ? 'Close' : '+ Log complaint')),
+    React.createElement("p", { style: { fontSize: 12, color: '#94a3b8', margin: '2px 0 10px' } }, "Every client complaint — email, call, WhatsApp or site. Reply within 4 working hours, resolve within 2 working days (Mon–Sat 10–7). Complaints found in email count only after Jigar confirms them."),
+    form ? React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12, display: 'grid', gap: 8 } },
+      React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+        React.createElement("input", { ...inp, placeholder: 'Client name', value: form.client || '', onChange: e => setForm({ ...form, client: e.target.value }), style: { ...inp.style, flex: '1 1 180px' } }),
+        React.createElement("input", { ...inp, placeholder: 'Job no. (if known)', value: form.job || '', onChange: e => setForm({ ...form, job: e.target.value }), style: { ...inp.style, width: 140 } }),
+        React.createElement("select", { ...inp, value: form.channel, onChange: e => setForm({ ...form, channel: e.target.value }) }, ['call', 'whatsapp', 'email', 'site', 'other'].map(c => React.createElement("option", { key: c, value: c }, c))),
+        React.createElement("select", { ...inp, value: form.owner || '', onChange: e => setForm({ ...form, owner: e.target.value }) }, React.createElement("option", { value: '' }, 'Owner: from job stage'), CMP_STAFF.map(k => React.createElement("option", { key: k, value: k }, nm(k))))),
+      React.createElement("input", { ...inp, placeholder: 'What is the complaint? (short)', value: form.subject || '', onChange: e => setForm({ ...form, subject: e.target.value }) }),
+      React.createElement("textarea", { ...inp, rows: 2, placeholder: 'Details — who complained, what exactly', value: form.desc || '', onChange: e => setForm({ ...form, desc: e.target.value }) }),
+      React.createElement("div", null, React.createElement("button", { type: 'button', onClick: create, style: { padding: '6px 14px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Save complaint'))) : null,
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 } },
+      [me === 'JIGAR' ? ['review', 'To confirm (' + review.length + ')'] : null, ['open', 'Open (' + open.length + ')'], ['mine', 'Mine (' + lists.mine.length + ')'], ['late', 'Late (' + lists.late.length + ')'], ['done', 'Resolved (' + lists.done.length + ')']].filter(Boolean).map(f =>
+        React.createElement("button", { key: f[0], type: 'button', onClick: () => setFilt(f[0]), style: pill(filt === f[0]) }, f[1]))),
+    msg ? React.createElement("div", { style: { fontSize: 12, color: msg[0] === '✓' ? '#4ade80' : '#f87171', marginBottom: 6 } }, msg) : null,
+    list.length === 0 ? React.createElement("div", { className: "c", style: { padding: 14, color: '#64748b', fontSize: 12 } }, 'Nothing here.') :
+    list.map(r => React.createElement("div", { key: r.id, className: "cd", style: { padding: 10, marginBottom: 8 } },
+      React.createElement("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+        React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0' } }, '#' + r.id),
+        React.createElement("span", { style: { fontWeight: 700, color: '#e2e8f0', flex: '1 1 200px' } }, (r.client_name || '') + (r.job_id ? ' · ' + r.job_id : '')),
+        tag(r.channel, '#60a5fa'), tag('Owner: ' + nm(r.owner), '#cbd5e1'),
+        r.status === 'resolved' ? tag('Resolved ' + fd(r.resolved_at), '#4ade80') : null,
+        isOpen(r) && !r.first_reply_at ? tag((replyLate(r) ? 'Reply LATE · was due ' : 'Reply by ') + fd(r.reply_due), replyLate(r) ? '#e0574f' : '#f59e0b') : null,
+        isOpen(r) && r.first_reply_at ? tag('Replied ' + fd(r.first_reply_at), replyLate(r) ? '#f59e0b' : '#4ade80') : null,
+        isOpen(r) ? tag((resolveLate(r) ? 'Resolve LATE · was due ' : 'Resolve by ') + fd(r.resolve_due), resolveLate(r) ? '#e0574f' : '#94a3b8') : null),
+      React.createElement("div", { style: { fontSize: 12.5, color: '#e2e8f0', marginTop: 4 } }, r.subject || ''),
+      r.description ? React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 2 } }, r.description) : null,
+      React.createElement("div", { style: { fontSize: 10.5, color: '#64748b', marginTop: 2 } }, 'Raised ' + fd(r.raised_at) + ' · by ' + (r.raised_by === 'ERP (auto)' ? 'email (' + (r.source_mailbox || '') + ')' : nm(r.raised_by)) + (r.resolution_note ? ' · ' + r.resolution_note : '')),
+      r.needs_review && me === 'JIGAR' ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' } },
+        React.createElement("select", { ...inp, value: pick[r.id] || r.owner || '', onChange: e => setPick(p => ({ ...p, [r.id]: e.target.value })) }, CMP_STAFF.map(k => React.createElement("option", { key: k, value: k }, 'Owner: ' + nm(k)))),
+        React.createElement("button", { type: 'button', onClick: () => act(r, 'confirm', { person: pick[r.id] || r.owner }), style: btn('#e0574f') }, '✓ Yes, complaint'),
+        React.createElement("button", { type: 'button', onClick: () => act(r, 'not_complaint'), style: btn('#64748b') }, 'Not a complaint')) : null,
+      !r.needs_review && isOpen(r) && (boss || r.owner === me) ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' } },
+        !r.first_reply_at ? React.createElement("button", { type: 'button', onClick: () => act(r, 'replied'), style: btn('#60a5fa') }, 'Replied to client') : null,
+        React.createElement("input", { ...inp, placeholder: 'How was it resolved?', value: note[r.id] || '', onChange: e => setNote(p => ({ ...p, [r.id]: e.target.value })), style: { ...inp.style, flex: '1 1 200px' } }),
+        React.createElement("button", { type: 'button', onClick: () => act(r, 'resolved', { note: note[r.id] }), style: btn('#22c55e') }, 'Resolved'),
+        boss ? React.createElement("select", { ...inp, value: '', onChange: e => e.target.value && act(r, 'reassign', { person: e.target.value }) }, React.createElement("option", { value: '' }, 'Reassign…'), CMP_STAFF.map(k => React.createElement("option", { key: k, value: k }, nm(k)))) : null,
+        boss ? React.createElement("button", { type: 'button', onClick: () => act(r, 'not_complaint'), style: btn('#64748b') }, 'Not a complaint') : null) : null)));
+}
 // ── v4.1 Login commitment gate (2026-10-14, Jigar): before the ERP opens, commit a date for every late job ──
 function CommitGate({ user }) {
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -34928,7 +35017,7 @@ function AtRiskCard({ user }) {
   const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
   const today = rows.filter(r => { const t = new Date(r.due_at).getTime(); return t >= now && t <= endToday.getTime(); });
   const soon = rows.filter(r => new Date(r.due_at).getTime() > endToday.getTime());
-  const kindLbl = { stage: '', bank_pod: 'POD · ', bank_image: 'Installed image · ', po: 'PO not inwarded · ', quote: 'Quote · ' };
+  const kindLbl = { stage: '', bank_pod: 'POD · ', bank_image: 'Installed image · ', po: 'PO not inwarded · ', quote: 'Quote · ', complaint_reply: 'Complaint #', complaint_resolve: 'Complaint #' };
   const fd = d => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   const open = r => { if (['stage', 'bank_pod', 'bank_image'].includes(r.kind) && window._navigateToRecord) window._navigateToRecord('job', r.ref); };
   const card = (label, n, color) => React.createElement("div", { style: { flex: '1 1 90px', padding: 8, borderRadius: 8, background: color + '1a', border: '1px solid ' + color + '55' } },
