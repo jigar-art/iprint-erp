@@ -34757,7 +34757,7 @@ function CommitGate({ user }) {
   if (me === 'PRIYANKA' && unBank !== 0) return shell('🏦 Step 1 — assign every open banking job', unBank === null ? 'Loading…' : unBank + ' banking job(s) still not assigned. Assign each to yourself or Harshala (whoever is handling it). The ERP opens when none are left.', React.createElement(BankAssignCard, { user, onCount: setUnBank }));
   if (me === 'POONAM' && unCrew !== 0) return shell('👷 Step 1 — set the site crew on every open site job', unCrew === null ? 'Loading…' : unCrew + ' site job(s) still without crew. Pick who goes to site, or Vendor when a partner does it. The ERP opens when none are left.', React.createElement(CrewAssignCard, { user, onCount: setUnCrew }));
   if (!rows || rows.length === 0) return null;
-  const kindLbl = r => r.kind === 'stage' ? r.stage : r.kind === 'bank_pod' ? 'Upload POD' : r.kind === 'bank_image' ? 'Upload installed image' : r.kind === 'po' ? 'PO inward (GRN)' : r.kind === 'quote' ? 'Send quote' : r.stage;
+  const kindLbl = r => ['stage', 'email_handover'].includes(r.kind) ? (r.kind === 'email_handover' ? '✉️ ' : '') + r.stage : r.kind.indexOf('complaint') === 0 ? '📣 ' + r.stage + ' #' + r.ref : r.kind === 'bank_pod' ? 'Upload POD' : r.kind === 'bank_image' ? 'Upload installed image' : r.kind === 'po' ? 'PO inward (GRN)' : r.kind === 'quote' ? 'Send quote' : r.stage;
   const picked = rows.filter(r => sel[k(r)]);
   const apply = () => {
     if (!picked.length) { setErr('Tick jobs first'); return; }
@@ -35017,7 +35017,7 @@ function AtRiskCard({ user }) {
   const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
   const today = rows.filter(r => { const t = new Date(r.due_at).getTime(); return t >= now && t <= endToday.getTime(); });
   const soon = rows.filter(r => new Date(r.due_at).getTime() > endToday.getTime());
-  const kindLbl = { stage: '', bank_pod: 'POD · ', bank_image: 'Installed image · ', po: 'PO not inwarded · ', quote: 'Quote · ', complaint_reply: 'Complaint #', complaint_resolve: 'Complaint #' };
+  const kindLbl = { stage: '', bank_pod: 'POD · ', bank_image: 'Installed image · ', po: 'PO not inwarded · ', quote: 'Quote · ', complaint_reply: '📣 ', complaint_resolve: '📣 ', email_handover: '✉️ ' };
   const fd = d => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   const open = r => { if (['stage', 'bank_pod', 'bank_image'].includes(r.kind) && window._navigateToRecord) window._navigateToRecord('job', r.ref); };
   const card = (label, n, color) => React.createElement("div", { style: { flex: '1 1 90px', padding: 8, borderRadius: 8, background: color + '1a', border: '1px solid ' + color + '55' } },
@@ -35032,7 +35032,7 @@ function AtRiskCard({ user }) {
     late.length ? React.createElement("div", { style: { fontSize: 11.5, color: '#fca5a5', marginBottom: 6 } }, 'Late items weigh ' + saved + ' item-equivalents right now — clearing them stops the penalty growing.') : null,
     shown.map((r, i) => { const lt = new Date(r.due_at).getTime() < now; return React.createElement("div", { key: r.kind + r.ref + i, onClick: () => open(r), style: { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderTop: '1px solid #1f2937', fontSize: 12, cursor: ['stage', 'bank_pod', 'bank_image'].includes(r.kind) ? 'pointer' : 'default' } },
       React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: 58 } }, r.ref),
-      React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (kindLbl[r.kind] || '') + (r.kind === 'stage' ? r.stage : '') + (r.client_name ? ' · ' + r.client_name : '')),
+      React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, (kindLbl[r.kind] || '') + (['stage', 'complaint_reply', 'complaint_resolve', 'email_handover'].includes(r.kind) ? r.stage : '') + (r.kind.indexOf('complaint') === 0 ? ' #' + r.ref : '') + (r.client_name ? ' · ' + r.client_name : '')),
       React.createElement("span", { style: { color: lt ? '#e0574f' : '#f59e0b', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' } }, lt ? r.days_late + ' d late' : 'due ' + fd(r.due_at))); }),
     rows.length > 25 ? React.createElement("button", { type: 'button', onClick: () => setAll(!all), style: { marginTop: 6, padding: '4px 11px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, all ? 'Show less' : 'Show all ' + rows.length) : null,
     rows.length && rows[0].computed_at ? React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } }, 'Updated hourly · last ' + fd(rows[0].computed_at)) : null);
