@@ -3610,7 +3610,9 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
-  }) : null, pg === "myscore" && React.createElement(BankAssignCard, {
+  }) : null, pg === "myscore" && React.createElement(DayPlanCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(BankAssignCard, {
     user: user
   }), pg === "myscore" && React.createElement(AtRiskCard, {
     user: user
@@ -34601,6 +34603,98 @@ function JobDateChanges({ job, user }) {
         can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
+// ── v4.1 Daily plan (2026-10-14): close today by 7 pm, plan next working day by 9 pm ──
+function DayPlanCard({ user }) {
+  const uname = (user?.name || '').toUpperCase();
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const now = new Date();
+  const todayISO = iso(now);
+  const nx = new Date(now); nx.setDate(nx.getDate() + 1); if (nx.getDay() === 0) nx.setDate(nx.getDate() + 1);
+  const tomISO = iso(nx);
+  const tomLbl = nx.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+  const [today, setToday] = React.useState(null);
+  const [tom, setTom] = React.useState([]);
+  const [risk, setRisk] = React.useState([]);
+  const [pick, setPick] = React.useState({});
+  const [txt, setTxt] = React.useState('');
+  const [why, setWhy] = React.useState({});
+  const [askWhy, setAskWhy] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const load = async () => {
+    const [a, b, c] = await Promise.all([
+      sb.from('daily_tasks').select('id,task_text,status,stuck_note,linked_job_id,carry_count,source').eq('user_name', uname).eq('task_date', todayISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
+      sb.from('daily_tasks').select('id,task_text,status,linked_job_id,source_task_id,carry_count').eq('user_name', uname).eq('task_date', tomISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
+      sb.rpc('erp_my_at_risk')]);
+    setToday(a.data || []); setTom(b.data || []); setRisk(c.error ? [] : (c.data || []));
+  };
+  React.useEffect(() => { if (uname) load(); }, [uname]);
+  if (!uname || today === null) return null;
+  const h = now.getHours();
+  const open = today.filter(t => t.status === 'pending');
+  const notDone = today.filter(t => t.status === 'stuck');
+  const carried = new Set(tom.map(t => t.source_task_id).filter(Boolean));
+  const tomTexts = new Set(tom.map(t => (t.task_text || '').trim().toLowerCase()));
+  const carryOpts = today.filter(t => t.status !== 'done' && !carried.has(t.id));
+  const riskOpts = risk.filter(r => r.kind === 'stage' || r.kind === 'bank_image' || r.kind === 'bank_pod').slice(0, 30)
+    .map(r => ({ key: 'r' + r.kind + r.ref, text: 'Clear ' + r.ref + ' — ' + (r.kind === 'stage' ? r.stage : r.kind === 'bank_pod' ? 'upload POD' : 'upload installed image') + (r.client_name ? ' (' + r.client_name + ')' : ''), job: r.ref, late: new Date(r.due_at).getTime() < Date.now() }))
+    .filter(o => !tomTexts.has(o.text.toLowerCase()));
+  const close = async (t, st) => {
+    if (st === 'stuck' && !(why[t.id] || '').trim()) { setAskWhy(t.id); return; }
+    const patch = st === 'done' ? { status: 'done', done_at: new Date().toISOString(), updated_at: new Date().toISOString() } : { status: 'stuck', stuck_note: why[t.id].trim(), updated_at: new Date().toISOString() };
+    const r = await sb.from('daily_tasks').update(patch).eq('id', t.id);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setAskWhy(null); load(); if (window._refreshMyTasks) window._refreshMyTasks();
+  };
+  const save = async () => {
+    const rows = [];
+    carryOpts.forEach(t => { if (pick['c' + t.id]) rows.push({ user_name: uname, task_text: t.task_text, task_date: tomISO, status: 'pending', source: 'carried', source_task_id: t.id, carry_count: (t.carry_count || 0) + 1, linked_job_id: t.linked_job_id || null, added_by: uname }); });
+    riskOpts.forEach(o => { if (pick[o.key]) rows.push({ user_name: uname, task_text: o.text, task_date: tomISO, status: 'pending', source: 'user', linked_job_id: o.job, added_by: uname }); });
+    txt.split('\n').map(x => x.trim()).filter(Boolean).forEach(x => rows.push({ user_name: uname, task_text: x, task_date: tomISO, status: 'pending', source: 'user', added_by: uname }));
+    if (!rows.length) { setMsg('Tick or type at least one line'); return; }
+    setBusy(true); setMsg('');
+    const r = await sb.from('daily_tasks').insert(rows);
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setPick({}); setTxt(''); setMsg('✓ ' + rows.length + ' line(s) planned for ' + tomLbl); load();
+  };
+  const drop = async t => { const r = await sb.from('daily_tasks').update({ status: 'cancelled', cancelled_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', t.id); if (!r.error) load(); };
+  const B = (c, on) => ({ padding: '3px 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + c, background: on ? c : c + '22' });
+  const row = { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderTop: '1px solid #1f2937', fontSize: 12 };
+  const closeLate = h >= 19 && open.length > 0;
+  const planLate = h >= 21 && tom.length === 0;
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12, border: (closeLate || planLate) ? '1px solid #e0574f' : undefined } },
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008' } }, "🗓 My day — close today by 7 pm, plan " + tomLbl + " by 9 pm"),
+    React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, "Each missed close-out or missed plan costs 1 point. Mark every line Done, or Not done with the reason."),
+    // A. Close today
+    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: closeLate ? '#f87171' : '#e2e8f0', marginTop: 4 } }, '1 · Close today (' + (today.length - open.length) + ' / ' + today.length + ' closed)' + (closeLate ? ' — past 7 pm' : '')),
+    today.length === 0 ? React.createElement("div", { style: { fontSize: 11.5, color: '#64748b', padding: '4px 2px' } }, 'No plan for today.') : null,
+    today.map(t => React.createElement("div", { key: t.id, style: { ...row, flexWrap: 'wrap' } },
+      React.createElement("span", { style: { flex: '1 1 200px', color: t.status === 'done' ? '#4ade80' : t.status === 'stuck' ? '#fca5a5' : '#e2e8f0' } }, (t.status === 'done' ? '✓ ' : t.status === 'stuck' ? '✗ ' : '') + t.task_text + (t.carry_count ? ' · carried ×' + t.carry_count : '') + (t.status === 'stuck' && t.stuck_note ? ' — ' + t.stuck_note : '')),
+      t.status === 'pending' ? React.createElement("span", { style: { display: 'flex', gap: 6 } },
+        React.createElement("button", { type: 'button', onClick: () => close(t, 'done'), style: B('#22c55e') }, 'Done'),
+        React.createElement("button", { type: 'button', onClick: () => close(t, 'stuck'), style: B('#e0574f') }, 'Not done')) : null,
+      askWhy === t.id ? React.createElement("span", { style: { display: 'flex', gap: 6, flex: '1 1 100%' } },
+        React.createElement("input", { className: 'in', autoFocus: true, value: why[t.id] || '', onChange: e => setWhy(p => ({ ...p, [t.id]: e.target.value })), placeholder: 'Why not done? (required)', style: { flex: 1 } }),
+        React.createElement("button", { type: 'button', onClick: () => close(t, 'stuck'), style: B('#e0574f', true) }, 'Save')) : null)),
+    // B. Plan tomorrow
+    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: planLate ? '#f87171' : '#e2e8f0', marginTop: 12 } }, '2 · Plan ' + tomLbl + ' (' + tom.length + ' planned)' + (planLate ? ' — past 9 pm' : '')),
+    tom.map(t => React.createElement("div", { key: t.id, style: row },
+      React.createElement("span", { style: { flex: 1, color: '#cbd5e1' } }, '• ' + t.task_text + (t.carry_count ? ' · carried ×' + t.carry_count : '')),
+      React.createElement("button", { type: 'button', onClick: () => drop(t), style: B('#334155') }, 'Remove'))),
+    carryOpts.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 8 } }, 'Carry forward from today:') : null,
+    carryOpts.map(t => React.createElement("label", { key: 'c' + t.id, style: { ...row, cursor: 'pointer' } },
+      React.createElement("input", { type: 'checkbox', checked: !!pick['c' + t.id], onChange: e => setPick(p => ({ ...p, ['c' + t.id]: e.target.checked })) }),
+      React.createElement("span", { style: { flex: 1, color: '#e2e8f0' } }, t.task_text + (t.carry_count ? ' · carried ×' + t.carry_count : '')))),
+    riskOpts.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 8 } }, 'Your late / due jobs (from At risk):') : null,
+    riskOpts.map(o => React.createElement("label", { key: o.key, style: { ...row, cursor: 'pointer' } },
+      React.createElement("input", { type: 'checkbox', checked: !!pick[o.key], onChange: e => setPick(p => ({ ...p, [o.key]: e.target.checked })) }),
+      React.createElement("span", { style: { flex: 1, color: o.late ? '#fca5a5' : '#e2e8f0' } }, o.text))),
+    React.createElement("textarea", { className: 'in', value: txt, onChange: e => setTxt(e.target.value), placeholder: 'Other work for ' + tomLbl + ' — one line each (site visit, client call, report…)', rows: 2, style: { width: '100%', marginTop: 8, boxSizing: 'border-box' } }),
+    React.createElement("div", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 } },
+      React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { padding: '6px 14px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, busy ? '…' : 'Save plan for ' + tomLbl),
+      msg ? React.createElement("span", { style: { fontSize: 12, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null));
+}
 // ── v4.1 point system (2026-10-14): Rectification people, banking bulk assign, At-risk list ──
 const RECT_PEOPLE = {
   DESIGN: ['PRAJAKTA', 'VIKAS'],
@@ -43476,6 +43570,10 @@ function ReportsPage({
         } = await sb.from('daily_tasks').select('id,task_text,task_date,linked_job_id,linked_site_id,status,source,source_task_id,due_date').eq('user_name', uname).lt('task_date', todayISO).in('status', ['pending', 'stuck']).neq('source', 'recurring');
         if (cancelled) return;
         if (!yErr && pastUnfinished && pastUnfinished.length > 0) {
+          const { data: kidRows } = await sb.from('daily_tasks').select('source_task_id').eq('user_name', uname).not('source_task_id', 'is', null).limit(20000);
+          if (cancelled) return;
+          const hasChild = new Set((kidRows || []).map(r => r.source_task_id));
+          const textsToday = new Set((existing || []).map(r => (r.task_text || '').trim().toLowerCase()));
           const parentTextById = new Map();
           pastUnfinished.forEach(r => {
             if (r.source_task_id) parentTextById.set(r.source_task_id, r.task_text);
@@ -43496,6 +43594,10 @@ function ReportsPage({
             });
           }
           pastUnfinished.forEach(t => {
+            if (hasChild.has(t.id)) return;
+            const tKey = (t.task_text || '').trim().toLowerCase();
+            if (textsToday.has(tKey)) return;
+            textsToday.add(tKey);
             const parentText = parentTextById.get(t.id);
             if (parentText !== undefined && parentText === t.task_text) return;
             const todayCarrySet = existingCarryTextById.get(t.id);
