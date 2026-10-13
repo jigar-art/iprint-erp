@@ -3610,6 +3610,8 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
+  }) : null, user ? React.createElement(CommitGate, {
+    user: user
   }) : null, pg === "myscore" && React.createElement(DayPlanCard, {
     user: user
   }), pg === "myscore" && React.createElement(CrewAssignCard, {
@@ -34639,9 +34641,85 @@ function JobDateChanges({ job, user }) {
         can ? React.createElement("button", { type: 'button', onClick: () => mark(r.id, !r.client_requested), style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: '#1f2937' } }, r.client_requested ? 'Undo' : 'Client asked') : null))),
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
+// ── v4.1 Login commitment gate (2026-10-14, Jigar): before the ERP opens, commit a date for every late job ──
+function CommitGate({ user }) {
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const todayISO = iso(new Date());
+  const maxD = new Date(); maxD.setDate(maxD.getDate() + 14);
+  const [rows, setRows] = React.useState(null);
+  const [plan, setPlan] = React.useState({});
+  const [sel, setSel] = React.useState({});
+  const [bd, setBd] = React.useState(todayISO);
+  const [br, setBr] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const me = pbKey(user);
+  const [unBank, setUnBank] = React.useState(me === 'PRIYANKA' ? null : 0);
+  const [unCrew, setUnCrew] = React.useState(me === 'POONAM' ? null : 0);
+  const k = r => r.kind + '|' + r.ref + '|' + (r.stage || '');
+  React.useEffect(() => {
+    try { if (sessionStorage.getItem('commit_done_' + todayISO) === '1') { setRows([]); return; } } catch (e) {}
+    sb.rpc('erp_my_commit_needed').then(r => setRows(r.error ? [] : (r.data || [])));
+  }, [user && user.name]);
+  const shell = (title, sub, body) => React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99990, background: 'rgba(3,6,12,.94)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 860, margin: '0 auto', background: '#0f172a', border: '1px solid #e3a008', borderRadius: 12, padding: 14 } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#e3a008' } }, title),
+      React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '4px 0 10px' } }, sub), body));
+  if (me === 'PRIYANKA' && unBank !== 0) return shell('🏦 Step 1 — assign every open banking job', unBank === null ? 'Loading…' : unBank + ' banking job(s) still not assigned. Assign each to yourself or Harshala (whoever is handling it). The ERP opens when none are left.', React.createElement(BankAssignCard, { user, onCount: setUnBank }));
+  if (me === 'POONAM' && unCrew !== 0) return shell('👷 Step 1 — set the site crew on every open site job', unCrew === null ? 'Loading…' : unCrew + ' site job(s) still without crew. Pick who goes to site, or Vendor when a partner does it. The ERP opens when none are left.', React.createElement(CrewAssignCard, { user, onCount: setUnCrew }));
+  if (!rows || rows.length === 0) return null;
+  const kindLbl = r => r.kind === 'stage' ? r.stage : r.kind === 'bank_pod' ? 'Upload POD' : r.kind === 'bank_image' ? 'Upload installed image' : r.kind === 'po' ? 'PO inward (GRN)' : r.kind === 'quote' ? 'Send quote' : r.stage;
+  const picked = rows.filter(r => sel[k(r)]);
+  const apply = () => {
+    if (!picked.length) { setErr('Tick jobs first'); return; }
+    if (bd > todayISO && !br.trim()) { setErr('Give a reason for a date after today'); return; }
+    setErr('');
+    setPlan(p => { const o = { ...p }; picked.forEach(r => { o[k(r)] = { date: bd, reason: br.trim() }; }); return o; });
+    setSel({});
+  };
+  const done = rows.filter(r => plan[k(r)]).length;
+  const save = async () => {
+    if (done < rows.length) { setErr((rows.length - done) + ' job(s) still without a date'); return; }
+    setBusy(true); setErr('');
+    const items = rows.map(r => ({ kind: r.kind, ref: r.ref, stage: r.stage || '', date: plan[k(r)].date, reason: plan[k(r)].reason || '' }));
+    const r = await sb.rpc('erp_commit_items', { p_items: items });
+    if (r.error) { setBusy(false); setErr(r.error.message); return; }
+    try {
+      const uname = (user.name || '').toUpperCase();
+      const ex = await sb.from('daily_tasks').select('task_text').eq('user_name', uname).eq('task_date', todayISO);
+      const have = new Set((ex.data || []).map(x => (x.task_text || '').trim().toLowerCase()));
+      const add = rows.filter(r => plan[k(r)].date === todayISO).map(r => ({ user_name: uname, task_text: 'Clear ' + r.ref + ' — ' + kindLbl(r) + (r.client_name ? ' (' + r.client_name + ')' : ''), task_date: todayISO, status: 'pending', source: 'user', linked_job_id: ['stage', 'bank_pod', 'bank_image'].includes(r.kind) ? r.ref : null, added_by: uname }))
+        .filter(t => !have.has(t.task_text.toLowerCase()));
+      for (let i = 0; i < add.length; i += 200) await sb.from('daily_tasks').insert(add.slice(i, i + 200));
+      if (window._refreshMyTasks) window._refreshMyTasks();
+    } catch (e) {}
+    try { sessionStorage.setItem('commit_done_' + todayISO, '1'); } catch (e) {}
+    setBusy(false); setRows([]);
+  };
+  const fd = d => new Date(d + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99990, background: 'rgba(3,6,12,.94)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 760, margin: '0 auto', background: '#0f172a', border: '1px solid #e0574f', borderRadius: 12, padding: 14 } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#fca5a5' } }, '⏰ Before you start — ' + rows.length + ' late job' + (rows.length > 1 ? 's' : '')),
+      React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '4px 0 10px' } }, 'For each late job, commit when you will clear it: today, or a later date with the reason. Jobs for today go into your plan. Late jobs keep costing points every day until cleared, and missed commitments are shown to your lead.'),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', position: 'sticky', top: 0, background: '#0f172a', padding: '6px 0', zIndex: 1, borderBottom: '1px solid #1f2937' } },
+        React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 4, alignItems: 'center' } },
+          React.createElement("input", { type: 'checkbox', checked: picked.length === rows.length, onChange: e => { const o = {}; if (e.target.checked) rows.forEach(r => { o[k(r)] = true; }); setSel(o); } }), picked.length + ' selected'),
+        React.createElement("input", { type: 'date', className: 'in', value: bd, min: todayISO, max: iso(maxD), onChange: e => setBd(e.target.value), style: { fontSize: 12, padding: '4px 6px' } }),
+        React.createElement("input", { className: 'in', value: br, onChange: e => setBr(e.target.value), placeholder: bd > todayISO ? 'Reason (required)' : 'Note (optional)', style: { fontSize: 12, padding: '4px 6px', flex: '1 1 160px' } }),
+        React.createElement("button", { type: 'button', onClick: apply, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#111', border: '1px solid #e3a008', background: '#e3a008' } }, 'Apply to selected')),
+      rows.map(r => { const c = plan[k(r)]; return React.createElement("label", { key: k(r), style: { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderBottom: '1px solid #1f2937', fontSize: 12, cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: !!sel[k(r)], onChange: e => setSel(p => ({ ...p, [k(r)]: e.target.checked })) }),
+        React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: 62 } }, r.ref),
+        React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, kindLbl(r) + (r.client_name ? ' · ' + r.client_name : '')),
+        React.createElement("span", { style: { color: '#e0574f', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' } }, Math.floor(r.days_late) + ' d late'),
+        React.createElement("span", { style: { color: c ? '#4ade80' : '#f59e0b', fontSize: 11, minWidth: 90, textAlign: 'right', whiteSpace: 'nowrap' } }, c ? (c.date === todayISO ? 'today' : fd(c.date)) : 'no date')); }),
+      React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' } },
+        React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: done === rows.length ? '#15803d' : '#1f2937' } }, busy ? '…' : 'Save & open ERP (' + done + ' / ' + rows.length + ')'),
+        err ? React.createElement("span", { style: { fontSize: 12, color: '#f87171' } }, err) : null)));
+}
 // ── v4.1 Site crew per job (2026-10-14): who actually goes to site; crew share the job's installation items ──
 const SITE_CREW = ['KULDEEP', 'SHIV', 'KAIF', 'MUSTAFA', 'RASHID', 'SAHIL', 'JAGDISH', 'VENDOR'];
-function CrewAssignCard({ user }) {
+function CrewAssignCard({ user, onCount }) {
   const me = pbKey(user);
   const can = ['POONAM', 'PRIYANKA', 'KULDEEP', 'AMOL', 'JIGAR'].includes(me);
   const [rows, setRows] = React.useState(null);
@@ -34650,7 +34728,7 @@ function CrewAssignCard({ user }) {
   const [filt, setFilt] = React.useState('none');
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState('');
-  const load = () => sb.rpc('erp_crew_assign_list').then(r => setRows(r.error ? [] : (r.data || [])));
+  const load = () => sb.rpc('erp_crew_assign_list').then(r => { const d = r.error ? [] : (r.data || []); setRows(d); if (onCount) onCount(d.filter(x => !(x.site_crew && x.site_crew.length)).length); });
   React.useEffect(() => { if (can) load(); }, [can]);
   if (!can || !rows) return null;
   const nm = k => k === 'VENDOR' ? 'Vendor' : k.charAt(0) + k.slice(1).toLowerCase();
@@ -34790,7 +34868,7 @@ const RECT_PEOPLE = {
   INSTALLATION: ['POONAM', 'PRIYANKA', 'HARSHALA', 'KULDEEP', 'SHIV', 'KAIF', 'MUSTAFA', 'RASHID', 'SAHIL', 'JAGDISH', 'VENDOR'],
   DISPATCH: ['MURLI', 'MANOJ', 'MANISH']
 };
-function BankAssignCard({ user }) {
+function BankAssignCard({ user, onCount }) {
   const me = pbKey(user);
   const can = ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me);
   const [rows, setRows] = React.useState(null);
@@ -34798,7 +34876,7 @@ function BankAssignCard({ user }) {
   const [filt, setFilt] = React.useState('unassigned');
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState('');
-  const load = () => sb.rpc('erp_bank_assign_list').then(r => setRows(r.error ? [] : (r.data || [])));
+  const load = () => sb.rpc('erp_bank_assign_list').then(r => { const d = r.error ? [] : (r.data || []); setRows(d); if (onCount) onCount(new Set(d.filter(x => !x.bank_assignee).map(x => x.job_id)).size); });
   React.useEffect(() => { if (can) load(); }, [can]);
   if (!can || !rows) return null;
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '—';
