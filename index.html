@@ -34671,7 +34671,7 @@ function ComplaintsPage({ user }) {
   const review = rows.filter(r => r.needs_review && r.status !== 'not_complaint');
   const open = rows.filter(r => !r.needs_review && isOpen(r));
   const lists = { review, open, mine: open.filter(r => r.owner === me), late: open.filter(r => replyLate(r) || resolveLate(r)), done: rows.filter(r => r.status === 'resolved') };
-  const list = lists[filt] || [];
+  const list = (lists[filt] || []).slice().sort((a, b) => ((b.follow_ups || 0) >= 2) - ((a.follow_ups || 0) >= 2));
   const act = async (r, action, extra) => {
     setMsg('');
     const res = await sb.rpc('erp_complaint_act', { p_id: r.id, p_action: action, p_note: (extra && extra.note) || null, p_person: (extra && extra.person) || null });
@@ -34711,6 +34711,7 @@ function ComplaintsPage({ user }) {
       React.createElement("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
         React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0' } }, '#' + r.id),
         React.createElement("span", { style: { fontWeight: 700, color: '#e2e8f0', flex: '1 1 200px' } }, (r.client_name || '') + (r.job_id ? ' · ' + r.job_id : '')),
+        r.follow_ups >= 2 ? tag('ESCALATED · client chased ' + r.follow_ups + '×', '#e0574f') : r.follow_ups ? tag('Client chased 1×', '#f59e0b') : null,
         tag(r.channel, '#60a5fa'), tag('Owner: ' + nm(r.owner), '#cbd5e1'),
         r.status === 'resolved' ? tag('Resolved ' + fd(r.resolved_at), '#4ade80') : null,
         isOpen(r) && !r.first_reply_at ? tag((replyLate(r) ? 'Reply LATE · was due ' : 'Reply by ') + fd(r.reply_due), replyLate(r) ? '#e0574f' : '#f59e0b') : null,
