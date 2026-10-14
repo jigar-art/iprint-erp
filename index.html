@@ -3617,6 +3617,8 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(CommitGate, {
     user: user
+  }) : null, user ? React.createElement(CallLogFab, {
+    user: user
   }) : null, pg === "complaints" && React.createElement(ComplaintsPage, {
     user: user
   }), pg === "myscore" && React.createElement(RegisterCard, {
@@ -34733,6 +34735,80 @@ function ComplaintsPage({ user }) {
         boss ? React.createElement("select", { ...inp, value: '', onChange: e => e.target.value && act(r, 'reassign', { person: e.target.value }) }, React.createElement("option", { value: '' }, 'Reassign…'), CMP_STAFF.map(k => React.createElement("option", { key: k, value: k }, nm(k)))) : null,
         boss ? React.createElement("button", { type: 'button', onClick: () => act(r, 'not_complaint'), style: btn('#64748b') }, 'Not a complaint') : null) : null)));
 }
+// ── v4.2 One-tap call log (2026-10-14, Jigar): 📞 button → who/what/outcome → task, follow-up, complaint ──
+function CallLogFab({ user }) {
+  const me = pbKey(user);
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const plus = n => { const d = new Date(); d.setDate(d.getDate() + n); if (d.getDay() === 0) d.setDate(d.getDate() + 1); return iso(d); };
+  const blank = () => ({ direction: 'out', outcome: '', topic: '', job: null, client: '', q: '', note: '', fu: plus(1) });
+  const [open, setOpen] = React.useState(false);
+  const [f, setF] = React.useState(blank);
+  const [hits, setHits] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const [recent, setRecent] = React.useState(null);
+  React.useEffect(() => {
+    if (!open || f.job || (f.q || '').trim().length < 2) { setHits([]); return; }
+    const t = setTimeout(() => sb.rpc('erp_call_job_search', { p_q: f.q.trim() }).then(r => setHits(r.error ? [] : (r.data || []))), 250);
+    return () => clearTimeout(t);
+  }, [f.q, f.job, open]);
+  React.useEffect(() => { if (open) sb.rpc('erp_call_log_list', { p_days: 1 }).then(r => setRecent(r.error ? [] : (r.data || []).filter(x => x.person === me))); }, [open]);
+  if (!me) return null;
+  const TOPICS = ['Status update', 'Quote / PO', 'Design approval', 'Installation date', 'Rectification', 'Payment / billing', 'Documents / POD', 'New enquiry'];
+  const OUTS = [['resolved', '✅ Done'], ['follow_up', '🔁 Follow-up'], ['no_answer', '📵 No answer'], ['escalated', '⬆️ Escalated'], ['complaint', '📣 Complaint']];
+  const chip = (on, c) => ({ padding: '9px 12px', borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? (c || '#e3a008') : '#334155'), background: on ? (c || '#e3a008') : 'transparent', color: on ? '#111' : '#e2e8f0' });
+  const save = async () => {
+    setMsg('');
+    if (!f.job && !f.client.trim() && !f.q.trim()) { setMsg('⚠️ Pick a job or type the client name'); return; }
+    if (!f.outcome) { setMsg('⚠️ Pick what happened'); return; }
+    setBusy(true);
+    const r = await sb.rpc('erp_call_log', { p: { job_id: f.job ? f.job.id : null, client: f.job ? null : (f.client.trim() || f.q.trim()), direction: f.direction, topic: f.topic || null, outcome: f.outcome, follow_up_on: f.outcome === 'follow_up' ? f.fu : null, note: f.note || null } });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    const d = r.data || {};
+    setMsg('✓ Call logged' + (d.follow_task_id ? ' · follow-up task on ' + f.fu : '') + (d.complaint_id ? ' · complaint #' + d.complaint_id + ' opened' : ''));
+    setF(blank()); setRecent(null);
+    sb.rpc('erp_call_log_list', { p_days: 1 }).then(x => setRecent(x.error ? [] : (x.data || []).filter(y => y.person === me)));
+  };
+  const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); }, title: 'Log a call',
+    style: { position: 'fixed', right: 16, bottom: 'calc(64px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#e3a008', color: '#111', fontSize: 26, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } }, '📞');
+  if (!open) return fab;
+  const lbl = t => React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: .4 } }, t);
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 520, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #e3a008', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#e3a008' } }, '📞 Log a call'),
+        React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
+      React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 10 } },
+        [['out', '↗ I called'], ['in', '↙ They called']].map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => setF({ ...f, direction: o[0] }), style: { ...chip(f.direction === o[0]), flex: 1 } }, o[1]))),
+      lbl('Job or client'),
+      f.job ? React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #e3a008', borderRadius: 10 } },
+        React.createElement("div", { style: { flex: 1, fontSize: 13, color: '#e2e8f0' } }, React.createElement("b", null, f.job.id), ' · ', f.job.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (f.job.status || ''))),
+        React.createElement("button", { type: 'button', onClick: () => setF({ ...f, job: null }), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer' } }, '✕')) :
+      React.createElement("div", null,
+        React.createElement("input", { className: 'in', value: f.q, onChange: e => setF({ ...f, q: e.target.value }), placeholder: 'Type job no. or client name', style: { width: '100%', fontSize: 15, padding: '10px 12px', boxSizing: 'border-box' } }),
+        hits.map(h => React.createElement("div", { key: h.id, onClick: () => setF({ ...f, job: h, q: '' }), style: { padding: '9px 10px', borderBottom: '1px solid #1f2937', fontSize: 13, color: '#e2e8f0', cursor: 'pointer' } },
+          React.createElement("b", null, h.id), ' · ', h.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (h.status || '')))),
+        (f.q || '').trim().length >= 2 && !hits.length ? React.createElement("div", { style: { fontSize: 11.5, color: '#64748b', marginTop: 4 } }, 'No job found — the call will be logged against "' + f.q.trim() + '"') : null),
+      lbl('About'),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        TOPICS.map(t => React.createElement("button", { key: t, type: 'button', onClick: () => setF({ ...f, topic: f.topic === t ? '' : t }), style: chip(f.topic === t, '#60a5fa') }, t))),
+      lbl('What happened'),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        OUTS.map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => setF({ ...f, outcome: o[0] }), style: chip(f.outcome === o[0], o[0] === 'complaint' ? '#e0574f' : o[0] === 'resolved' ? '#4ade80' : '#e3a008') }, o[1]))),
+      f.outcome === 'follow_up' ? React.createElement("div", { style: { marginTop: 10 } },
+        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+          [['Today', plus(0)], ['Tomorrow', plus(1)], ['In 2 days', plus(2)]].map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => setF({ ...f, fu: o[1] }), style: chip(f.fu === o[1], '#a78bfa') }, o[0])),
+          React.createElement("input", { type: 'date', className: 'in', value: f.fu, min: plus(0), onChange: e => setF({ ...f, fu: e.target.value }), style: { fontSize: 13, padding: '7px 8px' } }))) : null,
+      lbl(f.outcome === 'complaint' ? 'What is the complaint? *' : 'Note (optional)'),
+      React.createElement("textarea", { className: 'in', rows: 2, value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: f.outcome === 'complaint' ? 'What exactly did the client complain about?' : 'Anything to remember', style: { width: '100%', fontSize: 14, padding: '9px 11px', boxSizing: 'border-box' } }),
+      msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
+      React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { width: '100%', marginTop: 12, padding: '13px 0', borderRadius: 12, border: 'none', background: busy ? '#475569' : '#22c55e', color: '#06210f', fontSize: 15.5, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Save call'),
+      recent && recent.length ? React.createElement("div", { style: { marginTop: 14 } },
+        lbl('My calls in the last 24 hours (' + recent.length + ')'),
+        recent.slice(0, 8).map(c => React.createElement("div", { key: c.id, style: { fontSize: 12, color: '#cbd5e1', padding: '5px 0', borderBottom: '1px solid #1f2937' } },
+          new Date(c.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' · ' + (c.direction === 'in' ? '↙ ' : '↗ ') + (c.client_name || '') + (c.job_id ? ' · ' + c.job_id : '') + ' · ' + c.outcome.replace('_', ' ')))) : null));
+}
 // ── v4.1 Login commitment gate (2026-10-14, Jigar): before the ERP opens, commit a date for every late job ──
 function CommitGate({ user }) {
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -34868,7 +34944,8 @@ function RegisterCard({ user }) {
   const [day, setDay] = React.useState(() => { const d = new Date(); if (d.getHours() < 12) d.setDate(d.getDate() - 1); if (d.getDay() === 0) d.setDate(d.getDate() - 1); return iso(d); });
   const [rows, setRows] = React.useState(null);
   const [open, setOpen] = React.useState(true);
-  React.useEffect(() => { if (can) { setRows(null); sb.rpc('erp_daily_register', { p_day: day }).then(r => setRows(r.error ? [] : (r.data || []))); } }, [day, can]);
+  const [calls, setCalls] = React.useState({});
+  React.useEffect(() => { if (can) { setRows(null); sb.rpc('erp_daily_register', { p_day: day }).then(r => setRows(r.error ? [] : (r.data || []))); sb.rpc('erp_daily_calls', { p_day: day }).then(r => { const m = {}; (r.data || []).forEach(x => { m[x.person] = x; }); setCalls(m); }); } }, [day, can]);
   if (!can) return null;
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const t = v => v ? new Date(v).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—';
@@ -34889,12 +34966,13 @@ function RegisterCard({ user }) {
       React.createElement("div", { style: { overflowX: 'auto' } },
         React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse' } },
           React.createElement("thead", null, React.createElement("tr", null,
-            ['Person', 'First', 'Last', 'Actions', 'Moves', 'Site', 'Prod', 'Emails', 'Cleared', 'New late', 'Open late', 'Plan', 'Done', 'Not done', 'Open', 'Flag'].map(h => React.createElement("th", { key: h, style: th }, h)))),
+            ['Person', 'First', 'Last', 'Actions', 'Moves', 'Site', 'Prod', 'Emails', 'Calls', 'Cleared', 'New late', 'Open late', 'Plan', 'Done', 'Not done', 'Open', 'Flag'].map(h => React.createElement("th", { key: h, style: th }, h)))),
           React.createElement("tbody", null, rows.map(r => React.createElement("tr", { key: r.person, style: { background: r.flag === 'NO ERP ACTIVITY' ? '#e0574f14' : 'transparent' } },
             React.createElement("td", { style: { ...td, fontWeight: 700, color: '#e2e8f0' } }, nm(r.person)),
             React.createElement("td", { style: td }, t(r.first_at)), React.createElement("td", { style: td }, t(r.last_at)),
             React.createElement("td", { style: td }, r.actions), React.createElement("td", { style: td }, r.stage_moves), React.createElement("td", { style: td }, r.site_logs),
             React.createElement("td", { style: td }, r.prod_logs), React.createElement("td", { style: td }, r.emails_sent),
+            React.createElement("td", { style: { ...td, color: calls[r.person] ? '#e3a008' : '#64748b' }, title: calls[r.person] ? (calls[r.person].follow_ups + ' follow-up, ' + calls[r.person].complaints + ' complaint') : '' }, calls[r.person] ? calls[r.person].calls : 0),
             React.createElement("td", { style: { ...td, color: r.cleared ? '#4ade80' : '#64748b', fontWeight: 700 } }, r.cleared),
             React.createElement("td", { style: { ...td, color: r.newly_late ? '#f59e0b' : '#64748b' } }, r.newly_late),
             React.createElement("td", { style: { ...td, color: r.open_late ? '#e0574f' : '#64748b' } }, r.open_late),
