@@ -3615,6 +3615,8 @@ function MainApp({
     show: show
   }), user ? React.createElement(PointBriefGate, {
     user: user
+  }) : null, user ? React.createElement(V4ChangeGate, {
+    user: user
   }) : null, user ? React.createElement(CommitGate, {
     user: user
   }) : null, user ? React.createElement(CallLogFab, {
@@ -34809,6 +34811,83 @@ function CallLogFab({ user }) {
         recent.slice(0, 8).map(c => React.createElement("div", { key: c.id, style: { fontSize: 12, color: '#cbd5e1', padding: '5px 0', borderBottom: '1px solid #1f2937' } },
           new Date(c.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' · ' + (c.direction === 'in' ? '↙ ' : '↗ ') + (c.client_name || '') + (c.job_id ? ' · ' + c.job_id : '') + ' · ' + c.outcome.replace('_', ' ')))) : null));
 }
+// ── v4 change notice (2026-10-14, Jigar): from 15 Oct, show what changed in My Score once per person at login ──
+function V4ChangeGate({ user }) {
+  const V = '2026-10-15-v4';
+  const me = pbKey(user);
+  const [st, setSt] = React.useState('loading');
+  const [row, setRow] = React.useState(null);
+  const [lang, setLangS] = React.useState(() => { try { return localStorage.getItem('pb_lang') || 'en'; } catch (e) { return 'en'; } });
+  const [note, setNote] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const live = new Date() >= new Date('2026-10-15T00:00:00+05:30');
+  React.useEffect(() => {
+    if (!live || !user || !me) { setSt('hidden'); return; }
+    try { if (sessionStorage.getItem('v4_done') === '1') { setSt('hidden'); return; } } catch (e) {}
+    sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => {
+      if (r.error || (r.data || []).length) { setSt('hidden'); return; }
+      sb.rpc('erp_my_scorecard_v4', {}).then(x => {
+        const mine = (x.data || []).find(y => y.person_key === me);
+        if (!mine || mine.v !== 'v4') { setSt('hidden'); return; }
+        setRow(mine); setSt('show');
+      });
+    });
+  }, [me]);
+  if (st !== 'show' || !row) return null;
+  const hi = lang === 'hi';
+  const T = (en, h) => hi ? h : en;
+  const f = v => v == null ? '0' : Number(v).toFixed(1);
+  const done = async (resp) => {
+    if (resp === 'change' && !note.trim()) { setErr(T('Write what looks wrong', 'क्या गलत लग रहा है, लिखें')); return; }
+    setBusy(true); setErr('');
+    const r = await sb.from('point_brief_responses').insert({ person_name: user.name, brief_version: V, response: resp, comment: resp === 'change' ? note.trim() : null, lang });
+    setBusy(false);
+    if (r.error) { setErr('Could not save: ' + r.error.message); return; }
+    try { sessionStorage.setItem('v4_done', '1'); } catch (e) {}
+    setSt('hidden');
+  };
+  const li = { fontSize: 13, color: '#e2e8f0', lineHeight: 1.55, margin: '4px 0' };
+  const card = { background: '#0d1320', border: '1px solid #1f2937', borderRadius: 10, padding: 12, marginTop: 10 };
+  const h = { fontSize: 12, fontWeight: 800, color: '#e3a008', marginBottom: 6, letterSpacing: .3, textTransform: 'uppercase' };
+  const cut = (lbl, v, max, c) => React.createElement("div", { style: { flex: '1 1 120px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: 8 } },
+    React.createElement("div", { style: { fontSize: 10.5, fontWeight: 800, color: c } }, lbl),
+    React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: Number(v || 0) > 0 ? '#fca5a5' : '#4ade80' } }, '−' + f(v), React.createElement("span", { style: { fontSize: 11, color: '#64748b' } }, ' / ' + max)));
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99995, background: 'rgba(3,6,12,.95)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 640, margin: '0 auto' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 } },
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, T('🏆 My Score has changed — from 15 Oct', '🏆 My Score बदल गया है — 15 अक्टूबर से')),
+        React.createElement("div", { style: { display: 'flex', gap: 4 } }, [['en', 'English'], ['hi', 'हिंदी']].map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => { setLangS(o[0]); try { localStorage.setItem('pb_lang', o[0]); } catch (e) {} }, style: { padding: '3px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (lang === o[0] ? '#e3a008' : '#334155'), background: lang === o[0] ? '#e3a008' : 'transparent', color: lang === o[0] ? '#111' : '#cbd5e1' } }, o[1])))),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, T('Your score this month', 'इस महीने आपका स्कोर')),
+        React.createElement("div", { style: { fontSize: 28, fontWeight: 900, color: '#f8fafc' } }, row.final_score == null ? T('not enough work yet', 'अभी पर्याप्त काम नहीं') : f(row.final_score) + ' / 100', row.band ? React.createElement("span", { style: { fontSize: 14, marginLeft: 10, color: '#e3a008' } }, T('Band ', 'बैंड ') + row.band) : null),
+        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } },
+          cut(T('LATE WORK', 'देरी'), row.late_lost, 80, '#e0574f'), cut(T('OUTPUT', 'आउटपुट'), row.out_lost, 15, '#f59e0b'),
+          cut(T('QUALITY', 'क्वालिटी'), row.q_lost, 20, '#a78bfa'), cut(T('DISCIPLINE', 'अनुशासन'), row.d_lost, 20, '#60a5fa')),
+        React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 6 } }, (row.late_items || 0) + T(' of ', ' में से ') + (row.items || 0) + T(' items late this month', ' काम इस महीने लेट'))),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, T('What changed', 'क्या बदला')),
+        [T('Everyone starts at 100. Points are cut only for what went wrong.', 'हर किसी के 100 पॉइंट से शुरुआत। सिर्फ़ गलती पर पॉइंट कटते हैं।'),
+         T('Late work — up to 80: every job, PO, bank image/POD, quote, complaint and email handover that crosses its deadline (more days late = bigger cut, max 5 days).', 'देरी — 80 तक: हर जॉब, PO, बैंक इमेज/POD, कोटेशन, शिकायत और ईमेल हैंडओवर जो समय-सीमा पार करे (जितने दिन लेट उतना ज़्यादा, अधिकतम 5 दिन)।'),
+         T('Output — up to 15: if you clear less than your team\'s fair share.', 'आउटपुट — 15 तक: अगर आप टीम के औसत से कम काम पूरा करें।'),
+         T('Quality — 5 per incident, up to 20 (rectification charged to the person picked on the job).', 'क्वालिटी — हर गलती पर 5, अधिकतम 20 (रेक्टिफिकेशन उसी पर जिसे जॉब पर चुना गया)।'),
+         T('Discipline — up to 20: no plan for tomorrow by 9 pm, no close-out by 7 pm, and client emails replied late (counted from 16 Oct).', 'अनुशासन — 20 तक: रात 9 बजे तक कल का प्लान नहीं, शाम 7 बजे क्लोज़-आउट नहीं, और क्लाइंट ईमेल का देर से जवाब (16 अक्टूबर से)।'),
+         T('Bands: A 85+ · B 70–84 · C 55–69 · D below 55. Increment is decided on the Oct–Dec average.', 'बैंड: A 85+ · B 70–84 · C 55–69 · D 55 से कम। इंक्रीमेंट अक्टूबर–दिसंबर के औसत पर।')
+        ].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, T('How to protect your score', 'अपना स्कोर कैसे बचाएँ')),
+        [T('Late job you can\'t finish today? Commit a date at login. Finish by that date = not late. Miss it = counts double.', 'जो लेट काम आज पूरा नहीं हो सकता? लॉगिन पर पक्की तारीख दें। उस तारीख तक पूरा = लेट नहीं। चूके = दोगुना।'),
+         T('Quotation Sent / PO Pending: follow up with the client every working day — tap 📞 to log the call, or email them with the job number in the subject.', 'Quotation Sent / PO Pending: हर काम के दिन क्लाइंट से फ़ॉलो-अप करें — 📞 दबाकर कॉल दर्ज करें, या सब्जेक्ट में जॉब नंबर के साथ ईमेल करें।'),
+         T('Every client call: tap 📞 (bottom right). It counts as your follow-up and becomes a task automatically.', 'हर क्लाइंट कॉल: 📞 (नीचे दाएँ) दबाएँ। यह फ़ॉलो-अप गिना जाएगा और अपने आप टास्क बन जाएगा।'),
+         T('Client complaint: reply within 4 working hours, resolve within 2 working days.', 'क्लाइंट की शिकायत: 4 काम के घंटों में जवाब, 2 काम के दिनों में समाधान।'),
+         T('You get this score on WhatsApp at 6 pm every working day.', 'यह स्कोर हर काम के दिन शाम 6 बजे WhatsApp पर आएगा।')
+        ].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
+      React.createElement("textarea", { className: 'in', rows: 2, value: note, onChange: e => setNote(e.target.value), placeholder: T('Something looks wrong in your score? Write it here (optional)', 'आपके स्कोर में कुछ गलत लग रहा है? यहाँ लिखें (वैकल्पिक)'), style: { width: '100%', marginTop: 12, fontSize: 13, padding: '8px 10px', boxSizing: 'border-box' } }),
+      err ? React.createElement("div", { style: { color: '#f87171', fontSize: 12.5, marginTop: 6 } }, err) : null,
+      React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+        React.createElement("button", { type: 'button', disabled: busy, onClick: () => done('accepted'), style: { flex: '1 1 200px', padding: '12px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 15, fontWeight: 800, cursor: 'pointer' } }, T('✓ I understand', '✓ मैं समझ गया/गई')),
+        note.trim() ? React.createElement("button", { type: 'button', disabled: busy, onClick: () => done('change'), style: { flex: '1 1 200px', padding: '12px 0', borderRadius: 10, border: '1px solid #f59e0b', background: 'transparent', color: '#fde68a', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, T('Send my note to Jigar', 'मेरा नोट जिगर को भेजें')) : null)));
+}
 // ── v4.1 Login commitment gate (2026-10-14, Jigar): before the ERP opens, commit a date for every late job ──
 function CommitGate({ user }) {
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -35170,7 +35249,7 @@ function ScorecardCard({ user }) {
   const [prev, setPrev] = React.useState(null);
   const monthDate = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - mOff); return d; })();
   const iso = monthDate.getFullYear() + '-' + String(monthDate.getMonth() + 1).padStart(2, '0') + '-01';
-  React.useEffect(() => { setRows(null); setPrev(null); sb.rpc('erp_my_scorecard', { p_month: iso }).then(r => setRows(r.error ? [] : (r.data || []))); }, [iso]);
+  React.useEffect(() => { setRows(null); setPrev(null); sb.rpc('erp_my_scorecard_v4', { p_month: iso }).then(r => setRows(r.error ? [] : (r.data || []))); }, [iso]);
   // Early in a month (no score yet): also fetch last month so the person always sees a score
   React.useEffect(() => {
     if (mOff !== 0 || !rows) return;
@@ -35178,7 +35257,7 @@ function ScorecardCard({ user }) {
     if (m && m.final_score != null) return;
     const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
     const p = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
-    sb.rpc('erp_my_scorecard', { p_month: p }).then(r => { const x = (r.data || []).find(y => y.person_key === me); setPrev(x || null); });
+    sb.rpc('erp_my_scorecard_v4', { p_month: p }).then(r => { const x = (r.data || []).find(y => y.person_key === me); setPrev(x || null); });
   }, [rows, mOff]);
   if (rows === null) return null;
   const mine = rows.find(r => r.person_key === me);
@@ -35192,16 +35271,23 @@ function ScorecardCard({ user }) {
     React.createElement("div", { style: { fontSize: 10, fontWeight: 800, color: c, textTransform: 'uppercase', letterSpacing: .4 } }, lbl),
     React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: pts == null ? '#475569' : '#f8fafc' } }, pts == null ? '—' : Number(pts).toFixed(1), React.createElement("span", { style: { fontSize: 11, color: '#64748b', fontWeight: 600 } }, ' / ' + max)),
     React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, note || ''));
+  const lost = (lbl, pts, max, note, c) => React.createElement("div", { style: { flex: '1 1 150px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: 8 } },
+    React.createElement("div", { style: { fontSize: 10, fontWeight: 800, color: c, textTransform: 'uppercase', letterSpacing: .4 } }, lbl),
+    React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: pts == null ? '#475569' : Number(pts) > 0 ? '#fca5a5' : '#4ade80' } }, pts == null ? '—' : '−' + Number(pts).toFixed(1), React.createElement("span", { style: { fontSize: 11, color: '#64748b', fontWeight: 600 } }, ' / ' + max)),
+    React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, note || ''));
   const big = r => React.createElement("div", null,
     React.createElement("div", { style: { display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginTop: 6 } },
       React.createElement("span", { style: { fontSize: 30, fontWeight: 900, color: r.final_score == null ? '#475569' : '#f8fafc' } }, r.final_score == null ? '—' : Number(r.final_score).toFixed(1)),
       React.createElement("span", { style: { fontSize: 13, color: '#64748b' } }, '/ 100'),
       r.band ? React.createElement("span", { style: { fontSize: 13, fontWeight: 900, padding: '2px 10px', borderRadius: 999, background: bandC[r.band] + '22', color: bandC[r.band], border: '1px solid ' + bandC[r.band] } }, 'Band ' + r.band) : React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, 'not enough data yet'),
       r.team_avg != null ? React.createElement("span", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'own ' + Number(r.own_score).toFixed(1) + ' × 80% + team ' + Number(r.team_avg).toFixed(1) + ' × 20%') : null),
+    r.v === 'v4' ? React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } },
+      lost('Late work', r.late_lost, 80, r.ot_note, '#e0574f'), lost('Output', r.out_lost, 15, r.out_note, '#f59e0b'),
+      lost('Quality', r.q_lost, 20, r.q_note, '#a78bfa'), lost('Discipline', r.d_lost, 20, r.d_note, '#60a5fa')) :
     React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } },
       part('ERP entry', r.erp_pts, 25, r.erp_note, '#60a5fa'), part('On time', r.ot_pts, 30, r.ot_note, '#4ade80'),
       part('Output', r.out_pts, 25, r.out_note, '#f59e0b'), part('Quality', r.q_pts, 20, r.q_note, '#a78bfa')),
-    React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } }, 'A part shown as — has too little data this month; the other parts are scaled to 100. Bands: A 85+ · B 70–84 · C 55–69 · D below 55.'));
+    React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } }, r.v === 'v4' ? 'v4: everyone starts at 100; points are cut for late work, low output, quality incidents and discipline. Commit a date at login for a late job — meet it and it is not counted late. Fewer than 10 items = not enough work yet. Bands: A 85+ · B 70–84 · C 55–69 · D below 55.' : 'A part shown as — has too little data this month; the other parts are scaled to 100. Bands: A 85+ · B 70–84 · C 55–69 · D below 55.'));
   const upd = (mine || others[0]) && (mine || others[0]).computed_at;
   return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #e3a00855' } },
     React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
@@ -35217,12 +35303,12 @@ function ScorecardCard({ user }) {
     others.length ? React.createElement("div", { style: { marginTop: 12 } },
       React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#cbd5e1', marginBottom: 4 } }, (['JIGAR', 'AMOL'].includes(me) ? 'Everyone' : 'Your team') + ' (' + others.length + ') — tap a name for details'),
       React.createElement("div", { style: { overflowX: 'auto' } }, React.createElement("table", { style: { width: '100%', fontSize: 12, borderCollapse: 'collapse' } },
-        React.createElement("thead", null, React.createElement("tr", { style: { color: '#64748b', textAlign: 'left' } }, ['Name', 'Team', 'ERP', 'On time', 'Output', 'Quality', 'Score', 'Band'].map(h => React.createElement("th", { key: h, style: { padding: '4px 6px', fontWeight: 700 } }, h)))),
+        React.createElement("thead", null, React.createElement("tr", { style: { color: '#64748b', textAlign: 'left' } }, (others.some(x => x.v === 'v4') ? ['Name', 'Team', 'Late −', 'Output −', 'Quality −', 'Discipline −', 'Score', 'Band'] : ['Name', 'Team', 'ERP', 'On time', 'Output', 'Quality', 'Score', 'Band']).map(h => React.createElement("th", { key: h, style: { padding: '4px 6px', fontWeight: 700 } }, h)))),
         React.createElement("tbody", null, others.map(r => React.createElement(React.Fragment, { key: r.person_key },
           React.createElement("tr", { onClick: () => setOpen(open === r.person_key ? null : r.person_key), style: { borderTop: '1px solid #1f2937', cursor: 'pointer' } },
             React.createElement("td", { style: { padding: '5px 6px', fontWeight: 700 } }, nm(r.person_key)),
             React.createElement("td", { style: { padding: '5px 6px', color: '#94a3b8' } }, r.team),
-            [r.erp_pts, r.ot_pts, r.out_pts, r.q_pts].map((v, i) => React.createElement("td", { key: i, className: 'mn', style: { padding: '5px 6px', color: v == null ? '#475569' : '#e2e8f0' } }, v == null ? '—' : Number(v).toFixed(1))),
+            (r.v === 'v4' ? [r.late_lost, r.out_lost, r.q_lost, r.d_lost] : [r.erp_pts, r.ot_pts, r.out_pts, r.q_pts]).map((v, i) => React.createElement("td", { key: i, className: 'mn', style: { padding: '5px 6px', color: v == null ? '#475569' : '#e2e8f0' } }, v == null ? '—' : Number(v).toFixed(1))),
             React.createElement("td", { className: 'mn', style: { padding: '5px 6px', fontWeight: 800 } }, r.final_score == null ? '—' : Number(r.final_score).toFixed(1)),
             React.createElement("td", { style: { padding: '5px 6px', fontWeight: 900, color: r.band ? bandC[r.band] : '#475569' } }, r.band || '—')),
           open === r.person_key ? React.createElement("tr", null, React.createElement("td", { colSpan: 8, style: { padding: '0 6px 8px' } }, big(r))) : null)))))) : null);
