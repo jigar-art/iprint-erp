@@ -34742,7 +34742,9 @@ function CallLogFab({ user }) {
   const me = pbKey(user);
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const plus = n => { const d = new Date(); d.setDate(d.getDate() + n); if (d.getDay() === 0) d.setDate(d.getDate() + 1); return iso(d); };
-  const blank = () => ({ direction: 'out', outcome: '', topic: '', job: null, client: '', q: '', note: '', fu: plus(1) });
+  const blank = () => ({ direction: 'out', outcome: '', topic: '', job: null, client: '', q: '', note: '', quick: '', fu: plus(1) });
+  const [mine, setMine] = React.useState([]);
+  const [showNote, setShowNote] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const [f, setF] = React.useState(blank);
   const [hits, setHits] = React.useState([]);
@@ -34754,22 +34756,30 @@ function CallLogFab({ user }) {
     const t = setTimeout(() => sb.rpc('erp_call_job_search', { p_q: f.q.trim() }).then(r => setHits(r.error ? [] : (r.data || []))), 250);
     return () => clearTimeout(t);
   }, [f.q, f.job, open]);
-  React.useEffect(() => { if (open) sb.rpc('erp_call_log_list', { p_days: 1 }).then(r => setRecent(r.error ? [] : (r.data || []).filter(x => x.person === me))); }, [open]);
+  React.useEffect(() => { if (open) { sb.rpc('erp_call_log_list', { p_days: 1 }).then(r => setRecent(r.error ? [] : (r.data || []).filter(x => x.person === me))); sb.rpc('erp_call_my_jobs').then(r => setMine(r.error ? [] : (r.data || []))); } }, [open]);
   if (!me) return null;
   const TOPICS = ['Status update', 'Quote / PO', 'Design approval', 'Installation date', 'Rectification', 'Payment / billing', 'Documents / POD', 'New enquiry'];
   const OUTS = [['resolved', '✅ Done'], ['follow_up', '🔁 Follow-up'], ['no_answer', '📵 No answer'], ['escalated', '⬆️ Escalated'], ['complaint', '📣 Complaint']];
+  const QUICK = {
+    resolved: ['Update given', 'Approval received', 'PO confirmed', 'Payment confirmed', 'Site date fixed', 'Query answered'],
+    follow_up: ['Will send PO', 'Will approve design', 'Will confirm site date', 'Payment promised', 'Will share details', 'Call back later'],
+    no_answer: ['Not reachable', 'Switched off', 'Busy — call back', 'Wrong number'],
+    escalated: ['To Amol', 'To Jigar', 'To client senior', 'To accounts'],
+    complaint: ['Not installed', 'Light not working', 'Damaged', 'Wrong size / design', 'Photos / POD missing', 'Delay', 'Billing issue']
+  };
   const chip = (on, c) => ({ padding: '9px 12px', borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? (c || '#e3a008') : '#334155'), background: on ? (c || '#e3a008') : 'transparent', color: on ? '#111' : '#e2e8f0' });
   const save = async () => {
     setMsg('');
     if (!f.job && !f.client.trim() && !f.q.trim()) { setMsg('⚠️ Pick a job or type the client name'); return; }
     if (!f.outcome) { setMsg('⚠️ Pick what happened'); return; }
+    if (f.outcome === 'complaint' && !f.quick && !f.note.trim()) { setMsg('⚠️ Pick what the complaint is about'); return; }
     setBusy(true);
-    const r = await sb.rpc('erp_call_log', { p: { job_id: f.job ? f.job.id : null, client: f.job ? null : (f.client.trim() || f.q.trim()), direction: f.direction, topic: f.topic || null, outcome: f.outcome, follow_up_on: f.outcome === 'follow_up' ? f.fu : null, note: f.note || null } });
+    const r = await sb.rpc('erp_call_log', { p: { job_id: f.job ? f.job.id : null, client: f.job ? null : (f.client.trim() || f.q.trim()), direction: f.direction, topic: f.topic || null, outcome: f.outcome, follow_up_on: f.outcome === 'follow_up' ? f.fu : null, note: [f.quick, f.note.trim()].filter(Boolean).join(' — ') || null } });
     setBusy(false);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
     const d = r.data || {};
     setMsg('✓ Call logged' + (d.follow_task_id ? ' · follow-up task on ' + f.fu : '') + (d.complaint_id ? ' · complaint #' + d.complaint_id + ' opened' : ''));
-    setF(blank()); setRecent(null);
+    setF(blank()); setRecent(null); setShowNote(false);
     sb.rpc('erp_call_log_list', { p_days: 1 }).then(x => setRecent(x.error ? [] : (x.data || []).filter(y => y.person === me)));
   };
   const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); }, title: 'Log a call',
@@ -34788,7 +34798,11 @@ function CallLogFab({ user }) {
         React.createElement("div", { style: { flex: 1, fontSize: 13, color: '#e2e8f0' } }, React.createElement("b", null, f.job.id), ' · ', f.job.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (f.job.status || ''))),
         React.createElement("button", { type: 'button', onClick: () => setF({ ...f, job: null }), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer' } }, '✕')) :
       React.createElement("div", null,
-        React.createElement("input", { className: 'in', value: f.q, onChange: e => setF({ ...f, q: e.target.value }), placeholder: 'Type job no. or client name', style: { width: '100%', fontSize: 15, padding: '10px 12px', boxSizing: 'border-box' } }),
+        mine.length && !(f.q || '').trim() ? React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 } },
+          mine.slice(0, 8).map(h => React.createElement("button", { key: h.id, type: 'button', onClick: () => setF({ ...f, job: h, q: '' }), style: { textAlign: 'left', padding: '9px 10px', borderRadius: 10, border: '1px solid #334155', background: '#0a0f1a', color: '#e2e8f0', fontSize: 13, cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' } },
+            React.createElement("b", null, h.id), React.createElement("span", { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#cbd5e1' } }, h.client_name || ''),
+            React.createElement("span", { style: { fontSize: 10.5, fontWeight: 700, color: h.why === 'late' ? '#f87171' : h.why === 'called recently' ? '#a78bfa' : '#94a3b8', whiteSpace: 'nowrap' } }, h.why === 'called recently' ? 'called' : h.why === 'late' ? 'late' : (h.status || ''))))) : null,
+        React.createElement("input", { className: 'in', value: f.q, onChange: e => setF({ ...f, q: e.target.value }), placeholder: mine.length ? 'Other job? Type job no. or client name' : 'Type job no. or client name', style: { width: '100%', fontSize: 15, padding: '10px 12px', boxSizing: 'border-box' } }),
         hits.map(h => React.createElement("div", { key: h.id, onClick: () => setF({ ...f, job: h, q: '' }), style: { padding: '9px 10px', borderBottom: '1px solid #1f2937', fontSize: 13, color: '#e2e8f0', cursor: 'pointer' } },
           React.createElement("b", null, h.id), ' · ', h.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (h.status || '')))),
         (f.q || '').trim().length >= 2 && !hits.length ? React.createElement("div", { style: { fontSize: 11.5, color: '#64748b', marginTop: 4 } }, 'No job found — the call will be logged against "' + f.q.trim() + '"') : null),
@@ -34797,13 +34811,16 @@ function CallLogFab({ user }) {
         TOPICS.map(t => React.createElement("button", { key: t, type: 'button', onClick: () => setF({ ...f, topic: f.topic === t ? '' : t }), style: chip(f.topic === t, '#60a5fa') }, t))),
       lbl('What happened'),
       React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
-        OUTS.map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => setF({ ...f, outcome: o[0] }), style: chip(f.outcome === o[0], o[0] === 'complaint' ? '#e0574f' : o[0] === 'resolved' ? '#4ade80' : '#e3a008') }, o[1]))),
+        OUTS.map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => setF({ ...f, outcome: o[0], quick: '' }), style: chip(f.outcome === o[0], o[0] === 'complaint' ? '#e0574f' : o[0] === 'resolved' ? '#4ade80' : '#e3a008') }, o[1]))),
       f.outcome === 'follow_up' ? React.createElement("div", { style: { marginTop: 10 } },
         React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
           [['Today', plus(0)], ['Tomorrow', plus(1)], ['In 2 days', plus(2)]].map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => setF({ ...f, fu: o[1] }), style: chip(f.fu === o[1], '#a78bfa') }, o[0])),
           React.createElement("input", { type: 'date', className: 'in', value: f.fu, min: plus(0), onChange: e => setF({ ...f, fu: e.target.value }), style: { fontSize: 13, padding: '7px 8px' } }))) : null,
-      lbl(f.outcome === 'complaint' ? 'What is the complaint? *' : 'Note (optional)'),
-      React.createElement("textarea", { className: 'in', rows: 2, value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: f.outcome === 'complaint' ? 'What exactly did the client complain about?' : 'Anything to remember', style: { width: '100%', fontSize: 14, padding: '9px 11px', boxSizing: 'border-box' } }),
+      f.outcome ? lbl(f.outcome === 'complaint' ? 'What is the complaint? *' : 'Details (tap one)') : null,
+      f.outcome ? React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        (QUICK[f.outcome] || []).map(q => React.createElement("button", { key: q, type: 'button', onClick: () => setF({ ...f, quick: f.quick === q ? '' : q }), style: chip(f.quick === q, f.outcome === 'complaint' ? '#e0574f' : '#a78bfa') }, q))) : null,
+      showNote ? React.createElement("textarea", { className: 'in', rows: 2, value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Anything else (optional)', style: { width: '100%', marginTop: 8, fontSize: 14, padding: '9px 11px', boxSizing: 'border-box' } })
+        : React.createElement("button", { type: 'button', onClick: () => setShowNote(true), style: { marginTop: 8, background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 12.5, cursor: 'pointer', padding: 0 } }, '+ Add a note (optional)'),
       msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
       React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { width: '100%', marginTop: 12, padding: '13px 0', borderRadius: 12, border: 'none', background: busy ? '#475569' : '#22c55e', color: '#06210f', fontSize: 15.5, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Save call'),
       recent && recent.length ? React.createElement("div", { style: { marginTop: 14 } },
