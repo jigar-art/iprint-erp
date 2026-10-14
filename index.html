@@ -34821,15 +34821,15 @@ function V4ChangeGate({ user }) {
   const [note, setNote] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
-  const live = new Date() >= new Date('2026-10-15T00:00:00+05:30');
+  const [ok, setOk] = React.useState(false);
   React.useEffect(() => {
-    if (!live || !user || !me) { setSt('hidden'); return; }
+    if (!user || !me) { setSt('hidden'); return; }
     try { if (sessionStorage.getItem('v4_done') === '1') { setSt('hidden'); return; } } catch (e) {}
     sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => {
       if (r.error || (r.data || []).length) { setSt('hidden'); return; }
-      sb.rpc('erp_my_scorecard_v4', {}).then(x => {
-        const mine = (x.data || []).find(y => y.person_key === me);
-        if (!mine || mine.v !== 'v4') { setSt('hidden'); return; }
+      sb.rpc('erp_my_score_v4_preview').then(x => {
+        const mine = (x.data || [])[0];
+        if (x.error || !mine) { setSt('hidden'); return; }
         setRow(mine); setSt('show');
       });
     });
@@ -34852,19 +34852,42 @@ function V4ChangeGate({ user }) {
   const h = { fontSize: 12, fontWeight: 800, color: '#e3a008', marginBottom: 6, letterSpacing: .3, textTransform: 'uppercase' };
   const cut = (lbl, v, max, c) => React.createElement("div", { style: { flex: '1 1 120px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: 8 } },
     React.createElement("div", { style: { fontSize: 10.5, fontWeight: 800, color: c } }, lbl),
-    React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: Number(v || 0) > 0 ? '#fca5a5' : '#4ade80' } }, '−' + f(v), React.createElement("span", { style: { fontSize: 11, color: '#64748b' } }, ' / ' + max)));
+    React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: Number(v || 0) > 0 ? '#fca5a5' : '#4ade80' } }, Number(v || 0) > 0 ? '−' + f(v) : '0', React.createElement("span", { style: { fontSize: 11, color: '#64748b' } }, ' / ' + max)));
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99995, background: 'rgba(3,6,12,.95)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
     React.createElement("div", { style: { maxWidth: 640, margin: '0 auto' } },
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 } },
-        React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, T('🏆 My Score has changed — from 15 Oct', '🏆 My Score बदल गया है — 15 अक्टूबर से')),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, T('🏆 New point system (v4) + new daily tasks — read before you start', '🏆 नया पॉइंट सिस्टम (v4) + नए रोज़ के काम — शुरू करने से पहले पढ़ें')),
         React.createElement("div", { style: { display: 'flex', gap: 4 } }, [['en', 'English'], ['hi', 'हिंदी']].map(o => React.createElement("button", { key: o[0], type: 'button', onClick: () => { setLangS(o[0]); try { localStorage.setItem('pb_lang', o[0]); } catch (e) {} }, style: { padding: '3px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (lang === o[0] ? '#e3a008' : '#334155'), background: lang === o[0] ? '#e3a008' : 'transparent', color: lang === o[0] ? '#111' : '#cbd5e1' } }, o[1])))),
       React.createElement("div", { style: card },
-        React.createElement("div", { style: h }, T('Your score this month', 'इस महीने आपका स्कोर')),
+        React.createElement("div", { style: h }, T('Your score this month under the new rules', 'नए नियमों से इस महीने आपका स्कोर')),
         React.createElement("div", { style: { fontSize: 28, fontWeight: 900, color: '#f8fafc' } }, row.final_score == null ? T('⚠ No tracked work yet', '⚠ अभी कोई काम दर्ज नहीं') : f(row.final_score) + ' / 100', row.band ? React.createElement("span", { style: { fontSize: 14, marginLeft: 10, color: '#e3a008' } }, T('Band ', 'बैंड ') + row.band) : null),
         React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } },
           cut(T('LATE WORK', 'देरी'), row.late_lost, 80, '#e0574f'), cut(T('OUTPUT', 'आउटपुट'), row.out_lost, 30, '#f59e0b'),
           cut(T('QUALITY', 'क्वालिटी'), row.q_lost, 20, '#a78bfa'), cut(T('DISCIPLINE', 'अनुशासन'), row.d_lost, 20, '#60a5fa')),
         React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 6 } }, (row.late_items || 0) + T(' of ', ' में से ') + (row.items || 0) + T(' items late this month', ' काम इस महीने लेट'))),
+      React.createElement("div", { style: { ...card, border: '1px solid #e3a00877' } },
+        React.createElement("div", { style: h }, T('New in the ERP — your daily tasks', 'ERP में नया — आपके रोज़ के काम')),
+        React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'flex-start', background: '#e3a00814', border: '1px solid #e3a00855', borderRadius: 8, padding: 10, margin: '4px 0 8px' } },
+          React.createElement("div", { style: { width: 40, height: 40, borderRadius: 20, background: '#e3a008', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flex: '0 0 auto' } }, '📞'),
+          React.createElement("div", { style: { fontSize: 12.5, color: '#e2e8f0', lineHeight: 1.5 } },
+            React.createElement("b", null, T('Call log — every client call, in 3 taps', 'कॉल लॉग — हर क्लाइंट कॉल, 3 टैप में')), React.createElement("br"),
+            T('Tap the yellow 📞 button (bottom right) → pick the job or type the client → topic → what happened (Done / Follow-up / No answer / Escalated / Complaint). Follow-up creates a task on the date you pick; Complaint opens a complaint. Every call becomes a done task and counts as your follow-up.',
+              'नीचे दाएँ पीला 📞 बटन दबाएँ → जॉब चुनें या क्लाइंट का नाम लिखें → विषय → क्या हुआ (Done / Follow-up / No answer / Escalated / Complaint)। Follow-up चुनने पर उस तारीख का टास्क बनेगा; Complaint चुनने पर शिकायत दर्ज होगी। हर कॉल अपने आप टास्क बनती है और फ़ॉलो-अप गिनी जाती है।'))),
+        [T('Every login: give a date for each late job (today, or a later date with a reason).', 'हर लॉगिन पर: हर लेट काम की तारीख दें (आज, या कारण के साथ बाद की तारीख)।'),
+         T('By 7 pm: close today — mark each task Done or Not done (with reason). By 9 pm: plan tomorrow\'s tasks.', 'शाम 7 बजे तक: आज के हर टास्क को Done या Not done (कारण के साथ) करें। रात 9 बजे तक: कल के टास्क प्लान करें।'),
+         T('Email handover: when someone writes "Poonam, please…" on a client email, it becomes your task — "by Sunday" / "by 15 Oct" in the email sets the deadline.', 'ईमेल हैंडओवर: क्लाइंट ईमेल पर कोई "Poonam, please…" लिखे तो वह आपका टास्क बनेगा — ईमेल में "by Sunday" / "by 15 Oct" समय-सीमा तय करता है।'),
+         T('Complaints page: log any client complaint (call, WhatsApp, site). Reply within 4 working hours, resolve within 2 working days.', 'Complaints पेज: हर क्लाइंट शिकायत दर्ज करें (कॉल, WhatsApp, साइट)। 4 काम के घंटों में जवाब, 2 काम के दिनों में समाधान।'),
+         T('Moving a job to Rectification: the cause and the person responsible are compulsory.', 'जॉब को Rectification में डालते समय: कारण और ज़िम्मेदार व्यक्ति ज़रूरी।'),
+         T('Raising a PR: "Material required by" date is compulsory; Jigar can change it at approval.', 'PR बनाते समय: "Material required by" तारीख ज़रूरी; जिगर अप्रूवल पर बदल सकते हैं।')
+        ].concat(({
+          PRIYANKA: [T('Every morning first: assign each open banking job to yourself or Harshala.', 'हर सुबह सबसे पहले: हर खुला बैंकिंग जॉब अपने या हर्षला के नाम करें।')],
+          HARSHALA: [T('Installed photos and document uploads for banking jobs are counted under you.', 'बैंकिंग जॉब की इंस्टॉलेशन फ़ोटो और डॉक्यूमेंट अपलोड आपके नाम गिने जाएँगे।')],
+          POONAM: [T('Every morning first: set the site crew (or Vendor) on every open site job.', 'हर सुबह सबसे पहले: हर खुले साइट जॉब पर साइट क्रू (या Vendor) चुनें।')],
+          MANOJ: [T('GRN: supplier invoice number is compulsory and received date must be between PO date and today. Inward all open POs.', 'GRN: सप्लायर इनवॉइस नंबर ज़रूरी, और रिसीव तारीख PO तारीख से आज के बीच। सारे खुले PO का इनवर्ड करें।')],
+          MURLI: [T('GRN: supplier invoice number is compulsory and received date must be between PO date and today.', 'GRN: सप्लायर इनवॉइस नंबर ज़रूरी, और रिसीव तारीख PO तारीख से आज के बीच।')],
+          ANKITA: [T('Quotation Sent / PO Pending: follow up every working day (📞 or email with the job number).', 'Quotation Sent / PO Pending: हर काम के दिन फ़ॉलो-अप (📞 या जॉब नंबर के साथ ईमेल)।')],
+          RUCHITA: [T('Quotation Sent / PO Pending: follow up every working day (📞 or email with the job number).', 'Quotation Sent / PO Pending: हर काम के दिन फ़ॉलो-अप (📞 या जॉब नंबर के साथ ईमेल)।')]
+        })[me] || []).map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
       React.createElement("div", { style: card },
         React.createElement("div", { style: h }, T('What changed', 'क्या बदला')),
         [T('Everyone starts at 100. Points are cut only for what went wrong.', 'हर किसी के 100 पॉइंट से शुरुआत। सिर्फ़ गलती पर पॉइंट कटते हैं।'),
@@ -34872,20 +34895,24 @@ function V4ChangeGate({ user }) {
          T('Output — up to 30: if you clear less than your team\'s fair share.', 'आउटपुट — 30 तक: अगर आप टीम के औसत से कम काम पूरा करें।'),
          T('Quality — 5 per incident, up to 20 (rectification charged to the person picked on the job).', 'क्वालिटी — हर गलती पर 5, अधिकतम 20 (रेक्टिफिकेशन उसी पर जिसे जॉब पर चुना गया)।'),
          T('Discipline — up to 20: no plan for tomorrow by 9 pm, no close-out by 7 pm, and client emails replied late (counted from 16 Oct).', 'अनुशासन — 20 तक: रात 9 बजे तक कल का प्लान नहीं, शाम 7 बजे क्लोज़-आउट नहीं, और क्लाइंट ईमेल का देर से जवाब (16 अक्टूबर से)।'),
-         T('Bands: A 85+ · B 70–84 · C 55–69 · D below 55. Increment is decided on the Oct–Dec average.', 'बैंड: A 85+ · B 70–84 · C 55–69 · D 55 से कम। इंक्रीमेंट अक्टूबर–दिसंबर के औसत पर।')
+         T('Only work that is already due counts. Fewer than 10 items due = ⚠ No tracked work — so record everything you do in the ERP the same day.', 'सिर्फ़ वही काम गिना जाएगा जिसकी समय-सीमा आ चुकी है। 10 से कम = ⚠ कोई काम दर्ज नहीं — इसलिए हर काम उसी दिन ERP में दर्ज करें।'),
+         T('Bands: A 85+ · B 70–84 · C 55–69 · D below 55. Increment is decided on the Oct–Dec average.', 'बैंड: A 85+ · B 70–84 · C 55–69 · D 55 से कम। इंक्रीमेंट अक्टूबर–दिसंबर के औसत पर।'),
+         T('My Score and the 6 pm WhatsApp switch to this system from 15 Oct.', 'My Score और शाम 6 बजे का WhatsApp 15 अक्टूबर से इसी सिस्टम पर।')
         ].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
       React.createElement("div", { style: card },
         React.createElement("div", { style: h }, T('How to protect your score', 'अपना स्कोर कैसे बचाएँ')),
         [T('Late job you can\'t finish today? Commit a date at login. Finish by that date = not late. Miss it = counts double.', 'जो लेट काम आज पूरा नहीं हो सकता? लॉगिन पर पक्की तारीख दें। उस तारीख तक पूरा = लेट नहीं। चूके = दोगुना।'),
          T('Quotation Sent / PO Pending: follow up with the client every working day — tap 📞 to log the call, or email them with the job number in the subject.', 'Quotation Sent / PO Pending: हर काम के दिन क्लाइंट से फ़ॉलो-अप करें — 📞 दबाकर कॉल दर्ज करें, या सब्जेक्ट में जॉब नंबर के साथ ईमेल करें।'),
-         T('Every client call: tap 📞 (bottom right). It counts as your follow-up and becomes a task automatically.', 'हर क्लाइंट कॉल: 📞 (नीचे दाएँ) दबाएँ। यह फ़ॉलो-अप गिना जाएगा और अपने आप टास्क बन जाएगा।'),
          T('Client complaint: reply within 4 working hours, resolve within 2 working days.', 'क्लाइंट की शिकायत: 4 काम के घंटों में जवाब, 2 काम के दिनों में समाधान।'),
          T('You get this score on WhatsApp at 6 pm every working day.', 'यह स्कोर हर काम के दिन शाम 6 बजे WhatsApp पर आएगा।')
         ].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
       React.createElement("textarea", { className: 'in', rows: 2, value: note, onChange: e => setNote(e.target.value), placeholder: T('Something looks wrong in your score? Write it here (optional)', 'आपके स्कोर में कुछ गलत लग रहा है? यहाँ लिखें (वैकल्पिक)'), style: { width: '100%', marginTop: 12, fontSize: 13, padding: '8px 10px', boxSizing: 'border-box' } }),
+      React.createElement("label", { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 12, padding: '12px 12px', borderRadius: 10, border: '2px solid ' + (ok ? '#22c55e' : '#e3a008'), background: ok ? '#14532d55' : '#e3a00814', cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 22, height: 22, accentColor: '#22c55e', flex: '0 0 auto' } }),
+        React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: '#f8fafc' } }, T('I have read and understood these changes and my new tasks', 'मैंने ये बदलाव और अपने नए काम पढ़ और समझ लिए हैं'))),
       err ? React.createElement("div", { style: { color: '#f87171', fontSize: 12.5, marginTop: 6 } }, err) : null,
       React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
-        React.createElement("button", { type: 'button', disabled: busy, onClick: () => done('accepted'), style: { flex: '1 1 200px', padding: '12px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 15, fontWeight: 800, cursor: 'pointer' } }, T('✓ I understand', '✓ मैं समझ गया/गई')),
+        React.createElement("button", { type: 'button', disabled: busy || !ok, onClick: () => done('accepted'), style: { flex: '1 1 200px', padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: ok ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: ok ? 'pointer' : 'not-allowed' } }, T('Continue to ERP →', 'ERP खोलें →')),
         note.trim() ? React.createElement("button", { type: 'button', disabled: busy, onClick: () => done('change'), style: { flex: '1 1 200px', padding: '12px 0', borderRadius: 10, border: '1px solid #f59e0b', background: 'transparent', color: '#fde68a', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, T('Send my note to Jigar', 'मेरा नोट जिगर को भेजें')) : null)));
 }
 // ── v4.1 Login commitment gate (2026-10-14, Jigar): before the ERP opens, commit a date for every late job ──
