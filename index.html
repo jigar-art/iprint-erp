@@ -2248,9 +2248,21 @@ function MainApp({
       data: dbRow,
       error: readErr
     } = await sb.from('jobs').select('id,status,status_dates,updated_at').eq('id', jobId).single();
+    // 2026-10-14 (Jigar): moving a job BACK to an earlier stage needs a reason, logged against the person
+    let _backDone = false;
+    if (dbRow && dbRow.status && newStatus && dbRow.status !== newStatus && newStatus !== 'Rectification' && newStatus !== 'Cancelled' && newStatus !== 'No Bill') {
+      const rk = st => { const R = { 'Draft': 0, 'Active': 0, 'Quotation Sent': 1, 'PO Pending': 2, 'Designing - In House': 3, 'Designing - Outsource': 3, 'Printing · In-House': 4, 'Printing · Outsource': 4, 'Fabrication · In-House': 5, 'Fabrication · Outsource': 5, 'Recee': 2.5, 'DC Pending': 6, 'In Transit': 6, 'Delivered': 6.5, 'Installation WIP': 7, 'IC Pending': 8, 'Billing Pending': 9, 'Given for Billing': 9, 'Cash Pending': 10, 'Billing Done': 11, 'Cash Received': 12 }; return R[st]; };
+      const a = rk(dbRow.status), b = rk(newStatus);
+      if (a != null && b != null && b < a) {
+        const why = prompt('↩ Moving this job BACK\n\n' + dbRow.status + '  →  ' + newStatus + '\n\nWhy? (required — recorded against your name)');
+        if (!why || !why.trim()) { show('Not moved — a reason is needed to move a job back.', false); return; }
+        sb.from('transition_overrides').insert({ job_id: jobId, from_status: dbRow.status, to_status: newStatus, overridden_by: userName, reason: 'BACK: ' + why.trim().slice(0, 300) }).then(() => {}, () => {});
+        _backDone = true;
+      }
+    }
     // Transition check (2026-09-17): warn on unusual moves, never block. The
     // override is logged so the history stays readable.
-    if (dbRow && dbRow.status && newStatus && dbRow.status !== newStatus) {
+    if (!_backDone && dbRow && dbRow.status && newStatus && dbRow.status !== newStatus) {
       try {
         const tr = await sb.from('status_transitions').select('to_status')
           .eq('from_status', dbRow.status).eq('to_status', newStatus).limit(1);
@@ -2921,6 +2933,11 @@ function MainApp({
       allSla.push(...pg);
       if (pg.length < 1000) break;
     }
+    // 2026-10-14 (Jigar): whole-job deadline — order start + category total days; shown on coordination stages
+    try {
+      const ov = await sb.from('v_job_overall').select('job_id,overall_due,overall_days_late').range(0, 4999);
+      if (!ov.error && ov.data) { const om = new Map(ov.data.map(x => [x.job_id, x])); allSla.forEach(r => { const o = om.get(r.job_id); if (o) { r.overall_due = o.overall_due; r.overall_days_late = Number(o.overall_days_late) || 0; } }); }
+    } catch (e) {}
     setSlaRows(allSla);
     const data = allSla.filter(r => ['Recee', 'Installation WIP', 'IC Pending'].includes(r.status));
     setInstRows(data);
@@ -35534,7 +35551,12 @@ function instInSeg(r, seg) {
   if (seg === 'ic') return r.status === 'IC Pending';
   return true;
 }
+const JOB_DEADLINE_STAGES = ['Recee', 'DC Pending', 'In Transit', 'Installation WIP', 'IC Pending'];
 function instDelayText(r) {
+  if (r && r.overall_days_late > 0 && JOB_DEADLINE_STAGES.includes(r.status) && !(r.due_at && new Date(r.due_at).getTime() < Date.now() - 86400000 * r.overall_days_late)) {
+    const n = Math.floor(r.overall_days_late);
+    return { t: (n >= 1 ? n + (n === 1 ? ' day' : ' days') : Math.ceil(r.overall_days_late * 24) + 'h') + ' late (job)', c: '#e0574f', late: r.overall_days_late * 24 };
+  }
   const due = r.due_at ? new Date(r.due_at).getTime() : null;
   if (!due) return { t: '\u2014', c: '#64748b', late: 0 };
   const diffH = (Date.now() - due) / 3600000;
