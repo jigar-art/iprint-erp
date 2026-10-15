@@ -3658,6 +3658,10 @@ function MainApp({
     user: user
   }), pg === "myscore" && React.createElement(HowMyScore, {
     user: user
+  }), pg === "myscore" && React.createElement(ScoreCardV5, {
+    user: user
+  }), pg === "myscore" && React.createElement(DutyChecksCard, {
+    user: user
   }), pg === "myscore" && React.createElement(DutiesCard, {
     user: user
   }), pg === "myscore" && React.createElement(QualityIncidentsCard, {
@@ -34506,6 +34510,7 @@ function dutyPeriod(freq, dueDay, now) {
   if (freq === 'daily') due = new Date(d);
   else if (freq === 'monthly') due = new Date(d.getFullYear(), d.getMonth(), dueDay || 7);
   else if (freq === 'tuesday') { due = new Date(mon); due.setDate(mon.getDate() + 1); }
+  else if (freq === 'fortnightly') due = d.getDate() <= 15 ? new Date(d.getFullYear(), d.getMonth(), 15) : new Date(d.getFullYear(), d.getMonth() + 1, 0);
   else { due = new Date(mon); due.setDate(mon.getDate() + 5); }
   due.setHours(21, 0, 0, 0);
   return { due, ist };
@@ -34523,8 +34528,100 @@ function dutyExpected(def, now) {
     else if (def.freq === 'tuesday' && dow === 2) n++;
     else if (def.freq === 'weekly' && dow === 6) n++;
     else if (def.freq === 'monthly' && x.getDate() === (def.due_day || 7)) n++;
+    else if (def.freq === 'fortnightly' && (x.getDate() === 15 || x.getDate() === new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate())) n++;
   }
   return n;
+}
+// ── v5 role score card (2026-10-15): preview from 27 Oct, counts from 1 Nov ──
+function ScoreCardV5({ user }) {
+  const me = pbKey(user);
+  const [boss, setBoss] = React.useState(false);
+  const [who, setWho] = React.useState(me);
+  const [people, setPeople] = React.useState([]);
+  const curM = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+  const [mon, setMon] = React.useState(curM);
+  const [rows, setRows] = React.useState(null);
+  const [q, setQ] = React.useState(null);
+  const [msg, setMsg] = React.useState('');
+  React.useEffect(() => { sb.from('score_roles').select('person_key,lead_key').is('valid_to', null).then(r => {
+    const all = r.data || []; const isBoss = ['JIGAR', 'AMOL'].includes(me); setBoss(isBoss);
+    const mine = isBoss ? all.map(x => x.person_key) : all.filter(x => x.lead_key === me).map(x => x.person_key);
+    setPeople([...new Set([me, ...mine])].sort()); }); }, []);
+  const load = () => { setRows(null); sb.rpc('erp_my_score_v5', { p_person: who, p_month: mon + '-01' }).then(r => setRows(r.error ? [] : (r.data || []))); };
+  React.useEffect(load, [who, mon]);
+  if (rows === null || !rows.length) return null;
+  if (!['JIGAR', 'AMOL'].includes(me) && new Date() < new Date('2026-10-27T00:00:00+05:30')) return null;
+  const live = new Date() >= new Date('2026-11-01T00:00:00+05:30');
+  const get = k => rows.find(r => r.task_key === k) || {};
+  const fin = get('_FINAL'), own = get('_OWN'), team = get('_TEAM');
+  const tasks = rows.filter(r => r.task_key[0] !== '_').sort((a, b) => a.sort - b.sort);
+  const common = rows.filter(r => r.task_key.startsWith('_COMMON')).sort((a, b) => a.sort - b.sort);
+  const locked = rows[0].locked;
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const f1 = v => v == null ? '—' : Number(v).toFixed(1);
+  const band = v => v == null ? '' : v >= 85 ? 'A' : v >= 70 ? 'B' : v >= 55 ? 'C' : 'D';
+  const months = []; for (let i = 0; i < 12; i++) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); const k = d.toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7); if (k >= '2026-10') months.push(k); }
+  const sendQ = async () => {
+    if (!q.reason.trim()) { setMsg('Write the reason'); return; }
+    const r = await sb.rpc('erp_v5_dispute', { p_month: mon + '-01', p_task: q.task, p_reason: q.reason.trim() });
+    setMsg(r.error ? r.error.message : '✓ Query sent to your lead'); setQ(null);
+  };
+  const row = r => React.createElement("div", { key: r.task_key, style: { padding: '6px 0', borderTop: '1px solid #1f2937', fontSize: 12.5 } },
+    React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 } },
+      React.createElement("div", null,
+        React.createElement("div", { style: { color: '#e2e8f0' } }, r.label),
+        React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } },
+          [r.freq && r.freq !== 'event' ? r.freq : null, r.due_n != null && r.ok_n != null ? Number(r.ok_n).toFixed(r.ok_n % 1 ? 1 : 0) + ' of ' + Number(r.due_n) + ' on time' : null, r.note].filter(Boolean).join(' · '),
+          who === me && !locked && r.task_key[0] !== '_' ? React.createElement("a", { onClick: () => setQ({ task: r.task_key, reason: '' }), style: { color: '#60a5fa', marginLeft: 6, cursor: 'pointer' } }, 'Raise query') : null)),
+      React.createElement("div", { style: { fontWeight: 800, whiteSpace: 'nowrap', color: r.earned == null ? '#64748b' : Number(r.earned) >= Number(r.points) - 0.05 ? '#4ade80' : '#fbbf24' } }, f1(r.earned) + ' / ' + Number(r.points))),
+    q && q.task === r.task_key ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
+      React.createElement("input", { className: 'in', value: q.reason, onChange: e => setQ({ ...q, reason: e.target.value }), placeholder: 'What is wrong with this line?', style: { flex: 1, fontSize: 12 } }),
+      React.createElement("button", { type: 'button', onClick: sendQ, style: { padding: '4px 10px', borderRadius: 6, fontSize: 11.5, fontWeight: 800, color: '#fff', border: '1px solid #22c55e', background: '#15803d', cursor: 'pointer' } }, 'Send'),
+      React.createElement("button", { type: 'button', onClick: () => setQ(null), style: { padding: '4px 10px', borderRadius: 6, fontSize: 11.5, color: '#fff', border: '1px solid #334155', background: 'transparent', cursor: 'pointer' } }, 'Cancel')) : null);
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #e3a00855' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { color: '#e3a008', fontSize: 14 } }, '🗂 Role score card' + (who !== me ? ' — ' + nm(who) : '')),
+      React.createElement("div", { style: { display: 'flex', gap: 6 } },
+        people.length > 1 ? React.createElement("select", { className: 'in', value: who, onChange: e => setWho(e.target.value), style: { width: 'auto', fontSize: 12, padding: '4px 8px' } }, people.map(p => React.createElement("option", { key: p, value: p }, nm(p)))) : null,
+        React.createElement("select", { className: 'in', value: mon, onChange: e => setMon(e.target.value), style: { width: 'auto', fontSize: 12, padding: '4px 8px' } },
+          months.map(m => React.createElement("option", { key: m, value: m }, new Date(m + '-01').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })))))),
+    live ? null : React.createElement("div", { style: { fontSize: 11.5, color: '#fde68a', background: '#e3a00814', border: '1px solid #e3a00840', borderRadius: 8, padding: 8, margin: '8px 0' } },
+      'Preview — this score card counts from 1 Nov. October is still scored the old way. "—" means not measured yet.'),
+    locked ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '4px 0' } }, '🔒 Month closed') : null,
+    React.createElement("div", { style: { display: 'flex', gap: 14, alignItems: 'baseline', margin: '6px 0 8px', flexWrap: 'wrap' } },
+      React.createElement("span", { style: { fontSize: 26, fontWeight: 900, color: '#f8fafc' } }, fin.earned == null ? (fin.note || '—') : f1(fin.earned),
+        fin.earned == null ? null : React.createElement("span", { style: { fontSize: 13, color: '#64748b' } }, ' / 100 · Band ' + band(fin.earned))),
+      React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, 'Your tasks ' + f1(own.earned) + ' / 80' + (team.earned != null ? ' · Team average ' + f1(team.earned) : '') + (own.note ? ' · ' + own.note : ''))),
+    tasks.map(row),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', fontWeight: 700, marginTop: 10 } }, 'EVERYONE'),
+    common.map(row),
+    msg ? React.createElement("div", { style: { fontSize: 11.5, marginTop: 6, color: msg[0] === '✓' ? '#4ade80' : '#fca5a5' } }, msg) : null,
+    React.createElement("div", { style: { fontSize: 10.5, color: '#64748b', marginTop: 6 } }, 'Updated hourly' + (fin.computed_at ? ' · last ' + new Date(fin.computed_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '') + '. Tick your duties in the Duties box below. The previous month stays open until the 3rd.'));
+}
+function DutyChecksCard({ user }) {
+  const [rows, setRows] = React.useState(null);
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_v5_checks_due').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(load, []);
+  if (!rows || !rows.length) return null;
+  if (new Date() < new Date('2026-10-27T00:00:00+05:30') && !['JIGAR', 'AMOL'].includes(pbKey(user))) return null;
+  const act = async (id, res) => {
+    const note = res === 'false' ? (window.prompt('What was wrong with this tick?') || '') : null;
+    if (res === 'false' && !note.trim()) { setMsg('Write what was wrong'); return; }
+    const r = await sb.rpc('erp_duty_check', { p_done_id: id, p_result: res, p_note: note });
+    setMsg(r.error ? r.error.message : (res === 'ok' ? '✓ Checked' : '✗ Marked false (−5 on that task)')); load();
+  };
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 10, border: '1px solid #a78bfa55' } },
+    React.createElement("b", { style: { color: '#c4b5fd', fontSize: 13 } }, '🔍 Check your team\'s ticks this week (' + rows.length + ')'),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '2px 0 6px' } }, 'Open the proof. If the work was not really done, mark it false — the tick scores 0 and −5.'),
+    rows.map(r => React.createElement("div", { key: r.done_id, style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderTop: '1px solid #1f2937', fontSize: 12 } },
+      React.createElement("b", { style: { color: '#e2e8f0' } }, nm(r.person_key)),
+      React.createElement("span", { style: { flex: 1, color: '#cbd5e1' } }, r.label + ' · ' + r.period_key),
+      r.proof_url ? React.createElement("a", { href: r.proof_url, target: '_blank', rel: 'noreferrer', style: { color: '#60a5fa' } }, '📎 proof') : React.createElement("span", { style: { color: '#64748b' } }, 'no proof'),
+      React.createElement("button", { type: 'button', onClick: () => act(r.done_id, 'ok'), style: { padding: '3px 10px', borderRadius: 6, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'OK'),
+      React.createElement("button", { type: 'button', onClick: () => act(r.done_id, 'false'), style: { padding: '3px 10px', borderRadius: 6, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'False'))),
+    msg ? React.createElement("div", { style: { fontSize: 11.5, marginTop: 6, color: msg[0] === '✓' ? '#4ade80' : '#fca5a5' } }, msg) : null);
 }
 function DutiesCard({ user }) {
   const me = pbKey(user);
@@ -34535,8 +34632,11 @@ function DutiesCard({ user }) {
   const [form, setForm] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
+  const [cal, setCal] = React.useState([]);
   const load = () => {
-    sb.from('duty_defs').select('*').eq('active', true).order('sort').then(r => setDefs(r.error ? [] : (r.data || [])));
+    const todayIso = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10);
+    sb.from('duty_defs').select('*').eq('active', true).order('sort').then(r => setDefs(r.error ? [] : (r.data || []).filter(d => (!d.end_date || d.end_date >= todayIso) && (!d.start_date || d.start_date <= todayIso))));
+    sb.from('compliance_calendar').select('*').gte('due_date', todayIso.slice(0, 8) + '01').order('due_date').then(r => setCal(r.error ? [] : (r.data || [])));
     const since = new Date(); since.setDate(1); since.setHours(0, 0, 0, 0); since.setMonth(since.getMonth() - 1);
     sb.from('duty_done').select('*').gte('done_at', since.toISOString()).order('done_at', { ascending: false }).then(r => setDone(r.error ? [] : (r.data || [])));
   };
@@ -34556,13 +34656,14 @@ function DutiesCard({ user }) {
     setBusy(true); setErr('');
     let proof = null;
     if (form.file) { proof = await uploadFile(form.file, 'duty-proof'); if (!proof) { setBusy(false); setErr('Upload failed'); return; } }
-    const r = await sb.rpc('erp_duty_mark', { p_code: d.code, p_note: form.note.trim() || null, p_proof: proof });
+    const r = await sb.rpc('erp_duty_mark2', { p_code: d.code, p_note: form.note.trim() || null, p_proof: proof, p_period: form.period || null });
     setBusy(false);
     if (r.error) { setErr(r.error.message); return; }
     setForm(null); load();
   };
   let got = 0, max = 0;
   const rows = mine.map(d => {
+    if (d.freq === 'calendar') return { d, due: now, dueMs: 0, cur: null, exp: 0, onTime: 0 };
     const { due } = dutyPeriod(d.freq, d.due_day, now);
     const dueMs = Date.parse(due.getFullYear() + '-' + String(due.getMonth() + 1).padStart(2, '0') + '-' + String(due.getDate()).padStart(2, '0') + 'T21:00:00+05:30');
     const cur = done.find(x => x.code === d.code && Math.abs(new Date(x.due_at).getTime() - dueMs) < 60000);
@@ -34572,7 +34673,7 @@ function DutiesCard({ user }) {
     got += share * Number(d.points); max += Number(d.points);
     return { d, due, dueMs, cur, exp, onTime };
   });
-  const freqLbl = { daily: 'Daily', weekly: 'Weekly (Sat)', tuesday: 'Every Tuesday', monthly: 'Monthly' };
+  const freqLbl = { daily: 'Daily', weekly: 'Weekly (Sat)', tuesday: 'Every Tuesday', monthly: 'Monthly', fortnightly: 'Fortnightly (15th + month end)', calendar: 'As per filing calendar' };
   return React.createElement("div", { className: "cd", style: { padding: 10, marginBottom: 10 } },
     React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
       React.createElement("b", { style: { color: '#e3a008', fontSize: 13 } }, "📋 Duties — " + nm(target)),
@@ -34580,6 +34681,29 @@ function DutiesCard({ user }) {
       React.createElement("span", { style: { fontSize: 12, color: '#cbd5e1' } }, 'This month so far: ', React.createElement("b", { style: { color: '#fde68a' } }, got.toFixed(1) + ' / ' + max), ' pts')),
     React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginTop: 2 } }, "Mark each duty done on time, with proof. Late or missing = no points for that period."),
     rows.map(({ d, due, dueMs, cur, exp, onTime }) => {
+            if (d.freq === 'calendar') {
+              const mm = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+              const list = cal.filter(c => c.task_key === d.task_key_ref && c.due_date.slice(0, 7) === mm);
+              return React.createElement("div", { key: d.code, style: { border: '1px solid #1f2937', borderRadius: 8, padding: 8, marginTop: 6, background: '#0a0f1a' } },
+                React.createElement("b", { style: { fontSize: 12, color: '#e2e8f0' } }, d.label + '  · ' + d.points + ' pts'),
+                list.map(c => {
+                  const pk = c.due_date + '|' + c.filing;
+                  const cur = done.find(x => x.code === d.code && x.period_key === pk);
+                  const overdue = !cur && Date.now() > Date.parse(c.due_date + 'T21:00:00+05:30');
+                  return React.createElement("div", { key: pk, style: { display: 'flex', justifyContent: 'space-between', gap: 6, fontSize: 11.5, marginTop: 4, color: '#cbd5e1' } },
+                    React.createElement("span", null, c.filing + ' · due ' + new Date(c.due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })),
+                    cur ? React.createElement("span", { style: { color: cur.on_time ? '#4ade80' : '#f59e0b', fontWeight: 700 } }, cur.on_time ? '✓ on time' : '✓ late')
+                        : (target === me || adm) ? React.createElement("button", { type: 'button', onClick: () => { setForm({ def: d, note: '', file: null, period: pk }); setErr(''); }, style: { padding: '2px 9px', borderRadius: 6, fontSize: 11, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + (overdue ? '#e0574f' : '#22c55e'), background: overdue ? '#7f1d1d' : '#15803d' } }, overdue ? 'Mark (late)' : 'Mark done')
+                        : React.createElement("span", { style: { color: overdue ? '#e0574f' : '#94a3b8' } }, overdue ? '✗ missed' : 'pending'));
+                }),
+                form && form.def.code === d.code ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 6 } },
+                  React.createElement("div", { style: { fontSize: 11, color: '#fde68a' } }, 'Marking: ' + form.period.split('|')[1]),
+                  React.createElement("input", { className: 'in', value: form.note, onChange: e => setForm({ ...form, note: e.target.value }), placeholder: 'Note (optional)' }),
+                  React.createElement("input", { type: 'file', accept: 'image/*,.pdf,.xlsx,.xls,.csv', onChange: e => setForm({ ...form, file: e.target.files[0] || null }) }),
+                  React.createElement("div", { style: { display: 'flex', gap: 6 } },
+                    React.createElement("button", { type: 'button', disabled: busy, onClick: submit, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, busy ? 'Saving…' : 'Save'),
+                    React.createElement("button", { type: 'button', disabled: busy, onClick: () => { setForm(null); setErr(''); }, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid #334155', background: 'transparent' } }, 'Cancel'))) : null);
+            }
       const overdue = !cur && Date.now() > dueMs;
       const st = cur ? (cur.on_time ? '✓ done on time' : '✓ done late') : overdue ? '✗ missed' : 'pending';
       const c = cur ? (cur.on_time ? '#4ade80' : '#f59e0b') : overdue ? '#e0574f' : '#94a3b8';
