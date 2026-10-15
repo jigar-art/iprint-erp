@@ -3634,9 +3634,15 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(V4ChangeGate, {
     user: user
+  }) : null, user ? React.createElement(V5ChangeGate, {
+    user: user
   }) : null, user ? React.createElement(CommitGate, {
     user: user
   }) : null, user ? React.createElement(CallLogFab, {
+    user: user
+  }) : null, user ? React.createElement(ProofFab, {
+    user: user
+  }) : null, user ? React.createElement(CourierFab, {
     user: user
   }) : null, pg === "complaints" && React.createElement(ComplaintsPage, {
     user: user
@@ -3661,6 +3667,12 @@ function MainApp({
   }), pg === "myscore" && React.createElement(ScoreCardV5, {
     user: user
   }), pg === "myscore" && React.createElement(DutyChecksCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(ScoreQueriesCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(ReportMistakeCard, {
+    user: user
+  }), pg === "myscore" && React.createElement(ScoreSettingsCard, {
     user: user
   }), pg === "myscore" && React.createElement(DutiesCard, {
     user: user
@@ -34896,6 +34908,327 @@ function ComplaintsPage({ user }) {
         boss ? React.createElement("button", { type: 'button', onClick: () => act(r, 'not_complaint'), style: btn('#64748b') }, 'Not a complaint') : null) : null)));
 }
 // ── v4.2 One-tap call log (2026-10-14, Jigar): 📞 button → who/what/outcome → task, follow-up, complaint ──
+// ── v5 Part 2 (2026-10-15, Jigar): proof photos + material used (📷), courier approvals (🚚), mistakes, queries, settings, 1 Nov notice ──
+function ProofFab({ user }) {
+  const me = pbKey(user);
+  const [roles, setRoles] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState('');
+  const [hits, setHits] = React.useState([]);
+  const [job, setJob] = React.useState(null);
+  const [kind, setKind] = React.useState('');
+  const [files, setFiles] = React.useState([]);
+  const [mat, setMat] = React.useState({ material: '', qty: '', unit: 'sqft' });
+  const [mats, setMats] = React.useState([]);
+  const [have, setHave] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); }, []);
+  React.useEffect(() => {
+    if (!open || job || q.trim().length < 2) { setHits([]); return; }
+    const t = setTimeout(() => sb.rpc('erp_call_job_search', { p_q: q.trim() }).then(r => setHits(r.error ? [] : (r.data || []))), 250);
+    return () => clearTimeout(t);
+  }, [q, job, open]);
+  const loadHave = j => {
+    setHave(null);
+    Promise.all([sb.from('job_photos').select('kind').eq('job_id', j.id), sb.from('material_usage').select('material,qty,unit').eq('job_id', j.id)]).then(([a, b]) => {
+      const c = {}; (a.data || []).forEach(x => { c[x.kind] = (c[x.kind] || 0) + 1; }); setHave({ c, m: b.data || [] });
+    });
+  };
+  React.useEffect(() => { if (open && !mats.length) sb.from('materials_master_v2').select('name').eq('active', true).order('name').then(r => setMats((r.data || []).map(x => x.name))); }, [open]);
+  if (!roles) return null;
+  const mine = roles.find(r => r.person_key === me);
+  const card = mine ? mine.card : null;
+  const allowed = ['JIGAR', 'AMOL'].includes(me) || ['PRINTING', 'FABRICATION', 'DISPATCH', 'STORES', 'INST_COORD', 'SITE_LEAD'].includes(card);
+  if (!allowed) return null;
+  const KINDS = [['print_batch', '🖨 Printed batch', 1], ['fab_angle', '📐 Fabrication — 2 angles', 2], ['pre_pack', '📦 Pre-packing', 1], ['post_pack', '📦 Post-packing', 1], ['material', '🧾 Material used', 0]];
+  const chip = on => ({ padding: '9px 12px', borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
+  const save = async () => {
+    setMsg('');
+    if (!job) { setMsg('⚠️ Pick the job'); return; }
+    if (!kind) { setMsg('⚠️ Pick what you are uploading'); return; }
+    setBusy(true);
+    if (kind === 'material') {
+      const r = await sb.rpc('erp_material_use_add', { p_job: job.id, p_material: mat.material, p_qty: Number(mat.qty), p_unit: mat.unit });
+      setBusy(false);
+      if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+      setMsg('✓ Material saved'); setMat({ material: '', qty: '', unit: mat.unit }); loadHave(job); return;
+    }
+    if (!files.length) { setBusy(false); setMsg('⚠️ Take or choose the photo(s)'); return; }
+    const urls = [];
+    for (const f of files) { const u = await uploadFile(f, 'job-proof'); if (u) urls.push(u); }
+    if (!urls.length) { setBusy(false); setMsg('⚠️ Upload failed — try again'); return; }
+    const r = await sb.rpc('erp_photo_add', { p_job: job.id, p_kind: kind, p_urls: urls });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setMsg('✓ ' + urls.length + ' photo(s) saved'); setFiles([]); loadHave(job);
+  };
+  const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); }, title: 'Upload job photos / material used',
+    style: { position: 'fixed', right: 16, bottom: 'calc(132px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#60a5fa', color: '#111', fontSize: 24, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } }, '📷');
+  if (!open) return fab;
+  const lbl = t => React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: .4 } }, t);
+  const need = k => { const x = KINDS.find(y => y[0] === k); return x ? x[2] : 0; };
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 520, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #60a5fa', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#60a5fa' } }, '📷 Job photos & material used'),
+        React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'From 1 Nov a job cannot leave Printing / Fabrication until these are uploaded.'),
+      lbl('Job'),
+      job ? React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #60a5fa', borderRadius: 10 } },
+        React.createElement("div", { style: { flex: 1, fontSize: 13, color: '#e2e8f0' } }, React.createElement("b", null, job.id), ' · ', job.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (job.status || ''))),
+        React.createElement("button", { type: 'button', onClick: () => { setJob(null); setHave(null); }, style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer' } }, '✕')) :
+      React.createElement("div", null,
+        React.createElement("input", { className: 'in', value: q, onChange: e => setQ(e.target.value), placeholder: 'Type job no. or client name', style: { width: '100%', fontSize: 15, padding: '10px 12px', boxSizing: 'border-box' } }),
+        hits.map(h => React.createElement("div", { key: h.id, onClick: () => { setJob(h); setQ(''); loadHave(h); }, style: { padding: '9px 10px', borderBottom: '1px solid #1f2937', fontSize: 13, color: '#e2e8f0', cursor: 'pointer' } },
+          React.createElement("b", null, h.id), ' · ', h.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (h.status || ''))))),
+      have ? React.createElement("div", { style: { fontSize: 11.5, color: '#cbd5e1', marginTop: 6 } }, 'Already uploaded: ' +
+        KINDS.filter(k => k[2]).map(k => k[1].replace(/^\S+ /, '') + ' ' + (have.c[k[0]] || 0) + '/' + k[2]).join(' · ') + ' · Material entries ' + have.m.length) : null,
+      lbl('What are you uploading?'),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, KINDS.map(k => React.createElement("button", { key: k[0], type: 'button', onClick: () => { setKind(k[0]); setFiles([]); }, style: chip(kind === k[0]) }, k[1]))),
+      kind === 'material' ? React.createElement("div", { style: { display: 'grid', gap: 8, marginTop: 10 } },
+        React.createElement("input", { className: 'in', list: 'v5mats', value: mat.material, onChange: e => setMat({ ...mat, material: e.target.value }), placeholder: 'Material (e.g. Star flex, Vinyl, ACP)', style: { fontSize: 14, padding: '9px 11px' } }),
+        React.createElement("datalist", { id: 'v5mats' }, mats.map(x => React.createElement("option", { key: x, value: x }))),
+        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+          React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: mat.qty, onChange: e => setMat({ ...mat, qty: e.target.value }), placeholder: 'Qty', style: { width: 100, fontSize: 14, padding: '9px 11px' } }),
+          ['sqft', 'sqm', 'rmt', 'pcs', 'kg', 'roll'].map(u => React.createElement("button", { key: u, type: 'button', onClick: () => setMat({ ...mat, unit: u }), style: chip(mat.unit === u) }, u)))) : kind ?
+      React.createElement("div", { style: { marginTop: 10 } },
+        React.createElement("input", { type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: e => setFiles([...e.target.files]) }),
+        React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, files.length + ' selected' + (need(kind) > 1 ? ' — need ' + need(kind) + ' (different angles)' : ''))) : null,
+      msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
+      React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { width: '100%', marginTop: 12, padding: '13px 0', borderRadius: 12, border: 'none', background: busy ? '#475569' : '#22c55e', color: '#06210f', fontSize: 15.5, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Save')));
+}
+
+function CourierFab({ user }) {
+  const me = pbKey(user);
+  const [roles, setRoles] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [rows, setRows] = React.useState([]);
+  const [modes, setModes] = React.useState([]);
+  const [f, setF] = React.useState({ job: '', mode: '', courier: '', cost: '', note: '' });
+  const [msg, setMsg] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const load = () => sb.rpc('erp_courier_inbox').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(load, 120000); return () => clearInterval(t); }, []);
+  React.useEffect(() => { if (open && !modes.length) sb.from('dispatch_mode_config').select('mode').eq('active', true).order('sort').then(r => setModes((r.data || []).map(x => x.mode).filter(x => x !== 'Own vehicle' && x !== 'Client / vendor pickup'))); }, [open]);
+  if (!roles) return null;
+  const mine = roles.find(r => r.person_key === me);
+  const card = mine ? mine.card : null;
+  const requester = ['DISPATCH', 'STORES'].includes(card) || ['JIGAR', 'AMOL'].includes(me);
+  const approver = ['JIGAR', 'AMOL', 'PRIYANKA'].includes(me);
+  if (!requester && !approver) return null;
+  const waiting = rows.filter(r => r.waiting_for_me).length;
+  const chip = on => ({ padding: '8px 11px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
+  const ask = async () => {
+    setMsg('');
+    if (!f.job.trim() || !f.mode) { setMsg('⚠️ Job no. and mode are needed'); return; }
+    setBusy(true);
+    const r = await sb.rpc('erp_courier_request', { p_job: f.job.trim(), p_mode: f.mode, p_courier: f.courier || null, p_cost: f.cost ? Number(f.cost) : null, p_note: f.note || null });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setMsg('✓ Request sent'); setF({ job: '', mode: '', courier: '', cost: '', note: '' }); load();
+  };
+  const decide = async (id, ok) => {
+    setBusy(true);
+    const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: null });
+    setBusy(false);
+    setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load();
+  };
+  const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); load(); }, title: 'Courier approvals',
+    style: { position: 'fixed', right: 16, bottom: 'calc(200px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#a78bfa', color: '#111', fontSize: 24, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } },
+    '🚚', waiting ? React.createElement("span", { style: { position: 'absolute', top: -4, right: -4, background: '#e0574f', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 800, padding: '2px 6px' } }, waiting) : null);
+  if (!open) return fab;
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const st = r => r.status === 'approved' ? '✓ approved' : r.status === 'rejected' ? '✗ rejected' : r.l1_action === 'approved' ? 'waiting for Jigar' : 'waiting for ' + nm(r.l1_key);
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #a78bfa', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#c4b5fd' } }, '🚚 Courier approvals'),
+        React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'From 1 Nov: any courier / transport (not own vehicle or client pickup) needs Priyanka (banking) or Amol, then Jigar — before the dispatch can be logged.'),
+      requester ? React.createElement("div", { style: { display: 'grid', gap: 8, marginTop: 10, padding: 10, border: '1px solid #1f2937', borderRadius: 10 } },
+        React.createElement("b", { style: { fontSize: 13, color: '#e2e8f0' } }, 'New request'),
+        React.createElement("input", { className: 'in', value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no. (e.g. 11929-2627)', style: { fontSize: 14, padding: '9px 11px' } }),
+        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, modes.map(m => React.createElement("button", { key: m, type: 'button', onClick: () => setF({ ...f, mode: m }), style: chip(f.mode === m) }, m))),
+        React.createElement("div", { style: { display: 'flex', gap: 6 } },
+          React.createElement("input", { className: 'in', value: f.courier, onChange: e => setF({ ...f, courier: e.target.value }), placeholder: 'Courier / transporter', style: { flex: 1, fontSize: 13, padding: '8px 10px' } }),
+          React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.cost, onChange: e => setF({ ...f, cost: e.target.value }), placeholder: '₹ cost', style: { width: 100, fontSize: 13, padding: '8px 10px' } })),
+        React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Why this mode? (optional)', style: { fontSize: 13, padding: '8px 10px' } }),
+        React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '10px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Sending…' : 'Send for approval')) : null,
+      msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 4px' } }, 'LAST 14 DAYS'),
+      rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'No requests yet.') :
+      rows.map(r => React.createElement("div", { key: r.id, style: { padding: '8px 0', borderTop: '1px solid #1f2937', fontSize: 12.5, color: '#e2e8f0' } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
+          React.createElement("span", null, React.createElement("b", null, r.job_id), ' · ', r.client_name || '', ' · ', r.mode, r.courier_name ? ' (' + r.courier_name + ')' : '', r.est_cost ? ' · ₹' + r.est_cost : ''),
+          React.createElement("span", { style: { fontSize: 11, color: r.status === 'approved' ? '#4ade80' : r.status === 'rejected' ? '#f87171' : '#fbbf24', whiteSpace: 'nowrap' } }, st(r))),
+        React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'by ' + nm(r.requested_by) + ' · ' + new Date(r.requested_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + (r.note ? ' · ' + r.note : '')),
+        r.waiting_for_me ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
+          React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true), style: { padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
+          React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, false), style: { padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')) : null))));
+}
+
+function ReportMistakeCard({ user }) {
+  const [opts, setOpts] = React.useState(null);
+  const [f, setF] = React.useState({ person: '', code: '', job: '', note: '' });
+  const [msg, setMsg] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => { sb.rpc('erp_my_report_options').then(r => setOpts(r.error ? [] : (r.data || []))); }, []);
+  if (!opts || !opts.length) return null;
+  const people = [...new Set(opts.map(o => o.person_key))].sort();
+  const cats = opts.filter(o => o.person_key === f.person);
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  const send = async () => {
+    setMsg('');
+    if (!f.person || !f.code) { setMsg('⚠️ Pick the person and what went wrong'); return; }
+    setBusy(true);
+    const r = await sb.rpc('erp_incident_log', { p_person: f.person, p_reason: f.code, p_job: f.job || null, p_note: f.note || null });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setMsg('✓ Reported — it shows on ' + nm(f.person) + '\'s score card (they can raise a query)'); setF({ person: '', code: '', job: '', note: '' });
+  };
+  const chip = on => ({ padding: '6px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e0574f' : '#334155'), background: on ? '#e0574f' : 'transparent', color: on ? '#fff' : '#e2e8f0' });
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #e0574f44' } },
+    React.createElement("b", { style: { color: '#fca5a5', fontSize: 13.5 } }, '⚠️ Report a mistake (our error)'),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '2px 0 8px' } }, 'Only for real mistakes you received from the previous person — e.g. docket returned, wrong file, reprint, bank rejection, damaged packing.'),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, people.map(p => React.createElement("button", { key: p, type: 'button', onClick: () => setF({ ...f, person: p, code: '' }), style: chip(f.person === p) }, nm(p)))),
+    f.person ? React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 } }, cats.map(c => React.createElement("button", { key: c.code, type: 'button', onClick: () => setF({ ...f, code: c.code }), style: chip(f.code === c.code) }, c.label + ' (−' + c.per_incident + ')'))) : null,
+    f.code ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 8 } },
+      React.createElement("input", { className: 'in', value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no.', style: { fontSize: 13, padding: '7px 10px' } }),
+      React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'What exactly was wrong?', style: { fontSize: 13, padding: '7px 10px' } }),
+      React.createElement("button", { type: 'button', disabled: busy, onClick: send, style: { padding: '8px 0', borderRadius: 8, border: 'none', background: '#e0574f', color: '#fff', fontSize: 13, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Report')) : null,
+    msg ? React.createElement("div", { style: { fontSize: 12, marginTop: 6, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null);
+}
+
+function ScoreQueriesCard({ user }) {
+  const [rows, setRows] = React.useState(null);
+  const [pts, setPts] = React.useState({});
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_v5_queries_open').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(load, []);
+  if (!rows || !rows.length) return null;
+  const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
+  const decide = async (id, ok) => {
+    const r = await sb.rpc('erp_v5_decide', { p_id: id, p_status: ok ? 'approved' : 'rejected', p_delta: ok ? Number(pts[id] || 0) : 0 });
+    setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load();
+  };
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #60a5fa55' } },
+    React.createElement("b", { style: { color: '#93c5fd', fontSize: 13.5 } }, '💬 Score queries from your team (' + rows.length + ')'),
+    rows.map(r => React.createElement("div", { key: r.id, style: { padding: '7px 0', borderTop: '1px solid #1f2937', fontSize: 12.5, color: '#e2e8f0' } },
+      React.createElement("div", null, React.createElement("b", null, nm(r.person_key)), ' · ', r.label),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#cbd5e1', margin: '2px 0 6px' } }, '"' + r.reason + '"'),
+      React.createElement("div", { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+        React.createElement("input", { className: 'in', type: 'number', value: pts[r.id] || '', onChange: e => setPts({ ...pts, [r.id]: e.target.value }), placeholder: '+ points', style: { width: 90, fontSize: 12, padding: '5px 8px' } }),
+        React.createElement("button", { type: 'button', onClick: () => decide(r.id, true), style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Accept'),
+        React.createElement("button", { type: 'button', onClick: () => decide(r.id, false), style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')))),
+    msg ? React.createElement("div", { style: { fontSize: 12, marginTop: 6, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null);
+}
+
+function ScoreSettingsCard({ user }) {
+  const me = pbKey(user);
+  const [open, setOpen] = React.useState(false);
+  const [hol, setHol] = React.useState([]);
+  const [h, setH] = React.useState({ d: '', name: '' });
+  const [tasks, setTasks] = React.useState([]);
+  const [card, setCard] = React.useState('');
+  const [edit, setEdit] = React.useState([]);
+  const [msg, setMsg] = React.useState('');
+  const loadH = () => sb.from('holidays').select('*').gte('d', '2026-01-01').lte('d', '2098-12-31').order('d').then(r => setHol(r.data || []));
+  const loadT = () => sb.from('score_card_tasks').select('*').is('valid_to', null).order('sort').then(r => setTasks(r.data || []));
+  React.useEffect(() => { if (open) { loadH(); loadT(); } }, [open]);
+  if (!['JIGAR', 'SAMRUDDHI'].includes(me)) return null;
+  const cards = [...new Set(tasks.map(t => t.card))].sort();
+  const pick = c => { setCard(c); setEdit(tasks.filter(t => t.card === c).map(t => ({ task_key: t.task_key, label: t.label, points: Number(t.points), remove: false }))); setMsg(''); };
+  const total = edit.filter(x => !x.remove).reduce((a, x) => a + Number(x.points || 0), 0);
+  const saveCard = async () => {
+    const r = await sb.rpc('erp_v5_card_save', { p_card: card, p_tasks: edit.map(x => x.task_key ? x : { label: x.label, points: Number(x.points), freq: x.freq || 'weekly', proof: 'Tick' }) });
+    setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); loadT();
+  };
+  const addH = async () => { const r = await sb.rpc('erp_holiday_set', { p_d: h.d, p_name: h.name, p_remove: false }); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ Holiday saved'); setH({ d: '', name: '' }); loadH(); };
+  const delH = async d => { const r = await sb.rpc('erp_holiday_set', { p_d: d, p_name: null, p_remove: true }); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ Removed'); loadH(); };
+  const box = { border: '1px solid #1f2937', borderRadius: 10, padding: 10, marginTop: 8 };
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #33415588' } },
+    React.createElement("b", { style: { color: '#cbd5e1', fontSize: 13.5, cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + '⚙ Score settings — holidays' + (me === 'JIGAR' ? ' and score cards' : '')),
+    !open ? null : React.createElement("div", null,
+      React.createElement("div", { style: box },
+        React.createElement("b", { style: { fontSize: 12.5, color: '#e2e8f0' } }, 'Company holidays (not counted as missed days)'),
+        React.createElement("div", { style: { display: 'flex', gap: 6, margin: '6px 0', flexWrap: 'wrap' } },
+          React.createElement("input", { className: 'in', type: 'date', value: h.d, onChange: e => setH({ ...h, d: e.target.value }), style: { fontSize: 12, padding: '5px 8px' } }),
+          React.createElement("input", { className: 'in', value: h.name, onChange: e => setH({ ...h, name: e.target.value }), placeholder: 'Holiday name', style: { flex: 1, fontSize: 12, padding: '5px 8px' } }),
+          React.createElement("button", { type: 'button', onClick: addH, style: { padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Add')),
+        hol.map(x => React.createElement("div", { key: x.d, style: { display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#cbd5e1', padding: '3px 0' } },
+          React.createElement("span", null, new Date(x.d).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }) + ' · ' + x.name),
+          React.createElement("a", { onClick: () => delH(x.d), style: { color: '#f87171', cursor: 'pointer' } }, 'remove')))),
+      me === 'JIGAR' ? React.createElement("div", { style: box },
+        React.createElement("b", { style: { fontSize: 12.5, color: '#e2e8f0' } }, 'Edit a score card (changes start on the 1st of next month)'),
+        React.createElement("select", { className: 'in', value: card, onChange: e => pick(e.target.value), style: { display: 'block', margin: '6px 0', fontSize: 12, padding: '5px 8px' } },
+          React.createElement("option", { value: '' }, 'Pick a card…'), cards.map(c => React.createElement("option", { key: c, value: c }, c))),
+        card ? React.createElement("div", null,
+          edit.map((x, i) => React.createElement("div", { key: i, style: { display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0', opacity: x.remove ? .4 : 1 } },
+            React.createElement("input", { className: 'in', value: x.label, onChange: e => { const n = [...edit]; n[i] = { ...x, label: e.target.value }; setEdit(n); }, style: { flex: 1, fontSize: 12, padding: '5px 8px' } }),
+            React.createElement("input", { className: 'in', type: 'number', value: x.points, onChange: e => { const n = [...edit]; n[i] = { ...x, points: e.target.value }; setEdit(n); }, style: { width: 64, fontSize: 12, padding: '5px 8px' } }),
+            React.createElement("a", { onClick: () => { const n = [...edit]; if (x.task_key) n[i] = { ...x, remove: !x.remove }; else n.splice(i, 1); setEdit(n); }, style: { color: '#f87171', cursor: 'pointer', fontSize: 12 } }, x.remove ? 'undo' : '✕'))),
+          React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 } },
+            React.createElement("a", { onClick: () => setEdit([...edit, { label: '', points: 5, freq: 'weekly' }]), style: { color: '#60a5fa', cursor: 'pointer', fontSize: 12 } }, '+ Add weekly tick task'),
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: total === 80 ? '#4ade80' : '#f87171' } }, 'Total ' + total + ' / 80')),
+          React.createElement("button", { type: 'button', disabled: total !== 80, onClick: saveCard, style: { marginTop: 8, padding: '7px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: total === 80 ? '#15803d' : '#334155' } }, 'Save card')) : null) : null,
+      msg ? React.createElement("div", { style: { fontSize: 12, marginTop: 6, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null));
+}
+
+function V5ChangeGate({ user }) {
+  const V = '2026-11-01-v5';
+  const me = pbKey(user);
+  const [st, setSt] = React.useState('loading');
+  const [rows, setRows] = React.useState([]);
+  const [ok, setOk] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const live = new Date() >= new Date('2026-11-01T00:00:00+05:30');
+  React.useEffect(() => {
+    if (!live || !user || !me) { setSt('hidden'); return; }
+    try { if (sessionStorage.getItem('v5_done') === '1') { setSt('hidden'); return; } } catch (e) {}
+    sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => {
+      if (r.error || (r.data || []).length) { setSt('hidden'); return; }
+      sb.from('score_roles').select('card').eq('person_key', me).is('valid_to', null).limit(1).then(x => {
+        const c = ((x.data || [])[0] || {}).card;
+        if (!c) { setSt('hidden'); return; }
+        sb.from('score_card_tasks').select('label,points,freq,proof,sort').eq('card', c).is('valid_to', null).order('sort').then(y => { setRows(y.data || []); setSt('show'); });
+      });
+    });
+  }, [me]);
+  if (st !== 'show') return null;
+  const done = async () => {
+    setBusy(true);
+    await sb.from('point_brief_responses').insert({ person_name: user.name, brief_version: V, response: 'accepted', comment: null, lang: 'en' });
+    setBusy(false);
+    try { sessionStorage.setItem('v5_done', '1'); } catch (e) {}
+    setSt('hidden');
+  };
+  const li = { fontSize: 13, color: '#e2e8f0', lineHeight: 1.55, margin: '4px 0' };
+  const card = { background: '#0d1320', border: '1px solid #1f2937', borderRadius: 10, padding: 12, marginTop: 10 };
+  const h = { fontSize: 12, fontWeight: 800, color: '#e3a008', marginBottom: 6, letterSpacing: .3, textTransform: 'uppercase' };
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99995, background: 'rgba(3,6,12,.95)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 640, margin: '0 auto' } },
+      React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, '🗂 Your new score card — from 1 Nov'),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, 'Your tasks — 80 points'),
+        rows.map((r, i) => React.createElement("div", { key: i, style: { ...li, display: 'flex', justifyContent: 'space-between', gap: 8 } },
+          React.createElement("span", null, '• ' + r.label + (r.freq && r.freq !== 'event' ? ' (' + r.freq + ')' : '')), React.createElement("b", { style: { color: '#fde68a' } }, r.points)))),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, 'Everyone — 20 points'),
+        ['Today\'s tasks updated in ERP by 7 pm — 5', 'Tomorrow\'s tasks planned by 9 pm — 5', 'Client emails replied on time — 10'].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, 'Important'),
+        ['Tick your duties in My Score → Duties, with proof, by 9 pm. Leads check 10% of ticks — a false tick scores 0 and −5.',
+         'Printing / Fabrication: upload batch photos (2 angles, pre/post packing) and material used with 📷 — the job cannot move on without them.',
+         'Courier / transport needs approval with 🚚 before dispatch (Priyanka for banking / Amol, then Jigar).',
+         'Mistakes passed on to the next person (wrong file, reprint, docket returned, bank rejection) are reported by that person and cost points.',
+         'Disagree with a line? Tap "Raise query" on your score card — your lead decides. The month stays open until the 3rd.',
+         'You get your score and the tasks that lost most points on WhatsApp at 6 pm every working day.'].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
+      React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
+        'I have read and understood my score card and tasks'),
+      React.createElement("button", { type: 'button', disabled: !ok || busy, onClick: done, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: ok ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: ok ? 'pointer' : 'default' } }, '✓ Continue')));
+}
 function CallLogFab({ user }) {
   const me = pbKey(user);
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
