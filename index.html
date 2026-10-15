@@ -3654,6 +3654,8 @@ function MainApp({
     user: user
   }), pg === "myscore" && React.createElement(ScorecardCard, {
     user: user
+  }), pg === "myscore" && React.createElement(ScoreReasonsCard, {
+    user: user
   }), pg === "myscore" && React.createElement(HowMyScore, {
     user: user
   }), pg === "myscore" && React.createElement(DutiesCard, {
@@ -35315,6 +35317,67 @@ function AtRiskCard({ user }) {
     rows.length && rows[0].computed_at ? React.createElement("div", { style: { fontSize: 10, color: '#64748b', marginTop: 6 } }, 'Updated hourly · last ' + fd(rows[0].computed_at)) : null);
 }
 // ── Monthly scorecard (point system, 2026-09-29) — reads the hourly snapshot ──
+// ── v4 "Why is my score this?" (2026-10-15, Jigar): every point lost, item by item ──
+function ScoreReasonsCard({ user }) {
+  const me = pbKey(user);
+  const boss = ['JIGAR', 'AMOL'].includes(me);
+  const [who, setWho] = React.useState(boss ? '' : me);
+  const [rows, setRows] = React.useState(null);
+  const [card, setCard] = React.useState(null);
+  const [open, setOpen] = React.useState(!boss);
+  const [tab, setTab] = React.useState('missed_promise');
+  const [people, setPeople] = React.useState([]);
+  React.useEffect(() => { sb.rpc('erp_my_scorecard_v4', {}).then(r => setPeople(((r.data || []).map(x => x.person_key)).sort())); }, []);
+  React.useEffect(() => {
+    if (!who) { setRows([]); setCard(null); return; }
+    setRows(null);
+    sb.rpc('erp_my_score_reasons', { p_person: who }).then(r => setRows(r.error ? [] : (r.data || [])));
+    sb.rpc('erp_my_scorecard_v4', {}).then(r => setCard((r.data || []).find(x => x.person_key === who) || null));
+  }, [who]);
+  const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const grp = { missed_promise: [], late_open: [], late_done: [] };
+  (rows || []).forEach(r => { (grp[r.category] || (grp[r.category] = [])).push(r); });
+  const fd = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+  const lbl = r => r.kind === 'stage' ? r.stage : r.kind === 'po' ? 'PO not inwarded' : r.kind === 'bank_image' ? 'Installed photo upload' : r.kind === 'bank_pod' ? 'POD upload' : r.kind === 'quote' ? 'Quote' : (r.stage || r.kind);
+  const tabs = [
+    ['missed_promise', '🔴 Promised date missed', 'You gave a date at login and the job was not done by then — counts DOUBLE.'],
+    ['late_open', '🟠 Still late — not done', 'Past the deadline and still open. Finish it, or give a date at login (done by that date = not counted late).'],
+    ['late_done', '⚪ Finished late', 'Done, but after the deadline. These stay for this month.']
+  ];
+  const pill = on => ({ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#cbd5e1' });
+  const list = grp[tab] || [];
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #60a5fa55' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { color: '#60a5fa', fontSize: 14, cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + '🔎 Why is my score this? — every point lost'),
+      boss ? React.createElement("select", { className: 'in', value: who, onChange: e => { setWho(e.target.value); setOpen(true); }, style: { width: 'auto', fontSize: 12, padding: '4px 8px' } },
+        React.createElement("option", { value: '' }, 'Pick a person…'), people.map(p => React.createElement("option", { key: p, value: p }, nm(p)))) : null),
+    !open ? null : React.createElement("div", null,
+      React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '6px 0 8px', lineHeight: 1.5, background: '#60a5fa12', border: '1px solid #60a5fa33', borderRadius: 8, padding: 8 } },
+        React.createElement("b", null, 'Why scores changed on 15 Oct: '),
+        'the old score (till 14 Oct) counted only how many stages you finished on time. The new score starts at 100 and cuts points for ', React.createElement("b", null, 'every job past its deadline'),
+        ' — including old backlog — and for ', React.createElement("b", null, 'promised dates missed (double)'), '. Clear the oldest items and keep your promised dates; the score rises the same day (updated hourly).'),
+      card ? React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 8 } },
+        [['Score', card.final_score == null ? '—' : Number(card.final_score).toFixed(1) + (card.band ? ' (' + card.band + ')' : ''), '#f8fafc'],
+         ['Late work', '−' + Number(card.late_lost || 0).toFixed(1) + ' / 80', '#fca5a5'], ['Output', '−' + Number(card.out_lost || 0).toFixed(1) + ' / 30', '#fbbf24'],
+         ['Quality', '−' + Number(card.q_lost || 0).toFixed(1) + ' / 20', '#c4b5fd'], ['Discipline', '−' + Number(card.d_lost || 0).toFixed(1) + ' / 20', '#93c5fd']
+        ].map(x => React.createElement("div", { key: x[0], style: { background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: '5px 9px' } },
+          React.createElement("div", { style: { fontSize: 10, color: '#94a3b8', fontWeight: 700 } }, x[0]), React.createElement("div", { style: { fontWeight: 900, color: x[2] } }, x[1])))) : null,
+      card && Number(card.out_lost || 0) > 0 ? React.createElement("div", { style: { fontSize: 11.5, color: '#fbbf24', marginBottom: 8 } }, '📦 Output: ' + (card.out_note || '') + ' — you lose points when you clear less than your team\'s average.') : null,
+      rows === null ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'Loading…') : !who ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'Pick a person to see their list.') :
+      React.createElement("div", null,
+        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 } }, tabs.map(t => React.createElement("button", { key: t[0], type: 'button', onClick: () => setTab(t[0]), style: pill(tab === t[0]) }, t[1] + ' (' + (grp[t[0]] || []).length + ')'))),
+        React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginBottom: 6 } }, (tabs.find(t => t[0] === tab) || [])[2]),
+        list.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#4ade80', padding: 6 } }, 'Nothing here 👍') :
+        React.createElement("div", { style: { maxHeight: 360, overflowY: 'auto' } },
+          list.slice(0, 300).map((r, i) => React.createElement("div", { key: r.kind + r.ref + (r.stage || '') + i, style: { display: 'flex', gap: 8, alignItems: 'center', padding: '5px 2px', borderBottom: '1px solid #1f2937', fontSize: 12 } },
+            React.createElement("b", { style: { color: '#e2e8f0', minWidth: 78 } }, r.ref),
+            React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, lbl(r) + (r.client_name ? ' · ' + r.client_name : '')),
+            r.promise ? React.createElement("span", { style: { fontSize: 10.5, color: tab === 'missed_promise' ? '#f87171' : '#94a3b8', whiteSpace: 'nowrap' } }, 'promised ' + fd(r.promise)) : null,
+            React.createElement("span", { style: { fontSize: 10.5, color: '#fca5a5', fontWeight: 700, whiteSpace: 'nowrap' } }, Math.floor(r.days_late || 0) + 'd late'),
+            React.createElement("span", { style: { fontSize: 10.5, color: '#64748b', whiteSpace: 'nowrap', minWidth: 52, textAlign: 'right' } }, '−' + Number(r.weight || 0).toFixed(1) + ' pt'))),
+          list.length > 300 ? React.createElement("div", { style: { fontSize: 11, color: '#64748b', padding: 6 } }, '+ ' + (list.length - 300) + ' more') : null),
+        React.createElement("div", { style: { fontSize: 10.5, color: '#64748b', marginTop: 6 } }, '"pt" = how much that item weighs (1 = a full late item, 2 = missed promise). Your Late cut = 100 × total weight ÷ items due, capped at 80.'))));
+}
 function ScorecardCard({ user }) {
   const me = pbKey(user);
   const [mOff, setMOff] = React.useState(0);
