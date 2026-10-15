@@ -34564,7 +34564,6 @@ function ScoreCardV5({ user }) {
   const load = () => { setRows(null); sb.rpc('erp_my_score_v5', { p_person: who, p_month: mon + '-01' }).then(r => setRows(r.error ? [] : (r.data || []))); };
   React.useEffect(load, [who, mon]);
   if (rows === null || !rows.length) return null;
-  if (!['JIGAR', 'AMOL'].includes(me) && new Date() < new Date('2026-10-27T00:00:00+05:30')) return null;
   const live = new Date() >= new Date('2026-11-01T00:00:00+05:30');
   const get = k => rows.find(r => r.task_key === k) || {};
   const fin = get('_FINAL'), own = get('_OWN'), team = get('_TEAM');
@@ -34618,7 +34617,6 @@ function DutyChecksCard({ user }) {
   const load = () => sb.rpc('erp_v5_checks_due').then(r => setRows(r.error ? [] : (r.data || [])));
   React.useEffect(load, []);
   if (!rows || !rows.length) return null;
-  if (new Date() < new Date('2026-10-27T00:00:00+05:30') && !['JIGAR', 'AMOL'].includes(pbKey(user))) return null;
   const act = async (id, res) => {
     const note = res === 'false' ? (window.prompt('What was wrong with this tick?') || '') : null;
     if (res === 'false' && !note.trim()) { setMsg('Write what was wrong'); return; }
