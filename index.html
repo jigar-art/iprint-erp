@@ -34564,7 +34564,7 @@ function ScoreCardV5({ user }) {
   const load = () => { setRows(null); sb.rpc('erp_my_score_v5', { p_person: who, p_month: mon + '-01' }).then(r => setRows(r.error ? [] : (r.data || []))); };
   React.useEffect(load, [who, mon]);
   if (rows === null || !rows.length) return null;
-  const live = new Date() >= new Date('2026-11-01T00:00:00+05:30');
+  const live = new Date() >= new Date('2026-10-16T00:00:00+05:30');
   const get = k => rows.find(r => r.task_key === k) || {};
   const fin = get('_FINAL'), own = get('_OWN'), team = get('_TEAM');
   const tasks = rows.filter(r => r.task_key[0] !== '_').sort((a, b) => a.sort - b.sort);
@@ -34599,12 +34599,13 @@ function ScoreCardV5({ user }) {
         React.createElement("select", { className: 'in', value: mon, onChange: e => setMon(e.target.value), style: { width: 'auto', fontSize: 12, padding: '4px 8px' } },
           months.map(m => React.createElement("option", { key: m, value: m }, new Date(m + '-01').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })))))),
     live ? null : React.createElement("div", { style: { fontSize: 11.5, color: '#fde68a', background: '#e3a00814', border: '1px solid #e3a00840', borderRadius: 8, padding: 8, margin: '8px 0' } },
-      'Preview — this score card counts from 1 Nov. October is still scored the old way. "—" means not measured yet.'),
+      'Preview — this score card counts from 16 Oct. "—" means not measured yet.'),
     locked ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '4px 0' } }, '🔒 Month closed') : null,
     React.createElement("div", { style: { display: 'flex', gap: 14, alignItems: 'baseline', margin: '6px 0 8px', flexWrap: 'wrap' } },
       React.createElement("span", { style: { fontSize: 26, fontWeight: 900, color: '#f8fafc' } }, fin.earned == null ? (fin.note || '—') : f1(fin.earned),
         fin.earned == null ? null : React.createElement("span", { style: { fontSize: 13, color: '#64748b' } }, ' / 100 · Band ' + band(fin.earned))),
       React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, 'Your tasks ' + f1(own.earned) + ' / 80' + (team.earned != null ? ' · Team average ' + f1(team.earned) : '') + (own.note ? ' · ' + own.note : ''))),
+    fin.earned != null && fin.note ? React.createElement("div", { style: { fontSize: 11.5, color: '#fde68a', margin: '-4px 0 8px' } }, '📅 October = ' + fin.note) : null,
     tasks.map(row),
     React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', fontWeight: 700, marginTop: 10 } }, 'EVERYONE'),
     common.map(row),
@@ -34971,7 +34972,7 @@ function ProofFab({ user }) {
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
         React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#60a5fa' } }, '📷 Job photos & material used'),
         React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
-      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'From 1 Nov a job cannot leave Printing / Fabrication until these are uploaded.'),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'A job cannot leave Printing / Fabrication until these are uploaded.'),
       lbl('Job'),
       job ? React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #60a5fa', borderRadius: 10 } },
         React.createElement("div", { style: { flex: 1, fontSize: 13, color: '#e2e8f0' } }, React.createElement("b", null, job.id), ' · ', job.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (job.status || ''))),
@@ -35043,7 +35044,7 @@ function CourierFab({ user }) {
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
         React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#c4b5fd' } }, '🚚 Courier approvals'),
         React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
-      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'From 1 Nov: any courier / transport (not own vehicle or client pickup) needs Priyanka (banking) or Amol, then Jigar — before the dispatch can be logged.'),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'Any courier / transport (not own vehicle or client pickup) needs Priyanka (banking) or Amol, then Jigar — before the dispatch can be logged.'),
       requester ? React.createElement("div", { style: { display: 'grid', gap: 8, marginTop: 10, padding: 10, border: '1px solid #1f2937', borderRadius: 10 } },
         React.createElement("b", { style: { fontSize: 13, color: '#e2e8f0' } }, 'New request'),
         React.createElement("input", { className: 'in', value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no. (e.g. 11929-2627)', style: { fontSize: 14, padding: '9px 11px' } }),
@@ -35180,7 +35181,7 @@ function V5ChangeGate({ user }) {
   const [rows, setRows] = React.useState([]);
   const [ok, setOk] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const live = new Date() >= new Date('2026-11-01T00:00:00+05:30');
+  const live = new Date() >= new Date('2026-10-16T00:00:00+05:30');
   React.useEffect(() => {
     if (!live || !user || !me) { setSt('hidden'); return; }
     try { if (sessionStorage.getItem('v5_done') === '1') { setSt('hidden'); return; } } catch (e) {}
@@ -35206,7 +35207,7 @@ function V5ChangeGate({ user }) {
   const h = { fontSize: 12, fontWeight: 800, color: '#e3a008', marginBottom: 6, letterSpacing: .3, textTransform: 'uppercase' };
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99995, background: 'rgba(3,6,12,.95)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
     React.createElement("div", { style: { maxWidth: 640, margin: '0 auto' } },
-      React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, '🗂 Your new score card — from 1 Nov'),
+      React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, '🗂 Your new score card — from 16 Oct'),
       React.createElement("div", { style: card },
         React.createElement("div", { style: h }, 'Your tasks — 80 points'),
         rows.map((r, i) => React.createElement("div", { key: i, style: { ...li, display: 'flex', justifyContent: 'space-between', gap: 8 } },
