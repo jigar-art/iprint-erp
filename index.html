@@ -34755,7 +34755,7 @@ function JobCredit({ job, user }) {
   const designDone = job.designed_by || !/^Quotation|^PO Pending|^Design|^Active/.test(job.status || '');
   const isBank = cls === 'B';
   const up = [['Photo', job.image_uploaded_by], ['POD', job.pod_uploaded_by], ['IC', job.ic_uploaded_by], ['DC', job.dc_uploaded_by]].filter(x => x[1]);
-  const isRect = ['Rectification', 'Installation WIP', 'Delivered', 'IC Pending', 'DC Pending', 'Billing Pending', 'Given for Billing'].includes(job.status) || !!job.rectification_cause;
+  const isRect = !/^Quot|^PO Pending|^Recce|^Design|^Active/.test(job.status || '') || !!job.rectification_cause;
   if (!designDone && !isBank && !up.length && !isRect) return null;
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const set = async (field, v) => {
@@ -34774,8 +34774,8 @@ function JobCredit({ job, user }) {
     React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "🏷 Credit (point system)"),
     designDone ? picker('Designed by', 'designed_by', ['PRAJAKTA', 'VIKAS'], ['PRAJAKTA', 'AMOL', 'JIGAR'].includes(me), 'PRAJAKTA') : null,
     isBank ? picker('Banking site assigned to', 'bank_assignee', ['PRIYANKA', 'HARSHALA'], ['PRIYANKA', 'AMOL', 'JIGAR'].includes(me), 'PRIYANKA') : null,
-    isRect ? picker('Rectification caused by', 'rectification_cause', ['DESIGN', 'PRINTING', 'FABRICATION', 'INSTALLATION', 'DISPATCH', 'CLIENT', 'OTHER'], ['POONAM', 'PRIYANKA', 'AMOL', 'JIGAR'].includes(me), null) : null,
-    isRect && vals.rectification_cause && RECT_PEOPLE[vals.rectification_cause] ? picker('Person responsible', 'rectification_person', RECT_PEOPLE[vals.rectification_cause], ['POONAM', 'PRIYANKA', 'AMOL', 'JIGAR'].includes(me), null) : null,
+    isRect ? picker('Rectification caused by', 'rectification_cause', ['DESIGN', 'PRINTING', 'FABRICATION', 'INSTALLATION', 'DISPATCH', 'CLIENT', 'OTHER'], !!me, null) : null,
+    isRect && vals.rectification_cause && RECT_PEOPLE[vals.rectification_cause] ? picker('Person responsible', 'rectification_person', RECT_PEOPLE[vals.rectification_cause], !!me, null) : null,
     isRect && (!vals.rectification_cause || (RECT_PEOPLE[vals.rectification_cause] && !vals.rectification_person)) ? React.createElement("div", { style: { fontSize: 10.5, color: '#f59e0b' } }, job.status === 'Rectification' ? 'Rework job: record the department and the person responsible. The person gets a quality incident (5 pts, can be disputed).' : 'Before moving this job to Rectification, record who caused the rework (department + person). The ERP will block the move without it.') : null,
     up.length ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'Uploaded by: ' + up.map(x => x[0] + ' — ' + nm(x[1])).join(' · ')) : null,
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5 } }, err) : null);
