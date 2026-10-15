@@ -34545,8 +34545,10 @@ function ScoreCardV5({ user }) {
   const [msg, setMsg] = React.useState('');
   React.useEffect(() => { sb.from('score_roles').select('person_key,lead_key').is('valid_to', null).then(r => {
     const all = r.data || []; const isBoss = ['JIGAR', 'AMOL'].includes(me); setBoss(isBoss);
-    const mine = isBoss ? all.map(x => x.person_key) : all.filter(x => x.lead_key === me).map(x => x.person_key);
-    setPeople([...new Set([me, ...mine])].sort()); }); }, []);
+    const keys = all.map(x => x.person_key);
+    const mine = isBoss ? keys : all.filter(x => x.lead_key === me).map(x => x.person_key);
+    if (isBoss && !keys.includes(me)) setWho('AMOL');
+    setPeople([...new Set([...(keys.includes(me) ? [me] : []), ...mine])].sort()); }); }, []);
   const load = () => { setRows(null); sb.rpc('erp_my_score_v5', { p_person: who, p_month: mon + '-01' }).then(r => setRows(r.error ? [] : (r.data || []))); };
   React.useEffect(load, [who, mon]);
   if (rows === null || !rows.length) return null;
