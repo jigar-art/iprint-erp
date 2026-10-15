@@ -34746,7 +34746,7 @@ function ComplaintsPage({ user }) {
         r.status === 'not_complaint' ? tag('Not a complaint', '#64748b') : r.needs_review ? tag('To confirm', '#e3a008') : null,
         tag(r.channel, '#60a5fa'),
         boss && !r.needs_review && r.status !== 'not_complaint'
-          ? React.createElement("select", { ...inp, title: 'Change owner', value: r.owner || '', onChange: e => e.target.value && e.target.value !== r.owner && act(r, 'reassign', { person: e.target.value }), style: { ...inp.style, fontSize: 11, padding: '1px 4px', fontWeight: 700 } },
+          ? React.createElement("select", { ...inp, title: 'Change owner', value: r.owner || '', onChange: e => e.target.value && e.target.value !== r.owner && act(r, 'reassign', { person: e.target.value }), style: { ...inp.style, fontSize: 11, padding: '1px 4px', fontWeight: 700, width: 'auto', flex: '0 0 auto' } },
               !CMP_STAFF.includes(r.owner) ? React.createElement("option", { value: r.owner || '' }, 'Owner: ' + nm(r.owner)) : null,
               CMP_STAFF.map(k => React.createElement("option", { key: k, value: k }, 'Owner: ' + nm(k))))
           : tag('Owner: ' + nm(r.owner), '#cbd5e1'),
