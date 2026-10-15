@@ -34938,9 +34938,11 @@ function ProofFab({ user }) {
   if (!roles) return null;
   const mine = roles.find(r => r.person_key === me);
   const card = mine ? mine.card : null;
-  const allowed = ['JIGAR', 'AMOL'].includes(me) || ['PRINTING', 'FABRICATION', 'DISPATCH', 'STORES', 'INST_COORD', 'SITE_LEAD'].includes(card);
+  const allowed = ['JIGAR', 'AMOL'].includes(me) || ['PRINTING', 'FABRICATION', 'DISPATCH', 'STORES', 'INST_COORD', 'SITE_LEAD', 'DESIGN'].includes(card);
   if (!allowed) return null;
-  const KINDS = [['print_batch', '🖨 Printed batch', 1], ['fab_angle', '📐 Fabrication — 2 angles', 2], ['pre_pack', '📦 Pre-packing', 1], ['post_pack', '📦 Post-packing', 1], ['material', '🧾 Material used', 0]];
+  const KINDS = [['print_batch', '🖨 Printed batch', 1], ['fab_angle', '📐 Fabrication — 2 angles', 2], ['pre_pack', '📦 Pre-packing', 1], ['post_pack', '📦 Post-packing', 1], ['material', '🧾 Material used', 0], ['recce_drawing', '📏 Recce drawing', 1]];
+  const isDes = card === 'DESIGN' && !['JIGAR', 'AMOL'].includes(me);
+  const KS = isDes ? KINDS.filter(k => k[0] === 'recce_drawing') : ['JIGAR', 'AMOL'].includes(me) ? KINDS : KINDS.filter(k => k[0] !== 'recce_drawing');
   const chip = on => ({ padding: '9px 12px', borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
   const save = async () => {
     setMsg('');
@@ -34972,7 +34974,7 @@ function ProofFab({ user }) {
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
         React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#60a5fa' } }, '📷 Job photos & material used'),
         React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
-      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'A job cannot leave Printing / Fabrication until these are uploaded.'),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, isDes ? 'Upload the recce drawing within 24 h of the site photos and sizes.' : 'A job cannot leave Printing / Fabrication until these are uploaded.'),
       lbl('Job'),
       job ? React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid #60a5fa', borderRadius: 10 } },
         React.createElement("div", { style: { flex: 1, fontSize: 13, color: '#e2e8f0' } }, React.createElement("b", null, job.id), ' · ', job.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (job.status || ''))),
@@ -34982,9 +34984,9 @@ function ProofFab({ user }) {
         hits.map(h => React.createElement("div", { key: h.id, onClick: () => { setJob(h); setQ(''); loadHave(h); }, style: { padding: '9px 10px', borderBottom: '1px solid #1f2937', fontSize: 13, color: '#e2e8f0', cursor: 'pointer' } },
           React.createElement("b", null, h.id), ' · ', h.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (h.status || ''))))),
       have ? React.createElement("div", { style: { fontSize: 11.5, color: '#cbd5e1', marginTop: 6 } }, 'Already uploaded: ' +
-        KINDS.filter(k => k[2]).map(k => k[1].replace(/^\S+ /, '') + ' ' + (have.c[k[0]] || 0) + '/' + k[2]).join(' · ') + ' · Material entries ' + have.m.length) : null,
+        KS.filter(k => k[2]).map(k => k[1].replace(/^\S+ /, '') + ' ' + (have.c[k[0]] || 0) + '/' + k[2]).join(' · ') + (isDes ? '' : ' · Material entries ' + have.m.length)) : null,
       lbl('What are you uploading?'),
-      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, KINDS.map(k => React.createElement("button", { key: k[0], type: 'button', onClick: () => { setKind(k[0]); setFiles([]); }, style: chip(kind === k[0]) }, k[1]))),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, KS.map(k => React.createElement("button", { key: k[0], type: 'button', onClick: () => { setKind(k[0]); setFiles([]); }, style: chip(kind === k[0]) }, k[1]))),
       kind === 'material' ? React.createElement("div", { style: { display: 'grid', gap: 8, marginTop: 10 } },
         React.createElement("input", { className: 'in', list: 'v5mats', value: mat.material, onChange: e => setMat({ ...mat, material: e.target.value }), placeholder: 'Material (e.g. Star flex, Vinyl, ACP)', style: { fontSize: 14, padding: '9px 11px' } }),
         React.createElement("datalist", { id: 'v5mats' }, mats.map(x => React.createElement("option", { key: x, value: x }))),
@@ -34992,7 +34994,7 @@ function ProofFab({ user }) {
           React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: mat.qty, onChange: e => setMat({ ...mat, qty: e.target.value }), placeholder: 'Qty', style: { width: 100, fontSize: 14, padding: '9px 11px' } }),
           ['sqft', 'sqm', 'rmt', 'pcs', 'kg', 'roll'].map(u => React.createElement("button", { key: u, type: 'button', onClick: () => setMat({ ...mat, unit: u }), style: chip(mat.unit === u) }, u)))) : kind ?
       React.createElement("div", { style: { marginTop: 10 } },
-        React.createElement("input", { type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: e => setFiles([...e.target.files]) }),
+        kind === 'recce_drawing' ? React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', multiple: true, onChange: e => setFiles([...e.target.files]) }) : React.createElement("input", { type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: e => setFiles([...e.target.files]) }),
         React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, files.length + ' selected' + (need(kind) > 1 ? ' — need ' + need(kind) + ' (different angles)' : ''))) : null,
       msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
       React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { width: '100%', marginTop: 12, padding: '13px 0', borderRadius: 12, border: 'none', background: busy ? '#475569' : '#22c55e', color: '#06210f', fontSize: 15.5, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Save')));
@@ -51876,6 +51878,7 @@ function QuotesPage({
     }
     setProofFor(null);
     show(data && data.verified ? 'Verified \u2713 ' + (data.subject || '') : 'Marked sent \u2014 sent to Amol/Jigar for review', true);
+    openMargin(r);
     if (reload) reload();
   };
   const reviewSend = async (r, action) => {
@@ -51889,6 +51892,63 @@ function QuotesPage({
   };
   const METHODS = [['email', 'Email from estimation@ (auto-checked)'], ['whatsapp', 'WhatsApp'], ['other_mailbox', "Amol's / Jigar's mailbox"], ['phone', 'Phone / in person']];
   const inp = { width: '100%', boxSizing: 'border-box', padding: '7px 9px', fontSize: 12, background: '#060810', color: '#e2e8f0', border: '1px solid #1a2030', borderRadius: 6 };
+  // Margin (16 Oct 2026, ESTIMATION_04): quote value + our cost on every sent quote; below the floor needs Jigar/Amol OK.
+  const MFLOOR = 20;
+  const [marFor, setMarFor] = useState(null);
+  const [mf, setMf] = useState({ v: '', c: '' });
+  const openMargin = r => { setMf({ v: r.quote_value || '', c: r.est_cost || '' }); setMarFor(r); };
+  const mPct = (v, c) => Number(v) > 0 && Number(c) > 0 ? Math.round((Number(v) - Number(c)) / Number(v) * 1000) / 10 : null;
+  const saveMargin = async () => {
+    const r = marFor; if (!r) return;
+    setBusy(r.id);
+    const { data, error } = await sb.rpc('erp_quote_margin_set', { p_id: r.id, p_value: Number(mf.v), p_cost: Number(mf.c) });
+    setBusy(0);
+    if (error) { show(error.message.replace(/^[A-Z_]+:\s*/, ''), false); return; }
+    setMarFor(null);
+    show('Margin ' + data + '%' + (data < MFLOOR ? ' \u2014 below ' + MFLOOR + '%, Jigar/Amol must OK it' : ' \u2713'), data >= MFLOOR);
+    if (reload) reload();
+  };
+  const okMargin = async r => {
+    setBusy(r.id);
+    const { error } = await sb.rpc('erp_quote_margin_ok', { p_id: r.id });
+    setBusy(0);
+    if (error) { show(error.message.replace(/^[A-Z_]+:\s*/, ''), false); return; }
+    show('Low margin approved', true);
+    if (reload) reload();
+  };
+  const marginChip = r => {
+    if (r.status !== 'Sent' || !r.sent_at || r.sent_at < '2026-10-15T18:30:00Z') return null;
+    const pc = mPct(r.quote_value, r.est_cost);
+    const low = pc !== null && pc < MFLOOR && !r.margin_ok_by;
+    return React.createElement(React.Fragment, null,
+      React.createElement("button", { type: 'button', onClick: () => openMargin(r), title: 'Quote value and our cost',
+        style: { padding: "1px 8px", fontSize: 9.5, borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+          border: '1px solid ' + (pc === null ? '#f4706788' : low ? '#fbbf2488' : '#10b98166'),
+          background: pc === null ? '#f4706718' : low ? '#fbbf2418' : '#10b98118',
+          color: pc === null ? '#f47067' : low ? '#fbbf24' : '#34d399' } },
+        pc === null ? '\u20b9 Add value & cost' : 'Margin ' + pc + '%' + (r.margin_ok_by ? ' \u00b7 OK by ' + r.margin_ok_by : low ? ' \u00b7 needs OK' : '')),
+      low && isBoss && React.createElement("button", { type: 'button', disabled: busy === r.id, onClick: () => okMargin(r),
+        style: { padding: "1px 8px", fontSize: 9.5, borderRadius: 9, cursor: 'pointer', fontWeight: 700, border: 'none', background: '#fbbf24', color: '#060810' } }, 'OK margin'));
+  };
+  const marginModal = marFor && React.createElement("div", {
+    onClick: () => busy ? null : setMarFor(null),
+    style: { position: 'fixed', inset: 0, background: '#000a', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }
+  }, React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: { width: '100%', maxWidth: 380, background: '#0b0f1a', border: '1px solid #1a2030', borderRadius: 10, padding: 16 }
+  }, React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: '#e2e8f0' } }, "Quote value & cost \u2014 ", marFor.client_name || ''),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '4px 0 12px' } }, marFor.subject),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginBottom: 4 } }, "Quote value to client (\u20b9, before GST)"),
+    React.createElement("input", { value: mf.v, onChange: e => setMf({ ...mf, v: e.target.value }), inputMode: 'decimal', placeholder: 'e.g. 48000', style: inp }),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '10px 0 4px' } }, "Our cost (\u20b9: material + printing + fabrication + install + transport)"),
+    React.createElement("input", { value: mf.c, onChange: e => setMf({ ...mf, c: e.target.value }), inputMode: 'decimal', placeholder: 'e.g. 36000', style: inp }),
+    mPct(mf.v, mf.c) !== null && React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginTop: 10, color: mPct(mf.v, mf.c) >= MFLOOR ? '#34d399' : '#fbbf24' } },
+      'Margin ' + mPct(mf.v, mf.c) + '%' + (mPct(mf.v, mf.c) < MFLOOR ? ' \u2014 below ' + MFLOOR + '%: Jigar or Amol must OK it' : ' \u2713')),
+    React.createElement("div", { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 } },
+      React.createElement("button", { onClick: () => setMarFor(null), disabled: !!busy,
+        style: { padding: '6px 12px', fontSize: 11, background: '#0b0f1a', color: '#94a3b8', border: '1px solid #1a2030', borderRadius: 6, cursor: 'pointer' } }, "Later"),
+      React.createElement("button", { onClick: saveMargin, disabled: !!busy,
+        style: { padding: '6px 12px', fontSize: 11, background: '#e3a008', color: '#060810', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' } }, busy ? '...' : 'Save'))));
   const proofModal = proofFor && React.createElement("div", {
     onClick: () => busy ? null : setProofFor(null),
     style: { position: 'fixed', inset: 0, background: '#000a', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }
@@ -51959,7 +52019,7 @@ function QuotesPage({
     style: {
       padding: 12
     }
-  }, proofModal, React.createElement("div", {
+  }, proofModal, marginModal, React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -52135,7 +52195,7 @@ function QuotesPage({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, r.needs_review ? '\u26a0 Unverified \u00b7 ' + r.sent_method.replace('_', ' ') + ': ' + (r.sent_proof || '') : '\u2713 ' + (r.sent_method === 'auto-email' ? 'Auto' : 'Verified') + ' \u00b7 ' + (r.sent_proof || 'email')), r.status === 'Sent' && r.needs_review && isBoss && React.createElement("span", {
+    }, r.needs_review ? '\u26a0 Unverified \u00b7 ' + r.sent_method.replace('_', ' ') + ': ' + (r.sent_proof || '') : '\u2713 ' + (r.sent_method === 'auto-email' ? 'Auto' : 'Verified') + ' \u00b7 ' + (r.sent_proof || 'email')), marginChip(r), r.status === 'Sent' && r.needs_review && isBoss && React.createElement("span", {
       style: {
         marginLeft: "auto",
         display: "flex",
