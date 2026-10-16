@@ -89,6 +89,8 @@ tr:hover td{background:#0a0f1a}
 <body>
 <div id="root"></div>
 <script>
+// 16 Oct 2026: qty 0 = listed but not supplied (amount 0); blank/invalid still defaults to 1
+function _qty(v) { return v !== '' && v != null && +v === 0 ? 0 : +v || 1; }
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 const {
   useState,
@@ -737,8 +739,8 @@ const getUnitMode = rm => UNIT_MODES.find(u => u.value === rm) || UNIT_MODES[0];
 const prLineAmount = x => {
   if (x && x.unit_mode) {
     const um = getUnitMode(x.unit_mode);
-    const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
-    return um.totalFn(a, +x.qty || 1, +x.rate || 0);
+    const a = um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty));
+    return um.totalFn(a, _qty(x.qty), +x.rate || 0);
   }
   return (+x.qty || 0) * (+x.rate || 0);
 };
@@ -747,7 +749,7 @@ const prLineQtyLabel = x => {
   if (x && x.unit_mode) {
     const um = getUnitMode(x.unit_mode);
     if (um.needsWH) {
-      const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
+      const a = um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty));
       if (a > 0 && a !== q) return a + ' ' + x.unit_mode + (q > 1 ? ' \u00b7 ' + q + ' pcs' : '');
     }
   }
@@ -1072,7 +1074,7 @@ document.addEventListener('click', function (e) {
   const d = document.createElement('dialog');
   d.style.cssText = 'background:#0c1017;border:1px solid #e3a008;border-radius:12px;padding:16px;width:420px;max-width:92vw;color:#c9d1d9;z-index:999;';
   const esc = s => (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  d.innerHTML = '<p style="font-size:12px;font-weight:700;color:#e3a008;margin:0 0 10px">✏️ Edit: ' + esc(it.internal_name) + '</p>' + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">ITEM NAME</label><input id="_eName" class="in" value="' + esc(it.internal_name) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">MATERIAL</label><input id="_eMedia" class="in" value="' + esc(it.media) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">WIDTH</label><input id="_eW" class="in mn" value="' + (it.width || '') + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">HEIGHT</label><input id="_eH" class="in mn" value="' + (it.height || '') + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">SIZE UNIT</label><select id="_eSU" class="in" style="width:100%;box-sizing:border-box">' + ['MM', 'INCH', 'FOOT'].map(u => '<option' + (u === (it.size_unit || 'MM') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">QTY</label><input id="_eQ" class="in mn" type="number" value="' + (it.qty || 1) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">UNIT (Billing)</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"' + (window._canSeeRates === false ? ' disabled' : '') + (window._canSeeRates === false ? ' title="Not authorized"' : '') + '>' + UNIT_MODES.map(u => '<option value="' + u.value + '"' + (u.value === (it.rate_mode || 'SqFt (INCH)') ? ' selected' : '') + '>' + u.label + '</option>').join('') + '</select></div>' + (window._canSeeRates !== false ? '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="' + (it.rate || 0) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' : '<input id="_eR" type="hidden" value="' + (it.rate || 0) + '"/>') + (window._canSeeRates !== false ? '<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">' + [0, 5, 12, 18, 28].map(g => '<option value="' + g + '"' + (g === (it.gstPct != null ? it.gstPct : 18) ? ' selected' : '') + '>' + g + '%</option>').join('') + '</select></div>' : '<input id="_eGST" type="hidden" value="' + (it.gstPct != null ? it.gstPct : 18) + '"/>') + '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">REMARKS (optional)</label><textarea id="_eRemarks" class="in" rows="2" placeholder="Internal note for this line item…" style="width:100%;font-size:10px;box-sizing:border-box;resize:vertical;font-family:inherit">' + esc(it.remarks || '') + '</textarea></div>' + '</div>' + '<div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>';
+  d.innerHTML = '<p style="font-size:12px;font-weight:700;color:#e3a008;margin:0 0 10px">✏️ Edit: ' + esc(it.internal_name) + '</p>' + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">' + '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">ITEM NAME</label><input id="_eName" class="in" value="' + esc(it.internal_name) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">MATERIAL</label><input id="_eMedia" class="in" value="' + esc(it.media) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">WIDTH</label><input id="_eW" class="in mn" value="' + (it.width || '') + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">HEIGHT</label><input id="_eH" class="in mn" value="' + (it.height || '') + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">SIZE UNIT</label><select id="_eSU" class="in" style="width:100%;box-sizing:border-box">' + ['MM', 'INCH', 'FOOT'].map(u => '<option' + (u === (it.size_unit || 'MM') ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">QTY</label><input id="_eQ" class="in mn" type="number" value="' + (_qty(it.qty)) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' + '<div><label style="font-size:8px;color:#64748b;font-weight:600">UNIT (Billing)</label><select id="_eRM" class="in" style="width:100%;box-sizing:border-box"' + (window._canSeeRates === false ? ' disabled' : '') + (window._canSeeRates === false ? ' title="Not authorized"' : '') + '>' + UNIT_MODES.map(u => '<option value="' + u.value + '"' + (u.value === (it.rate_mode || 'SqFt (INCH)') ? ' selected' : '') + '>' + u.label + '</option>').join('') + '</select></div>' + (window._canSeeRates !== false ? '<div><label style="font-size:8px;color:#64748b;font-weight:600">RATE ₹</label><input id="_eR" class="in mn" type="number" value="' + (it.rate || 0) + '" style="width:100%;font-size:11px;box-sizing:border-box"/></div>' : '<input id="_eR" type="hidden" value="' + (it.rate || 0) + '"/>') + (window._canSeeRates !== false ? '<div><label style="font-size:8px;color:#64748b;font-weight:600">GST %</label><select id="_eGST" class="in" style="width:100%;box-sizing:border-box">' + [0, 5, 12, 18, 28].map(g => '<option value="' + g + '"' + (g === (it.gstPct != null ? it.gstPct : 18) ? ' selected' : '') + '>' + g + '%</option>').join('') + '</select></div>' : '<input id="_eGST" type="hidden" value="' + (it.gstPct != null ? it.gstPct : 18) + '"/>') + '<div style="grid-column:span 2"><label style="font-size:8px;color:#64748b;font-weight:600">REMARKS (optional)</label><textarea id="_eRemarks" class="in" rows="2" placeholder="Internal note for this line item…" style="width:100%;font-size:10px;box-sizing:border-box;resize:vertical;font-family:inherit">' + esc(it.remarks || '') + '</textarea></div>' + '</div>' + '<div style="display:flex;gap:6px;margin-top:12px"><button id="_eSave" style="flex:1;padding:8px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:11px">💾 Save Item</button><button id="_eCancel" style="padding:8px 16px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;cursor:pointer;font-size:11px">Cancel</button></div>';
   document.body.appendChild(d);
   d.showModal();
   d.querySelector('#_eCancel').onclick = () => {
@@ -1087,7 +1089,7 @@ document.addEventListener('click', function (e) {
   d.querySelector('#_eSave').onclick = async () => {
     const w = Math.round((+d.querySelector('#_eW').value || 0) * 100) / 100;
     const h = Math.round((+d.querySelector('#_eH').value || 0) * 100) / 100;
-    const q = +d.querySelector('#_eQ').value || 1;
+    const q = _qty(d.querySelector('#_eQ').value);
     const r = +d.querySelector('#_eR').value || 0;
     const rm = d.querySelector('#_eRM').value || 'UNIT';
     const su = d.querySelector('#_eSU').value || 'MM';
@@ -5608,7 +5610,7 @@ function JobDetail({
     }
     const r = +osForm.rate || 0;
     const rm = osForm.rate_mode;
-    const q = +lineItem.qty || 1;
+    const q = _qty(lineItem.qty);
     const sf = +lineItem.sqft || 0;
     const total = rm === 'SQFT' ? Math.round(sf * r * 100) / 100 : rm === 'SQINCH' ? Math.round(sf * 144 * r * 100) / 100 : Math.round(q * r * 100) / 100;
     const rec = {
@@ -6192,7 +6194,7 @@ function JobDetail({
     }
     const w = +ni.width || 0,
       h = +ni.height || 0,
-      q = +ni.qty || 1,
+      q = _qty(ni.qty),
       r = +ni.rate || 0,
       gp = ni.gstPct === '' || ni.gstPct == null ? 18 : +ni.gstPct;
     const um3 = getUnitMode(ni.rate_mode);
@@ -7433,8 +7435,8 @@ function JobDetail({
     const lineAmount = x => {
       if (x && x.unit_mode) {
         const um = getUnitMode(x.unit_mode);
-        const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
-        return um.totalFn(a, +x.qty || 1, +x.rate || 0);
+        const a = um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty));
+        return um.totalFn(a, _qty(x.qty), +x.rate || 0);
       }
       return (+x.qty || 0) * (+x.rate || 0);
     };
@@ -7560,7 +7562,7 @@ function JobDetail({
         items: acceptedItems.map(x => ({
           product: x.product,
           size: x.size || '',
-          qty: x.qty || 1,
+          qty: _qty(x.qty),
           rate: x.rate,
           per: x.per || 'Job',
           gst_pct: x.gst_pct || 18,
@@ -7776,7 +7778,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         items: rows.map(r => ({
           ...blankItem,
           product: r.material,
-          qty: r.qty || 1
+          qty: _qty(r.qty)
         }))
       });
       setPrFromBom(rows.map(r => r.id));
@@ -8347,7 +8349,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
         minWidth: 60,
         textAlign: 'right'
       }
-    }, "\u20B9", ((item.qty || 1) * (item.rate || 0)).toLocaleString('en-IN'))), !item.accepted && React.createElement("div", {
+    }, "\u20B9", ((_qty(item.qty)) * (item.rate || 0)).toLocaleString('en-IN'))), !item.accepted && React.createElement("div", {
       style: {
         marginTop: 5
       }
@@ -8394,7 +8396,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       style: {
         color: '#e3a008'
       }
-    }, "\u20B9", quoteReview.items.filter(x => x.accepted).reduce((s, x) => s + (x.qty || 1) * (x.rate || 0), 0).toLocaleString('en-IN')), quoteReview.items.some(x => !x.accepted) && React.createElement("span", {
+    }, "\u20B9", quoteReview.items.filter(x => x.accepted).reduce((s, x) => s + (_qty(x.qty)) * (x.rate || 0), 0).toLocaleString('en-IN')), quoteReview.items.some(x => !x.accepted) && React.createElement("span", {
       style: {
         marginLeft: 8,
         color: '#f47067'
@@ -8950,8 +8952,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       }
     }))), React.createElement("tbody", null, prf.items.map((x, xi) => {
       const um = getUnitMode(x.unit_mode || 'NOS');
-      const area = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
-      const lineAmt = um.totalFn(area, +x.qty || 1, +x.rate || 0);
+      const area = um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty));
+      const lineAmt = um.totalFn(area, _qty(x.qty), +x.rate || 0);
       const lineGst = lineAmt * (+x.gst_pct || 0) / 100;
       const whDisabled = !um.needsWH;
       const onModeChange = v => {
@@ -8960,7 +8962,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           items: p.items.map((it, i) => {
             if (i !== xi) return it;
             const newUm = getUnitMode(v);
-            const newArea = newUm.areaFn(+it.width || 0, +it.height || 0, +it.qty || 1);
+            const newArea = newUm.areaFn(+it.width || 0, +it.height || 0, _qty(it.qty));
             const sizeStr = newUm.needsWH && (it.width || it.height) ? `${it.width || ''}×${it.height || ''} ${newUm.dimUnit || ''}`.trim() : '';
             return {
               ...it,
@@ -8981,7 +8983,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               [field]: v
             };
             const um2 = getUnitMode(merged.unit_mode || 'NOS');
-            const newArea = um2.areaFn(+merged.width || 0, +merged.height || 0, +merged.qty || 1);
+            const newArea = um2.areaFn(+merged.width || 0, +merged.height || 0, _qty(merged.qty));
             const sizeStr = um2.needsWH && (merged.width || merged.height) ? `${merged.width || ''}×${merged.height || ''} ${um2.dimUnit || ''}`.trim() : '';
             return {
               ...merged,
@@ -10759,7 +10761,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
   }, React.createElement("input", {
     className: "in mn",
     type: "number",
-    min: 1,
+    min: 0,
     value: ni.qty,
     onChange: e => setNi(p => ({
       ...p,
@@ -12507,7 +12509,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               totalsGst += +it.gst || 0;
               totalsAmt += +it.amount || 0;
               totalsQty += +it.qty || 0;
-              const row = ws.addRow([ii + 1, it.internal_name || it.client_name || '', it.media || '', it.width || '', it.height || '', it.size_unit || '', it.qty || 1, it.rate_mode || 'UNIT', it.sqft || '', +it.rate || 0, +it.total || 0, it.gstPct != null ? it.gstPct : 18, +it.gst || 0, +it.amount || 0, '']);
+              const row = ws.addRow([ii + 1, it.internal_name || it.client_name || '', it.media || '', it.width || '', it.height || '', it.size_unit || '', _qty(it.qty), it.rate_mode || 'UNIT', it.sqft || '', +it.rate || 0, +it.total || 0, it.gstPct != null ? it.gstPct : 18, +it.gst || 0, +it.amount || 0, '']);
               if (it.img_url && imgCache[it.img_url]) {
                 try {
                   const imageId = wb.addImage(imgCache[it.img_url]);
@@ -14193,7 +14195,7 @@ function NewJobPage({
       };
       const w = +it.w || 0,
         h = +it.h || 0,
-        q = +it.qty || 1,
+        q = _qty(it.qty),
         r = +it.rate || 0;
       const gp = it.gstPct === '' || it.gstPct == null ? 18 : +it.gstPct;
       const um = getUnitMode(it.rm);
@@ -14366,7 +14368,7 @@ function NewJobPage({
       width: it.w,
       height: it.h,
       size_unit: getUnitMode(it.rm).dimUnit || 'INCH',
-      qty: +it.qty || 1,
+      qty: _qty(it.qty),
       rate_mode: it.rm,
       rate: +it.rate || 0,
       sqft: it.sqft,
@@ -15126,7 +15128,7 @@ function NewJobPage({
   }, "\u2014")), React.createElement("td", null, React.createElement("input", {
     className: "in mn",
     type: "number",
-    min: 1,
+    min: 0,
     value: it.qty,
     onChange: e => uI(i, "qty", e.target.value),
     style: {
@@ -15444,7 +15446,7 @@ function NewJobPage({
         };
         for (let i = 0; i < (its || []).length; i++) {
           const it = its[i];
-          const row = ws.addRow([i + 1, it.int || it.cli || '', it.m || '', it.w || '', it.h || '', su, it.qty || 1, it.rm || 'UNIT', it.sqft || '', +it.rate || 0, it.tot || 0, it.gstPct != null ? it.gstPct : 18, it.gst || 0, it.amt || 0, '']);
+          const row = ws.addRow([i + 1, it.int || it.cli || '', it.m || '', it.w || '', it.h || '', su, _qty(it.qty), it.rm || 'UNIT', it.sqft || '', +it.rate || 0, it.tot || 0, it.gstPct != null ? it.gstPct : 18, it.gst || 0, it.amt || 0, '']);
           if (it.imgUrl && imgCache[it.imgUrl]) {
             try {
               const imageId = wb.addImage(imgCache[it.imgUrl]);
@@ -17519,7 +17521,7 @@ function PrintPage({
     };
     const W = +item.width || 0,
       H = +item.height || 0,
-      Q = +item.qty || 1;
+      Q = _qty(item.qty);
     if (W <= 0 || H <= 0) return {
       val: '',
       hint: 'no W×H on job sheet — enter manually'
@@ -18134,7 +18136,7 @@ function PrintPage({
     }
     const W = +li.width || 0,
       H = +li.height || 0,
-      Q = +li.qty || 1;
+      Q = _qty(li.qty);
     if (W > 0 && H > 0) {
       const unit = (li.size_unit || 'INCH').toUpperCase();
       const div = unit === 'INCH' ? 144 : unit === 'FOOT' || unit === 'FT' ? 1 : unit === 'MM' ? 92903.04 : unit === 'MTR' || unit === 'M' ? 1 / 10.7639 : 144;
@@ -19217,7 +19219,7 @@ function PrintPage({
         fontSize: 10,
         color: "#e6e6e6"
       }
-    }, itemLabel, " \xB7 ", it.qty || 1, "\xD7 \xB7 ", it.sqft || 0, "sqft", ticked && mats.length > 1 ? React.createElement("span", {
+    }, itemLabel, " \xB7 ", _qty(it.qty), "\xD7 \xB7 ", it.sqft || 0, "sqft", ticked && mats.length > 1 ? React.createElement("span", {
       style: {
         color: "#3b82f6",
         marginLeft: 6
@@ -20796,7 +20798,7 @@ function FabPage({
     };
     const W = +item.width || 0,
       H = +item.height || 0,
-      Q = +item.qty || 1;
+      Q = _qty(item.qty);
     if (W <= 0 || H <= 0) return {
       val: '',
       hint: 'no W×H on job sheet — enter manually'
@@ -22092,7 +22094,7 @@ function FabPage({
         fontSize: 10,
         color: "#e6e6e6"
       }
-    }, itemLabel, " \xB7 ", it.qty || 1, "\xD7 \xB7 ", it.sqft || 0, "sqft", ticked && mats.length > 1 ? React.createElement("span", {
+    }, itemLabel, " \xB7 ", _qty(it.qty), "\xD7 \xB7 ", it.sqft || 0, "sqft", ticked && mats.length > 1 ? React.createElement("span", {
       style: {
         color: "#3b82f6",
         marginLeft: 6
@@ -25452,8 +25454,8 @@ function buildPOHtml(pr, poNo, firm, jobsArr, genBy) {
   const _lineBase = x => {
     if (x && x.unit_mode) {
       const um = getUnitMode(x.unit_mode);
-      const a = um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1);
-      return um.totalFn(a, +x.qty || 1, +x.rate || 0);
+      const a = um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty));
+      return um.totalFn(a, _qty(x.qty), +x.rate || 0);
     }
     return (+x.qty || 0) * (+x.rate || 0);
   };
@@ -25488,11 +25490,11 @@ function buildPOHtml(pr, poNo, firm, jobsArr, genBy) {
   });
   const itemRows = items.map((x, i) => {
     const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
-    const area = um ? um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1) : 0;
+    const area = um ? um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty)) : 0;
     const dimLine = um && um.needsWH && (x.width || x.height) ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.width || ''}×${x.height || ''} ${um.dimUnit || ''}${area > 0 ? ' = ' + um.displayFn(area) : ''}</span>` : x.size ? `<br><span style="font-weight:400;font-size:9px;color:#555">${x.size}</span>` : '';
     const hsnLine = x.hsn ? `<br><span style="font-size:8px;color:#888">HSN: ${x.hsn}</span>` : '';
     const _basis = um ? (um.totalFn(1000, 1, 1) === 1000 ? 'area' : um.totalFn(0, 1000, 1) === 1000 ? 'qty' : 'lot') : 'qty';
-    const billQty = _basis === 'area' ? area : _basis === 'lot' ? 1 : um ? +x.qty || 1 : +x.qty || 0;
+    const billQty = _basis === 'area' ? area : _basis === 'lot' ? (_qty(x.qty) === 0 ? 0 : 1) : um ? _qty(x.qty) : +x.qty || 0;
     const billUnit = _basis === 'area' ? (getUomLabel(um.value).suffix || '').trim() || 'ft²' : _basis === 'lot' ? 'lot' : um ? um.value.indexOf('Roll') === 0 ? 'roll' : um.value : x.per || 'nos';
     const lineAmt = _lineBase(x);
     return `
@@ -25772,7 +25774,7 @@ function GRNReceivePage({
       partial_delivery: false,
       items_received: items.map((x, i) => {
         const um = x.unit_mode ? getUnitMode(x.unit_mode) : null;
-        const area = um ? um.areaFn(+x.width || 0, +x.height || 0, +x.qty || 1) : 0;
+        const area = um ? um.areaFn(+x.width || 0, +x.height || 0, _qty(x.qty)) : 0;
         const isAreaMode = um && um.needsWH && area > 0 && um.value !== 'Roll M×M (per roll)';
         const orderedAmt = isAreaMode ? area : +x.qty || 0;
         const already = +x.received_qty || 0;
@@ -31705,7 +31707,7 @@ function BOQImportPage({
       };
       const w = +it.w || 0,
         h = +it.h || 0,
-        q = +it.qty || 1;
+        q = _qty(it.qty);
       const gp = it.gstPct === '' || it.gstPct == null ? 18 : +it.gstPct;
       const sr = +it.supplyRate || 0;
       const ir = +it.installRate || 0;
@@ -31881,7 +31883,7 @@ function BOQImportPage({
           width: it.w,
           height: it.h,
           size_unit: getUnitMode(it.rm).dimUnit || 'INCH',
-          qty: +it.qty || 1,
+          qty: _qty(it.qty),
           rate_mode: it.rm,
           rate: +it.rate || 0,
           sqft: it.sqft,
@@ -32003,7 +32005,7 @@ function BOQImportPage({
         width: it.w,
         height: it.h,
         size_unit: getUnitMode(it.rm).dimUnit || 'INCH',
-        qty: +it.qty || 1,
+        qty: _qty(it.qty),
         rate_mode: it.rm,
         rate: +it.rate || 0,
         sqft: it.sqft,
@@ -49359,7 +49361,7 @@ function ClientPortal({
           width: it.width,
           height: it.height,
           size_unit: it.size_unit,
-          qty: +it.qty || 1,
+          qty: _qty(it.qty),
           rate_mode: 'UNIT',
           rate: 0,
           sqft: 0,
@@ -50357,7 +50359,7 @@ function ClientPortal({
         width: it.w,
         height: it.h,
         size_unit: 'MM',
-        qty: +it.qty || 1,
+        qty: _qty(it.qty),
         rate_mode: 'UNIT',
         rate: 0,
         sqft: 0,
