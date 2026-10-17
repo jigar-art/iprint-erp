@@ -100,6 +100,68 @@ const {
   useRef
 } = React;
 const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
+// 17 Oct 2026: the Uploads bucket is private. Stored links keep their public form; the app rewrites them
+// on the fly to /api/file?p=<path>, which checks the ERP login (erp_ft cookie) and redirects to a signed link.
+const ERP_PUBLIC_UPLOADS = SUPABASE_URL + '/storage/v1/object/public/Uploads/';
+const ERP_PUBLIC_UPLOADS_RE = /https:\/\/idjeniwznjiaanaxcjvg\.supabase\.co\/storage\/v1\/object\/public\/Uploads\/([^"'\s)<>\\]+)/g;
+function erpFilePath(u) {
+  let p = String(u).slice(ERP_PUBLIC_UPLOADS.length).split('?')[0].split('#')[0];
+  try { p = decodeURIComponent(p); } catch (e) {}
+  return p;
+}
+function erpFileUrl(u) {
+  if (typeof u !== 'string' || u.indexOf(ERP_PUBLIC_UPLOADS) !== 0) return u;
+  return location.origin + '/api/file?p=' + encodeURIComponent(erpFilePath(u));
+}
+function erpFileUrlsInHtml(h) {
+  return typeof h === 'string' && h.indexOf(ERP_PUBLIC_UPLOADS) >= 0 ? h.replace(ERP_PUBLIC_UPLOADS_RE, m => erpFileUrl(m)) : h;
+}
+function erpSetFileCookie() {
+  let t = null;
+  try { t = localStorage.getItem('erp_jwt'); } catch (e) {}
+  try {
+    document.cookie = t
+      ? 'erp_ft=' + encodeURIComponent(t) + '; Path=/api/file; Max-Age=43200; Secure; SameSite=Lax'
+      : 'erp_ft=; Path=/api/file; Max-Age=0; Secure; SameSite=Lax';
+  } catch (e) {}
+}
+erpSetFileCookie();
+setInterval(erpSetFileCookie, 30000);
+window.addEventListener('focus', erpSetFileCookie);
+(function () {
+  // images and links rendered by React
+  const ce = React.createElement;
+  React.createElement = function (type, props) {
+    if (props && ((typeof props.src === 'string' && props.src.indexOf(ERP_PUBLIC_UPLOADS) === 0) || (typeof props.href === 'string' && props.href.indexOf(ERP_PUBLIC_UPLOADS) === 0))) {
+      const np = Object.assign({}, props);
+      if (typeof np.src === 'string') np.src = erpFileUrl(np.src);
+      if (typeof np.href === 'string') np.href = erpFileUrl(np.href);
+      arguments[1] = np;
+    }
+    return ce.apply(this, arguments);
+  };
+  // new tabs, and print windows written with document.write
+  const wo = window.open.bind(window);
+  window.open = function (u) {
+    erpSetFileCookie();
+    const args = Array.prototype.slice.call(arguments);
+    args[0] = erpFileUrl(u);
+    const w = wo.apply(null, args);
+    try {
+      if (w && w.document && (!u || u === 'about:blank')) {
+        const d = w.document, dw = d.write.bind(d), dwl = d.writeln.bind(d);
+        d.write = function () { return dw.apply(null, Array.prototype.map.call(arguments, erpFileUrlsInHtml)); };
+        d.writeln = function () { return dwl.apply(null, Array.prototype.map.call(arguments, erpFileUrlsInHtml)); };
+      }
+    } catch (e) {}
+    return w;
+  };
+  // fetch of stored file links (Excel export images etc.)
+  const f0 = window.fetch.bind(window);
+  window.fetch = function (i, o) {
+    return f0(typeof i === 'string' ? erpFileUrl(i) : i, o);
+  };
+})();
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkamVuaXd6bmppYWFuYXhjanZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NTEzMzIsImV4cCI6MjA5MDUyNzMzMn0.ocVwlguP-u5STy73eF-FwJjUWp29QINdLiYZY0L1z9E';
 // ERP lockdown 2026-09-09: every request carries the session token (erp_jwt).
 // If none is present supabase-js falls back to the anon key, which after the grant revoke can read nothing but team_members_public.
@@ -141,6 +203,26 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
     }
   }
 });
+// 17 Oct 2026: photo-check functions download the photo themselves, so they get a signed link instead
+(function () {
+  const inv = sb.functions.invoke.bind(sb.functions);
+  sb.functions.invoke = async function (name, opts) {
+    try {
+      const b = opts && opts.body;
+      if (b && typeof b === 'object') {
+        const nb = Object.assign({}, b);
+        for (const k of Object.keys(nb)) {
+          if (typeof nb[k] === 'string' && nb[k].indexOf(ERP_PUBLIC_UPLOADS) === 0) {
+            const r = await sb.storage.from('Uploads').createSignedUrl(erpFilePath(nb[k]), 600);
+            if (r && r.data && r.data.signedUrl) nb[k] = r.data.signedUrl;
+          }
+        }
+        opts = Object.assign({}, opts, { body: nb });
+      }
+    } catch (e) {}
+    return inv(name, opts);
+  };
+})();
 async function erpLoginRequest(body) {
   const r = await fetch(SUPABASE_URL + '/functions/v1/erp-login', {
     method: 'POST',
