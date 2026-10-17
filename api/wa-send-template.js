@@ -1,4 +1,5 @@
 // api/wa-send-template.js
+import { erpUserFromRequest } from './_erp-auth.js';
 // Vercel serverless function: proxies WhatsApp Template-message sends to
 // Interakt's Template Message API (distinct from the Track Event API used
 // by /api/wa-send). The Interakt Secret Key (base64 of `apiKey:`) lives in
@@ -104,6 +105,11 @@ export async function sendTemplate({ to, template_name, language_code = 'en', tr
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+  }
+  // 17 Oct 2026: this route was open to the internet. Only a logged-in ERP user may call it now.
+  // (The daily digest calls sendTemplate() in-process and is not affected.)
+  if (!(await erpUserFromRequest(req))) {
+    return res.status(401).json({ ok: false, error: 'login_required' });
   }
 
   const interaktKey = process.env.INTERAKT_KEY;

@@ -20,6 +20,8 @@
 // 21 Apr 2026: track-user upsert before send (kept) — resolves
 // "Customer is not available for the organization".
 
+import { erpUserFromRequest } from './_erp-auth.js';
+
 const VENDOR_CAMPAIGN = /vendor|po_send/i;
 const TEMPLATE_STAFF = 'iprint_erp_update';
 const TEMPLATE_VENDOR = 'iprint_vendor_update';
@@ -51,6 +53,12 @@ export default async function handler(req, res) {
   const isVercelPreview = /^https:\/\/iprint-erp-[a-z0-9-]+\.vercel\.app$/.test(origin);
   if (origin && !allowedOrigins.includes(origin) && !isVercelPreview) {
     return res.status(403).json({ ok: false, error: 'Forbidden origin' });
+  }
+
+  // 17 Oct 2026: only a logged-in ERP user may send (the Origin header alone can be skipped by any script).
+  const erpUser = await erpUserFromRequest(req);
+  if (!erpUser) {
+    return res.status(401).json({ ok: false, error: 'Login required' });
   }
 
   const { to, message, campaign } = req.body || {};
