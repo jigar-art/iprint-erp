@@ -4223,6 +4223,50 @@ function F({
     }
   }, l), children);
 }
+// 16 Oct 2026 (Jigar): open client complaints at the top of Jigar's / Amol's home screen
+function ComplaintAlertCard({ user, sp }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState(null);
+  const boss = ['JIGAR', 'AMOL'].includes(me);
+  React.useEffect(() => {
+    if (!boss) return;
+    const load = () => sb.rpc('erp_complaints_list', { p_days: 60 }).then(r => setRows(r.error ? [] : (r.data || [])));
+    load(); const iv = setInterval(load, 300000); return () => clearInterval(iv);
+  }, [boss]);
+  if (!boss || !rows) return null;
+  const now = Date.now();
+  const open = rows.filter(c => ['open', 'replied'].includes(c.status));
+  const live = open.filter(c => !c.needs_review);
+  const review = open.filter(c => c.needs_review);
+  const replyLate = live.filter(c => !c.first_reply_at && c.reply_due && new Date(c.reply_due).getTime() < now);
+  const fixLate = live.filter(c => !c.resolved_at && c.resolve_due && new Date(c.resolve_due).getTime() < now);
+  if (!open.length) return null;
+  const ago = t => { const h = Math.max(0, (now - new Date(t).getTime()) / 3600000); return h < 24 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd'; };
+  const top = live.slice().sort((a, b) => (b.follow_ups || 0) - (a.follow_ups || 0) || new Date(a.resolve_due || a.raised_at) - new Date(b.resolve_due || b.raised_at)).slice(0, 5);
+  const tile = (label, n, col) => React.createElement("div", { style: { flex: 1, minWidth: 70, background: '#0b0f1a', border: '1px solid #1a2030', borderRadius: 8, padding: '6px 8px' } },
+    React.createElement("div", { style: { fontSize: 10, color: '#64748b' } }, label),
+    React.createElement("div", { style: { fontSize: 18, fontWeight: 800, color: n ? col : '#475569' } }, n));
+  return React.createElement("div", { className: "c", style: { padding: 10, border: '1px solid ' + (replyLate.length ? '#f4706755' : '#1a2030') } },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: '#f47067' } }, '📣 Client complaints'),
+      React.createElement("button", { type: 'button', onClick: () => sp && sp('complaints'), style: { padding: '3px 10px', fontSize: 11, background: 'transparent', color: '#38bdf8', border: '1px solid #38bdf855', borderRadius: 6, cursor: 'pointer' } }, 'Open all →')),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+      tile('Not resolved', live.length, '#e2e8f0'), tile('Reply overdue', replyLate.length, '#f47067'), tile('Fix overdue', fixLate.length, '#fbbf24'), me === 'JIGAR' ? tile('To confirm', review.length, '#38bdf8') : null),
+    top.length ? React.createElement("div", { style: { marginTop: 8 } }, top.map(c => {
+      const rl = !c.first_reply_at && c.reply_due && new Date(c.reply_due).getTime() < now;
+      const fl = c.resolve_due && new Date(c.resolve_due).getTime() < now;
+      return React.createElement("div", { key: c.id, onClick: () => sp && sp('complaints'), style: { padding: '6px 2px', borderTop: '1px solid #1a2030', cursor: 'pointer' } },
+        React.createElement("div", { style: { fontSize: 12, color: '#e2e8f0', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } },
+          (c.client_name || 'Unknown client') + (c.job_id ? ' · ' + c.job_id : '')),
+        React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, c.subject || c.description || ''),
+        React.createElement("div", { style: { fontSize: 10.5, marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+          React.createElement("span", { style: { color: '#cbd5e1' } }, 'Owner: ' + (c.owner ? c.owner.charAt(0) + c.owner.slice(1).toLowerCase() : '—')),
+          React.createElement("span", { style: { color: '#64748b' } }, 'raised ' + ago(c.raised_at) + ' ago'),
+          rl ? React.createElement("span", { style: { color: '#f47067', fontWeight: 700 } }, 'No reply · ' + ago(c.reply_due) + ' overdue') : fl ? React.createElement("span", { style: { color: '#fbbf24', fontWeight: 700 } }, 'Fix ' + ago(c.resolve_due) + ' overdue') : null,
+          c.follow_ups ? React.createElement("span", { style: { color: '#f47067' } }, 'chased ' + c.follow_ups + '×') : null,
+          !c.job_id ? React.createElement("span", { style: { color: '#64748b' } }, 'no job linked') : null));
+    })) : null);
+}
 function DashPage({
   s,
   stock,
@@ -4442,7 +4486,7 @@ function DashPage({
       flexDirection: "column",
       gap: 8
     }
-  }, !isDashViewOnly && React.createElement("div", {
+  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), !isDashViewOnly && React.createElement("div", {
     className: "c",
     style: {
       padding: 10
@@ -35012,7 +35056,7 @@ function CourierFab({ user }) {
   const [msg, setMsg] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const load = () => sb.rpc('erp_courier_inbox').then(r => setRows(r.error ? [] : (r.data || [])));
-  React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(load, 120000); return () => clearInterval(t); }, []);
+  React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 300000); return () => clearInterval(t); }, []);
   React.useEffect(() => { if (open && !modes.length) sb.from('dispatch_mode_config').select('mode').eq('active', true).order('sort').then(r => setModes((r.data || []).map(x => x.mode).filter(x => x !== 'Own vehicle' && x !== 'Client / vendor pickup'))); }, [open]);
   if (!roles) return null;
   const mine = roles.find(r => r.person_key === me);
