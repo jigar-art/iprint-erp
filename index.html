@@ -52573,7 +52573,7 @@ function PettyCashPage({
   }, [form.jobs]);
   const appCatsF = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
   const preNeeded = form.files.length > 0 && (form.kind === 'booking' || form.kind === 'reimbursement' && appCatsF.includes(form.category));
-  const preKey = preNeeded ? form.files[0].name + '|' + form.files[0].size + '|' + form.files[0].lastModified : '';
+  const preKey = preNeeded ? form.files[0].name + '|' + form.files[0].size + '|' + form.files[0].lastModified + '|' + (form.category || '') : '';
   useEffect(() => {
     if (!preKey) {
       setPre(null);
@@ -52599,7 +52599,8 @@ function PettyCashPage({
           error
         } = await sb.functions.invoke('verify-fare-screenshot', {
           body: {
-            precheck_path: path
+            precheck_path: path,
+            category: form.kind === 'reimbursement' ? form.category : null
           }
         });
         if (error) throw new Error(error.message);
@@ -52638,6 +52639,14 @@ function PettyCashPage({
       });
       return out;
     }
+    if (pre.screen === 'not_a_receipt') out.push({
+      red: true,
+      text: "This doesn't look like a transport / cargo receipt."
+    });
+    if (pre.paid === 'balance_due') out.push({
+      red: true,
+      text: 'The receipt shows the amount is still due' + (pre.balance_due ? ' (balance ' + pcRupee(pre.balance_due) + ')' : '') + ' - it is not proof of payment. Attach the paid receipt.'
+    });
     if (pre.screen === 'not_a_ride_app') out.push({
       red: true,
       text: "This doesn't look like a Porter / Ola / Rapido / Wefast screen."
@@ -52652,7 +52661,7 @@ function PettyCashPage({
     });else if (amt && Math.abs(pre.fare - amt) > 1) out.push({
       red: true,
       fix: pre.fare,
-      text: 'Screenshot shows ' + pcRupee(pre.fare) + ' but you entered ' + pcRupee(amt) + '.' + (amt > pre.fare ? ' Extra costs like parking or toll? Raise a separate request for them with their own receipt.' : '')
+      text: (pre.screen === 'receipt' ? 'Receipt shows ' : 'Screenshot shows ') + pcRupee(pre.fare) + ' but you entered ' + pcRupee(amt) + '.' + (amt > pre.fare ? ' Extra costs like parking or toll? Raise a separate request for them with their own receipt.' : '')
     });
     if (!goods && pre.screen === 'quote' && pre.fare != null && pre.cheapest_fare != null && pre.cheapest_fare < pre.fare) out.push({
       red: false,
@@ -53965,7 +53974,7 @@ function PettyCashPage({
       color: '#10b981',
       fontWeight: 700
     }
-  }, '\u2713', " Screenshot shows ", pcRupee(pre.fare), pre.app && pre.app !== 'unknown' ? ' (' + pre.app + ')' : '', pre.trip_id ? ' \u00b7 ' + pre.trip_id : '', " - matches. It will be approved automatically.") : preIssues.map((x, k) => /*#__PURE__*/React.createElement("div", {
+  }, '\u2713', pre.screen === 'receipt' ? " Receipt shows " : " Screenshot shows ", pcRupee(pre.fare), pre.app && pre.app !== 'unknown' ? ' (' + pre.app + ')' : '', pre.trip_id ? ' \u00b7 ' + pre.trip_id : '', " - matches. It will be approved automatically.") : preIssues.map((x, k) => /*#__PURE__*/React.createElement("div", {
     key: k,
     style: {
       color: x.red ? '#f47067' : '#f0b429',
