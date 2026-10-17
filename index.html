@@ -1057,7 +1057,7 @@ const cSq = (w, h, q, u) => {
   const U = (u || 'MM').toUpperCase();
   return U === "MM" ? Math.round(W * H * Q / 92903.04 * 100) / 100 : U === "CM" ? Math.round(W * H * Q / 929.0304 * 100) / 100 : U === "INCH" || U === "IN" ? Math.round(W * H * Q / 144 * 100) / 100 : U === "FOOT" || U === "FT" || U === "FEET" ? Math.round(W * H * Q * 100) / 100 : 0;
 };
-const td = () => new Date().toISOString().slice(0, 10);
+const td = () => new Date(Date.now() + 19800000).toISOString().slice(0, 10); // 17 Oct 2026: IST date (was UTC: 00:00-05:30 IST saved as yesterday)
 let _uidSeq = 0;
 const uid = () => "" + Date.now() + String(++_uidSeq).padStart(4, '0') + Math.random().toString(36).slice(2, 5);
 window._itemCache = {};
@@ -3432,7 +3432,8 @@ function MainApp({
     addNewProduct: addNewProduct,
     sp: setPg,
     jobs: fullJobs,
-    user: user
+    user: user,
+    show: show
   }), pg === "boq" && React.createElement(BOQImportPage, {
     firms: firms,
     clients: clients,
@@ -3442,7 +3443,8 @@ function MainApp({
     createJob: createJob,
     sp: setPg,
     jobs: fullJobs,
-    user: user
+    user: user,
+    show: show
   }), pg === "dept" && React.createElement(DeptPage, {
     jobs: filteredJobs,
     s: search,
@@ -3788,6 +3790,7 @@ function MainApp({
     saveBill: saveBill,
     deleteBatch: deleteBatch,
     updateBatchNote: updateBatchNote,
+    updateBatchField: updateBatchField,
     osItems: osItems,
     setOsItems: setOsItems,
     agencies: agencies,
@@ -5442,6 +5445,7 @@ function JobDetail({
   saveBill,
   deleteBatch,
   updateBatchNote,
+  updateBatchField,
   osItems,
   setOsItems,
   agencies,
@@ -14004,7 +14008,8 @@ function NewJobPage({
   addNewProduct,
   sp,
   jobs,
-  user
+  user,
+  show
 }) {
   const [fm, sfm] = useState("JXT");
   const [f, sF] = useState({
@@ -25748,7 +25753,7 @@ function GRNReceivePage({
   const invoiceInputRef = React.useRef(null);
   const [gf, setGf] = React.useState({
     received_by: user?.name || 'Murli Shetty',
-    received_at: new Date().toISOString().slice(0, 10),
+    received_at: td(),
     invoice_no: '',
     received_notes: '',
     partial_delivery: false,
@@ -25817,7 +25822,7 @@ function GRNReceivePage({
     const items = Array.isArray(pr.items) ? pr.items : [];
     setGf({
       received_by: user?.name?.includes('MURLI') || user?.name?.includes('Murli') ? 'Murli Shetty' : user?.name?.includes('SHREYA') || user?.name?.includes('Shreya') ? 'Shreya' : 'Murli Shetty',
-      received_at: new Date().toISOString().slice(0, 10),
+      received_at: td(),
       invoice_no: '',
       received_notes: '',
       partial_delivery: false,
@@ -31227,7 +31232,8 @@ function BOQImportPage({
   createJob,
   sp,
   jobs,
-  user
+  user,
+  show
 }) {
   const [step, setStep] = useState(1);
   const [sheets, setSheets] = useState([]);
@@ -32046,7 +32052,7 @@ function BOQImportPage({
         show(`⚠ Created ${createdIds.length} of ${its.length} jobs. ${failedRows.length} failed: ${failedRows.slice(0, 3).map(r => r.desc).join(', ')}${failedRows.length > 3 ? '…' : ''}`, false);
       }
       if (createdIds.length > 0) {
-        setPg("jobs");
+        sp("jobs");
         setIts([]);
         setSheets([]);
         setSelSheets([]);
@@ -32157,7 +32163,7 @@ function BOQImportPage({
       }
       await persistTemplate();
       show(`✅ Created Job ${jid}`);
-      setPg("jobs");
+      sp("jobs");
       setIts([]);
       setSheets([]);
       setSelSheets([]);
@@ -34502,7 +34508,7 @@ function MyBlockersCard({ user }) {
     let q = sb.from('job_blockers').select('*').order('raised_at', { ascending: false }).limit(200);
     q.then(r => setRows(r.error ? [] : (r.data || [])));
   };
-  React.useEffect(load, []);
+  React.useEffect(() => { load(); }, []); // 17 Oct 2026: never return load()'s Promise as an effect cleanup (white-screen on leaving My Score)
   if (!rows) return null;
   const today = blkEod(new Date());
   const toConfirm = rows.filter(b => b.status === 'open' && blkEod(b.raised_at) === today && (b.charged_to === me || (b.charged_to === 'NONE' && me === 'HARISH')));
@@ -34550,7 +34556,7 @@ function QualityIncidentsCard({ user }) {
     const since = new Date(); since.setDate(1); since.setHours(0, 0, 0, 0); since.setMonth(since.getMonth() - 1);
     sb.from('quality_incidents').select('*').gte('logged_at', since.toISOString()).order('logged_at', { ascending: false }).then(r => setRows(r.error ? [] : (r.data || [])));
   };
-  React.useEffect(load, []);
+  React.useEffect(() => { load(); }, []); // 17 Oct 2026: never return load()'s Promise as an effect cleanup (white-screen on leaving My Score)
   if (!rep) return null;
   const team = rep.filter(r => adm ? r.person_key !== me : r.lead_key === me);
   const isLead = team.length > 0;
@@ -34659,7 +34665,7 @@ function ScoreCardV5({ user }) {
     if (isBoss && !keys.includes(me)) setWho('AMOL');
     setPeople([...new Set([...(keys.includes(me) ? [me] : []), ...mine])].sort()); }); }, []);
   const load = () => { setRows(null); sb.rpc('erp_my_score_v5', { p_person: who, p_month: mon + '-01' }).then(r => setRows(r.error ? [] : (r.data || []))); };
-  React.useEffect(load, [who, mon]);
+  React.useEffect(() => { load(); }, [who, mon]);
   if (rows === null || !rows.length) return null;
   const live = new Date() >= new Date('2026-10-16T00:00:00+05:30');
   const get = k => rows.find(r => r.task_key === k) || {};
@@ -34713,7 +34719,7 @@ function DutyChecksCard({ user }) {
   const [rows, setRows] = React.useState(null);
   const [msg, setMsg] = React.useState('');
   const load = () => sb.rpc('erp_v5_checks_due').then(r => setRows(r.error ? [] : (r.data || [])));
-  React.useEffect(load, []);
+  React.useEffect(() => { load(); }, []); // 17 Oct 2026: never return load()'s Promise as an effect cleanup (white-screen on leaving My Score)
   if (!rows || !rows.length) return null;
   const act = async (id, res) => {
     const note = res === 'false' ? (window.prompt('What was wrong with this tick?') || '') : null;
@@ -34750,7 +34756,7 @@ function DutiesCard({ user }) {
     const since = new Date(); since.setDate(1); since.setHours(0, 0, 0, 0); since.setMonth(since.getMonth() - 1);
     sb.from('duty_done').select('*').gte('done_at', since.toISOString()).order('done_at', { ascending: false }).then(r => setDone(r.error ? [] : (r.data || [])));
   };
-  React.useEffect(load, []);
+  React.useEffect(() => { load(); }, []); // 17 Oct 2026: never return load()'s Promise as an effect cleanup (white-screen on leaving My Score)
   if (!defs) return null;
   const people = [...new Set(defs.map(d => d.person_key))];
   const target = adm ? (who || people[0]) : me;
@@ -35205,7 +35211,7 @@ function ScoreQueriesCard({ user }) {
   const [pts, setPts] = React.useState({});
   const [msg, setMsg] = React.useState('');
   const load = () => sb.rpc('erp_v5_queries_open').then(r => setRows(r.error ? [] : (r.data || [])));
-  React.useEffect(load, []);
+  React.useEffect(() => { load(); }, []); // 17 Oct 2026: never return load()'s Promise as an effect cleanup (white-screen on leaving My Score)
   if (!rows || !rows.length) return null;
   const nm = k => k.charAt(0) + k.slice(1).toLowerCase();
   const decide = async (id, ok) => {
@@ -36774,7 +36780,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         job_id: sel === NOJOB ? null : sel,
         work_type: wt,
         site_name: sel === NOJOB ? siteName.trim() : null,
-        date: new Date().toISOString().slice(0, 10),
+        date: td(),
         person: crew[0] || user?.name || '',
         crew: crew,
         start_time: startT,
@@ -36914,6 +36920,42 @@ function deptLabel(role) {
   return ERP_DEPT_LABEL[(role || '').toLowerCase()] || (role || '');
 }
 
+// 17 Oct 2026: app-wide error boundary. A crash in one page shows a recover screen instead of a blank app.
+class ErpErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null };
+  }
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  componentDidCatch(err, info) {
+    try {
+      let who = null;
+      try { who = (JSON.parse(localStorage.getItem('erp_user') || 'null') || {}).name || null; } catch (e) {}
+      sb.from('client_errors').insert({
+        kind: 'render_crash',
+        errors: [{ message: String(err && err.message || err), stack: String(err && err.stack || '').slice(0, 2000), component: String(info && info.componentStack || '').slice(0, 2000), page: localStorage.getItem('erp_pg') }],
+        ua: navigator.userAgent,
+        url: location.href,
+        app_user: who
+      }).then(() => {}, () => {});
+    } catch (e) {}
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const goHome = () => {
+      try { localStorage.setItem('erp_pg', 'dash'); } catch (e) {}
+      location.reload();
+    };
+    return React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "#060810", color: "#e5e7eb", fontFamily: "'DM Sans',system-ui,sans-serif" } },
+      React.createElement("div", { style: { maxWidth: 420, textAlign: "center" } },
+        React.createElement("div", { style: { fontSize: 40, marginBottom: 8 } }, "\u26a0\ufe0f"),
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 700, marginBottom: 6 } }, "This page hit an error"),
+        React.createElement("div", { style: { fontSize: 13, opacity: 0.75, marginBottom: 16 } }, "Your data is safe. The error has been reported. Tap below to go back to the Dashboard."),
+        React.createElement("button", { onClick: goHome, style: { background: "#e3a008", color: "#060810", border: 0, borderRadius: 8, padding: "10px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer" } }, "Back to Dashboard")));
+  }
+}
 function RootApp() {
   const [user, setUser] = useState(() => {
     try {
@@ -56086,7 +56128,7 @@ function MonthlyRevenueCard({
   }))));
 }
 const __isHealth = new URLSearchParams(window.location.search).get('health') === '1';
-ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.createElement(HealthCheckPage, null) : React.createElement(RootApp, null));
+ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.createElement(HealthCheckPage, null) : React.createElement(ErpErrorBoundary, null, React.createElement(RootApp, null)));
 </script>
 <script>
 /* MARKER:BOOT_WATCHDOG_v1 — plain JS, outside Babel block. Replaces former SW registration. */
