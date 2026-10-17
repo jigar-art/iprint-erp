@@ -52623,6 +52623,14 @@ function PettyCashPage({
     const out = [];
     const amt = parseFloat(form.amount);
     const goods = pre.service === 'goods_delivery' || /porter|wefast|borzo/i.test(pre.app || '');
+    if (pre.system) {
+      out.push({
+        red: false,
+        system: true,
+        text: 'Auto-check is unavailable right now - you can still send. Your lead will check the bill.'
+      });
+      return out;
+    }
     if (pre.error && pre.fare == null) {
       out.push({
         red: true,
@@ -52898,7 +52906,7 @@ function PettyCashPage({
       show('Wait a moment - still checking the screenshot', false);
       return;
     }
-    if (preNeeded && preIssues.length && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
+    if (preNeeded && preIssues.some(x => !x.system) && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
     const jobs = form.jobs.split(/[\s,/&]+/).map(s => s.trim().split('-')[0]).filter(s => /^\d+$/.test(s));
     setBusy(true);
     const {
@@ -53136,7 +53144,7 @@ function PettyCashPage({
           bill_id: lastId
         }
       });
-      if (error || !data) show('\u26a0\ufe0f Bill uploaded, but it could not be read - enter the amount with "Enter bill amounts"', false);else if (data.dup) show('\u2717 This receipt was already used on ' + data.dup + ' - it will NOT be counted on this advance', false);else if (data.reasons && data.reasons.length) show('\u26a0\ufe0f ' + data.reasons.join('; ') + ' - check the amount', false);else if (data.total != null) show('\u2705 Bill read: ' + pcRupee(data.total) + (data.ref ? ' (' + data.ref + ')' : ''));
+      if (error || !data) show('\u26a0\ufe0f Bill uploaded, but it could not be read - enter the amount with "Enter bill amounts"', false);else if (data.system) show('\u26a0\ufe0f Bill saved. Auto-check is unavailable right now - enter the amount with "Enter bill amounts"', false);else if (data.dup) show('\u2717 This receipt was already used on ' + data.dup + ' - it will NOT be counted on this advance', false);else if (data.reasons && data.reasons.length) show('\u26a0\ufe0f ' + data.reasons.join('; ') + ' - check the amount', false);else if (data.total != null) show('\u2705 Bill read: ' + pcRupee(data.total) + (data.ref ? ' (' + data.ref + ')' : ''));
       load();
     } else show('\u2705 ' + ok + ' file(s) added to ' + r.req_no);
     load();
