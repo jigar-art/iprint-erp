@@ -1858,28 +1858,65 @@ function MainApp({
     });
     return out.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
   }, [user?.name, myInvoicesToday, jobs, prs, grnData, salesActs]);
+  // 17 Oct 2026: first page returns the row count, the remaining pages load 6 at a time
+  // (was one page after another: line items alone took ~9 s). Same rows, same order.
   const fetchAll = async (table, order = null, filter = null) => {
-    let all = [],
-      from = 0,
-      size = 1000;
-    while (true) {
-      let q = sb.from(table).select('*').order(order || 'id', {
+    const size = 1000;
+    const warn = (from, error) => {
+      console.error('fetchAll ' + table + ' failed at row ' + from + ':', error.message);
+      try { window._showToast && window._showToast('\u26a0\ufe0f Some ' + table.replace(/_/g, ' ') + ' did not load (' + error.message + '). Refresh before relying on totals.', false); } catch (e) {}
+    };
+    const page = (from, withCount) => {
+      let q = sb.from(table).select('*', withCount ? { count: 'exact' } : undefined).order(order || 'id', {
         ascending: true
       }).range(from, from + size - 1);
       if (filter) q = filter(q);
-      const {
-        data,
-        error
-      } = await q;
-      if (error) {
-        console.error('fetchAll ' + table + ' failed at row ' + from + ':', error.message);
-        try { window._showToast && window._showToast('\u26a0\ufe0f Some ' + table.replace(/_/g, ' ') + ' did not load (' + error.message + '). Refresh before relying on totals.', false); } catch (e) {}
-        break;
+      return q;
+    };
+    const first = await page(0, true);
+    if (first.error) { warn(0, first.error); return []; }
+    let all = first.data || [];
+    if (all.length < size) return all;
+    const total = typeof first.count === 'number' ? first.count : null;
+    if (total === null) {
+      // no count returned: fall back to one page at a time
+      let from = size;
+      while (true) {
+        const r = await page(from, false);
+        if (r.error) { warn(from, r.error); break; }
+        if (!r.data || !r.data.length) break;
+        all = all.concat(r.data);
+        if (r.data.length < size) break;
+        from += size;
       }
-      if (!data || data.length === 0) break;
-      all = all.concat(data);
-      if (data.length < size) break;
-      from += size;
+      return all;
+    }
+    const offsets = [];
+    for (let f = size; f < total; f += size) offsets.push(f);
+    const parts = new Array(offsets.length);
+    let next = 0, failed = null;
+    const worker = async () => {
+      while (next < offsets.length && !failed) {
+        const i = next++;
+        const r = await page(offsets[i], false);
+        if (r.error) { failed = { from: offsets[i], error: r.error }; return; }
+        parts[i] = r.data || [];
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, offsets.length) }, worker));
+    for (const p of parts) if (p) all = all.concat(p);
+    if (failed) { warn(failed.from, failed.error); return all; }
+    // rows added while loading: pick up anything past the counted total
+    const lastLen = parts.length ? (parts[parts.length - 1] || []).length : 0;
+    if (lastLen === size) {
+      let from = offsets.length ? offsets[offsets.length - 1] + size : size;
+      while (true) {
+        const r = await page(from, false);
+        if (r.error || !r.data || !r.data.length) break;
+        all = all.concat(r.data);
+        if (r.data.length < size) break;
+        from += size;
+      }
     }
     return all;
   };
