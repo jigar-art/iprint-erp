@@ -10,23 +10,17 @@
 // handler — strictly read-only on operational data + INSERT-only on history.
 
 import { sendTemplate } from '../wa-send-template.js';
+import { erpUserFromRequest } from '../_erp-auth.js';
 const SUPABASE_URL = 'https://idjeniwznjiaanaxcjvg.supabase.co';
 
-// WhatsApp number map — must stay in sync with WA_NUMBERS in index.html.
-const WA_NUMBERS = {
-  'Amol':         '918433727608',
-  'Murli Shetty': '918691069121',
-  'Harish':       '919326282238',
-  'Priyanka':     '917400214057',
-  'Jigar':        '919076270111',
-  'Shreya':       '917304008506',
-  'Ruchita':      '918591872142',
-  'Vidya':        '917743811713',
-  'Aparna':       '918425877312',
-  'Chandni':      '918291297160',
-  'Ankita':       '918454878271',
-  'Batul':        '916352713981',
-};
+// 17 Oct 2026: phone numbers come from team_members.phone (no numbers in the public repo).
+// Recipient names in digest_config ("Jigar", "Murli Shetty") match on the first word of the team name.
+const erpKey = n => String(n || '').trim().split(' - ')[0].split('(')[0].trim().split(/\s+/)[0].toUpperCase();
+function phoneDigits(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  if (d.length === 10) return '91' + d;
+  return d.length >= 11 ? d : null;
+}
 
 // PostgREST helper — read-only fetch, returns parsed JSON or [].
 async function pg(supabaseKey, path) {
@@ -140,9 +134,12 @@ function buildTextBody(d, sections) {
 // Main handler — Vercel invokes this on cron schedule OR on manual GET.
 export default async function handler(req, res) {
   const startTime = Date.now();
-  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+  // 17 Oct 2026: the anon key can no longer read ERP tables (every read here returned 401 since the
+  // Sept lockdown, so the digest silently built empty data and was logged as failed/skipped).
+  // Server-side reads use the service role key (already set in Vercel for /api/cron/db-health).
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseKey) {
-    return res.status(500).json({ ok: false, error: 'SUPABASE_ANON_KEY not configured' });
+    return res.status(500).json({ ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
   }
 
   // Auth: cron invocations carry CRON_SECRET; manual triggers from the UI
@@ -154,6 +151,12 @@ export default async function handler(req, res) {
   if (!isManual) {
     if (!cronSecret || auth !== `Bearer ${cronSecret}`) {
       return res.status(401).json({ ok: false, error: 'unauthorized' });
+    }
+  } else {
+    // 17 Oct 2026: manual runs (Settings panel) need a logged-in Jigar or Chandni.
+    const who = await erpUserFromRequest(req);
+    if (!who || !['JIGAR', 'CHANDNI'].includes(who)) {
+      return res.status(401).json({ ok: false, error: 'login_required' });
     }
   }
   const triggeredBy = isManual ? 'manual' : 'cron';
@@ -180,7 +183,7 @@ export default async function handler(req, res) {
     pg(supabaseKey, `delivery_challans?select=id,created_by,delivered_by,prepared_by,created_at&created_at=gte.${encodeURIComponent(todayStartISO)}`),
     pg(supabaseKey, `sales_activities?select=id,rep_name,estimated_value,created_at&created_at=gte.${encodeURIComponent(todayStartISO)}`),
     pg(supabaseKey, `daily_logs?select=id,user_name&log_date=eq.${today}`),
-    pg(supabaseKey, `team_members?select=name,active&active=eq.true`),
+    pg(supabaseKey, `team_members?select=name,active,phone&active=eq.true`),
   ]);
 
   const thresholds = thresholdRows[0]?.value || { pr_hours: 48, billing_hours: 48, job_days: 14, banking_days: 30 };
@@ -297,9 +300,11 @@ export default async function handler(req, res) {
   //    with 401 "Protected deployment", so every run since at least 10 Sep failed
   //    silently. Calling sendTemplate() directly removes the round-trip entirely.
 
+  const phoneByKey = {};
+  (teamRows || []).forEach(t => { const ph = phoneDigits(t.phone); if (ph) phoneByKey[erpKey(t.name)] = ph; });
   const results = [];
   for (const name of recipients) {
-    const phone = WA_NUMBERS[name];
+    const phone = phoneByKey[erpKey(name)];
     if (!phone) {
       results.push({ name, phone: null, status: 'skipped_no_phone', interakt_id: null, error: `No WA number for ${name}` });
       continue;
