@@ -34871,7 +34871,7 @@ function ComplaintsPage({ user }) {
   const [note, setNote] = React.useState({});
   const [pick, setPick] = React.useState({});
   const [msg, setMsg] = React.useState('');
-  const [q, setQ] = React.useState(() => { try { const f = JSON.parse(sessionStorage.getItem('erp_focus_ref') || 'null'); if (f && f.rt === 'complaint' && Date.now() - f.at < 60000) { sessionStorage.removeItem('erp_focus_ref'); return String(f.rid); } } catch (e) {} return ''; });
+  const [q, setQ] = React.useState(() => { try { const f = JSON.parse(sessionStorage.getItem('erp_focus_ref') || 'null'); if (f && f.rt === 'complaint' && Date.now() - f.at < 60000) { sessionStorage.removeItem('erp_focus_ref'); return '#' + f.rid; } } catch (e) {} return ''; });
   const load = () => sb.rpc('erp_complaints_list', { p_days: 60 }).then(r => setRows(r.error ? [] : (r.data || [])));
   React.useEffect(() => { load(); }, []);
   if (!rows) return React.createElement("div", { className: "c", style: { padding: 16 } }, "Loading…");
@@ -34885,7 +34885,8 @@ function ComplaintsPage({ user }) {
   const open = rows.filter(r => !r.needs_review && isOpen(r));
   const lists = { review, open, mine: open.filter(r => r.owner === me), late: open.filter(r => replyLate(r) || resolveLate(r)), done: rows.filter(r => r.status === 'resolved') };
   const qq = q.trim().toLowerCase().replace(/^#/, '');
-  const hit = r => [r.id, r.client_name, r.job_id, r.subject, r.description, r.owner, r.channel, r.source_mailbox, r.resolution_note].some(v => v != null && String(v).toLowerCase().includes(qq));
+  const exactId = /^#\d+$/.test(q.trim()) ? qq : null; // 2026-10-17: '#23' (task tap) = that complaint only
+  const hit = r => exactId ? String(r.id) === exactId : [r.id, r.client_name, r.job_id, r.subject, r.description, r.owner, r.channel, r.source_mailbox, r.resolution_note].some(v => v != null && String(v).toLowerCase().includes(qq));
   const list = (qq ? rows.filter(hit) : (lists[filt] || [])).slice().sort((a, b) => ((b.follow_ups || 0) >= 2) - ((a.follow_ups || 0) >= 2));
   const act = async (r, action, extra) => {
     setMsg('');
