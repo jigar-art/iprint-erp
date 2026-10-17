@@ -1657,7 +1657,6 @@ function MainApp({
     };
     const dest = map[rt];
     if (!dest) return;
-    setPg(dest);
     try {
       sessionStorage.setItem('erp_focus_ref', JSON.stringify({
         rt,
@@ -1665,6 +1664,8 @@ function MainApp({
         at: Date.now()
       }));
     } catch (e) {}
+    if (rt === 'complaint' && typeof window._complaintFocus === 'function') window._complaintFocus(rid);
+    setPg(dest);
   };
   const [myTasks, setMyTasks] = useState([]);
   const [myInvoicesToday, setMyInvoicesToday] = useState([]);
@@ -34872,6 +34873,7 @@ function ComplaintsPage({ user }) {
   const [pick, setPick] = React.useState({});
   const [msg, setMsg] = React.useState('');
   const [q, setQ] = React.useState(() => { try { const f = JSON.parse(sessionStorage.getItem('erp_focus_ref') || 'null'); if (f && f.rt === 'complaint' && Date.now() - f.at < 60000) { sessionStorage.removeItem('erp_focus_ref'); return '#' + f.rid; } } catch (e) {} return ''; });
+  React.useEffect(() => { window._complaintFocus = id => { try { sessionStorage.removeItem('erp_focus_ref'); } catch (e) {} setQ('#' + id); }; return () => { window._complaintFocus = null; }; }, []);
   const load = () => sb.rpc('erp_complaints_list', { p_days: 60 }).then(r => setRows(r.error ? [] : (r.data || [])));
   React.useEffect(() => { load(); }, []);
   if (!rows) return React.createElement("div", { className: "c", style: { padding: 16 } }, "Loading…");
