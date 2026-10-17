@@ -30233,6 +30233,37 @@ function EmailedTag({ b, user, setBatches, show }) {
   }, "\u2709 Emailed?");
 }
 
+// ── 2026-10-17 (Jigar): per-batch delivery coverage — which items are not on a DC, DCs not dispatched / delivered, IC ──
+function BatchCoverageBtn({ jobId, batches }) {
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const load = () => { setOpen(true); setErr(''); setRows(null); sb.rpc('erp_batch_coverage', { p_job: jobId }).then(r => { if (r.error) setErr(r.error.message); setRows(r.data || []); }); };
+  const idx = id => { const i = (batches || []).findIndex(b => b.id === id); return i >= 0 ? 'B' + (i + 1) : 'Batch'; };
+  const line = (ok, txt) => React.createElement("div", { style: { fontSize: 12, color: ok ? '#4ade80' : '#fbbf24', marginTop: 2 } }, (ok ? '✓ ' : '⚠️ ') + txt);
+  const btn = React.createElement("button", { type: 'button', className: "b bs", onClick: load, title: 'Delivery check per batch', style: { marginRight: 4, fontSize: 10 } }, "📦 Delivery");
+  if (!open) return btn;
+  return React.createElement(React.Fragment, null, btn,
+    React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
+      React.createElement("div", { style: { width: '100%', maxWidth: 620, maxHeight: '88vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #38bdf8', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))', textAlign: 'left' } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+          React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: '#7dd3fc' } }, "📦 Delivery check · " + jobId),
+          React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, "✕")),
+        React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '4px 0 8px' } }, "Every item (except transport / courier / installation charge lines) must be on a DC that is dispatched and delivered. Batches created from 19 Oct cannot get a bill no. until this is all green."),
+        err ? React.createElement("div", { style: { color: '#f87171', fontSize: 12 } }, err) : null,
+        rows === null ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8' } }, "Loading…") :
+        rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8' } }, "No batches.") :
+        rows.map(r => { const ok = r.items_not_on_dc === 0 && r.items_on_undelivered_dc === 0;
+          return React.createElement("div", { key: r.batch_id, style: { padding: '8px 0', borderTop: '1px solid #1f2937' } },
+            React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: '#e2e8f0' } }, idx(r.batch_id) + ' · ' + r.items_total + ' item(s)' + (r.items_charge ? ' (' + r.items_charge + ' charge line)' : '') + (r.bill_no ? ' · bill ' + r.bill_no : '') + (r.gate_applies ? '' : ' · old batch (no bill block)')),
+            ok ? line(true, 'All items on a delivered DC' + (r.dc_list ? ' (' + r.dc_list + ')' : '')) : null,
+            r.items_not_on_dc > 0 ? line(false, r.items_not_on_dc + ' item(s) not on any DC') : null,
+            r.dcs_not_dispatched ? line(false, 'DC not dispatched: ' + r.dcs_not_dispatched) : null,
+            r.dcs_not_delivered ? line(false, 'Dispatched, delivery not confirmed: ' + r.dcs_not_delivered) : null,
+            !ok && r.missing_items ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } }, 'Pending: ' + r.missing_items) : null,
+            line(r.ic_ok, r.ic_ok ? 'IC uploaded' : 'No IC for this batch (needed for installation jobs)'));
+        }))));
+}
 function AccPage({
   jobs,
   batches,
@@ -30980,11 +31011,26 @@ function AccPage({
           const files = [...e.target.files];
           if (files.length) {
             const newUrls = await uploadMultiple(files, 'accounts-ic');
-            if (newUrls.length && appendJobFiles) appendJobFiles(j.id, 'ic_file_url', newUrls);
+            if (newUrls.length && appendJobFiles) {
+              await appendJobFiles(j.id, 'ic_file_url', newUrls);
+              // 2026-10-17 (Jigar): on multi-batch jobs, note which batches this IC covers (blank = all)
+              const bs = j.batches || [];
+              if (bs.length > 1) {
+                const ans = prompt('This IC covers which batches? Type numbers 1-' + bs.length + ' (e.g. 1,3). Leave blank = all batches.', '');
+                const nums = [...new Set(String(ans || '').split(/[^0-9]+/).map(Number).filter(n => n >= 1 && n <= bs.length))].sort((a, b) => a - b);
+                if (nums.length && nums.length < bs.length) {
+                  const r = await sb.rpc('erp_ic_set_batches', { p_job: j.id, p_urls: newUrls, p_batch_ids: nums.map(n => bs[n - 1].id) });
+                  show(r.error ? '\u26a0\ufe0f IC saved, but the batch link failed: ' + r.error.message : '\u2713 IC linked to batch ' + nums.join(', '), !r.error);
+                }
+              }
+            }
           }
         }
       }));
-    })()), React.createElement("td", null, React.createElement("button", {
+    })()), React.createElement("td", null, React.createElement(BatchCoverageBtn, {
+      jobId: j.id,
+      batches: j.batches || []
+    }), React.createElement("button", {
       className: "b bg bs",
       onClick: () => markBilled(j)
     }, "\u2713 Bill Done"))));
