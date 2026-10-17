@@ -47,7 +47,9 @@ tr:hover td{background:#0a0f1a}
 .done{text-decoration:line-through;opacity:.4}
 .ck{width:14px;height:14px;border-radius:3px;border:2px solid #1a2030;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:8px;flex-shrink:0}
 .ck.on{background:#238636;border-color:#238636;color:#fff}
-.ni{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:500;color:#64748b;transition:all .12s;border:1px solid transparent;margin-bottom:1px}
+.ni{display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;color:#a3adbd;transition:all .12s;border:1px solid transparent;margin-bottom:1px}
+.ng{display:flex;align-items:center;justify-content:space-between;width:100%;margin:10px 0 2px;padding:5px 10px;background:none;border:0;border-radius:6px;color:#8b95a7;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.ng:hover{color:#e2e8f0;background:#111827}
 .ni:hover{color:#e2e8f0;background:#111827}
 .ni.on{color:#e3a008;background:#18150a;border-color:#e3a00833}
 .fg{display:grid;gap:5px}
@@ -1370,46 +1372,7 @@ function MyTasksFloatingWidget({
   const done = (tasks || []).filter(t => t.status === 'done');
   const auto = autoTasks || [];
   const badgeCount = pending.length + stuck.length;
-  if (!open) {
-    return React.createElement("div", {
-      onClick: () => setOpen(true),
-      title: "My Tasks",
-      style: {
-        position: 'fixed',
-        bottom: 18,
-        right: 18,
-        zIndex: 100,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        background: 'linear-gradient(135deg,#7f77dd,#5d4ec8)',
-        border: '1px solid #afa9ec',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-        fontSize: 20,
-        color: '#fff',
-        userSelect: 'none'
-      }
-    }, "\uD83D\uDCCB", badgeCount > 0 && React.createElement("span", {
-      style: {
-        position: 'absolute',
-        top: -3,
-        right: -3,
-        background: '#e3a008',
-        color: '#060810',
-        borderRadius: 10,
-        fontSize: 10,
-        fontWeight: 800,
-        padding: '2px 6px',
-        minWidth: 18,
-        textAlign: 'center',
-        border: '2px solid #060810'
-      }
-    }, badgeCount));
-  }
+  if (!open) return React.createElement(QuickSlot, { k: 'tasks', order: 4, label: 'My tasks', icon: 'tasks', badge: badgeCount, onClick: () => setOpen(true) });
   return React.createElement("div", {
     style: {
       position: 'fixed',
@@ -3084,6 +3047,7 @@ function MainApp({
     const tmr = setInterval(run, 300000);
     return () => { dead = true; clearInterval(tmr); };
   }, [loadInstDelay, pg]);
+  const [navShut, setNavShut] = useState(() => { try { return JSON.parse(localStorage.getItem('erp_nav_shut') || '[]'); } catch (e) { return []; } });
   const allNav = [{
     id: "dash",
     l: "Dashboard",
@@ -3305,7 +3269,7 @@ function MainApp({
   }), React.createElement("aside", {
     className: `shell-aside ${mNav ? "open" : ""}`,
     style: {
-      width: col ? 44 : 180,
+      width: col ? 44 : 216,
       background: "#060810",
       borderRight: "1px solid #1a2030",
       display: "flex",
@@ -3349,7 +3313,10 @@ function MainApp({
       padding: "3px",
       overflowY: "auto"
     }
-  }, nav.map(n => {
+  }, erpNavGroups(nav, col).map(g => React.createElement(React.Fragment, { key: 'g_' + g.k }, g.l ? React.createElement("button", {
+    type: 'button', className: 'ng', 'aria-expanded': !navShut.includes(g.k),
+    onClick: () => setNavShut(p => { const nx = p.includes(g.k) ? p.filter(x => x !== g.k) : p.concat(g.k); try { localStorage.setItem('erp_nav_shut', JSON.stringify(nx)); } catch (e) {} return nx; })
+  }, React.createElement("span", null, g.l), React.createElement("span", { 'aria-hidden': 'true', style: { fontSize: 10 } }, navShut.includes(g.k) ? '\u25B8' : '\u25BE')) : null, g.items.map(n => {
     const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
@@ -3368,6 +3335,7 @@ function MainApp({
         return 0;
       }
     })() : 0;
+    if (g.l && navShut.includes(g.k) && pg !== n.id && !(pendOs > 0)) return null;
     return React.createElement("div", {
       key: n.id,
       className: `ni ${pg === n.id ? "on" : ""}`,
@@ -3378,7 +3346,7 @@ function MainApp({
       style: {
         position: "relative"
       }
-    }, React.createElement("span", {
+    }, col && React.createElement("span", {
       style: {
         fontSize: 11,
         flexShrink: 0
@@ -3387,14 +3355,14 @@ function MainApp({
       style: {
         background: "#f97316",
         color: "#fff",
-        fontSize: 7,
+        fontSize: 11,
         fontWeight: 800,
-        borderRadius: 8,
-        padding: "1px 4px",
+        borderRadius: 9,
+        padding: "1px 6px",
         marginLeft: "auto"
       }
     }, pendOs));
-  })), React.createElement("div", {
+  })))), React.createElement("div", {
     style: {
       padding: "4px 3px",
       borderTop: "1px solid #1a2030"
@@ -4114,8 +4082,59 @@ function MainApp({
     tasks: myTasks,
     autoTasks: myAutoTasks,
     onOpen: () => setPg('mytasks')
-  }));
+  }), React.createElement(QuickActionsFab, null));
 }
+// 17 Oct 2026 (Deploy F): one + button holds the quick actions (was 4 stacked floating buttons).
+// Each action component renders a QuickSlot instead of its own button; QuickActionsFab lists them.
+const erpQuick = { items: {}, subs: new Set(), put(k, v) { if (v) this.items[k] = v; else delete this.items[k]; this.subs.forEach(f => { try { f(); } catch (e) {} }); } };
+const erpIco = d => React.createElement("svg", { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true' }, d.map((p, i) => React.createElement("path", { key: i, d: p })));
+const ERP_ICO = {
+  courier: ['M3 7h11v9H3z', 'M14 10h4l3 3v3h-7', 'M5.5 17.5a1.5 1.5 0 103 0 1.5 1.5 0 10-3 0', 'M15.5 17.5a1.5 1.5 0 103 0 1.5 1.5 0 10-3 0'],
+  proof: ['M4 8h3l2-2h6l2 2h3v11H4z', 'M8.5 13a3.5 3.5 0 107 0 3.5 3.5 0 10-7 0'],
+  call: ['M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2'],
+  tasks: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M9 13l2 2 4-4']
+};
+function QuickSlot({ k, label, icon, badge, order, onClick }) {
+  const ref = React.useRef(onClick);
+  ref.current = onClick;
+  React.useEffect(() => { erpQuick.put(k, { label, icon: ERP_ICO[icon] || [], badge: badge || 0, order: order || 0, run: () => ref.current && ref.current() }); }, [k, label, icon, badge, order]);
+  React.useEffect(() => () => erpQuick.put(k, null), [k]);
+  return null;
+}
+function QuickActionsFab() {
+  const [, force] = React.useState(0);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { const f = () => force(x => x + 1); erpQuick.subs.add(f); f(); return () => { erpQuick.subs.delete(f); }; }, []);
+  const list = Object.keys(erpQuick.items).map(k => Object.assign({ k }, erpQuick.items[k])).sort((a, b) => a.order - b.order);
+  if (!list.length) return null;
+  const total = list.reduce((a, x) => a + (x.badge || 0), 0);
+  return React.createElement(React.Fragment, null,
+    open && React.createElement("div", { onClick: () => setOpen(false), style: { position: 'fixed', inset: 0, zIndex: 94, background: 'rgba(4,6,12,.6)' } }),
+    open && React.createElement("div", { role: 'menu', 'aria-label': 'Quick actions', style: { position: 'fixed', right: 16, bottom: 'calc(86px + env(safe-area-inset-bottom))', zIndex: 95, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-end' } },
+      list.map(x => React.createElement("button", { key: x.k, type: 'button', role: 'menuitem', onClick: () => { setOpen(false); x.run(); }, style: { display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit' } },
+        React.createElement("span", { style: { padding: '8px 12px', background: '#0d111c', border: '1px solid #2a3245', borderRadius: 8, color: '#f1f5f9', fontSize: 14, fontWeight: 600 } }, x.label, x.badge > 0 ? React.createElement("span", { style: { marginLeft: 8, background: '#e0574f', color: '#fff', borderRadius: 999, fontSize: 12, fontWeight: 800, padding: '1px 7px' } }, x.badge) : null),
+        React.createElement("span", { style: { width: 48, height: 48, borderRadius: 24, background: '#1a2030', border: '1px solid #2a3245', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f1f5f9' } }, erpIco(x.icon))))),
+    React.createElement("button", { type: 'button', 'aria-label': open ? 'Close quick actions' : 'Quick actions', 'aria-expanded': open, title: 'Quick actions', onClick: () => setOpen(o => !o),
+      style: { position: 'fixed', right: 16, bottom: 'calc(16px + env(safe-area-inset-bottom))', zIndex: 95, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#e3a008', color: '#060810', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } },
+      erpIco(open ? ['M6 6l12 12', 'M18 6L6 18'] : ['M12 5v14', 'M5 12h14']),
+      !open && total > 0 ? React.createElement("span", { style: { position: 'absolute', top: -4, right: -4, background: '#e0574f', color: '#fff', borderRadius: 999, fontSize: 12, fontWeight: 800, padding: '2px 7px', border: '2px solid #060810' } }, total) : null));
+}
+// 17 Oct 2026 (Deploy F): sidebar sections. Ids not listed fall into "More".
+function erpNavGroups(nav, col) {
+  if (col || nav.length <= 8) return [{ k: '_', l: null, items: nav }];
+  const G = [['me', 'Me', ['dash', 'mytasks', 'myscore', 'leave', 'petty']], ['sales', 'Sales & Clients', ['quotes', 'complaints', 'cli', 'sales', 'bankcrm', 'jobnotes']], ['jobs', 'Jobs', ['jobs', 'new', 'boq', 'dept']], ['prod', 'Production', ['print', 'fab', 'os', 'install', 'instdelay', 'disp']], ['stores', 'Stores & Purchase', ['grn', 'grn2', 'stock', 'myprs', 'po', 'appr']], ['acc', 'Accounts', ['acc', 'expenses', 'reports', 'targets', 'backup']]];
+  const used = new Set();
+  const out = [];
+  G.forEach(([k, l, ids]) => { const items = ids.map(id => nav.find(n => n.id === id)).filter(Boolean); items.forEach(n => used.add(n.id)); if (items.length) out.push({ k, l, items }); });
+  const rest = nav.filter(n => !used.has(n.id));
+  if (rest.length) out.push({ k: 'more', l: 'More', items: rest });
+  return out;
+}
+// 17 Oct 2026 (Deploy F): dashboard tile rows. Cards not listed fall into "Other".
+function erpDashGroups() {
+  return [{ k: 'pipe', l: 'Pipeline', total: true, keys: ['quotation_sent', 'po_pending', 'recee', 'draft', 'design'] }, { k: 'prod', l: 'Production & site', keys: ['printIn', 'printOut', 'fabIn', 'fabOut', 'in_transit', 'delivered', 'installation', 'rectification'] }, { k: 'acc', l: 'Accounts & closed', keys: ['accounts', 'nobill', 'cancelled'] }, { k: 'other', l: 'Other', keys: null }];
+}
+const ERP_DASH_LABEL = { quotation_sent: 'Quotation Sent', po_pending: 'PO Pending', recee: 'Recee', draft: 'Draft', design: 'Design', printIn: 'Print · In-House', printOut: 'Print · Outsource', fabIn: 'Fab · In-House', fabOut: 'Fab · Outsource', in_transit: 'In Transit', delivered: 'Delivered', installation: 'Installation', rectification: 'Rectification', accounts: 'Accounts', nobill: 'No Bill', cancelled: 'Cancelled' };
 function SC({
   l,
   v,
@@ -4124,24 +4143,25 @@ function SC({
   d = 0,
   delta,
   onEdit,
-  onClick
+  onClick,
+  big
 }) {
   return React.createElement("div", {
     className: "c a",
     onClick: onClick,
     style: {
-      padding: "10px 12px",
+      padding: big ? "14px 16px" : "10px 12px",
       animationDelay: `${d}ms`,
       cursor: onClick ? 'pointer' : 'default'
     }
   }, React.createElement("p", {
     style: {
-      fontSize: 8.5,
-      color: "#64748b",
-      textTransform: "uppercase",
-      letterSpacing: ".05em",
+      fontSize: big ? 12.5 : 10,
+      color: "#94a3b8",
+      textTransform: big ? "none" : "uppercase",
+      letterSpacing: big ? 0 : ".04em",
       fontWeight: 600,
-      marginBottom: 2
+      marginBottom: big ? 8 : 3
     }
   }, l, onEdit && React.createElement("span", {
     onClick: onEdit,
@@ -4152,7 +4172,7 @@ function SC({
       fontSize: 9
     },
     title: "Click to rename"
-  }, "\u270E")), React.createElement("div", {
+  }, "✎")), React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "baseline",
@@ -4161,20 +4181,21 @@ function SC({
   }, React.createElement("p", {
     className: "mn",
     style: {
-      fontSize: 16,
+      fontSize: big ? 26 : 18,
       fontWeight: 700,
-      color: c
+      color: c,
+      overflowWrap: "anywhere"
     }
   }, v), delta != null && delta !== 0 && React.createElement("span", {
     style: {
-      fontSize: 9,
+      fontSize: 11,
       fontWeight: 700,
       color: delta > 0 ? '#4ade80' : '#f47067'
     }
   }, delta > 0 ? '▲ +' + delta : '▼ ' + delta)), s && React.createElement("p", {
     style: {
-      fontSize: 9,
-      color: "#64748b"
+      fontSize: big ? 11.5 : 10,
+      color: "#8b95a7"
     }
   }, s));
 }
@@ -4743,35 +4764,58 @@ function DashPage({
     }
   }, "Showing changes in last ", cmpDays, " days")), React.createElement("div", {
     style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))",
-      gap: 7
+      display: "flex",
+      flexDirection: "column",
+      gap: 16
     }
-  }, React.createElement(SC, {
-    l: "Total Jobs",
-    v: s.jobs,
-    s: `${s.active} active`,
-    delta: deltas.jobs,
-    onClick: isDashViewOnly ? undefined : () => {
-      try {
-        sessionStorage.setItem('dash_card_filter', '__ALL__');
-      } catch (e) {}
-      sp('dept');
-    }
-  }), STATUS_CARDS.map((card, idx) => React.createElement(SC, {
-    key: card.key,
-    l: card.label,
-    v: countJobsByCard(jobs, card.key),
-    c: card.color,
-    d: 30 + idx * 15,
-    s: sitesPerCard ? `${sitesPerCard[card.key] || 0} sites` : undefined,
-    onClick: isDashViewOnly ? undefined : () => {
-      try {
-        sessionStorage.setItem('dash_card_filter', card.key);
-      } catch (e) {}
-      sp('dept');
-    }
-  }))), React.createElement("div", {
+  }, erpDashGroups().map(gr => {
+    const listed = erpDashGroups().filter(x => x.keys).flatMap(x => x.keys);
+    const cards = STATUS_CARDS.filter(card => gr.keys ? gr.keys.includes(card.key) : !listed.includes(card.key));
+    if (!cards.length && !gr.total) return null;
+    const sum = cards.reduce((a, card) => a + (Number(countJobsByCard(jobs, card.key)) || 0), 0);
+    return React.createElement("div", {
+      key: gr.k
+    }, React.createElement("div", {
+      style: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }
+    }, React.createElement("span", {
+      style: { fontSize: 14, fontWeight: 700, color: "#e2e8f0" }
+    }, gr.l), React.createElement("span", {
+      className: "mn",
+      style: { fontSize: 12, color: "#94a3b8" }
+    }, sum.toLocaleString('en-IN'))), React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 8 }
+    }, gr.total ? React.createElement(SC, {
+      big: true,
+      l: "Total jobs",
+      v: s.jobs,
+      c: "#f1f5f9",
+      s: `${s.active} active`,
+      delta: deltas.jobs,
+      onClick: isDashViewOnly ? undefined : () => {
+        try {
+          sessionStorage.setItem('dash_card_filter', '__ALL__');
+        } catch (e) {}
+        sp('dept');
+      }
+    }) : null, cards.map((card, idx) => {
+      const n = countJobsByCard(jobs, card.key);
+      return React.createElement(SC, {
+        key: card.key,
+        big: true,
+        l: ERP_DASH_LABEL[card.key] || card.label,
+        v: n,
+        c: n ? "#f1f5f9" : "#5d667a",
+        d: 30 + idx * 15,
+        s: sitesPerCard && sitesPerCard[card.key] ? `${sitesPerCard[card.key]} sites` : undefined,
+        onClick: isDashViewOnly ? undefined : () => {
+          try {
+            sessionStorage.setItem('dash_card_filter', card.key);
+          } catch (e) {}
+          sp('dept');
+        }
+      });
+    })));
+  })), React.createElement("div", {
     className: "c",
     style: {
       padding: 10
@@ -35206,7 +35250,7 @@ function ProofFab({ user }) {
   };
   const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); }, title: 'Upload job photos / material used',
     style: { position: 'fixed', right: 16, bottom: 'calc(132px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#60a5fa', color: '#111', fontSize: 24, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } }, '📷');
-  if (!open) return fab;
+  if (!open) return React.createElement(QuickSlot, { k: 'proof', order: 2, label: 'Proof photo', icon: 'proof', onClick: () => { setOpen(true); setMsg(''); } });
   const lbl = t => React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: .4 } }, t);
   const need = k => { const x = KINDS.find(y => y[0] === k); return x ? x[2] : 0; };
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
@@ -35278,7 +35322,7 @@ function CourierFab({ user }) {
   const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); load(); }, title: 'Courier approvals',
     style: { position: 'fixed', right: 16, bottom: 'calc(200px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#a78bfa', color: '#111', fontSize: 24, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } },
     '🚚', waiting ? React.createElement("span", { style: { position: 'absolute', top: -4, right: -4, background: '#e0574f', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 800, padding: '2px 6px' } }, waiting) : null);
-  if (!open) return fab;
+  if (!open) return React.createElement(QuickSlot, { k: 'courier', order: 1, label: 'Courier booking', icon: 'courier', badge: waiting, onClick: () => { setOpen(true); setMsg(''); load(); } });
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const st = r => r.status === 'approved' ? '✓ approved' : r.status === 'rejected' ? '✗ rejected' : r.l1_action === 'approved' ? 'waiting for Jigar' : 'waiting for ' + nm(r.l1_key);
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
@@ -35516,7 +35560,7 @@ function CallLogFab({ user }) {
   };
   const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); }, title: 'Log a call',
     style: { position: 'fixed', right: 16, bottom: 'calc(64px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#e3a008', color: '#111', fontSize: 26, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } }, '📞');
-  if (!open) return fab;
+  if (!open) return React.createElement(QuickSlot, { k: 'call', order: 3, label: 'Log a call', icon: 'call', onClick: () => { setOpen(true); setMsg(''); } });
   const lbl = t => React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 6px', textTransform: 'uppercase', letterSpacing: .4 } }, t);
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
     React.createElement("div", { style: { width: '100%', maxWidth: 520, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #e3a008', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))' } },
