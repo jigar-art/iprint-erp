@@ -52545,7 +52545,7 @@ function PettyCashPage({
       for (const n of nums) {
         const {
           data
-        } = await sb.from('jobs').select('id,client_name,project,status').like('id', n + '-%').order('id', {
+        } = await sb.from('jobs').select('id,client_name,project,status,firm').like('id', n + '-%').order('id', {
           ascending: false
         }).limit(5);
         const rows = data || [];
@@ -52561,7 +52561,8 @@ function PettyCashPage({
         });else out.push({
           n,
           ok: true,
-          text: open[0].id + ' \u00b7 ' + (open[0].client_name || '') + (open[0].project ? ' - ' + open[0].project : '') + ' \u00b7 ' + open[0].status
+          firm: open[0].firm || null,
+          text: open[0].id + ' \u00b7 ' + (open[0].firm ? open[0].firm + ' \u00b7 ' : '') + (open[0].client_name || '') + (open[0].project ? ' - ' + open[0].project : '') + ' \u00b7 ' + open[0].status
         });
       }
       if (!dead) setJobInfo(out);
@@ -52571,6 +52572,14 @@ function PettyCashPage({
       clearTimeout(t);
     };
   }, [form.jobs]);
+  const PC_FIRMS = [['JXT', 'Juxtapose'], ['JPP', 'Jyoti Print & Pack'], ['VHD', 'Versahue']];
+  const jobFirms = [...new Set(jobInfo.filter(j => j.ok && j.firm).map(j => j.firm))];
+  const firmIssue = (() => {
+    if (jobFirms.length > 1) return 'These jobs belong to different firms (' + jobInfo.filter(j => j.ok && j.firm).map(j => j.n + ' = ' + j.firm).join(', ') + '). Raise one request per firm.';
+    if (form.firm && jobFirms.length === 1 && form.firm !== jobFirms[0]) return 'Job ' + jobInfo.filter(j => j.ok && j.firm).map(j => j.n).join(', ') + ' is ' + jobFirms[0] + ', but you selected ' + form.firm + '. Pick ' + jobFirms[0] + '.';
+    if (form.firm === 'SHARED' && jobNums.length) return 'Shared is only for office expenses without a job. Pick the firm of the job.';
+    return null;
+  })();
   const appCatsF = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
   const preNeeded = form.files.length > 0 && (form.kind === 'booking' || form.kind === 'reimbursement' && appCatsF.includes(form.category));
   const preKey = preNeeded ? form.files[0].name + '|' + form.files[0].size + '|' + form.files[0].lastModified + '|' + (form.category || '') : '';
@@ -52898,6 +52907,14 @@ function PettyCashPage({
       show('Job number is required. Only office expenses (' + exemptCats.join(', ') + ') can go without a job.', false);
       return;
     }
+    if (!form.firm) {
+      show('Pick the firm' + (jobFirms.length === 1 ? ' - job is ' + jobFirms[0] : ''), false);
+      return;
+    }
+    if (firmIssue) {
+      show('\u26a0\ufe0f ' + firmIssue, false);
+      return;
+    }
     const badJob = jobInfo.find(j => !j.ok);
     if (badJob) {
       show('\u26a0\ufe0f ' + badJob.text, false);
@@ -52926,6 +52943,7 @@ function PettyCashPage({
       amount: amt,
       purpose: form.purpose.trim(),
       job_ids: jobs.length ? jobs : null,
+      firm: form.firm || null,
       category: form.category && form.category !== 'Other' ? form.category : null,
       meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
       mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null
@@ -53869,7 +53887,40 @@ function PettyCashPage({
       color: '#64748b',
       marginBottom: 12
     }
-  }, "Enter the exact fare shown in the app. The ERP reads your screenshot - if it matches, it's approved instantly and Shreya gives you the cash.") : null, form.kind !== 'booking' ? /*#__PURE__*/React.createElement("label", {
+  }, "Enter the exact fare shown in the app. The ERP reads your screenshot - if it matches, it's approved instantly and Shreya gives you the cash.") : null, /*#__PURE__*/React.createElement("label", {
+    style: lbl
+  }, "Firm - required"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      marginBottom: firmIssue ? 6 : 12
+    }
+  }, (jobNums.length ? PC_FIRMS : PC_FIRMS.concat([['SHARED', 'Shared office']])).map(([code, name]) => /*#__PURE__*/React.createElement("button", {
+    key: code,
+    type: "button",
+    onClick: () => setF('firm', code),
+    style: form.firm === code ? {
+      ...btn(firmIssue ? '#f47067' : '#10b981'),
+      padding: '8px 12px'
+    } : {
+      ...ghost,
+      padding: '8px 12px'
+    }
+  }, code, " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      opacity: 0.8,
+      fontSize: 12
+    }
+  }, name)))), firmIssue ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: '#f47067',
+      fontSize: 13,
+      fontWeight: 600,
+      marginBottom: 12
+    }
+  }, "\u2717 ", firmIssue) : null, form.kind !== 'booking' ? /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Category") : null, form.kind === 'booking' ? null : form.category && !catOpen ? /*#__PURE__*/React.createElement("div", {
     style: {
