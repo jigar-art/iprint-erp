@@ -1431,9 +1431,12 @@ function MyTasksFloatingWidget({
     }
   }, React.createElement("span", {
     style: {
-      flex: 1
-    }
-  }, t.task_text), t.due_date && React.createElement("span", {
+      flex: 1,
+      cursor: t.linked_complaint_id ? 'pointer' : 'default'
+    },
+    onClick: () => { if (t.linked_complaint_id && window._navigateToRecord) window._navigateToRecord('complaint', t.linked_complaint_id); },
+      title: t.linked_complaint_id ? 'Tap to open complaint #' + t.linked_complaint_id : undefined
+  }, t.task_text, t.linked_complaint_id ? React.createElement("span", { style: { marginLeft: 6, fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#1e3a5f', color: '#93c5fd', fontWeight: 700, whiteSpace: 'nowrap' } }, 'open \u2197') : null), t.due_date && React.createElement("span", {
     style: { fontSize: 9, padding: '1px 5px', borderRadius: 3, fontWeight: 700, whiteSpace: 'nowrap',
       background: t.due_date < new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10) ? '#7f1d1d' : '#3b2f0b',
       color: t.due_date < new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10) ? '#fecaca' : '#fde68a' }
@@ -1649,7 +1652,8 @@ function MainApp({
       banking_site: 'bankcrm',
       pr: 'myprs',
       grn: 'grn',
-      sales_activity: 'sales'
+      sales_activity: 'sales',
+      complaint: 'complaints'
     };
     const dest = map[rt];
     if (!dest) return;
@@ -1674,7 +1678,7 @@ function MainApp({
     let cancelled = false;
     const fetchTasks = async () => {
       try {
-        const [taskRes, invRes] = await Promise.all([sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
+        const [taskRes, invRes] = await Promise.all([sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,linked_complaint_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
           ascending: true
         }).limit(200), sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,added_by,created_at').eq('added_by', uname).gte('created_at', todayISO).order('created_at', {
           ascending: false
@@ -1705,7 +1709,7 @@ function MainApp({
     try {
       const {
         data
-      } = await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
+      } = await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,linked_complaint_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
         ascending: true
       }).limit(200);
       setMyTasks(data || []);
@@ -34867,7 +34871,7 @@ function ComplaintsPage({ user }) {
   const [note, setNote] = React.useState({});
   const [pick, setPick] = React.useState({});
   const [msg, setMsg] = React.useState('');
-  const [q, setQ] = React.useState('');
+  const [q, setQ] = React.useState(() => { try { const f = JSON.parse(sessionStorage.getItem('erp_focus_ref') || 'null'); if (f && f.rt === 'complaint' && Date.now() - f.at < 60000) { sessionStorage.removeItem('erp_focus_ref'); return String(f.rid); } } catch (e) {} return ''; });
   const load = () => sb.rpc('erp_complaints_list', { p_days: 60 }).then(r => setRows(r.error ? [] : (r.data || [])));
   React.useEffect(() => { load(); }, []);
   if (!rows) return React.createElement("div", { className: "c", style: { padding: 16 } }, "Loading…");
@@ -35488,7 +35492,7 @@ function CommitGate({ user }) {
   const k = r => r.kind + '|' + r.ref + '|' + (r.stage || '');
   React.useEffect(() => {
     try { if (sessionStorage.getItem('commit_done_' + todayISO) === '1') { setRows([]); return; } } catch (e) {}
-    sb.rpc('erp_my_commit_needed').then(r => setRows(r.error ? [] : (r.data || [])));
+    sb.rpc('erp_my_commit_needed_v2').then(r => setRows(r.error ? [] : (r.data || [])));
   }, [user && user.name]);
   const shell = (title, sub, body) => React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99990, background: 'rgba(3,6,12,.94)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
     React.createElement("div", { style: { maxWidth: 860, margin: '0 auto', background: '#0f172a', border: '1px solid #e3a008', borderRadius: 12, padding: 14 } },
@@ -35515,9 +35519,13 @@ function CommitGate({ user }) {
     if (r.error) { setBusy(false); setErr(r.error.message); return; }
     try {
       const uname = (user.name || '').toUpperCase();
-      const ex = await sb.from('daily_tasks').select('task_text').eq('user_name', uname).eq('task_date', todayISO);
+      const ex = await sb.from('daily_tasks').select('task_text,linked_complaint_id').eq('user_name', uname).eq('task_date', todayISO);
       const have = new Set((ex.data || []).map(x => (x.task_text || '').trim().toLowerCase()));
-      const add = rows.filter(r => plan[k(r)].date === todayISO).map(r => ({ user_name: uname, task_text: 'Clear ' + r.ref + ' — ' + kindLbl(r) + (r.client_name ? ' (' + r.client_name + ')' : ''), task_date: todayISO, status: 'pending', source: 'user', linked_job_id: ['stage', 'bank_pod', 'bank_image'].includes(r.kind) ? r.ref : null, added_by: uname }))
+      // 2026-10-17 (Jigar): one task per complaint (not Reply + Resolve), with client · job · subject, linked so it opens the complaint
+      const isC = r => r.kind.indexOf('complaint') === 0;
+      const seenC = new Set((ex.data || []).filter(x => x.linked_complaint_id).map(x => String(x.linked_complaint_id)));
+      const add = rows.filter(r => plan[k(r)].date === todayISO).filter(r => { if (!isC(r)) return true; if (seenC.has(String(r.ref))) return false; seenC.add(String(r.ref)); return true; })
+        .map(r => ({ user_name: uname, task_text: isC(r) && r.detail ? r.detail : 'Clear ' + r.ref + ' — ' + kindLbl(r) + (r.client_name ? ' (' + r.client_name + ')' : ''), task_date: todayISO, status: 'pending', source: 'user', linked_job_id: ['stage', 'bank_pod', 'bank_image'].includes(r.kind) ? r.ref : (r.job_id || null), linked_complaint_id: isC(r) && /^\d+$/.test(String(r.ref)) ? Number(r.ref) : null, added_by: uname }))
         .filter(t => !have.has(t.task_text.toLowerCase()));
       for (let i = 0; i < add.length; i += 200) await sb.from('daily_tasks').insert(add.slice(i, i + 200));
       if (window._refreshMyTasks) window._refreshMyTasks();
@@ -35539,7 +35547,7 @@ function CommitGate({ user }) {
       rows.map(r => { const c = plan[k(r)]; return React.createElement("label", { key: k(r), style: { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderBottom: '1px solid #1f2937', fontSize: 12, cursor: 'pointer' } },
         React.createElement("input", { type: 'checkbox', checked: !!sel[k(r)], onChange: e => setSel(p => ({ ...p, [k(r)]: e.target.checked })) }),
         React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: 62 } }, r.ref),
-        React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, kindLbl(r) + (r.client_name ? ' · ' + r.client_name : '')),
+        React.createElement("span", { title: r.detail || '', style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, r.detail ? r.detail.replace(/^Clear #\d+ — /, '') : kindLbl(r) + (r.client_name ? ' · ' + r.client_name : '')),
         React.createElement("span", { style: { color: '#e0574f', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' } }, Math.floor(r.days_late) + ' d late'),
         React.createElement("span", { style: { color: c ? '#4ade80' : '#f59e0b', fontSize: 11, minWidth: 90, textAlign: 'right', whiteSpace: 'nowrap' } }, c ? (c.date === todayISO ? 'today' : fd(c.date)) : 'no date')); }),
       React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' } },
@@ -44622,7 +44630,7 @@ function ReportsPage({
       ascending: false
     }).limit(500), sb.from('daily_logs').select('id,user_name,log_date,body,created_at,updated_at').eq('log_date', todayISO).order('updated_at', {
       ascending: false
-    }), sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count,client_kind,due_date').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0, 10)).lte('task_date', todayISO).order('task_date', {
+    }), sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,source_duty_id,source_task_id,added_by,linked_job_id,linked_site_id,linked_complaint_id,stuck_note,done_at,created_at,updated_at,is_quantified,task_type,target_count,actual_count,client_kind,due_date').eq('user_name', uname).gte('task_date', periodBounds.startISO.slice(0, 10)).lte('task_date', todayISO).order('task_date', {
       ascending: false
     }).order('created_at', {
       ascending: true
@@ -46240,9 +46248,12 @@ function ReportsPage({
       title: "Mark done"
     }, "\u2610"), React.createElement("span", {
       style: {
-        flex: 1
-      }
-    }, t.task_text), t.is_quantified && React.createElement("span", {
+        flex: 1,
+        cursor: t.linked_complaint_id ? 'pointer' : 'default'
+      },
+      onClick: () => { if (t.linked_complaint_id && window._navigateToRecord) window._navigateToRecord('complaint', t.linked_complaint_id); },
+      title: t.linked_complaint_id ? 'Tap to open complaint #' + t.linked_complaint_id : undefined
+    }, t.task_text, t.linked_complaint_id ? React.createElement("span", { style: { marginLeft: 6, fontSize: 9, padding: '1px 5px', borderRadius: 3, background: '#1e3a5f', color: '#93c5fd', fontWeight: 700, whiteSpace: 'nowrap' } }, 'open \u2197') : null), t.is_quantified && React.createElement("span", {
       style: {
         fontSize: 9,
         padding: '1px 5px',
