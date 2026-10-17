@@ -1789,7 +1789,12 @@ function MainApp({
         data,
         error
       } = await q;
-      if (error || !data || data.length === 0) break;
+      if (error) {
+        console.error('fetchAll ' + table + ' failed at row ' + from + ':', error.message);
+        try { window._showToast && window._showToast('\u26a0\ufe0f Some ' + table.replace(/_/g, ' ') + ' did not load (' + error.message + '). Refresh before relying on totals.', false); } catch (e) {}
+        break;
+      }
+      if (!data || data.length === 0) break;
       all = all.concat(data);
       if (data.length < size) break;
       from += size;
@@ -25383,21 +25388,28 @@ function StockPage({
     }
   }, "OK")))))))));
 }
-const WA_NUMBERS = {
-  'Amol': '918433727608',
-  'Murli Shetty': '918691069121',
-  'Harish': '919326282238',
-  'Priyanka': '917400214057',
-  'Harshala': '917304672087',
-  'Jigar': '919076270111',
-  'Shreya': '917304008506',
-  'Ruchita': '918591872142',
-  'Vidya': '917743811713',
-  'Aparna': '918425877312',
-  'Chandni': '918291297160',
-  'Ankita': '918454878271',
-  'Batul': '916352713981'
-};
+// 17 Oct 2026: numbers come from team_members.phone (loaded after login); nothing hardcoded (repo is public).
+// Lookups like WA_NUMBERS['Murli Shetty'] or WA_NUMBERS[pr.created_by] match on the first word of the name.
+const __waKey = n => String(n || '').trim().split(' - ')[0].split('(')[0].trim().split(/\s+/)[0].toUpperCase();
+window.__waPhones = window.__waPhones || {};
+const WA_NUMBERS = new Proxy({}, {
+  get: (t, name) => typeof name === 'string' ? window.__waPhones[__waKey(name)] || undefined : undefined
+});
+function erpSetWaPhones(team) {
+  const m = {};
+  (team || []).forEach(t => {
+    const d = String(t && t.phone || '').replace(/\D/g, '');
+    const ph = d.length === 10 ? '91' + d : d.length >= 11 ? d : null;
+    if (ph && t.active !== false) m[__waKey(t.name)] = ph;
+  });
+  window.__waPhones = m;
+}
+// 17 Oct 2026: /api routes require the ERP login token
+function erpAuthHeaders(extra) {
+  let t = null;
+  try { t = localStorage.getItem('erp_jwt'); } catch (e) {}
+  return Object.assign({}, extra || {}, t ? { Authorization: 'Bearer ' + t } : {});
+}
 const STAFF_DEPTS = {
   'Amol': 'Production',
   'Murli Shetty': 'Production',
@@ -25417,9 +25429,9 @@ async function sendWhatsApp(toNumber, message, campaign = 'iprint_notification')
   try {
     const res = await fetch('/api/wa-send', {
       method: 'POST',
-      headers: {
+      headers: erpAuthHeaders({
         'Content-Type': 'application/json'
-      },
+      }),
       body: JSON.stringify({
         to: toNumber,
         message: message,
@@ -36920,6 +36932,49 @@ function deptLabel(role) {
   return ERP_DEPT_LABEL[(role || '').toLowerCase()] || (role || '');
 }
 
+// 17 Oct 2026: forced PIN change. After login, if the account is flagged, the user must set a new PIN.
+function ErpPinChangeGate() {
+  const [need, setNeed] = React.useState(false);
+  const [oldP, setOldP] = React.useState('');
+  const [newP, setNewP] = React.useState('');
+  const [newP2, setNewP2] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    let checkedFor = null, off = false;
+    const check = () => {
+      let t = null;
+      try { t = localStorage.getItem('erp_jwt'); } catch (e) {}
+      if (!t) { setNeed(false); checkedFor = null; return; }
+      if (t === checkedFor) return;
+      checkedFor = t;
+      sb.rpc('erp_my_pin_status').then(r => { if (!off && !r.error) setNeed(r.data === true); });
+    };
+    check();
+    const iv = setInterval(check, 3000);
+    return () => { off = true; clearInterval(iv); };
+  }, []);
+  if (!need) return null;
+  const submit = async () => {
+    setMsg('');
+    if (!/^[0-9]{4,6}$/.test(newP)) return setMsg('New PIN must be 4 to 6 digits.');
+    if (newP !== newP2) return setMsg('The two new PINs do not match.');
+    setBusy(true);
+    const r = await sb.rpc('erp_change_pin', { p_old: oldP, p_new: newP });
+    setBusy(false);
+    if (r.error) return setMsg(r.error.message || 'Could not change PIN.');
+    setNeed(false);
+    try { window._showToast && window._showToast('\u2705 New PIN saved. Use it from your next login.'); } catch (e) {}
+  };
+  const inp = (v, set, ph) => React.createElement("input", { type: "password", inputMode: "numeric", autoComplete: "off", maxLength: 6, value: v, placeholder: ph, onChange: e => set(e.target.value.replace(/\D/g, '')), style: { width: "100%", padding: "10px 12px", marginBottom: 10, borderRadius: 8, border: "1px solid #334155", background: "#0b1220", color: "#e5e7eb", fontSize: 16, letterSpacing: 4 } });
+  return React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 100000, background: "rgba(6,8,16,.96)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'DM Sans',system-ui,sans-serif" } },
+    React.createElement("div", { style: { width: "100%", maxWidth: 360, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 14, padding: 20, color: "#e5e7eb" } },
+      React.createElement("div", { style: { fontSize: 18, fontWeight: 800, marginBottom: 6 } }, "\ud83d\udd12 Set a new PIN"),
+      React.createElement("div", { style: { fontSize: 13, opacity: .8, marginBottom: 14 } }, "For security, everyone is choosing a new PIN. Use 4 to 6 digits that others can't guess (not 1234 or your old PIN)."),
+      inp(oldP, setOldP, "Current PIN"), inp(newP, setNewP, "New PIN"), inp(newP2, setNewP2, "New PIN again"),
+      msg ? React.createElement("div", { style: { color: "#f87171", fontSize: 13, marginBottom: 10 } }, msg) : null,
+      React.createElement("button", { onClick: submit, disabled: busy, style: { width: "100%", background: "#e3a008", color: "#060810", border: 0, borderRadius: 8, padding: "11px 0", fontWeight: 800, fontSize: 15, cursor: "pointer", opacity: busy ? .6 : 1 } }, busy ? "Saving\u2026" : "Save new PIN")));
+}
 // 17 Oct 2026: app-wide error boundary. A crash in one page shows a recover screen instead of a blank app.
 class ErpErrorBoundary extends React.Component {
   constructor(props) {
@@ -37030,7 +37085,7 @@ function RootApp() {
   }, [user]);
   useEffect(() => {
     async function fetchMasters() {
-      return Promise.all([sb.from('firms').select('*'), sb.from('clients').select('*').order('name'), sb.from('suppliers').select('*').order('name'), sb.from('products').select('*').order('internal_name'), sb.from('materials').select('*').order('name'), sb.from('machines').select('*'), sb.from('outsource_agencies').select('*'), sb.from('delivery_boys').select('*'), sb.from('team_members').select('*').eq('active', true), sb.from('materials_master_v2').select('*').eq('active', true).order('name'), sb.from('lead_sources').select('*').eq('active', true).order('name')]);
+      return Promise.all([sb.from('firms').select('*'), sb.from('clients').select('*').order('name'), sb.from('suppliers').select('*').order('name'), sb.from('products').select('*').order('internal_name'), sb.from('materials').select('*').order('name'), sb.from('machines').select('*'), sb.from('outsource_agencies').select('*'), sb.from('delivery_boys').select('*'), sb.from('team_members').select('id,name,email,phone,role,active,created_at,is_operator').eq('active', true), sb.from('materials_master_v2').select('*').eq('active', true).order('name'), sb.from('lead_sources').select('*').eq('active', true).order('name')]);
     }
     async function loadMaster() {
       // ERP lockdown: no session token -> only the safe names view is readable; masters load after login.
@@ -37082,6 +37137,7 @@ function RootApp() {
         materialsV2: mv2.data || [],
         leadSources: ls.data || []
       });
+      try { erpSetWaPhones(tm.data || []); } catch (e) {}
       try {
         const stored = localStorage.getItem('erp_user');
         if (stored) {
@@ -45113,7 +45169,7 @@ function ReportsPage({
     setPostingDigest(true);
     setPostText(null);
     try {
-      const res = await fetch('/api/cron/daily-digest?manual=1&preview=1');
+      const res = await fetch('/api/cron/daily-digest?manual=1&preview=1', { headers: erpAuthHeaders() });
       const data = await res.json().catch(() => ({}));
       const text = data?.preview?.text;
       if (!text) {
@@ -45138,7 +45194,8 @@ function ReportsPage({
     setDigestPreview(null);
     try {
       const res = await fetch('/api/cron/daily-digest?manual=1', {
-        method: 'GET'
+        method: 'GET',
+        headers: erpAuthHeaders()
       });
       const data = await res.json().catch(() => ({}));
       setDigestPreview(data);
@@ -56128,7 +56185,7 @@ function MonthlyRevenueCard({
   }))));
 }
 const __isHealth = new URLSearchParams(window.location.search).get('health') === '1';
-ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.createElement(HealthCheckPage, null) : React.createElement(ErpErrorBoundary, null, React.createElement(RootApp, null)));
+ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.createElement(HealthCheckPage, null) : React.createElement(ErpErrorBoundary, null, React.createElement(RootApp, null), React.createElement(ErpPinChangeGate, null)));
 </script>
 <script>
 /* MARKER:BOOT_WATCHDOG_v1 — plain JS, outside Babel block. Replaces former SW registration. */
