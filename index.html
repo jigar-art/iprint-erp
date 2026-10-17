@@ -3546,6 +3546,10 @@ function MainApp({
     clients: clients,
     jobs: filteredJobs,
     s: search
+  }), pg === "acc" && React.createElement(NoBillApprovalCard, {
+    user: user,
+    show: show,
+    setItems: setItems
   }), pg === "acc" && React.createElement(AccPage, {
     jobs: filteredJobs,
     batches: batches,
@@ -36932,6 +36936,49 @@ function deptLabel(role) {
   return ERP_DEPT_LABEL[(role || '').toLowerCase()] || (role || '');
 }
 
+// 17 Oct 2026 (Jigar's rule of 10 Oct): No Bill items need approval by Aparna, Amol or Jigar before Billing Done.
+function NoBillApprovalCard({ user, show, setItems }) {
+  const [rows, setRows] = React.useState(null);
+  const [sel, setSel] = React.useState({});
+  const [busy, setBusy] = React.useState(false);
+  const [open, setOpen] = React.useState(true);
+  const load = () => sb.rpc('erp_no_bill_pending').then(r => { setRows(r.error ? [] : (r.data || [])); setSel({}); });
+  React.useEffect(() => { load(); }, []);
+  if (!rows || !rows.length) return null;
+  const can = rows.some(r => r.can_approve);
+  const ids = Object.keys(sel).filter(k => sel[k]);
+  const byJob = {};
+  rows.forEach(r => { (byJob[r.job_id] = byJob[r.job_id] || []).push(r); });
+  const decide = async approve => {
+    if (!ids.length) return;
+    setBusy(true);
+    const r = await sb.rpc('erp_no_bill_decide', { p_item_ids: ids, p_approve: approve });
+    setBusy(false);
+    if (r.error) return show && show('\u26a0\ufe0f ' + r.error.message, false);
+    if (setItems) setItems(p => p.map(i => ids.includes(i.id) ? (approve ? { ...i, no_bill_approved_at: new Date().toISOString() } : { ...i, no_bill: false, no_bill_by: null, no_bill_at: null }) : i));
+    show && show(approve ? '\u2705 ' + r.data + ' No Bill item(s) approved' : '\u21ba ' + r.data + ' item(s) sent back to billable');
+    load();
+  };
+  const fmt = v => '\u20b9' + Math.round(+v || 0).toLocaleString('en-IN');
+  const box = { background: 'var(--card, #0f172a)', border: '1px solid #b45309', borderRadius: 10, padding: 12, margin: '0 0 12px' };
+  return React.createElement("div", { style: box },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }, onClick: () => setOpen(!open) },
+      React.createElement("b", { style: { fontSize: 13 } }, "\u2298 No Bill waiting for approval"),
+      React.createElement("span", { style: { fontSize: 12, opacity: .8 } }, rows.length + " item(s) on " + Object.keys(byJob).length + " job(s) \u00b7 " + (can ? "approve or send back" : "Aparna, Amol or Jigar must approve before Billing Done")),
+      React.createElement("span", { style: { marginLeft: 'auto', fontSize: 12 } }, open ? "\u25b2" : "\u25bc")),
+    open && React.createElement("div", { style: { marginTop: 8, maxHeight: 320, overflowY: 'auto' } },
+      Object.keys(byJob).map(jid => React.createElement("div", { key: jid, style: { padding: '6px 0', borderTop: '1px solid #1e293b' } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 2 } }, jid + " \u00b7 " + (byJob[jid][0].client_name || '') + " \u00b7 " + byJob[jid][0].job_status),
+        byJob[jid].map(r => React.createElement("label", { key: r.item_id, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '2px 0' } },
+          can && React.createElement("input", { type: "checkbox", checked: !!sel[r.item_id], onChange: e => setSel(p => ({ ...p, [r.item_id]: e.target.checked })) }),
+          React.createElement("span", { style: { flex: 1 } }, r.item),
+          React.createElement("span", { style: { opacity: .8 } }, fmt(r.amount)),
+          React.createElement("span", { style: { opacity: .6, fontSize: 11 } }, "by " + String(r.marked_by || '?').split(' - ')[0])))))),
+    open && can && React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+      React.createElement("button", { className: "btn", onClick: () => setSel(Object.fromEntries(rows.map(r => [r.item_id, true]))) }, "Select all"),
+      React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => decide(true), style: { background: '#15803d', color: '#fff' } }, "\u2714 Approve No Bill (" + ids.length + ")"),
+      React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => decide(false) }, "\u21ba Send back to billable")));
+}
 // 17 Oct 2026: forced PIN change. After login, if the account is flagged, the user must set a new PIN.
 function ErpPinChangeGate() {
   const [need, setNeed] = React.useState(false);
