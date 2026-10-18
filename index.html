@@ -30462,57 +30462,134 @@ function CliPage({
     }, React.createElement("strong", null, cj.length), " jobs"));
   }));
 }
-// ===== Invoice "Emailed" tag (2026-09-21) — counts toward the daily invoice target
-function EmailedTag({ b, user, setBatches, show }) {
-  if (!b || !b.bill_no) return null;
-  if (b.invoice_emailed_at) {
-    const d = new Date(b.invoice_emailed_at);
-    return React.createElement("span", {
-      title: 'Emailed ' + d.toLocaleString('en-IN') + (b.invoice_emailed_by ? ' by ' + b.invoice_emailed_by : ''),
-      style: { fontSize: 9, color: '#10b981', padding: '1px 4px' }
-    }, "\u2709\u2713");
-  }
-  const mark = async e => {
-    e.stopPropagation();
-    if (!confirm('Invoice ' + b.bill_no + ' emailed to the client?')) return;
-    const at = new Date().toISOString();
-    const by = user?.name || '';
-    const { error } = await sb.from('batches').update({ invoice_emailed_at: at, invoice_emailed_by: by }).eq('id', b.id);
-    if (error) { if (show) show('\u26a0\ufe0f ' + error.message, false); return; }
-    if (setBatches) setBatches(p => p.map(x => x.id === b.id ? { ...x, invoice_emailed_at: at, invoice_emailed_by: by } : x));
-    if (show) show('\u2709 ' + b.bill_no + ' marked emailed');
-  };
-  return React.createElement("button", {
-    type: "button", onClick: mark, title: 'Tap after emailing this invoice',
-    style: { fontSize: 9, padding: '1px 6px', borderRadius: 3, border: '1px solid #f59e0b66', background: 'transparent', color: '#f59e0b', cursor: 'pointer' }
-  }, "\u2709 Emailed?");
+// ── 2026-10-18 (Jigar): invoice steps need proof — nobody can just tap them.
+// ✉ Emailed ticks itself when an email with the bill no. in the subject goes out from a synced mailbox (checked every 15 min).
+// Sent another way → note + screenshot, counts after Samruddhi verifies. 📨 Ack = client reply on that email, or screenshot + verify.
+// 🧾 E-invoice needs the IRN / e-way bill no. ₹ Paid needs the date + UTR / cheque no., counts after Samruddhi verifies.
+function invPatchLocal(setBatches, b, patch) {
+  if (setBatches) setBatches(p => p.map(x => x.job_id === b.job_id && x.bill_no === b.bill_no ? { ...x, ...patch } : x));
 }
-
-// ── 2026-10-18 (Jigar): invoice → payment steps scored in the point system. Beside "Emailed": client ack / portal upload,
-// e-invoice / e-way bill (or not needed), and payment received (with the date). Saved on every batch carrying that bill no.
-function InvoiceStepTags({ b, user, batches, setBatches, show }) {
-  if (!b || !b.bill_no) return null;
-  const sameBill = (batches || []).filter(x => x.bill_no === b.bill_no && x.job_id === b.job_id).map(x => x.id);
-  const ids = sameBill.length ? sameBill : [b.id];
-  const by = user?.name || '';
-  const save = async (patch, msg) => {
-    const { error } = await sb.from('batches').update(patch).in('id', ids);
-    if (error) { if (show) show('⚠️ ' + error.message, false); return; }
-    if (setBatches) setBatches(p => p.map(x => ids.includes(x.id) ? { ...x, ...patch } : x));
-    if (show) show(msg);
+function InvStepModal({ b, kind, onClose, setBatches, show }) {
+  const today = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10);
+  const [note, setNote] = React.useState('');
+  const [ref, setRef] = React.useState('');
+  const [date, setDate] = React.useState(today);
+  const [file, setFile] = React.useState(null);
+  const [na, setNa] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const T = { email: '✉ Invoice sent another way', ack: '📨 Client acknowledged / portal upload', einv: '🧾 E-invoice / e-way bill', paid: '₹ Payment received' }[kind];
+  const help = {
+    email: 'Emails with ' + b.bill_no + ' in the subject are found automatically. Use this only if it went another way (portal, WhatsApp, courier, or a mailbox the ERP does not read). Counts after Samruddhi verifies.',
+    ack: 'A client reply on the invoice email is found automatically. Otherwise add a screenshot of the reply or the portal upload. Counts after Samruddhi verifies.',
+    einv: 'Enter the IRN / e-invoice ack no. or the e-way bill no.',
+    paid: 'Enter the date the money came in and the UTR / cheque no. Counts after Samruddhi checks it against the bank.'
+  }[kind];
+  const save = async () => {
+    setErr(''); setBusy(true);
+    try {
+      let proof = null;
+      if (file) { proof = await uploadFile(file, 'invoice-proof'); if (!proof) { setBusy(false); return; } }
+      const k = kind === 'einv' && na ? 'einv_na' : kind;
+      const r = await sb.rpc('erp_inv_manual', { p_job: b.job_id, p_bill: b.bill_no, p_kind: k, p_date: kind === 'paid' ? date : null, p_ref: ref || null, p_note: note || null, p_proof: proof });
+      if (r.error) { setErr(r.error.message); setBusy(false); return; }
+      const now = new Date().toISOString();
+      const patch = kind === 'email' ? { invoice_emailed_at: now, invoice_email_source: 'manual', invoice_email_note: note, invoice_email_proof: proof, invoice_email_ok_at: null, invoice_email_rejected: null }
+        : kind === 'ack' ? { client_ack_at: now, client_ack_source: 'manual', client_ack_note: note, client_ack_proof: proof, client_ack_ok_at: null, client_ack_rejected: null }
+        : kind === 'einv' ? { einv_at: now, einv_na: na, einv_ref: na ? 'n/a: ' + note : ref }
+        : { paid_at: date, paid_ref: ref, paid_proof: proof, paid_ok_at: null, paid_rejected: null };
+      invPatchLocal(setBatches, b, patch);
+      if (show) show('✓ ' + b.bill_no + ' — ' + r.data);
+      onClose();
+    } catch (e) { setErr(String(e && e.message || e)); }
+    setBusy(false);
   };
-  const chip = (on, label, title, onClick, col) => React.createElement(on ? "span" : "button", on ? { title, style: { fontSize: 9, color: '#10b981', padding: '1px 4px', whiteSpace: 'nowrap' } } : {
-    type: 'button', title, onClick: e => { e.stopPropagation(); onClick(); },
-    style: { fontSize: 9, padding: '1px 6px', borderRadius: 3, border: '1px solid ' + col + '66', background: 'transparent', color: col, cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: 3 }
+  const inp = { width: '100%', boxSizing: 'border-box', marginTop: 4 };
+  const lab = t => React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', marginTop: 10, fontWeight: 700 } }, t);
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1300, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); } },
+    React.createElement("div", { onClick: e => e.stopPropagation(), style: { width: '100%', maxWidth: 520, background: '#0f172a', borderTop: '2px solid #38bdf8', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))', textAlign: 'left' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color: '#7dd3fc' } }, T + ' · ' + b.bill_no),
+        React.createElement("button", { type: 'button', onClick: onClose, style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, "✕")),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, help),
+      kind === 'einv' ? React.createElement("label", { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: '#cbd5e1', marginTop: 10 } },
+        React.createElement("input", { type: 'checkbox', checked: na, onChange: e => setNa(e.target.checked) }), "Not needed for this invoice") : null,
+      kind === 'paid' ? React.createElement(React.Fragment, null, lab('Money received on'), React.createElement("input", { className: 'in', type: 'date', max: today, value: date, onChange: e => setDate(e.target.value), style: inp })) : null,
+      (kind === 'paid' || (kind === 'einv' && !na)) ? React.createElement(React.Fragment, null, lab(kind === 'paid' ? 'UTR / cheque no.' : 'IRN / ack no. / e-way bill no.'), React.createElement("input", { className: 'in', value: ref, onChange: e => setRef(e.target.value), style: inp })) : null,
+      (kind === 'email' || kind === 'ack' || (kind === 'einv' && na)) ? React.createElement(React.Fragment, null, lab(kind === 'email' ? 'How was it sent? (required)' : kind === 'einv' ? 'Why not needed? (required)' : 'Note (optional)'), React.createElement("input", { className: 'in', value: note, onChange: e => setNote(e.target.value), style: inp })) : null,
+      (kind === 'email' || kind === 'ack' || kind === 'paid') ? React.createElement(React.Fragment, null, lab(kind === 'paid' ? 'Screenshot (optional)' : 'Screenshot (required)'), React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: e => setFile(e.target.files && e.target.files[0] || null), style: { marginTop: 4, fontSize: 12, color: '#cbd5e1' } })) : null,
+      err ? React.createElement("div", { style: { color: '#f87171', fontSize: 12, marginTop: 8 } }, '⚠️ ' + err) : null,
+      React.createElement("button", { type: 'button', className: 'b bp', disabled: busy, onClick: save, style: { marginTop: 12, width: '100%', padding: '9px 0', fontSize: 13, fontWeight: 800 } }, busy ? 'Saving…' : 'Save')));
+}
+function invChip(state, label, title, onClick) {
+  const col = { ok: '#10b981', wait: '#f59e0b', bad: '#f87171', todo: '#94a3b8' }[state];
+  const clickable = !!onClick;
+  return React.createElement(clickable ? "button" : "span", {
+    type: clickable ? 'button' : undefined, title, onClick: clickable ? e => { e.stopPropagation(); onClick(); } : undefined,
+    style: { fontSize: 9, padding: '1px 5px', borderRadius: 3, border: clickable ? '1px solid ' + col + '66' : 'none', background: 'transparent', color: col, cursor: clickable ? 'pointer' : 'default', whiteSpace: 'nowrap', marginLeft: 3 }
   }, label);
-  const now = () => new Date().toISOString();
-  const ack = chip(!!b.client_ack_at, b.client_ack_at ? '📨✓' : '📨 Ack?', b.client_ack_at ? 'Client acknowledged / portal upload ' + new Date(b.client_ack_at).toLocaleString('en-IN') + (b.client_ack_by ? ' by ' + b.client_ack_by : '') : 'Tap when the client acknowledged the invoice or it was uploaded on their portal',
-    () => { if (window.confirm('Invoice ' + b.bill_no + ': client acknowledged / uploaded on portal?')) save({ client_ack_at: now(), client_ack_by: by }, '📨 ' + b.bill_no + ' acknowledged'); }, '#a78bfa');
-  const einv = chip(!!b.einv_at || !!b.einv_na, b.einv_na ? 'E-inv n/a' : b.einv_at ? '🧾✓' : '🧾 E-inv?', b.einv_na ? 'E-invoice / e-way bill not needed' : b.einv_at ? 'E-invoice / e-way bill done ' + new Date(b.einv_at).toLocaleString('en-IN') : 'Tap when the e-invoice / e-way bill is generated',
-    () => { const a = window.prompt('Invoice ' + b.bill_no + ' — type Y if e-invoice / e-way bill is done, N if not needed for this invoice', 'Y'); if (!a) return; const v = a.trim().toUpperCase(); if (v === 'Y') save({ einv_at: now(), einv_by: by, einv_na: false }, '🧾 ' + b.bill_no + ' e-invoice done'); else if (v === 'N') save({ einv_na: true, einv_by: by, einv_at: now() }, b.bill_no + ' e-invoice not needed'); }, '#38bdf8');
-  const paid = chip(!!b.paid_at, b.paid_at ? '₹✓ ' + new Date(b.paid_at + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '₹ Paid?', b.paid_at ? 'Payment received on ' + b.paid_at + (b.paid_by ? ' (marked by ' + b.paid_by + ')' : '') : 'Tap when the client’s payment for this invoice is received',
-    () => { const t = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10); const a = window.prompt('Invoice ' + b.bill_no + ' — payment received on (YYYY-MM-DD)?', t); if (!a) return; const d = a.trim(); if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > t) { if (show) show('⚠️ Enter the date as YYYY-MM-DD, not in the future', false); return; } save({ paid_at: d, paid_marked_at: now(), paid_by: by }, '₹ ' + b.bill_no + ' paid on ' + d); }, '#22c55e');
-  return React.createElement(React.Fragment, null, ack, einv, paid);
+}
+const invWhen = t => t ? new Date(t).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+function EmailedTag({ b, user, setBatches, show }) {
+  const [open, setOpen] = React.useState(false);
+  if (!b || !b.bill_no) return null;
+  const src = b.invoice_email_source;
+  let chip;
+  if (src === 'email') chip = invChip('ok', '✉✓', 'Found in sent email · ' + invWhen(b.invoice_emailed_at) + (b.invoice_emailed_by ? ' · ' + b.invoice_emailed_by : ''));
+  else if (src === 'manual' && b.invoice_email_ok_at) chip = invChip('ok', '✉✓', 'Sent another way, verified by ' + (b.invoice_email_ok_by || 'Samruddhi') + (b.invoice_email_note ? ' · ' + b.invoice_email_note : ''));
+  else if (src === 'manual') chip = invChip('wait', '✉ check', 'Marked sent by ' + (b.invoice_emailed_by || '?') + ' ' + invWhen(b.invoice_emailed_at) + ' — waiting for Samruddhi to verify. Tap to add a screenshot.', () => setOpen(true));
+  else chip = invChip(b.invoice_email_rejected ? 'bad' : 'todo', b.invoice_email_rejected ? '✉ rejected' : '✉ not found', (b.invoice_email_rejected ? 'Rejected: ' + b.invoice_email_rejected + '. ' : '') + 'No sent email with ' + b.bill_no + ' in the subject yet (checked every 15 min). Sent another way? Tap to add proof.', () => setOpen(true));
+  return React.createElement(React.Fragment, null, chip, open ? React.createElement(InvStepModal, { b, kind: 'email', onClose: () => setOpen(false), setBatches, show }) : null);
+}
+function InvoiceStepTags({ b, user, batches, setBatches, show }) {
+  const [open, setOpen] = React.useState(null);
+  if (!b || !b.bill_no) return null;
+  const ackSrc = b.client_ack_source;
+  const ack = ackSrc === 'email' ? invChip('ok', '📨✓', 'Client replied on the invoice email · ' + invWhen(b.client_ack_at))
+    : ackSrc === 'manual' && b.client_ack_ok_at ? invChip('ok', '📨✓', 'Acknowledged (screenshot verified by ' + (b.client_ack_ok_by || 'Samruddhi') + ')')
+    : ackSrc === 'manual' ? invChip('wait', '📨 check', 'Marked by ' + (b.client_ack_by || '?') + ' — waiting for Samruddhi to verify', () => setOpen('ack'))
+    : invChip(b.client_ack_rejected ? 'bad' : 'todo', b.client_ack_rejected ? '📨 rejected' : '📨 Ack?', (b.client_ack_rejected ? 'Rejected: ' + b.client_ack_rejected + '. ' : '') + 'A client reply on the invoice email is found automatically. Portal upload or other reply? Tap to add a screenshot.', () => setOpen('ack'));
+  const einv = b.einv_na ? invChip('ok', 'E-inv n/a', 'Not needed' + (b.einv_ref ? ' · ' + b.einv_ref.replace(/^n\/a: /, '') : ''))
+    : b.einv_at && b.einv_ref ? invChip('ok', '🧾✓', 'IRN / e-way no. ' + b.einv_ref + ' · ' + invWhen(b.einv_at))
+    : invChip('todo', '🧾 E-inv?', 'Enter the IRN / e-way bill no., or mark not needed', () => setOpen('einv'));
+  const pd = b.paid_at ? new Date(b.paid_at + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+  const paid = b.paid_at && b.paid_ok_at ? invChip('ok', '₹✓ ' + pd, 'Paid on ' + b.paid_at + ' · ' + (b.paid_ref || '') + ' · verified by ' + (b.paid_ok_by || 'Samruddhi'))
+    : b.paid_at && b.paid_ref ? invChip('wait', '₹ ' + pd + ' check', 'Paid on ' + b.paid_at + ' · ' + b.paid_ref + ' — waiting for Samruddhi to check the bank')
+    : b.paid_at ? invChip('wait', '₹ ' + pd + ' no UTR', 'Paid date entered without UTR / cheque no. Tap to add it.', () => setOpen('paid'))
+    : invChip(b.paid_rejected ? 'bad' : 'todo', b.paid_rejected ? '₹ rejected' : '₹ Paid?', (b.paid_rejected ? 'Rejected: ' + b.paid_rejected + '. ' : '') + 'Tap when the payment is received — needs the UTR / cheque no.', () => setOpen('paid'));
+  return React.createElement(React.Fragment, null, ack, einv, paid, open ? React.createElement(InvStepModal, { b, kind: open, onClose: () => setOpen(null), setBatches, show }) : null);
+}
+// Samruddhi's list: invoice steps marked by hand that need her check (sent another way, portal upload, payment UTR)
+function InvoiceVerifyCard({ user, show }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState('');
+  const ok = ['SAMRUDDHI', 'JIGAR'].includes(me);
+  const load = () => sb.rpc('erp_inv_verify_queue').then(r => setRows(r.error ? [] : r.data || []));
+  React.useEffect(() => { if (ok) load(); }, [ok]);
+  if (!ok || !rows || rows.length === 0) return null;
+  const decide = async (r, yes) => {
+    let reason = null;
+    if (!yes) { reason = window.prompt('Reject ' + r.bill_no + ' — reason?'); if (!reason) return; }
+    setBusy(r.job_id + r.bill_no + r.kind);
+    const x = await sb.rpc('erp_inv_verify', { p_job: r.job_id, p_bill: r.bill_no, p_kind: r.kind, p_ok: yes, p_reason: reason });
+    setBusy('');
+    if (x.error) { if (show) show('⚠️ ' + x.error.message, false); return; }
+    if (show) show((yes ? '✓ ' : '✗ ') + r.bill_no + ' ' + x.data);
+    load();
+  };
+  const K = { email: '✉ Sent another way', ack: '📨 Ack / portal', paid: '₹ Paid' };
+  return React.createElement("div", { className: "cd", style: { padding: 10, border: '1px solid #f59e0b55' } },
+    React.createElement("b", { style: { color: '#fbbf24', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + '🔎 Invoice steps to verify · ' + rows.length),
+    open ? rows.map(r => React.createElement("div", { key: r.job_id + r.bill_no + r.kind, style: { borderTop: '1px solid #1f2937', padding: '7px 0', fontSize: 12, color: '#e2e8f0' } },
+      React.createElement("div", null, React.createElement("b", null, K[r.kind] + ' · ' + r.bill_no), ' · job ' + String(r.job_id).split('-')[0] + (r.client ? ' · ' + r.client : '')),
+      React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } },
+        'By ' + (r.by_name || '?') + ' · ' + invWhen(r.at) + (r.paid_on ? ' · received ' + r.paid_on : '') + (r.ref ? ' · UTR/chq ' + r.ref : '') + (r.note ? ' · ' + r.note : ''),
+        r.proof ? React.createElement("a", { href: r.proof, target: '_blank', rel: 'noopener noreferrer', style: { marginLeft: 6, color: '#7dd3fc' } }, 'screenshot') : (r.kind !== 'paid' ? React.createElement("span", { style: { marginLeft: 6, color: '#f87171' } }, 'no screenshot') : null)),
+      React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 4 } },
+        React.createElement("button", { type: 'button', className: 'b', disabled: !!busy, onClick: () => decide(r, true), style: { fontSize: 11, color: '#4ade80', borderColor: '#4ade8066' } }, '✓ Verified'),
+        React.createElement("button", { type: 'button', className: 'b', disabled: !!busy, onClick: () => decide(r, false), style: { fontSize: 11, color: '#f87171', borderColor: '#f8717166' } }, '✗ Reject')))) : null);
 }
 
 // ── 2026-10-17 (Jigar): per-batch delivery coverage — which items are not on a DC, DCs not dispatched / delivered, IC ──
@@ -30996,7 +31073,7 @@ function AccPage({
       flexDirection: "column",
       gap: 8
     }
-  }, React.createElement("div", {
+  }, React.createElement(InvoiceVerifyCard, { user: user, show: show }), React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
