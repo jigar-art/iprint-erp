@@ -30488,6 +30488,33 @@ function EmailedTag({ b, user, setBatches, show }) {
   }, "\u2709 Emailed?");
 }
 
+// ── 2026-10-18 (Jigar): invoice → payment steps scored in the point system. Beside "Emailed": client ack / portal upload,
+// e-invoice / e-way bill (or not needed), and payment received (with the date). Saved on every batch carrying that bill no.
+function InvoiceStepTags({ b, user, batches, setBatches, show }) {
+  if (!b || !b.bill_no) return null;
+  const sameBill = (batches || []).filter(x => x.bill_no === b.bill_no && x.job_id === b.job_id).map(x => x.id);
+  const ids = sameBill.length ? sameBill : [b.id];
+  const by = user?.name || '';
+  const save = async (patch, msg) => {
+    const { error } = await sb.from('batches').update(patch).in('id', ids);
+    if (error) { if (show) show('⚠️ ' + error.message, false); return; }
+    if (setBatches) setBatches(p => p.map(x => ids.includes(x.id) ? { ...x, ...patch } : x));
+    if (show) show(msg);
+  };
+  const chip = (on, label, title, onClick, col) => React.createElement(on ? "span" : "button", on ? { title, style: { fontSize: 9, color: '#10b981', padding: '1px 4px', whiteSpace: 'nowrap' } } : {
+    type: 'button', title, onClick: e => { e.stopPropagation(); onClick(); },
+    style: { fontSize: 9, padding: '1px 6px', borderRadius: 3, border: '1px solid ' + col + '66', background: 'transparent', color: col, cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: 3 }
+  }, label);
+  const now = () => new Date().toISOString();
+  const ack = chip(!!b.client_ack_at, b.client_ack_at ? '📨✓' : '📨 Ack?', b.client_ack_at ? 'Client acknowledged / portal upload ' + new Date(b.client_ack_at).toLocaleString('en-IN') + (b.client_ack_by ? ' by ' + b.client_ack_by : '') : 'Tap when the client acknowledged the invoice or it was uploaded on their portal',
+    () => { if (window.confirm('Invoice ' + b.bill_no + ': client acknowledged / uploaded on portal?')) save({ client_ack_at: now(), client_ack_by: by }, '📨 ' + b.bill_no + ' acknowledged'); }, '#a78bfa');
+  const einv = chip(!!b.einv_at || !!b.einv_na, b.einv_na ? 'E-inv n/a' : b.einv_at ? '🧾✓' : '🧾 E-inv?', b.einv_na ? 'E-invoice / e-way bill not needed' : b.einv_at ? 'E-invoice / e-way bill done ' + new Date(b.einv_at).toLocaleString('en-IN') : 'Tap when the e-invoice / e-way bill is generated',
+    () => { const a = window.prompt('Invoice ' + b.bill_no + ' — type Y if e-invoice / e-way bill is done, N if not needed for this invoice', 'Y'); if (!a) return; const v = a.trim().toUpperCase(); if (v === 'Y') save({ einv_at: now(), einv_by: by, einv_na: false }, '🧾 ' + b.bill_no + ' e-invoice done'); else if (v === 'N') save({ einv_na: true, einv_by: by, einv_at: now() }, b.bill_no + ' e-invoice not needed'); }, '#38bdf8');
+  const paid = chip(!!b.paid_at, b.paid_at ? '₹✓ ' + new Date(b.paid_at + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '₹ Paid?', b.paid_at ? 'Payment received on ' + b.paid_at + (b.paid_by ? ' (marked by ' + b.paid_by + ')' : '') : 'Tap when the client’s payment for this invoice is received',
+    () => { const t = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10); const a = window.prompt('Invoice ' + b.bill_no + ' — payment received on (YYYY-MM-DD)?', t); if (!a) return; const d = a.trim(); if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > t) { if (show) show('⚠️ Enter the date as YYYY-MM-DD, not in the future', false); return; } save({ paid_at: d, paid_marked_at: now(), paid_by: by }, '₹ ' + b.bill_no + ' paid on ' + d); }, '#22c55e');
+  return React.createElement(React.Fragment, null, ack, einv, paid);
+}
+
 // ── 2026-10-17 (Jigar): per-batch delivery coverage — which items are not on a DC, DCs not dispatched / delivered, IC ──
 function BatchCoverageBtn({ jobId, batches }) {
   const [rows, setRows] = React.useState(null);
@@ -30881,6 +30908,12 @@ function AccPage({
       }, "\u270E", hist.length) : null), React.createElement(EmailedTag, {
         b: b,
         user: user,
+        setBatches: setBatches,
+        show: show
+      }), React.createElement(InvoiceStepTags, {
+        b: b,
+        user: user,
+        batches: invBatches,
         setBatches: setBatches,
         show: show
       }));
