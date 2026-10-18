@@ -1361,26 +1361,74 @@ function Login({
     }
   }, "Jyoti Print \xB7 Juxtapose \xB7 Versahue")));
 }
+// 18 Oct 2026 (Jigar): staff went back to Excel because tasks had no visible tick. Shared actions for the 📋 panel:
+// done / not done (reason) / move to tomorrow / drop, for one task or many at once.
+function erpTomorrowISO() { const d = new Date(); d.setDate(d.getDate() + 1); if (d.getDay() === 0) d.setDate(d.getDate() + 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+async function erpTaskAct(ids, kind, note) {
+  ids = (ids || []).filter(Boolean); if (!ids.length) return { n: 0 };
+  const now = new Date().toISOString();
+  const chunks = []; for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  if (kind === 'tomorrow') {
+    const tom = erpTomorrowISO();
+    const tomLbl = new Date(tom + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+    let src = [], have = [];
+    for (const c of chunks) {
+      const a = await sb.from('daily_tasks').select('id,user_name,task_text,carry_count,linked_job_id,linked_site_id,linked_complaint_id,due_date').in('id', c);
+      if (a.error) return { error: a.error.message }; src = src.concat(a.data || []);
+      const b = await sb.from('daily_tasks').select('source_task_id').in('source_task_id', c).eq('task_date', tom).neq('status', 'cancelled');
+      if (!b.error) have = have.concat((b.data || []).map(x => x.source_task_id));
+    }
+    const rows = src.filter(t => !have.includes(t.id)).map(t => ({ user_name: t.user_name, task_text: t.task_text, task_date: tom, status: 'pending', source: 'carried', source_task_id: t.id,
+      carry_count: (t.carry_count || 0) + 1, linked_job_id: t.linked_job_id || null, linked_site_id: t.linked_site_id || null, linked_complaint_id: t.linked_complaint_id || null, due_date: t.due_date || null, added_by: t.user_name }));
+    for (let i = 0; i < rows.length; i += 200) { const r = await sb.from('daily_tasks').insert(rows.slice(i, i + 200)); if (r.error) return { error: r.error.message }; }
+    for (const c of chunks) { const r = await sb.from('daily_tasks').update({ status: 'stuck', stuck_note: '→ Moved to ' + tomLbl, updated_at: now }).in('id', c); if (r.error) return { error: r.error.message }; }
+    return { n: ids.length, label: 'moved to ' + tomLbl };
+  }
+  const patch = kind === 'done' ? { status: 'done', done_at: now, updated_at: now }
+    : kind === 'stuck' ? { status: 'stuck', stuck_note: note, updated_at: now }
+    : { status: 'cancelled', cancelled_at: now, updated_at: now };
+  for (const c of chunks) { const r = await sb.from('daily_tasks').update(patch).in('id', c); if (r.error) return { error: r.error.message }; }
+  return { n: ids.length, label: kind === 'done' ? 'done' : kind === 'stuck' ? 'marked not done' : 'dropped' };
+}
 function MyTasksFloatingWidget({
   tasks,
   autoTasks,
   onOpen
 }) {
   const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState({});
+  const [why, setWhy] = useState(null);
+  const [whyTxt, setWhyTxt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
   const pending = (tasks || []).filter(t => t.status === 'pending');
   const stuck = (tasks || []).filter(t => t.status === 'stuck');
   const done = (tasks || []).filter(t => t.status === 'done');
   const auto = autoTasks || [];
   const badgeCount = pending.length + stuck.length;
   if (!open) return React.createElement(QuickSlot, { k: 'tasks', order: 4, label: 'My tasks', icon: 'tasks', badge: badgeCount, onClick: () => setOpen(true) });
+  const selIds = pending.filter(t => sel[t.id]).map(t => t.id);
+  const run = async (ids, kind, note) => {
+    if (!ids.length) { setMsg('Tick at least one task'); return; }
+    if (kind === 'stuck' && !(note || '').trim()) { setMsg('Write why it is not done'); return; }
+    if (kind === 'drop' && ids.length > 1 && !window.confirm('Drop ' + ids.length + ' tasks? They will not be carried forward.')) return;
+    setBusy(true); setMsg('');
+    const r = await erpTaskAct(ids, kind, (note || '').trim());
+    setBusy(false);
+    if (r.error) { setMsg('\u26a0\ufe0f ' + r.error); return; }
+    setMsg('\u2713 ' + r.n + ' task' + (r.n > 1 ? 's' : '') + ' ' + r.label); setSel({}); setWhy(null); setWhyTxt('');
+    if (window._refreshMyTasks) window._refreshMyTasks();
+  };
+  const tb = (c, on) => ({ padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 800, cursor: busy ? 'wait' : 'pointer', color: on ? '#06210f' : c, border: '1px solid ' + c, background: on ? c : c + '1f', whiteSpace: 'nowrap' });
+  const allOn = pending.length > 0 && selIds.length === pending.length;
   return React.createElement("div", {
     style: {
       position: 'fixed',
       bottom: 18,
       right: 18,
       zIndex: 100,
-      width: 300,
-      maxHeight: '70vh',
+      width: 'min(400px, calc(100vw - 24px))',
+      maxHeight: '78vh',
       background: '#0f0f1a',
       border: '1px solid #7f77dd80',
       borderRadius: 10,
@@ -1458,7 +1506,20 @@ function MyTasksFloatingWidget({
       letterSpacing: 0.5,
       marginBottom: 4
     }
-  }, "\uD83D\uDCDD Pending"), pending.map(t => React.createElement("div", {
+  }, "\uD83D\uDCDD Pending"),
+  React.createElement("div", { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', margin: '2px 0 6px', padding: '6px', background: '#141a2b', borderRadius: 6 } },
+    React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#cbd5e1', cursor: 'pointer', marginRight: 4 } },
+      React.createElement("input", { type: 'checkbox', checked: allOn, onChange: e => setSel(e.target.checked ? Object.fromEntries(pending.map(t => [t.id, true])) : {}) }),
+      selIds.length ? selIds.length + ' ticked' : 'Select all'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run(selIds, 'done'), style: tb('#22c55e') }, '\u2713 Done'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run(selIds, 'tomorrow'), style: tb('#60a5fa') }, '\u2192 Tomorrow'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => { if (!selIds.length) { setMsg('Tick at least one task'); return; } setWhy('bulk'); setWhyTxt(''); }, style: tb('#f87171') }, '\u2717 Not done'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run(selIds, 'drop'), style: tb('#64748b') }, 'Drop')),
+  why === 'bulk' ? React.createElement("div", { style: { display: 'flex', gap: 5, marginBottom: 6 } },
+    React.createElement("input", { className: 'in', autoFocus: true, value: whyTxt, onChange: e => setWhyTxt(e.target.value), placeholder: 'Why not done? (for ' + selIds.length + ' tasks)', style: { flex: 1, fontSize: 12, padding: '5px 8px' } }),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run(selIds, 'stuck', whyTxt), style: tb('#f87171', true) }, 'Save')) : null,
+  msg ? React.createElement("div", { style: { fontSize: 11.5, margin: '0 0 6px', color: msg[0] === '\u2713' ? '#4ade80' : '#fca5a5' } }, msg) : null,
+  pending.map(t => React.createElement("div", {
     key: 'p' + t.id,
     style: {
       background: '#0f1422',
@@ -1474,9 +1535,10 @@ function MyTasksFloatingWidget({
       gap: 6,
       alignItems: 'center'
     }
-  }, React.createElement("span", {
+  }, React.createElement("input", { type: 'checkbox', checked: !!sel[t.id], onChange: e => setSel(p => ({ ...p, [t.id]: e.target.checked })), style: { flexShrink: 0 } }), React.createElement("span", {
     style: {
       flex: 1,
+      fontSize: 11.5,
       cursor: t.linked_complaint_id ? 'pointer' : 'default'
     },
     onClick: () => { if (t.linked_complaint_id && window._navigateToRecord) window._navigateToRecord('complaint', t.linked_complaint_id); },
@@ -1493,7 +1555,14 @@ function MyTasksFloatingWidget({
       color: '#85b7eb',
       borderRadius: 3
     }
-  }, t.linked_job_id))))), stuck.length > 0 && React.createElement("div", {
+  }, t.linked_job_id)), why === t.id ? React.createElement("div", { style: { display: 'flex', gap: 5, marginTop: 4 } },
+    React.createElement("input", { className: 'in', autoFocus: true, value: whyTxt, onChange: e => setWhyTxt(e.target.value), placeholder: 'Why not done?', style: { flex: 1, fontSize: 12, padding: '4px 8px' } }),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run([t.id], 'stuck', whyTxt), style: tb('#f87171', true) }, 'Save'),
+    React.createElement("button", { type: 'button', onClick: () => setWhy(null), style: tb('#64748b') }, 'Cancel'))
+  : React.createElement("div", { style: { display: 'flex', gap: 5, marginTop: 4, paddingLeft: 20 } },
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run([t.id], 'done'), style: tb('#22c55e') }, '\u2713 Done'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => { setWhy(t.id); setWhyTxt(''); }, style: tb('#f87171') }, '\u2717 Not done'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run([t.id], 'tomorrow'), style: tb('#60a5fa') }, '\u2192 Tomorrow'))))), stuck.length > 0 && React.createElement("div", {
     style: {
       marginBottom: 8
     }
@@ -1522,7 +1591,9 @@ function MyTasksFloatingWidget({
       marginTop: 3,
       fontStyle: 'italic'
     }
-  }, "\u21B3 ", t.stuck_note)))), auto.length > 0 && React.createElement("div", {
+  }, "\u21B3 ", t.stuck_note), String(t.stuck_note || '').indexOf('\u2192 Moved') === 0 ? null : React.createElement("div", { style: { display: 'flex', gap: 5, marginTop: 4 } },
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run([t.id], 'done'), style: tb('#22c55e') }, '\u2713 Done now'),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: () => run([t.id], 'tomorrow'), style: tb('#60a5fa') }, '\u2192 Tomorrow'))))), auto.length > 0 && React.createElement("div", {
     style: {
       marginBottom: 8
     }
@@ -46599,12 +46670,18 @@ function ReportsPage({
         }
       },
       style: {
-        color: '#64748b',
+        color: '#22c55e',
         cursor: 'pointer',
-        fontSize: 13
+        fontSize: 11,
+        fontWeight: 800,
+        padding: '2px 8px',
+        borderRadius: 6,
+        border: '1px solid #22c55e',
+        background: '#22c55e1f',
+        whiteSpace: 'nowrap'
       },
       title: "Mark done"
-    }, "\u2610"), React.createElement("span", {
+    }, "\u2713 Done"), React.createElement("span", {
       style: {
         flex: 1,
         cursor: t.linked_complaint_id ? 'pointer' : 'default'
@@ -46669,12 +46746,18 @@ function ReportsPage({
     }, "edit"), React.createElement("span", {
       onClick: () => setStuckNoteFor(t.id),
       style: {
-        color: '#e24b4a',
+        color: '#f87171',
         cursor: 'pointer',
-        fontSize: 9
+        fontSize: 11,
+        fontWeight: 800,
+        padding: '2px 8px',
+        borderRadius: 6,
+        border: '1px solid #f87171',
+        background: '#f871711f',
+        whiteSpace: 'nowrap'
       },
-      title: "Mark stuck"
-    }, "stuck?"), (t.source === 'user' || t.source === 'carried') && React.createElement("span", {
+      title: "Mark not done (with reason)"
+    }, "\u2717 Not done"), (t.source === 'user' || t.source === 'carried') && React.createElement("span", {
       onClick: () => {
         if (confirm('Cancel this task?')) cancelTask(t.id);
       },
