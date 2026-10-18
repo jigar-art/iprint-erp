@@ -2375,12 +2375,13 @@ function MainApp({
   }, [show]);
   const saveBill = useCallback(async (batchId, billNo) => {
     const billedBy = user?.name || '';
-    setBatches(p => p.map(b => b.id === batchId ? {
+    let _prevBatch = null;
+    setBatches(p => p.map(b => b.id === batchId ? (_prevBatch = b, {
       ...b,
       bill_no: billNo,
       status: 'Done',
       billed_by: billedBy
-    } : b));
+    }) : b));
     show("Invoice# saved: " + billNo);
     const {
       error
@@ -2389,7 +2390,13 @@ function MainApp({
       status: 'Done',
       billed_by: billedBy
     }).eq('id', batchId);
-    if (error) show("⚠️ Invoice save failed: " + error.message, false);
+    if (error) {
+      // 18 Oct 2026: the database refused it - put the batch back as it was so the screen doesn't show a bill no. that was never saved
+      setBatches(p => p.map(b => b.id === batchId ? (_prevBatch || { ...b, bill_no: '', billed_by: '' }) : b));
+      show("⚠️ Invoice save failed: " + error.message, false);
+      return false;
+    }
+    return true;
   }, [show, user]);
   const updateJobStatus = useCallback(async (jobId, newStatus) => {
     if (newStatus && !ALL_ST_NEW.includes(newStatus)) {
@@ -30796,7 +30803,8 @@ function AccPage({
     }
     if (targets.length) {
       for (const tb of targets) {
-        await saveBill(tb.id, inv);
+        const _okSave = await saveBill(tb.id, inv);
+        if (_okSave === false) return;
         if (updateBatchField) updateBatchField(tb.id, 'invoice_date', okDate);
       }
       setInvBatchSel(p => ({
