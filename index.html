@@ -30478,9 +30478,10 @@ function InvStepModal({ b, kind, onClose, setBatches, show }) {
   const [na, setNa] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
-  const T = { email: '✉ Invoice sent another way', ack: '📨 Client acknowledged / portal upload', einv: '🧾 E-invoice / e-way bill', paid: '₹ Payment received' }[kind];
+  const isV = /^\s*V/i.test(b.bill_no || '');
+  const T = { email: isV ? '✉ Versahue invoice sent' : '✉ Invoice sent another way', ack: '📨 Client acknowledged / portal upload', einv: '🧾 E-invoice / e-way bill', paid: '₹ Payment received' }[kind];
   const help = {
-    email: 'Emails with ' + b.bill_no + ' in the subject are found automatically. Use this only if it went another way (portal, WhatsApp, courier, or a mailbox the ERP does not read). Counts after Samruddhi verifies.',
+    email: isV ? 'Versahue invoices are not read from email. Upload the invoice (PDF or photo) as proof. Counts after Samruddhi verifies.' : 'Emails with ' + b.bill_no + ' in the subject are found automatically. Use this only if it went another way (portal, WhatsApp, courier, or a mailbox the ERP does not read). Counts after Samruddhi verifies.',
     ack: 'A client reply on the invoice email is found automatically. Otherwise add a screenshot of the reply or the portal upload. Counts after Samruddhi verifies.',
     einv: 'Enter the IRN / e-invoice ack no. or the e-way bill no.',
     paid: 'Enter the date the money came in and the UTR / cheque no. Counts after Samruddhi checks it against the bank.'
@@ -30516,8 +30517,8 @@ function InvStepModal({ b, kind, onClose, setBatches, show }) {
         React.createElement("input", { type: 'checkbox', checked: na, onChange: e => setNa(e.target.checked) }), "Not needed for this invoice") : null,
       kind === 'paid' ? React.createElement(React.Fragment, null, lab('Money received on'), React.createElement("input", { className: 'in', type: 'date', max: today, value: date, onChange: e => setDate(e.target.value), style: inp })) : null,
       (kind === 'paid' || (kind === 'einv' && !na)) ? React.createElement(React.Fragment, null, lab(kind === 'paid' ? 'UTR / cheque no.' : 'IRN / ack no. / e-way bill no.'), React.createElement("input", { className: 'in', value: ref, onChange: e => setRef(e.target.value), style: inp })) : null,
-      (kind === 'email' || kind === 'ack' || (kind === 'einv' && na)) ? React.createElement(React.Fragment, null, lab(kind === 'email' ? 'How was it sent? (required)' : kind === 'einv' ? 'Why not needed? (required)' : 'Note (optional)'), React.createElement("input", { className: 'in', value: note, onChange: e => setNote(e.target.value), style: inp })) : null,
-      (kind === 'email' || kind === 'ack' || kind === 'paid') ? React.createElement(React.Fragment, null, lab(kind === 'paid' ? 'Screenshot (optional)' : 'Screenshot (required)'), React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: e => setFile(e.target.files && e.target.files[0] || null), style: { marginTop: 4, fontSize: 12, color: '#cbd5e1' } })) : null,
+      (kind === 'email' || kind === 'ack' || (kind === 'einv' && na)) ? React.createElement(React.Fragment, null, lab(kind === 'email' ? (isV ? 'Note (optional)' : 'How was it sent? (required)') : kind === 'einv' ? 'Why not needed? (required)' : 'Note (optional)'), React.createElement("input", { className: 'in', value: note, onChange: e => setNote(e.target.value), style: inp })) : null,
+      (kind === 'email' || kind === 'ack' || kind === 'paid') ? React.createElement(React.Fragment, null, lab(kind === 'paid' ? 'Screenshot (optional)' : kind === 'email' && isV ? 'Invoice file (required)' : 'Screenshot (required)'), React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: e => setFile(e.target.files && e.target.files[0] || null), style: { marginTop: 4, fontSize: 12, color: '#cbd5e1' } })) : null,
       err ? React.createElement("div", { style: { color: '#f87171', fontSize: 12, marginTop: 8 } }, '⚠️ ' + err) : null,
       React.createElement("button", { type: 'button', className: 'b bp', disabled: busy, onClick: save, style: { marginTop: 12, width: '100%', padding: '9px 0', fontSize: 13, fontWeight: 800 } }, busy ? 'Saving…' : 'Save')));
 }
@@ -30538,6 +30539,7 @@ function EmailedTag({ b, user, setBatches, show }) {
   if (src === 'email') chip = invChip('ok', '✉✓', 'Found in sent email · ' + invWhen(b.invoice_emailed_at) + (b.invoice_emailed_by ? ' · ' + b.invoice_emailed_by : ''));
   else if (src === 'manual' && b.invoice_email_ok_at) chip = invChip('ok', '✉✓', 'Sent another way, verified by ' + (b.invoice_email_ok_by || 'Samruddhi') + (b.invoice_email_note ? ' · ' + b.invoice_email_note : ''));
   else if (src === 'manual') chip = invChip('wait', '✉ check', 'Marked sent by ' + (b.invoice_emailed_by || '?') + ' ' + invWhen(b.invoice_emailed_at) + ' — waiting for Samruddhi to verify. Tap to add a screenshot.', () => setOpen(true));
+  else if (/^\s*V/i.test(b.bill_no) && !b.invoice_email_rejected) chip = invChip('todo', '✉ Upload inv', 'Versahue invoice: upload the invoice file after sending it. Counts after Samruddhi verifies.', () => setOpen(true));
   else chip = invChip(b.invoice_email_rejected ? 'bad' : 'todo', b.invoice_email_rejected ? '✉ rejected' : '✉ not found', (b.invoice_email_rejected ? 'Rejected: ' + b.invoice_email_rejected + '. ' : '') + 'No sent email with ' + b.bill_no + ' in the subject yet (checked every 15 min). Sent another way? Tap to add proof.', () => setOpen(true));
   return React.createElement(React.Fragment, null, chip, open ? React.createElement(InvStepModal, { b, kind: 'email', onClose: () => setOpen(false), setBatches, show }) : null);
 }
