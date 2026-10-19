@@ -3395,7 +3395,7 @@ function MainApp({
     type: 'button', className: 'ng', 'aria-expanded': !navShut.includes(g.k),
     onClick: () => setNavShut(p => { const nx = p.includes(g.k) ? p.filter(x => x !== g.k) : p.concat(g.k); try { localStorage.setItem('erp_nav_shut', JSON.stringify(nx)); } catch (e) {} return nx; })
   }, React.createElement("span", null, g.l), React.createElement("span", { 'aria-hidden': 'true', style: { fontSize: 10 } }, navShut.includes(g.k) ? '\u25B8' : '\u25BE')) : null, g.items.map(n => {
-    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status)).length : n.id === 'myprs' ? (() => {
+    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status) && !prIsSiteClose(p)).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
         const lvKey = 'myprs_last_viewed_' + uname;
@@ -25997,6 +25997,14 @@ ${pr.job_id ? `<div class="meta-row" style="margin-top:-4px">
 
 </body></html>`;
 }
+const PR_SERVICE_RE = /install|transport|on[ -]?pole|lollipop|lollypop|charge|recce|labour|labor|fitting/i;
+const PR_OPEN_PO = ['PO Generated', 'PO Sent', 'Partially Received'];
+const prIsSiteClose = p => {
+  if (!p) return false;
+  if (p.deliver_to === 'site') return true;
+  const it = Array.isArray(p.items) ? p.items : [];
+  return it.length > 0 && it.every(x => typeof x.is_service === 'boolean' ? x.is_service : PR_SERVICE_RE.test(x.product || ''));
+};
 function GRNReceivePage({
   prs,
   setPrs,
@@ -26005,7 +26013,7 @@ function GRNReceivePage({
   show
 }) {
   const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
-  const STATUS_FILTERS = ['PO Generated', 'Partially Received', 'PO Sent', 'Approved', 'All'];
+  const STATUS_FILTERS = ['PO Generated', 'Partially Received', 'PO Sent', 'Approved', 'All', 'Site / service'];
   const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
   const [searchQ, setSearchQ] = React.useState('');
@@ -26055,7 +26063,7 @@ function GRNReceivePage({
     return hit;
   };
   const filtered = React.useMemo(() => {
-    const list = filter === 'All' ? prs.filter(p => ['Approved', 'PO Generated', 'Partially Received', 'PO Sent'].includes(p.status)) : prs.filter(p => p.status === filter);
+    const list = filter === 'Site / service' ? prs.filter(p => PR_OPEN_PO.includes(p.status) && prIsSiteClose(p)) : (filter === 'All' ? prs.filter(p => ['Approved', 'PO Generated', 'Partially Received', 'PO Sent'].includes(p.status)) : prs.filter(p => p.status === filter)).filter(p => !prIsSiteClose(p));
     const q = (searchQ || '').trim().toLowerCase();
     const searched = q ? list.filter(p => {
       const itemsStr = Array.isArray(p.items) ? p.items.map(x => x?.product || '').join(' ').toLowerCase() : '';
@@ -26293,7 +26301,7 @@ function GRNReceivePage({
     JXT: '#3b82f6',
     VHD: '#8b5cf6'
   })[code] || '#64748b';
-  const pendingCount = prs.filter(p => ['PO Sent', 'PO Generated', 'Partially Received'].includes(p.status)).length;
+  const pendingCount = prs.filter(p => ['PO Sent', 'PO Generated', 'Partially Received'].includes(p.status) && !prIsSiteClose(p)).length;
   return React.createElement("div", {
     style: {
       padding: 12,
@@ -28096,6 +28104,242 @@ function POPage({
     }
   }, cancelling ? '⏳ Cancelling...' : '❌ Confirm Cancel PO')))));
 }
+function PRSiteCloseBox({
+  pr,
+  user,
+  setPrs,
+  show
+}) {
+  const [form, setForm] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const uname = (user?.name || '').toUpperCase();
+  const canAct = (pr.created_by || '').toUpperCase() === uname || uname === 'JIGAR' || uname === 'SHREYA';
+  if (!PR_OPEN_PO.includes(pr.status) || !canAct) return null;
+  const site = prIsSiteClose(pr);
+  const btn = {
+    fontSize: 8,
+    padding: '3px 8px'
+  };
+  const patch = async updates => {
+    const {
+      error
+    } = await sb.from('purchase_requests').update(updates).eq('id', pr.id);
+    if (error) {
+      show && show('Save failed: ' + error.message, false);
+      return false;
+    }
+    setPrs && setPrs(p => p.map(x => x.id === pr.id ? {
+      ...x,
+      ...updates
+    } : x));
+    return true;
+  };
+  const markSite = async () => {
+    if (!window.confirm('Material for ' + pr.pr_no + ' went straight to the site / installer (not the factory)?\n\nIt will leave Murli\'s Receive Material list and you will close it here with the vendor bill.')) return;
+    setBusy(true);
+    if (await patch({
+      deliver_to: 'site'
+    })) show && show('Moved to you - close it here once the vendor bill is in');
+    setBusy(false);
+  };
+  const backToFactory = async () => {
+    setBusy(true);
+    if (await patch({
+      deliver_to: 'factory'
+    })) show && show('Back in Receive Material for factory receipt');
+    setBusy(false);
+  };
+  const poDay = pr.po_generated_at ? String(pr.po_generated_at).slice(0, 10) : '';
+  const save = async () => {
+    const billNo = (form.bill_no || '').trim();
+    if (!billNo) {
+      show && show('Enter the vendor bill number', false);
+      return;
+    }
+    if (!form.date || form.date > td()) {
+      show && show('Work date cannot be in the future', false);
+      return;
+    }
+    if (poDay && form.date < poDay) {
+      show && show('Work date cannot be before the PO date (' + poDay + ')', false);
+      return;
+    }
+    setBusy(true);
+    let url = null;
+    if (form.file) {
+      url = await uploadFile(form.file, 'vendor-bills');
+      if (!url) {
+        setBusy(false);
+        show && show('Bill upload failed - try again or save without the photo', false);
+        return;
+      }
+    }
+    const items = (Array.isArray(pr.items) ? pr.items : []).map(it => ({
+      ...it,
+      received_qty: +it.qty || 0
+    }));
+    const ok = await patch({
+      status: 'Completed',
+      deliver_to: 'site',
+      received_by: user?.name || '',
+      received_at: new Date(form.date).toISOString(),
+      invoice_no: billNo,
+      vendor_bill_url: url,
+      grn_id: 'SITE' + Date.now(),
+      partial_delivery: false,
+      items,
+      received_notes: ['Site / service PO closed by PR raiser', 'Bill: ' + billNo, form.note || ''].filter(Boolean).join(' | '),
+      last_status_change_at: new Date().toISOString()
+    });
+    setBusy(false);
+    if (ok) {
+      setForm(null);
+      show && show('PO closed - ' + pr.pr_no + ' Completed');
+    }
+  };
+  const wrap = {
+    marginTop: 6,
+    padding: '6px 8px',
+    borderRadius: 6,
+    background: site ? '#f59e0b10' : 'transparent',
+    border: site ? '1px solid #f59e0b44' : 'none'
+  };
+  if (!site) return React.createElement("div", {
+    style: {
+      marginTop: 6
+    }
+  }, React.createElement("button", {
+    className: "b bs",
+    style: btn,
+    disabled: busy,
+    onClick: markSite
+  }, "📍 Delivered at site / installer - I will close it"));
+  return React.createElement("div", {
+    style: wrap
+  }, React.createElement("div", {
+    style: {
+      fontSize: 8,
+      color: '#f59e0b',
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "📍 Site / service PO - you close this once work is done and the vendor bill is in"), !form ? React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, React.createElement("button", {
+    className: "b bp",
+    style: btn,
+    disabled: busy,
+    onClick: () => setForm({
+      bill_no: '',
+      date: td(),
+      file: null,
+      note: ''
+    })
+  }, "✅ Work done - enter vendor bill"), pr.deliver_to === 'site' && React.createElement("button", {
+    className: "b bs",
+    style: btn,
+    disabled: busy,
+    onClick: backToFactory
+  }, "↩ Came to factory instead")) : React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))',
+      gap: 6,
+      alignItems: 'end'
+    }
+  }, React.createElement("label", {
+    style: {
+      fontSize: 7,
+      color: '#64748b'
+    }
+  }, "Vendor bill no. *", React.createElement("input", {
+    className: "in",
+    value: form.bill_no,
+    onChange: e => setForm(f => ({
+      ...f,
+      bill_no: e.target.value
+    })),
+    style: {
+      fontSize: 9,
+      padding: '3px 4px',
+      width: '100%'
+    }
+  })), React.createElement("label", {
+    style: {
+      fontSize: 7,
+      color: '#64748b'
+    }
+  }, "Work done on *", React.createElement("input", {
+    className: "in",
+    type: "date",
+    value: form.date,
+    max: td(),
+    onChange: e => setForm(f => ({
+      ...f,
+      date: e.target.value
+    })),
+    style: {
+      fontSize: 9,
+      padding: '3px 4px',
+      width: '100%'
+    }
+  })), React.createElement("label", {
+    style: {
+      fontSize: 7,
+      color: '#64748b'
+    }
+  }, "Bill photo / PDF (optional)", React.createElement("input", {
+    type: "file",
+    accept: "image/*,application/pdf",
+    onChange: e => {
+      const fl = e.target.files && e.target.files[0];
+      setForm(f => ({
+        ...f,
+        file: fl || null
+      }));
+    },
+    style: {
+      fontSize: 8,
+      width: '100%'
+    }
+  })), React.createElement("label", {
+    style: {
+      fontSize: 7,
+      color: '#64748b'
+    }
+  }, "Note", React.createElement("input", {
+    className: "in",
+    value: form.note,
+    onChange: e => setForm(f => ({
+      ...f,
+      note: e.target.value
+    })),
+    style: {
+      fontSize: 9,
+      padding: '3px 4px',
+      width: '100%'
+    }
+  })), React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6
+    }
+  }, React.createElement("button", {
+    className: "b bs",
+    style: btn,
+    disabled: busy,
+    onClick: () => setForm(null)
+  }, "Cancel"), React.createElement("button", {
+    className: "b bp",
+    style: btn,
+    disabled: busy,
+    onClick: save
+  }, busy ? 'Saving...' : 'Close PO'))));
+}
 function MyPRsPage({
   prs,
   setPrs,
@@ -28701,7 +28945,12 @@ function MyPRsPage({
         expected_delivery: pr.expected_delivery || '',
         revisionNote: ''
       })
-    }, "\u270F\uFE0F Edit & Resubmit")), pr.status === 'Completed' && pr.received_at && React.createElement("div", {
+    }, "\u270F\uFE0F Edit & Resubmit")), React.createElement(PRSiteCloseBox, {
+      pr,
+      user,
+      setPrs,
+      show
+    }), pr.status === 'Completed' && pr.received_at && React.createElement("div", {
       style: {
         marginTop: 4,
         fontSize: 8,
