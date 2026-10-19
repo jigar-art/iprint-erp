@@ -35751,10 +35751,16 @@ function CourierFab({ user }) {
     setMsg('');
     if (!f.job.trim() || !f.mode) { setMsg('⚠️ Job no. and mode are needed'); return; }
     setBusy(true);
-    const r = await sb.rpc('erp_courier_request', { p_job: f.job.trim(), p_mode: f.mode, p_courier: f.courier || null, p_cost: f.cost ? Number(f.cost) : null, p_note: f.note || null });
+    let jobId = f.job.trim();
+    if (!jobId.includes('-')) {
+      const jr = await sb.from('jobs').select('id').like('id', jobId + '-%').order('id', { ascending: false }).limit(5);
+      const hits = (jr.data || []).map(x => x.id);
+      if (hits.length) jobId = hits[0];
+    }
+    const r = await sb.rpc('erp_courier_request', { p_job: jobId, p_mode: f.mode, p_courier: f.courier || null, p_cost: f.cost ? Number(f.cost) : null, p_note: f.note || null });
     setBusy(false);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
-    setMsg('✓ Request sent'); setF({ job: '', mode: '', courier: '', cost: '', note: '' }); load();
+    setMsg('✓ Request sent for job ' + jobId); setF({ job: '', mode: '', courier: '', cost: '', note: '' }); load();
   };
   const decide = async (id, ok) => {
     setBusy(true);
