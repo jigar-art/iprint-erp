@@ -3819,6 +3819,8 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(V5ChangeGate, {
     user: user
+  }) : null, user ? React.createElement(WhatsNewGate, {
+    user: user
   }) : null, user ? React.createElement(CommitGate, {
     user: user
   }) : null, user ? React.createElement(CallLogFab, {
@@ -4170,7 +4172,8 @@ const ERP_ICO = {
   courier: ['M3 7h11v9H3z', 'M14 10h4l3 3v3h-7', 'M5.5 17.5a1.5 1.5 0 103 0 1.5 1.5 0 10-3 0', 'M15.5 17.5a1.5 1.5 0 103 0 1.5 1.5 0 10-3 0'],
   proof: ['M4 8h3l2-2h6l2 2h3v11H4z', 'M8.5 13a3.5 3.5 0 107 0 3.5 3.5 0 10-7 0'],
   call: ['M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2'],
-  tasks: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M9 13l2 2 4-4']
+  tasks: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M9 13l2 2 4-4'],
+  news: ['M12 3l2.4 5.2L20 9l-4.2 3.9L17 19l-5-2.9L7 19l1.2-6.1L4 9l5.6-.8z']
 };
 function QuickSlot({ k, label, icon, badge, order, onClick }) {
   const ref = React.useRef(onClick);
@@ -35704,6 +35707,131 @@ function V5ChangeGate({ user }) {
         React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
         'I have read and understood my score card and tasks'),
       React.createElement("button", { type: 'button', disabled: !ok || busy, onClick: done, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: ok ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: ok ? 'pointer' : 'default' } }, '✓ Continue')));
+}
+// 19 Oct 2026 (Jigar): "What's new" - once per person after login: 45 s video + 6 swipe cards (own points card first).
+// Recorded in point_brief_responses (brief_version 2026-10-19-whatsnew). Reopen from the + menu until 2 Nov.
+function WhatsNewGate({ user }) {
+  const V = '2026-10-19-whatsnew';
+  const me = pbKey(user);
+  const [st, setSt] = React.useState('loading');
+  const [rows, setRows] = React.useState(null);
+  const [i, setI] = React.useState(0);
+  const [ok, setOk] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [seen, setSeen] = React.useState(false);
+  const tx = React.useRef(null);
+  const until = new Date() < new Date('2026-11-03T00:00:00+05:30');
+  const loadCard = () => {
+    if (rows || !me) return;
+    sb.from('score_roles').select('card').eq('person_key', me).is('valid_to', null).limit(1).then(x => {
+      const c = ((x.data || [])[0] || {}).card;
+      if (!c) { setRows([]); return; }
+      sb.from('score_card_tasks').select('label,points,freq,sort').eq('card', c).is('valid_to', null).order('sort').then(y => setRows(y.data || []));
+    });
+  };
+  React.useEffect(() => {
+    if (!user || !me || !until) { setSt('hidden'); return; }
+    let done = false;
+    try { done = sessionStorage.getItem('wn_done') === '1'; } catch (e) {}
+    sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => {
+      if (r.error || (r.data || []).length) { setSeen(true); setSt('hidden'); return; }
+      if (done) { setSt('hidden'); return; }
+      loadCard(); setSt('show');
+    });
+  }, [me]);
+  if (!user || !until) return null;
+  if (st === 'loading') return null;
+  if (st === 'hidden') return React.createElement(QuickSlot, { k: 'whatsnew', order: 9, label: "What's new", icon: 'news', onClick: () => { loadCard(); setI(0); setOk(false); setSt('show'); } });
+  const close = async () => {
+    if (!seen) {
+      setBusy(true);
+      const r = await sb.from('point_brief_responses').insert({ person_name: user.name, brief_version: V, response: 'accepted', comment: null, lang: 'en' });
+      setBusy(false);
+      if (!r.error) setSeen(true);
+    }
+    try { sessionStorage.setItem('wn_done', '1'); } catch (e) {}
+    setSt('hidden');
+  };
+  const tot = (rows || []).reduce((a, r) => a + (+r.points || 0), 0);
+  const li = { fontSize: 14, color: '#e2e8f0', lineHeight: 1.5, margin: '6px 0' };
+  const h = { fontSize: 13, fontWeight: 800, color: '#e3a008', margin: '10px 0 4px', letterSpacing: .3, textTransform: 'uppercase' };
+  const pts = React.createElement("div", null,
+    React.createElement("div", { style: h }, 'Your role tasks' + (tot ? ' — ' + tot + ' points' : '')),
+    rows === null ? React.createElement("div", { style: li }, 'Loading your card…')
+      : !rows.length ? React.createElement("div", { style: li }, 'Your role card is still being set up — ask Amol.')
+      : rows.map((r, k) => React.createElement("div", { key: k, style: { ...li, display: 'flex', justifyContent: 'space-between', gap: 10 } },
+          React.createElement("span", null, '• ' + r.label + (r.freq && r.freq !== 'event' ? ' (' + r.freq + ')' : '')),
+          React.createElement("b", { style: { color: '#fde68a', flex: 'none' } }, r.points))),
+    React.createElement("div", { style: h }, 'Everyone — 20 points'),
+    ['Today\'s tasks updated in ERP by 7 pm — 5', 'Tomorrow\'s tasks planned by 9 pm — 5', 'Client emails replied on time — 10'].map((x, k) => React.createElement("div", { key: k, style: li }, '• ' + x)));
+  const cards = [
+    { t: '🎯 Your points card — 100 a month', node: pts },
+    { t: '📏 How it is measured', items: [
+      'Each task scores its points × (times done on time ÷ times due).',
+      'Daily and weekly tasks: on time = full, late = half, missed = 0.',
+      'Monthly and filing tasks: late = 75%, missed = 50%.',
+      'Waiting on someone else (an approval, a client PO) pauses your clock.',
+      'A task with too little data shows “—” and its points move to your other tasks.',
+      'Leads: 80% own card + 20% team average. Amol: 50% own + 50% operations teams.',
+      'Bands: A 85+ · B 70–84 · C 55–69 · D below 55. Increment uses the Oct–Dec average.',
+      'Your score and the tasks that lost most points come on WhatsApp at 6 pm. Disagree? Tap “Raise query” on My Score — the month stays open till the 3rd.'] },
+    { t: '📋 Your tasks — where and how', items: [
+      'Tap the yellow + (bottom right) → My tasks, or Me → My Tasks in the menu.',
+      'Each task: ✓ Done · ✗ Not done (write why) · → Tomorrow. Use Select all for many at once.',
+      'By 7 pm: every task of today ticked, marked not done, or moved to tomorrow.',
+      'By 9 pm: add at least one task for tomorrow.',
+      'Late jobs, complaints, POs and client emails come to you automatically — at login, give a date for each.',
+      'Role duties (photos, recos, filings) are ticked in My Score → Duties with proof. Leads check 10% — a false tick scores 0 and −5.'] },
+    { t: '🧭 New layout', items: [
+      'Menu in sections: Me · Sales & Clients · Jobs · Production · Stores & Purchase · Accounts · More.',
+      'Tap ◂ at the bottom of the menu to shrink it to icons — the ERP remembers your choice.',
+      'Dashboard tiles are grouped: Pipeline · Production & site · Accounts & closed.',
+      'One yellow + button holds Courier booking 🚚, Proof photo 📷, Log a call 📞 and My tasks 📋. A red number = things waiting for you.'] },
+    { t: '✅ Where approvals sit', items: [
+      'Late items: the “Before you start” screen at login — give each one a date.',
+      'Courier / transport: + → Courier booking 🚚. Priyanka (banking) or Amol approves, then Jigar. You get a WhatsApp on approve or reject.',
+      'No Bill jobs: Accounts page, top card.',
+      'Invoice proof (sent another way, payment UTR): Accounts page → verify card — Samruddhi.',
+      'Quotes below 20% margin: Quote Pending → OK margin — Jigar / Amol.',
+      'Purchase requests: Stores & Purchase → Approvals — Jigar.',
+      'Score queries: My Score — your lead decides.'] },
+    { t: '🆕 Changed in the last 2 days', items: [
+      'Late-item lines now show client · project · job, for emails and POs too.',
+      'My tasks has ✓ Done / ✗ Not done / → Tomorrow buttons and Select all.',
+      'Billing: a batch gets its bill no. only after DC + dispatch log + POD (batches from 19 Oct).',
+      'A ₹0 bill, or a bill no. already used for another client, is refused.',
+      'Invoice “emailed” is picked up from sent mail (bill no. in the subject). Other ways need a note + screenshot, verified by Samruddhi.',
+      'Batch photos and material used are needed before the next stage — counted from today.',
+      'Uploaded files open only when you are logged in. Pages load faster.',
+      'New PIN: set it when the ERP asks you.'] }
+  ];
+  const N = cards.length;
+  const c = cards[i];
+  const last = i === N - 1;
+  const nb = on => ({ flex: 1, padding: '11px 0', borderRadius: 10, border: '1px solid #2a3245', background: on ? '#e3a008' : '#0d111c', color: on ? '#060810' : '#e2e8f0', fontSize: 15, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' });
+  const canGo = seen || ok;
+  return React.createElement("div", { role: 'dialog', 'aria-label': "What's new in the ERP", style: { position: 'fixed', inset: 0, zIndex: 99996, background: 'rgba(3,6,12,.96)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 720, margin: '0 auto' } },
+      React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, '🆕 What’s new in the ERP — 19 Oct'),
+        seen ? React.createElement("button", { type: 'button', onClick: close, 'aria-label': 'Close', style: { background: 'none', border: '1px solid #2a3245', borderRadius: 8, color: '#cbd5e1', fontSize: 14, padding: '6px 10px', cursor: 'pointer' } }, '✕ Close') : null),
+      React.createElement("video", { src: '/whatsnew-2026-10-19.mp4', controls: true, autoPlay: true, muted: true, playsInline: true, preload: 'auto', style: { width: '100%', aspectRatio: '16 / 9', marginTop: 10, borderRadius: 12, background: '#000', border: '1px solid #1f2937' } }),
+      React.createElement("div", { onTouchStart: e => { tx.current = e.touches[0].clientX; }, onTouchEnd: e => { if (tx.current == null) return; const d = e.changedTouches[0].clientX - tx.current; tx.current = null; if (d < -50 && i < N - 1) setI(i + 1); if (d > 50 && i > 0) setI(i - 1); },
+        style: { background: '#0d1320', border: '1px solid #1f2937', borderRadius: 12, padding: 14, marginTop: 12, minHeight: 260 } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 } },
+          React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: '#f1f5f9' } }, c.t),
+          React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', flex: 'none' } }, (i + 1) + ' / ' + N)),
+        c.node || c.items.map((x, k) => React.createElement("div", { key: k, style: li }, '• ' + x))),
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 } },
+        cards.map((x, k) => React.createElement("button", { key: k, type: 'button', 'aria-label': 'Card ' + (k + 1), onClick: () => setI(k), style: { width: k === i ? 22 : 9, height: 9, borderRadius: 9, border: 0, padding: 0, background: k === i ? '#e3a008' : '#334155', cursor: 'pointer' } }))),
+      React.createElement("div", { style: { display: 'flex', gap: 10, marginTop: 12 } },
+        React.createElement("button", { type: 'button', disabled: i === 0, onClick: () => setI(i - 1), style: { ...nb(false), opacity: i === 0 ? .4 : 1 } }, '← Back'),
+        !last ? React.createElement("button", { type: 'button', onClick: () => setI(i + 1), style: nb(true) }, 'Next →') : null),
+      last && !seen ? React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
+        'I have watched the video and read all 6 cards') : null,
+      last ? React.createElement("button", { type: 'button', disabled: !canGo || busy, onClick: close, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: canGo ? '#22c55e' : '#334155', color: canGo ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: canGo ? 'pointer' : 'default', fontFamily: 'inherit' } }, busy ? 'Saving…' : '✓ Continue to ERP') : null,
+      React.createElement("div", { style: { fontSize: 12, color: '#64748b', textAlign: 'center', marginTop: 10 } }, 'Reopen any time: + (bottom right) → What’s new')));
 }
 function CallLogFab({ user }) {
   const me = pbKey(user);
