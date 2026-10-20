@@ -24156,6 +24156,21 @@ function DispPage({
     setTatTick(t => t + 1);
     show('\u2713 Signed DC uploaded');
   };
+  const addDocket = async (l, file) => {
+    if (!file) return;
+    const amt = prompt('Actual \u20b9 the courier charged' + (l.courier_request_id ? ' for \ud83d\ude9a #' + l.courier_request_id : '') + ':', l.actual_cost || '');
+    if (amt === null) return;
+    if (!(+amt > 0)) { show('\u26a0\ufe0f Enter the \u20b9 amount', false); return; }
+    const mc = (modes || []).find(m => m.mode === l.dispatch_mode);
+    let kg = l.actual_weight || null;
+    if (mc && mc.rate_basis === 'per_kg') { const k = prompt('Weight charged on the docket (kg):', kg || ''); if (k === null) return; if (!(+k > 0)) { show('\u26a0\ufe0f Enter the weight', false); return; } kg = +k; }
+    const url = await uploadFile(file, 'courier-docket');
+    if (!url) { show('\u26a0\ufe0f Upload failed', false); return; }
+    const { error } = await sb.from('dispatch_logs').update({ actual_cost: +amt, actual_weight: kg, docket_url: url }).eq('id', l.id);
+    if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
+    setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), actual_cost: +amt, actual_weight: kg, docket_url: url } }));
+    show('\u2713 Docket + \u20b9' + Math.round(+amt) + ' saved');
+  };
   const [agLocal, setAgLocal] = useState(agencies || []);
   useEffect(() => {
     setAgLocal(agencies || []);
@@ -24218,9 +24233,8 @@ function DispPage({
     if (!isCourier && !f.dc_id) { alert("Pick the ERP DC for this job. If none exists, make the DC first (Delivery Challans)."); return; }
     // 21 Oct 2026 (Jigar): courier v2 — actual bill + docket photo on every paid courier dispatch
     const paidMode = modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none';
-    if (paidMode && !(+f.actual_cost > 0)) { alert("Enter the actual \u20b9 the courier charged"); return; }
-    if (paidMode && modeCfg.rate_basis === 'per_kg' && !(+f.actual_weight > 0)) { alert("Enter the weight charged on the docket (kg)"); return; }
-    if (paidMode && !f.docket_url) { alert("Upload the docket / courier bill photo"); return; }
+    // 21 Oct 2026 (Jigar): docket / bill can come after delivery - add later from the row (🧾); needed before billing
+    if (paidMode && +f.actual_cost > 0 && modeCfg.rate_basis === 'per_kg' && !(+f.actual_weight > 0)) { alert("Enter the weight charged on the docket (kg)"); return; }
     if (f.dispatch_type.includes("Install") && !String(f.installer || '').trim()) { alert("Delivery + Install needs the installer name"); return; }
     if (isCourier) {
       if (!String(f.vendor_name || '').trim()) {
@@ -24459,13 +24473,13 @@ function DispPage({
     value: f[k] || '',
     onChange: e => { const v = e.target.value; sF(p => ({ ...p, [k]: v })); }
   }))), modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none' && React.createElement(F, {
-    l: "Actual \u20b9 charged *"
+    l: "Actual \u20b9 charged (or add later)"
   }, React.createElement("input", { className: "in", type: "number", inputMode: "decimal", value: f.actual_cost, onChange: e => { const v = e.target.value; sF(p => ({ ...p, actual_cost: v })); } })),
   modeCfg && modeCfg.rate_basis === 'per_kg' && React.createElement(F, {
-    l: "Weight charged (kg) *"
+    l: "Weight charged (kg)"
   }, React.createElement("input", { className: "in", type: "number", inputMode: "decimal", value: f.actual_weight, onChange: e => { const v = e.target.value; sF(p => ({ ...p, actual_weight: v })); } })),
   modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none' && React.createElement(F, {
-    l: "Docket / bill photo *" + (f.docket_url ? " \u2713" : "")
+    l: "Docket / bill photo (or add later)" + (f.docket_url ? " \u2713" : "")
   }, React.createElement("input", { className: "in", type: "file", accept: "image/*,application/pdf", onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; const url = await uploadFile(fl, 'courier-docket'); if (url) sF(p => ({ ...p, docket_url: url })); } })),
   f.dispatch_type === "Courier to Vendor" && React.createElement(React.Fragment, null, React.createElement(F, {
     l: "Vendor (sent to)"
@@ -24638,7 +24652,12 @@ function DispPage({
         background: l.dispatch_type === "Courier to Vendor" ? "#3b82f620" : l.dispatch_type?.includes("Install") ? "#8b5cf620" : "#10b98120",
         color: l.dispatch_type === "Courier to Vendor" ? "#60a5fa" : l.dispatch_type?.includes("Install") ? "#c084fc" : "#4ade80" } }, l.dispatch_type)),
       React.createElement("td", { style: { fontSize: 10 } }, l.dispatch_mode ? React.createElement("b", null, l.dispatch_mode) : React.createElement("span", { style: { color: "#64748b" } }, "(old entry)"),
-        carrier ? React.createElement("div", { style: { color: "#94a3b8" } }, carrier) : null),
+        carrier ? React.createElement("div", { style: { color: "#94a3b8" } }, carrier) : null,
+        (() => { const mc = (modes || []).find(m => m.mode === l.dispatch_mode); if (!mc || !mc.rate_basis || mc.rate_basis === 'none') return null;
+          return +l.actual_cost > 0 && l.docket_url
+            ? React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + ' \u2713 docket')
+            : React.createElement("label", { className: "b bs", style: { fontSize: 9, padding: "2px 8px", cursor: "pointer", marginTop: 3, display: 'inline-block', color: '#fbbf24' } }, '\ud83e\uddfe Add docket + \u20b9',
+                React.createElement("input", { type: "file", accept: "image/*,application/pdf", style: { display: "none" }, onChange: e => addDocket(l, e.target.files && e.target.files[0]) })); })()),
       React.createElement("td", { className: "mn" }, l.challan_no || '\u2014'),
       React.createElement("td", { style: { fontSize: 10 } }, isNew && t.dc_made_at ? fmt(t.dc_made_at) + ' \u2192 ' + fmt(t.dispatched_at || l.created_at) : '\u2014', isNew ? late(t.dispatch_late_days) : null),
       React.createElement("td", { style: { fontSize: 10 } }, l.delivered_at
@@ -35892,6 +35911,8 @@ function CourierFab({ user }) {
   const [sum, setSum] = React.useState(null);
   const [vendors, setVendors] = React.useState([]);
   const [photos, setPhotos] = React.useState([]);
+  const [dcItems, setDcItems] = React.useState([]);
+  const [tick, setTick] = React.useState({});
   const [rec, setRec] = React.useState(null);
   const [msg, setMsg] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -35913,6 +35934,10 @@ function CourierFab({ user }) {
     setF(p => ({ ...p, dc: id }));
     const r = await sb.rpc('erp_dc_summary', { p_dc: id });
     const s = (r.data || [])[0] || null; setSum(s);
+    // 21 Oct 2026 (Jigar): tick which DC items go in this booking (all ticked by default)
+    const di = await sb.from('delivery_challans').select('items').eq('id', id).maybeSingle();
+    const its = Array.isArray(di.data && di.data.items) ? di.data.items : [];
+    setDcItems(its); const t0 = {}; its.forEach((x, i) => { t0[i] = true; }); setTick(t0);
     if (s) setF(p => ({ ...p, dc: id, name: p.name || (/^(na|n\/a|no data|\*|-)$/i.test(String(s.to_name || '').trim()) ? '' : s.to_name || ''), pin: p.pin || s.pincode || '' }));
   };
   if (!roles) return null;
@@ -35932,14 +35957,17 @@ function CourierFab({ user }) {
   const ask = async () => {
     setMsg('');
     const pics = photos.slice(0, n).filter(Boolean);
+    const onIdx = dcItems.map((x, i) => i).filter(i => tick[i]);
+    if (dcItems.length && !onIdx.length) { setMsg('⚠️ Tick at least one item going in this booking'); return; }
+    const itemIds = dcItems.length && onIdx.length < dcItems.length ? onIdx.map(i => dcItems[i].item_id).filter(Boolean) : null;
     const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
       install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
-      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, eta_courier: f.eta, note: f.note };
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, eta_courier: f.eta, note: f.note, item_ids: itemIds };
     setBusy(true);
     const r = await sb.rpc('erp_courier_request_v2', { p });
     setBusy(false);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
-    setMsg('✓ Request #' + r.data + ' sent for job ' + f.jobId); setF(blank()); setDcs(null); setSum(null); setVendors([]); setPhotos([]); load();
+    setMsg('✓ Request #' + r.data + ' sent for job ' + f.jobId); setF(blank()); setDcs(null); setSum(null); setVendors([]); setPhotos([]); setDcItems([]); setTick({}); load();
   };
   const decide = async (id, ok) => { setBusy(true); const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: null }); setBusy(false); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load(); };
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
@@ -35960,7 +35988,19 @@ function CourierFab({ user }) {
     dcs && dcs.length ? React.createElement("select", { className: 'in', value: f.dc, onChange: e => pickDc(e.target.value), style: inp },
       React.createElement("option", { value: '' }, '-- pick the DC being sent --'),
       dcs.map(d => React.createElement("option", { key: d.id, value: d.id }, d.dc_no + ' · ' + (d.dc_date || '') + ' · ' + (d.to_name || '')))) : null,
-    sum ? React.createElement("div", { style: { fontSize: 12, color: sum.over_qty ? '#fca5a5' : '#94a3b8' } }, sum.items + ' items · ' + Math.round(sum.pieces) + ' pcs · ' + Math.round(sum.sqft) + ' sqft' + (sum.over_qty ? ' · ⚠️ ' + sum.over_qty + ' item(s) above job qty' : '')) : null,
+    sum && dcItems.length ? (() => {
+      const on = dcItems.filter((x, i) => tick[i]);
+      const pcs = on.reduce((a, x) => a + (+x.qty || 0), 0), sq = on.reduce((a, x) => a + (+x.sqft || 0), 0);
+      return React.createElement("div", { style: { border: '1px solid #1f2937', borderRadius: 8, padding: '6px 8px' } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: '#cbd5e1', marginBottom: 4 } },
+          React.createElement("span", null, 'Items in this booking: ' + on.length + ' of ' + dcItems.length + ' · ' + Math.round(pcs) + ' pcs' + (sq ? ' · ' + Math.round(sq) + ' sqft' : '')),
+          React.createElement("button", { type: 'button', onClick: () => { const all = on.length !== dcItems.length; const t = {}; dcItems.forEach((x, i) => { t[i] = all; }); setTick(t); }, style: { background: 'none', border: 'none', color: '#93c5fd', fontSize: 12, cursor: 'pointer' } }, on.length === dcItems.length ? 'Untick all' : 'Tick all')),
+        React.createElement("div", { style: { maxHeight: 180, overflowY: 'auto' } }, dcItems.map((x, i) => React.createElement("label", { key: i, style: { display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: tick[i] ? '#e2e8f0' : '#64748b', padding: '3px 0', cursor: 'pointer' } },
+          React.createElement("input", { type: 'checkbox', checked: !!tick[i], disabled: !x.item_id, onChange: e => setTick(p => ({ ...p, [i]: e.target.checked })) }),
+          React.createElement("span", { style: { flex: 1, minWidth: 0, overflowWrap: 'anywhere' } }, (x.description || x.media || 'Item ' + (i + 1)) + (x.item_id ? '' : ' (old DC line - always included)')),
+          React.createElement("span", { style: { whiteSpace: 'nowrap', color: '#94a3b8' } }, (+x.qty || 0) + ' pcs' + (+x.sqft ? ' · ' + Math.round(+x.sqft) + ' sqft' : ''))))),
+        sum.over_qty ? React.createElement("div", { style: { fontSize: 12, color: '#fca5a5', marginTop: 4 } }, '⚠️ ' + sum.over_qty + ' item(s) on this DC above job qty') : null);
+    })() : sum ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8' } }, sum.items + ' items · ' + Math.round(sum.pieces) + ' pcs · ' + Math.round(sum.sqft) + ' sqft') : null,
     lab('2 · Where is it going'),
     React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, CR_DEST.map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF({ ...f, dest: k }), style: chip(f.dest === k) }, l))),
     ['site_installer', 'vendor'].includes(f.dest) ? (vendors.length ? React.createElement("select", { className: 'in', value: f.vendor, onChange: e => setF({ ...f, vendor: e.target.value }), style: inp },
@@ -36377,8 +36417,8 @@ function TasksNoteGate({ user }) {
         'The late-jobs list shows once a day. Promise a date for each — or tap “Later” and work from Waiting on you.',
         'Promised dates show as a green “promised” tag. A missed promise is still shown to your lead.']),
       sec('🚚', 'Courier and transport (from 21 Oct)', '#c4b5fd', [
-        'Manoj / Murli: a courier request now needs the DC, receiver name + mobile, packages with one labelled photo each, cost basis and the courier’s delivery date.',
-        'At dispatch: enter the actual ₹ and upload the docket photo.',
+        'Manoj / Murli: a courier request now needs the DC (tick the items going), receiver name + mobile, packages with one labelled photo each, cost basis and the courier’s delivery date.',
+        'Docket photo + actual ₹: at dispatch, or later with 🧾 on the Dispatch row. You get a task until it is added, and the batch can’t be billed without it.',
         'Porter / Wefast / transport claims in Petty cash must pick the 🚚 request they belong to.']),
       !seen ? React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
         React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
