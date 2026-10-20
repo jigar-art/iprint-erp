@@ -3933,6 +3933,8 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(WhatsNewGate, {
     user: user
+  }) : null, user ? React.createElement(TasksNoteGate, {
+    user: user
   }) : null, user ? React.createElement(CommitGate, {
     user: user
   }) : null, user ? React.createElement(CallLogFab, {
@@ -36148,7 +36150,7 @@ function WhatsNewGate({ user }) {
       'Each task: ✓ Done · ✗ Not done (write why) · → Tomorrow. Use Select all for many at once.',
       'By 7 pm: every task of today ticked, marked not done, or moved to tomorrow.',
       'By 9 pm: add at least one task for tomorrow.',
-      'Late jobs, complaints, POs and client emails come to you automatically — at login, give a date for each.',
+      'Late jobs, complaints, POs and client emails show live under ⏳ Waiting on you (top of My Tasks) — they clear themselves when the work moves on.',
       'Role duties (photos, recos, filings) are ticked in My Score → Duties with proof. Leads check 10% — a false tick scores 0 and −5.'] },
     { t: '🧭 New layout', items: [
       'Menu in sections: Me · Sales & Clients · Jobs · Production · Stores & Purchase · Accounts · More.',
@@ -36156,7 +36158,7 @@ function WhatsNewGate({ user }) {
       'Dashboard tiles are grouped: Pipeline · Production & site · Accounts & closed.',
       'One yellow + button holds Courier booking 🚚, Proof photo 📷, Log a call 📞 and My tasks 📋. A red number = things waiting for you.'] },
     { t: '✅ Where approvals sit', items: [
-      'Late items: the “Before you start” screen at login — give each one a date.',
+      'Late items: the “Before you start” screen at login, once a day — give each a date or tap Later.',
       'Courier / transport: + → Courier booking 🚚. Priyanka (banking) or Amol approves, then Jigar. You get a WhatsApp on approve or reject.',
       'No Bill jobs: Accounts page, top card.',
       'Invoice proof (sent another way, payment UTR): Accounts page → verify card — Samruddhi.',
@@ -36200,6 +36202,66 @@ function WhatsNewGate({ user }) {
         'I have watched the video and read all 6 cards') : null,
       last ? React.createElement("button", { type: 'button', disabled: !canGo || busy, onClick: close, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: canGo ? '#22c55e' : '#334155', color: canGo ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: canGo ? 'pointer' : 'default', fontFamily: 'inherit' } }, busy ? 'Saving…' : '✓ Continue to ERP') : null,
       React.createElement("div", { style: { fontSize: 12, color: '#64748b', textAlign: 'center', marginTop: 10 } }, 'Reopen any time: + (bottom right) → What’s new')));
+}
+// 21 Oct 2026 (Jigar): staff note for the tasks split — once per person after login, after What's new.
+// Recorded in point_brief_responses (brief_version 2026-10-21-tasks). Reopen from the + menu until 4 Nov.
+function TasksNoteGate({ user }) {
+  const V = '2026-10-21-tasks';
+  const me = pbKey(user);
+  const [st, setSt] = React.useState('loading');
+  const [ok, setOk] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [seen, setSeen] = React.useState(false);
+  const until = new Date() < new Date('2026-11-05T00:00:00+05:30');
+  React.useEffect(() => {
+    if (!user || !me || !until) { setSt('hidden'); return; }
+    let done = false;
+    try { done = sessionStorage.getItem('tn_done') === '1'; } catch (e) {}
+    sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => {
+      if (r.error || (r.data || []).length) { setSeen(true); setSt('hidden'); return; }
+      setSt(done ? 'hidden' : 'show');
+    });
+  }, [me]);
+  if (!user || !until || st === 'loading') return null;
+  if (st === 'hidden') return React.createElement(QuickSlot, { k: 'tasksnote', order: 10, label: 'My Tasks — what changed', icon: 'tasks', onClick: () => { setOk(false); setSt('show'); } });
+  const close = async () => {
+    if (!seen) {
+      setBusy(true);
+      const r = await sb.from('point_brief_responses').insert({ person_name: user.name, brief_version: V, response: 'accepted', comment: null, lang: 'en' });
+      setBusy(false);
+      if (!r.error) setSeen(true);
+    }
+    try { sessionStorage.setItem('tn_done', '1'); } catch (e) {}
+    setSt('hidden');
+  };
+  const li = { fontSize: 14, color: '#e2e8f0', lineHeight: 1.5, margin: '8px 0' };
+  const sec = (icon, title, color, lines) => React.createElement("div", { style: { background: '#0d1320', border: '1px solid ' + color + '55', borderRadius: 12, padding: '12px 14px', marginTop: 10 } },
+    React.createElement("div", { style: { fontSize: 15, fontWeight: 800, color } }, icon + ' ' + title),
+    lines.map((x, k) => React.createElement("div", { key: k, style: li }, '• ' + x)));
+  const canGo = seen || ok;
+  return React.createElement("div", { role: 'dialog', 'aria-label': 'My Tasks — what changed', style: { position: 'fixed', inset: 0, zIndex: 99995, background: 'rgba(3,6,12,.96)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 640, margin: '0 auto' } },
+      React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+        React.createElement("div", { style: { fontSize: 18, fontWeight: 900, color: '#e3a008' } }, '📋 My Tasks is simpler — 21 Oct'),
+        seen ? React.createElement("button", { type: 'button', onClick: close, 'aria-label': 'Close', style: { background: 'none', border: '1px solid #2a3245', borderRadius: 8, color: '#cbd5e1', fontSize: 14, padding: '6px 10px', cursor: 'pointer' } }, '✕ Close') : null),
+      React.createElement("div", { style: { fontSize: 13.5, color: '#94a3b8', marginTop: 4 } }, 'Your list had hundreds of “Clear …” lines copied from late jobs. They are gone. Nothing is lost — the work now shows in one live list.'),
+      sec('⏳', 'Waiting on you — top of My Tasks', '#e3a008', [
+        'Your late jobs, POs, complaints, quotes and client emails — live from the ERP, grouped by type.',
+        'Nothing to tick. A line disappears by itself when the job, PO or complaint moves on.',
+        'Tap a line to open that job, PO or complaint and do the work there.']),
+      sec('📝', 'My tasks — your own list', '#a5b4fc', [
+        'Only real tasks: ones you add, ones assigned to you, and your daily duties.',
+        'Each task: ✓ Done · ✗ Not done (write why) · → Tomorrow.',
+        'By 7 pm: close every task in My tasks. By 9 pm: add at least one task for tomorrow.',
+        'The 7 pm check counts only My tasks. Late jobs are already scored on their time limits — not counted twice.']),
+      sec('🔐', 'At login', '#86efac', [
+        'The late-jobs list shows once a day. Promise a date for each — or tap “Later” and work from Waiting on you.',
+        'Promised dates show as a green “promised” tag. A missed promise is still shown to your lead.']),
+      !seen ? React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
+        'I have read this') : null,
+      React.createElement("button", { type: 'button', disabled: !canGo || busy, onClick: close, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: canGo ? '#22c55e' : '#334155', color: canGo ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: canGo ? 'pointer' : 'default' } }, busy ? '…' : seen ? 'Close' : 'OK — open the ERP'),
+      React.createElement("div", { style: { fontSize: 12, color: '#64748b', textAlign: 'center', marginTop: 10 } }, 'Read again any time: + (bottom right) → My Tasks — what changed')));
 }
 function CallLogFab({ user }) {
   const me = pbKey(user);
