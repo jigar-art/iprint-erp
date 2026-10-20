@@ -24086,6 +24086,9 @@ function DispPage({
   const [dq, setDq] = useState("");
   const [f, sF] = useState({
     date: td(),
+    actual_cost: "",
+    actual_weight: "",
+    docket_url: "",
     job_id: "",
     dispatch_type: "Delivery Only",
     delivery_boy: "",
@@ -24213,6 +24216,11 @@ function DispPage({
       if (!v || (k === 'delivery_boy' && /^other/i.test(v))) { alert(modeCfg.mode + " needs: " + ((modeCfg.field_labels || {})[k] || k)); return; }
     }
     if (!isCourier && !f.dc_id) { alert("Pick the ERP DC for this job. If none exists, make the DC first (Delivery Challans)."); return; }
+    // 21 Oct 2026 (Jigar): courier v2 — actual bill + docket photo on every paid courier dispatch
+    const paidMode = modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none';
+    if (paidMode && !(+f.actual_cost > 0)) { alert("Enter the actual \u20b9 the courier charged"); return; }
+    if (paidMode && modeCfg.rate_basis === 'per_kg' && !(+f.actual_weight > 0)) { alert("Enter the weight charged on the docket (kg)"); return; }
+    if (paidMode && !f.docket_url) { alert("Upload the docket / courier bill photo"); return; }
     if (f.dispatch_type.includes("Install") && !String(f.installer || '').trim()) { alert("Delivery + Install needs the installer name"); return; }
     if (isCourier) {
       if (!String(f.vendor_name || '').trim()) {
@@ -24238,6 +24246,9 @@ function DispPage({
       batch_no: String(f.batch_no || '').trim() || null,
       delivery_boy: f.dispatch_mode !== 'Client / vendor pickup' ? (f.delivery_boy || "") : "",
       dc_id: isCourier ? null : f.dc_id,
+      actual_cost: +f.actual_cost > 0 ? +f.actual_cost : null,
+      actual_weight: +f.actual_weight > 0 ? +f.actual_weight : null,
+      docket_url: f.docket_url || null,
       challan_no: isCourier ? (f.challan_no || null) : ((jobDcs || []).find(d => d.id === f.dc_id) || {}).dc_no || null
     };
     await addLog(payload);
@@ -24253,7 +24264,10 @@ function DispPage({
       courier_name: "",
       vendor_name: "",
       batch_no: "",
-      dc_id: ""
+      dc_id: "",
+      actual_cost: "",
+      actual_weight: "",
+      docket_url: ""
     }));
   };
   const filtered = useMemo(() => {
@@ -24444,7 +24458,16 @@ function DispPage({
     className: "in",
     value: f[k] || '',
     onChange: e => { const v = e.target.value; sF(p => ({ ...p, [k]: v })); }
-  }))), f.dispatch_type === "Courier to Vendor" && React.createElement(React.Fragment, null, React.createElement(F, {
+  }))), modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none' && React.createElement(F, {
+    l: "Actual \u20b9 charged *"
+  }, React.createElement("input", { className: "in", type: "number", inputMode: "decimal", value: f.actual_cost, onChange: e => { const v = e.target.value; sF(p => ({ ...p, actual_cost: v })); } })),
+  modeCfg && modeCfg.rate_basis === 'per_kg' && React.createElement(F, {
+    l: "Weight charged (kg) *"
+  }, React.createElement("input", { className: "in", type: "number", inputMode: "decimal", value: f.actual_weight, onChange: e => { const v = e.target.value; sF(p => ({ ...p, actual_weight: v })); } })),
+  modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none' && React.createElement(F, {
+    l: "Docket / bill photo *" + (f.docket_url ? " \u2713" : "")
+  }, React.createElement("input", { className: "in", type: "file", accept: "image/*,application/pdf", onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; const url = await uploadFile(fl, 'courier-docket'); if (url) sF(p => ({ ...p, docket_url: url })); } })),
+  f.dispatch_type === "Courier to Vendor" && React.createElement(React.Fragment, null, React.createElement(F, {
     l: "Vendor (sent to)"
   }, React.createElement("input", {
     className: "in",
@@ -35842,18 +35865,56 @@ function ProofFab({ user }) {
       React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { width: '100%', marginTop: 12, padding: '13px 0', borderRadius: 12, border: 'none', background: busy ? '#475569' : '#22c55e', color: '#06210f', fontSize: 15.5, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Save')));
 }
 
+// 21 Oct 2026 (Jigar): courier request v2 — DC, destination, receiver, packages + one labelled photo each, cost basis, ETA, approver checks.
+// Spec: claude/iPrint_ERP_spec_2026-10-21_courier_request_v2.md. DB: erp_courier_request_v2 / erp_courier_inbox_v2 / erp_courier_record.
+const CR_DEST = [['client', 'Client'], ['warehouse', 'Warehouse / place'], ['site_installer', 'Site + installer'], ['vendor', 'Vendor']];
+const CR_PKG = ['roll', 'box', 'bundle', 'sheet', 'crate'];
+const CR_BASIS = { per_kg: '₹ per kg', per_pkg: '₹ per package', per_trip: '₹ for the trip (app fare)', per_roll: '₹ per roll' };
+function crPrintLabels(o) {
+  const n = Math.max(1, Math.min(200, +o.n || 1));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  let cells = '';
+  for (let i = 1; i <= n; i++) cells += '<div class="l"><div class="j">JOB ' + esc(o.job) + '</div><div class="r">' + esc((o.type || 'roll').toUpperCase()) + ' ' + i + ' of ' + n + '</div><div class="d">DC ' + esc(o.dc) + '</div><div class="t">' + esc(o.to) + (o.pin ? ' · ' + esc(o.pin) : '') + '</div><div class="m">' + esc(o.mode || '') + '</div></div>';
+  const w = window.open('', '_blank');
+  if (!w) { if (window._showToast) window._showToast('⚠️ Allow pop-ups to print labels', false); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Labels ' + esc(o.job) + '</title><style>@page{size:A4;margin:8mm}body{margin:0;font-family:Arial,sans-serif}.g{display:grid;grid-template-columns:1fr 1fr;gap:6mm}.l{border:2px solid #000;border-radius:4mm;height:132mm;padding:8mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:4mm;break-inside:avoid}.j{font-size:22pt;font-weight:700}.r{font-size:40pt;font-weight:800}.d{font-size:14pt}.t{font-size:16pt;font-weight:700}.m{font-size:12pt;color:#444}</style></head><body><div class="g">' + cells + '</div><script>setTimeout(function(){window.print()},300)<\/script></body></html>');
+  w.document.close();
+}
 function CourierFab({ user }) {
   const me = pbKey(user);
   const [roles, setRoles] = React.useState(null);
   const [open, setOpen] = React.useState(false);
   const [rows, setRows] = React.useState([]);
   const [modes, setModes] = React.useState([]);
-  const [f, setF] = React.useState({ job: '', mode: '', courier: '', cost: '', note: '' });
+  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '' });
+  const [f, setF] = React.useState(blank);
+  const [dcs, setDcs] = React.useState(null);
+  const [sum, setSum] = React.useState(null);
+  const [vendors, setVendors] = React.useState([]);
+  const [photos, setPhotos] = React.useState([]);
+  const [rec, setRec] = React.useState(null);
   const [msg, setMsg] = React.useState('');
   const [busy, setBusy] = React.useState(false);
-  const load = () => sb.rpc('erp_courier_inbox').then(r => setRows(r.error ? [] : (r.data || [])));
+  const load = () => sb.rpc('erp_courier_inbox_v2').then(r => setRows(r.error ? [] : (r.data || [])));
   React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 300000); return () => clearInterval(t); }, []);
-  React.useEffect(() => { if (open && !modes.length) sb.from('dispatch_mode_config').select('mode').eq('active', true).order('sort').then(r => setModes((r.data || []).map(x => x.mode).filter(x => x !== 'Own vehicle' && x !== 'Client / vendor pickup'))); }, [open]);
+  React.useEffect(() => { if (open && !modes.length) sb.from('dispatch_mode_config').select('mode,rate_basis,required_fields').eq('active', true).order('sort').then(r => setModes((r.data || []).filter(x => x.rate_basis && x.rate_basis !== 'none'))); }, [open]);
+  const findJob = async () => {
+    let jobId = f.job.trim(); if (!jobId) return;
+    if (!jobId.includes('-')) { const jr = await sb.from('jobs').select('id').like('id', jobId + '-%').order('id', { ascending: false }).limit(5); const hits = (jr.data || []).map(x => x.id); if (hits.length) jobId = hits[0]; }
+    const [d, v, j] = await Promise.all([
+      sb.from('delivery_challans').select('id,dc_no,dc_date,to_name').eq('job_id', jobId).order('created_at', { ascending: false }).limit(20),
+      sb.from('purchase_requests').select('vendor_name,po_no').eq('job_id', jobId).not('po_no', 'is', null).is('po_cancelled_at', null),
+      sb.from('jobs').select('install_date').eq('id', jobId).maybeSingle()]);
+    setDcs(d.data || []); setSum(null);
+    const vs = []; (v.data || []).forEach(x => { if (x.vendor_name && !vs.some(y => y.vendor_name === x.vendor_name)) vs.push(x); }); setVendors(vs);
+    setF(p => ({ ...p, jobId, dc: '', inst: (j.data && j.data.install_date) || '' }));
+  };
+  const pickDc = async id => {
+    setF(p => ({ ...p, dc: id }));
+    const r = await sb.rpc('erp_dc_summary', { p_dc: id });
+    const s = (r.data || [])[0] || null; setSum(s);
+    if (s) setF(p => ({ ...p, dc: id, name: p.name || (/^(na|n\/a|no data|\*|-)$/i.test(String(s.to_name || '').trim()) ? '' : s.to_name || ''), pin: p.pin || s.pincode || '' }));
+  };
   if (!roles) return null;
   const mine = roles.find(r => r.person_key === me);
   const card = mine ? mine.card : null;
@@ -35861,62 +35922,120 @@ function CourierFab({ user }) {
   const approver = ['JIGAR', 'AMOL', 'PRIYANKA'].includes(me);
   if (!requester && !approver) return null;
   const waiting = rows.filter(r => r.waiting_for_me).length;
-  const chip = on => ({ padding: '8px 11px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
+  if (!open) return React.createElement(QuickSlot, { k: 'courier', order: 1, label: 'Courier booking', icon: 'courier', badge: waiting, onClick: () => { setOpen(true); setMsg(''); load(); } });
+  const mcfg = modes.find(m => m.mode === f.mode) || null;
+  const basis = mcfg ? mcfg.rate_basis : '';
+  const n = Math.max(0, parseInt(f.n || '0', 10) || 0);
+  const type = basis === 'per_roll' ? 'roll' : f.type;
+  const calc = (() => { const r = +f.rate || 0, e = +f.extras || 0; if (!r) return null; if (basis === 'per_kg') return r * (+f.kg || 0) + e; if (basis === 'per_pkg' || basis === 'per_roll') return r * n + e; if (basis === 'per_trip') return r + e; return null; })();
+  const setPhoto = async (i, file) => { if (!file) return; setBusy(true); const url = await uploadFile(file, 'courier-pkg'); setBusy(false); if (!url) return; setPhotos(p => { const a = p.slice(); a[i] = url; return a; }); };
   const ask = async () => {
     setMsg('');
-    if (!f.job.trim() || !f.mode) { setMsg('⚠️ Job no. and mode are needed'); return; }
+    const pics = photos.slice(0, n).filter(Boolean);
+    const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
+      install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, eta_courier: f.eta, note: f.note };
     setBusy(true);
-    let jobId = f.job.trim();
-    if (!jobId.includes('-')) {
-      const jr = await sb.from('jobs').select('id').like('id', jobId + '-%').order('id', { ascending: false }).limit(5);
-      const hits = (jr.data || []).map(x => x.id);
-      if (hits.length) jobId = hits[0];
-    }
-    const r = await sb.rpc('erp_courier_request', { p_job: jobId, p_mode: f.mode, p_courier: f.courier || null, p_cost: f.cost ? Number(f.cost) : null, p_note: f.note || null });
+    const r = await sb.rpc('erp_courier_request_v2', { p });
     setBusy(false);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
-    setMsg('✓ Request sent for job ' + jobId); setF({ job: '', mode: '', courier: '', cost: '', note: '' }); load();
+    setMsg('✓ Request #' + r.data + ' sent for job ' + f.jobId); setF(blank()); setDcs(null); setSum(null); setVendors([]); setPhotos([]); load();
   };
-  const decide = async (id, ok) => {
-    setBusy(true);
-    const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: null });
-    setBusy(false);
-    setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load();
-  };
-  const fab = React.createElement("button", { type: 'button', onClick: () => { setOpen(true); setMsg(''); load(); }, title: 'Courier approvals',
-    style: { position: 'fixed', right: 16, bottom: 'calc(200px + env(safe-area-inset-bottom))', zIndex: 90, width: 56, height: 56, borderRadius: 28, border: 'none', background: '#a78bfa', color: '#111', fontSize: 24, boxShadow: '0 6px 18px rgba(0,0,0,.45)', cursor: 'pointer' } },
-    '🚚', waiting ? React.createElement("span", { style: { position: 'absolute', top: -4, right: -4, background: '#e0574f', color: '#fff', borderRadius: 999, fontSize: 11, fontWeight: 800, padding: '2px 6px' } }, waiting) : null);
-  if (!open) return React.createElement(QuickSlot, { k: 'courier', order: 1, label: 'Courier booking', icon: 'courier', badge: waiting, onClick: () => { setOpen(true); setMsg(''); load(); } });
+  const decide = async (id, ok) => { setBusy(true); const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: null }); setBusy(false); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load(); };
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const st = r => r.status === 'approved' ? '✓ approved' : r.status === 'rejected' ? '✗ rejected' : r.l1_action === 'approved' ? 'waiting for Jigar' : 'waiting for ' + nm(r.l1_key);
+  const chip = on => ({ padding: '8px 11px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
+  const inp = { fontSize: 13.5, padding: '9px 10px' };
+  const lab = t => React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, marginTop: 6 } }, t);
+  const lvl = { green: ['#052e1a', '#86efac'], amber: ['#3b2f0b', '#fde68a'], red: ['#3f1010', '#fca5a5'], grey: ['#1f2937', '#cbd5e1'] };
+  const fd = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+  const destTxt = r => r.dest_type === 'client' ? 'to client' : r.dest_type === 'warehouse' ? 'to warehouse' : r.dest_type === 'site_installer' ? 'to site, ' + (r.vendor_name || '') + ' installs' : r.dest_type === 'vendor' ? 'to vendor ' + (r.vendor_name || '') : '';
+  const form = requester ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 10, padding: 10, border: '1px solid #1f2937', borderRadius: 10 } },
+    React.createElement("b", { style: { fontSize: 13, color: '#e2e8f0' } }, 'New request'),
+    lab('1 · Job and DC'),
+    React.createElement("div", { style: { display: 'flex', gap: 6 } },
+      React.createElement("input", { className: 'in', value: f.job, onChange: e => setF({ ...f, job: e.target.value }), onBlur: findJob, onKeyDown: e => { if (e.key === 'Enter') findJob(); }, placeholder: 'Job no. (e.g. 11929)', style: { ...inp, flex: 1 } }),
+      React.createElement("button", { type: 'button', onClick: findJob, style: chip(false) }, 'Find')),
+    dcs && !dcs.length ? React.createElement("div", { style: { fontSize: 12, color: '#f87171' } }, 'No DC on job ' + f.jobId + ' — make the DC first') : null,
+    dcs && dcs.length ? React.createElement("select", { className: 'in', value: f.dc, onChange: e => pickDc(e.target.value), style: inp },
+      React.createElement("option", { value: '' }, '-- pick the DC being sent --'),
+      dcs.map(d => React.createElement("option", { key: d.id, value: d.id }, d.dc_no + ' · ' + (d.dc_date || '') + ' · ' + (d.to_name || '')))) : null,
+    sum ? React.createElement("div", { style: { fontSize: 12, color: sum.over_qty ? '#fca5a5' : '#94a3b8' } }, sum.items + ' items · ' + Math.round(sum.pieces) + ' pcs · ' + Math.round(sum.sqft) + ' sqft' + (sum.over_qty ? ' · ⚠️ ' + sum.over_qty + ' item(s) above job qty' : '')) : null,
+    lab('2 · Where is it going'),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, CR_DEST.map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF({ ...f, dest: k }), style: chip(f.dest === k) }, l))),
+    ['site_installer', 'vendor'].includes(f.dest) ? (vendors.length ? React.createElement("select", { className: 'in', value: f.vendor, onChange: e => setF({ ...f, vendor: e.target.value }), style: inp },
+      React.createElement("option", { value: '' }, f.dest === 'vendor' ? '-- vendor (needs a PO on this job) --' : '-- installer (needs a PO on this job) --'),
+      vendors.map(v => React.createElement("option", { key: v.vendor_name, value: v.vendor_name }, v.vendor_name + ' · ' + v.po_no)))
+      : React.createElement("div", { style: { fontSize: 12, color: '#f87171' } }, f.jobId ? 'No vendor PO on job ' + f.jobId + ' — raise the PO first' : 'Find the job first')) : null,
+    f.dest === 'site_installer' ? React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, 'Planned install date',
+      React.createElement("input", { className: 'in', type: 'date', value: f.inst, onChange: e => setF({ ...f, inst: e.target.value }), style: inp })) : null,
+    React.createElement("input", { className: 'in', value: f.name, onChange: e => setF({ ...f, name: e.target.value }), placeholder: f.dest === 'warehouse' ? 'Contact person at the place' : f.dest === 'vendor' ? 'Vendor contact person' : f.dest === 'site_installer' ? 'Site contact person' : "Receiver's name", style: inp }),
+    React.createElement("div", { style: { display: 'flex', gap: 6 } },
+      React.createElement("input", { className: 'in', type: 'tel', inputMode: 'tel', value: f.phone, onChange: e => setF({ ...f, phone: e.target.value }), placeholder: 'Mobile (10 digits)', style: { ...inp, flex: 1 } }),
+      React.createElement("input", { className: 'in', inputMode: 'numeric', value: f.pin, onChange: e => setF({ ...f, pin: e.target.value }), placeholder: 'Pincode', style: { ...inp, width: 100 } })),
+    f.dest === 'warehouse' ? React.createElement("input", { className: 'in', value: f.addr, onChange: e => setF({ ...f, addr: e.target.value }), placeholder: 'Warehouse / place address', style: inp }) : null,
+    lab('3 · Mode and packing'),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, modes.map(m => React.createElement("button", { key: m.mode, type: 'button', onClick: () => setF({ ...f, mode: m.mode, type: m.rate_basis === 'per_roll' ? 'roll' : f.type }), style: chip(f.mode === m.mode) }, m.mode))),
+    React.createElement("input", { className: 'in', value: f.courier, onChange: e => setF({ ...f, courier: e.target.value }), placeholder: 'Courier / transporter name', style: inp }),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+      React.createElement("input", { className: 'in', type: 'number', inputMode: 'numeric', value: f.n, onChange: e => setF({ ...f, n: e.target.value }), placeholder: 'How many', style: { ...inp, width: 90 } }),
+      CR_PKG.map(t => React.createElement("button", { key: t, type: 'button', disabled: basis === 'per_roll' && t !== 'roll', onClick: () => setF({ ...f, type: t }), style: { ...chip(type === t), opacity: basis === 'per_roll' && t !== 'roll' ? .35 : 1 } }, t))),
+    basis === 'per_kg' || f.kg ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.kg, onChange: e => setF({ ...f, kg: e.target.value }), placeholder: 'Total weight (kg)' + (basis === 'per_kg' ? ' — required' : ''), style: inp }) : null,
+    n > 0 && type ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
+      React.createElement("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+        React.createElement("span", { style: { fontSize: 12, color: photos.slice(0, n).filter(Boolean).length === n ? '#4ade80' : '#fbbf24' } }, 'Photo of each ' + type + ' with its label: ' + photos.slice(0, n).filter(Boolean).length + ' of ' + n),
+        React.createElement("button", { type: 'button', onClick: () => crPrintLabels({ n, type, job: f.jobId, dc: sum ? sum.dc_no : '', to: f.name, pin: f.pin, mode: f.mode }), style: chip(false) }, '🖨 Print ' + n + ' labels')),
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, Array.from({ length: Math.min(n, 60) }, (_, i) => React.createElement("label", { key: i, style: { width: 52, height: 52, borderRadius: 8, border: '1px ' + (photos[i] ? 'solid #22c55e' : 'dashed #475569'), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: photos[i] ? '#86efac' : '#94a3b8', cursor: 'pointer', overflow: 'hidden', position: 'relative', background: '#0b1220' } },
+        photos[i] ? React.createElement("img", { src: erpFileUrl(photos[i]), alt: '', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: .55 } }) : null,
+        React.createElement("span", { style: { position: 'relative', fontWeight: 800 } }, (i + 1) + '/' + n),
+        React.createElement("input", { type: 'file', accept: 'image/*', capture: 'environment', style: { display: 'none' }, onChange: e => setPhoto(i, e.target.files && e.target.files[0]) }))))) : null,
+    lab('4 · Cost and ETA'),
+    basis ? React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+      React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.rate, onChange: e => setF({ ...f, rate: e.target.value }), placeholder: CR_BASIS[basis] + (basis === 'per_roll' ? ' (can add later)' : ''), style: { ...inp, flex: 1, minWidth: 150 } }),
+      React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.extras, onChange: e => setF({ ...f, extras: e.target.value }), placeholder: '+ extras ₹', style: { ...inp, width: 100 } }),
+      React.createElement("span", { style: { fontSize: 12.5, color: '#e2e8f0', fontWeight: 800 } }, calc != null ? '= ₹' + Math.round(calc) : basis === 'per_roll' ? 'rate later' : '')) : React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'Pick the mode first'),
+    basis === 'per_roll' ? React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'Porter / Wefast to the station or airport: claim it in Petty cash and pick this 🚚 request there.') : null,
+    React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, 'Delivery date the courier promised',
+      React.createElement("input", { className: 'in', type: 'date', value: f.eta, onChange: e => setF({ ...f, eta: e.target.value }), style: inp })),
+    React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Why this mode? (optional)', style: inp }),
+    React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '11px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Please wait…' : 'Send for approval')) : null;
+  const card_ = r => React.createElement("div", { key: r.id, style: { padding: '9px 0', borderTop: '1px solid #1f2937', fontSize: 12.5, color: '#e2e8f0' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
+      React.createElement("span", null, React.createElement("b", null, '#' + r.id + ' · ' + r.job_id), ' · ', r.client_name || '', ' · ', r.mode, r.courier_name ? ' (' + r.courier_name + ')' : ''),
+      React.createElement("span", { style: { fontSize: 11, color: r.status === 'approved' ? '#4ade80' : r.status === 'rejected' ? '#f87171' : '#fbbf24', whiteSpace: 'nowrap' } }, st(r))),
+    r.v2 ? React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', marginTop: 2 } },
+      [r.pkg_count + ' ' + r.pkg_type + 's', r.weight_kg ? r.weight_kg + ' kg' : null, r.dc_no ? 'DC ' + r.dc_no : null, destTxt(r)].filter(Boolean).join(' · '),
+      React.createElement("br"), '→ ' + (r.consignee_name || '') + ' · ' + (r.consignee_phone || '') + ' · ' + (r.dest_pincode || '') + (r.eta_courier ? ' · ETA ' + fd(r.eta_courier) : ''),
+      React.createElement("br"), r.calc_cost != null ? '₹' + Math.round(r.calc_cost) + (r.rate ? ' (' + Math.round(r.rate) + ' ' + (CR_BASIS[r.rate_basis] || '').replace('₹ ', '') + ')' : '') : 'rate later',
+      +r.firstmile ? ' · first mile ₹' + Math.round(r.firstmile) : '',
+      r.actual_cost != null ? ' · actual ₹' + Math.round(r.actual_cost) + (r.variance ? ' (' + (r.variance > 0 ? '+' : '') + Math.round(r.variance) + ')' : '') : '') :
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, (r.est_cost ? '₹' + r.est_cost + ' · ' : '') + 'old request — no package details'),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'by ' + nm(r.requested_by) + ' · ' + new Date(r.requested_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })),
+    Array.isArray(r.checks) && r.checks.length ? React.createElement("div", { style: { display: 'grid', gap: 3, marginTop: 6 } }, r.checks.map(c => React.createElement("div", { key: c.k, style: { display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 8px', borderRadius: 6, fontSize: 11.5, background: (lvl[c.level] || lvl.grey)[0], color: (lvl[c.level] || lvl.grey)[1] } },
+      React.createElement("span", null, c.label), React.createElement("span", { style: { textAlign: 'right' } }, c.text)))) : null,
+    Array.isArray(r.pkg_photo_urls) && r.pkg_photo_urls.length ? React.createElement("div", { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 } }, r.pkg_photo_urls.map((u, i) => React.createElement("a", { key: i, href: erpFileUrl(u), target: '_blank', rel: 'noreferrer', style: { width: 46, height: 46, borderRadius: 6, overflow: 'hidden', border: '1px solid #334155', display: 'block', position: 'relative' } },
+      React.createElement("img", { src: erpFileUrl(u), alt: (i + 1) + '/' + r.pkg_count, style: { width: '100%', height: '100%', objectFit: 'cover' } }),
+      React.createElement("span", { style: { position: 'absolute', bottom: 0, right: 2, fontSize: 10, fontWeight: 800, color: '#fff', textShadow: '0 0 3px #000' } }, (i + 1) + '/' + r.pkg_count)))) : null,
+    r.waiting_for_me ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
+      React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
+      React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, false), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')) : null);
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
     React.createElement("div", { style: { width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #a78bfa', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))' } },
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
         React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#c4b5fd' } }, '🚚 Courier approvals'),
         React.createElement("button", { type: 'button', onClick: () => setOpen(false), style: { background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
       React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'Any courier / transport (not own vehicle or client pickup) needs Priyanka (banking) or Amol, then Jigar — before the dispatch can be logged.'),
-      requester ? React.createElement("div", { style: { display: 'grid', gap: 8, marginTop: 10, padding: 10, border: '1px solid #1f2937', borderRadius: 10 } },
-        React.createElement("b", { style: { fontSize: 13, color: '#e2e8f0' } }, 'New request'),
-        React.createElement("input", { className: 'in', value: f.job, onChange: e => setF({ ...f, job: e.target.value }), placeholder: 'Job no. (e.g. 11929-2627)', style: { fontSize: 14, padding: '9px 11px' } }),
-        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, modes.map(m => React.createElement("button", { key: m, type: 'button', onClick: () => setF({ ...f, mode: m }), style: chip(f.mode === m) }, m))),
-        React.createElement("div", { style: { display: 'flex', gap: 6 } },
-          React.createElement("input", { className: 'in', value: f.courier, onChange: e => setF({ ...f, courier: e.target.value }), placeholder: 'Courier / transporter', style: { flex: 1, fontSize: 13, padding: '8px 10px' } }),
-          React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.cost, onChange: e => setF({ ...f, cost: e.target.value }), placeholder: '₹ cost', style: { width: 100, fontSize: 13, padding: '8px 10px' } })),
-        React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Why this mode? (optional)', style: { fontSize: 13, padding: '8px 10px' } }),
-        React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '10px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Sending…' : 'Send for approval')) : null,
+      form,
       msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
       React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 4px' } }, 'LAST 14 DAYS'),
-      rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'No requests yet.') :
-      rows.map(r => React.createElement("div", { key: r.id, style: { padding: '8px 0', borderTop: '1px solid #1f2937', fontSize: 12.5, color: '#e2e8f0' } },
-        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
-          React.createElement("span", null, React.createElement("b", null, r.job_id), ' · ', r.client_name || '', ' · ', r.mode, r.courier_name ? ' (' + r.courier_name + ')' : '', r.est_cost ? ' · ₹' + r.est_cost : ''),
-          React.createElement("span", { style: { fontSize: 11, color: r.status === 'approved' ? '#4ade80' : r.status === 'rejected' ? '#f87171' : '#fbbf24', whiteSpace: 'nowrap' } }, st(r))),
-        React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'by ' + nm(r.requested_by) + ' · ' + new Date(r.requested_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + (r.note ? ' · ' + r.note : '')),
-        r.waiting_for_me ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
-          React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true), style: { padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
-          React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, false), style: { padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')) : null))));
+      rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'No requests yet.') : rows.map(card_),
+      approver || ['SHREYA'].includes(me) ? React.createElement("div", { style: { marginTop: 12 } },
+        React.createElement("button", { type: 'button', onClick: () => rec ? setRec(null) : sb.rpc('erp_courier_record').then(r => setRec(r.error ? [] : (r.data || []))), style: chip(!!rec) }, rec ? '▾ Courier record' : '▸ Courier record'),
+        rec ? (rec.length ? React.createElement("div", { style: { marginTop: 6, fontSize: 12 } }, rec.map((x, i) => React.createElement("div", { key: i, style: { display: 'flex', justifyContent: 'space-between', gap: 8, padding: '5px 0', borderTop: '1px solid #1f2937', color: '#e2e8f0' } },
+          React.createElement("span", null, x.courier + ' · ' + x.mode + ' · ' + x.bookings + ' booking' + (x.bookings > 1 ? 's' : '')),
+          React.createElement("span", { style: { color: '#94a3b8', whiteSpace: 'nowrap' } }, (x.avg_rate != null ? '₹' + x.avg_rate + ' ' + (CR_BASIS[x.basis] || '').replace('₹ ', '') + ' · ' : '') + x.on_time + ' on time · ' + x.late + ' late' + (x.over_budget ? ' · ' + x.over_budget + ' over budget' : '')))))
+          : React.createElement("div", { style: { fontSize: 12, color: '#64748b', marginTop: 6 } }, 'No completed bookings yet — the record builds as Manoj / Murli book.')) : null) : null));
 }
-
 function ReportMistakeCard({ user }) {
   const [opts, setOpts] = React.useState(null);
   const [f, setF] = React.useState({ person: '', code: '', job: '', note: '' });
@@ -36257,6 +36376,10 @@ function TasksNoteGate({ user }) {
       sec('🔐', 'At login', '#86efac', [
         'The late-jobs list shows once a day. Promise a date for each — or tap “Later” and work from Waiting on you.',
         'Promised dates show as a green “promised” tag. A missed promise is still shown to your lead.']),
+      sec('🚚', 'Courier and transport (from 21 Oct)', '#c4b5fd', [
+        'Manoj / Murli: a courier request now needs the DC, receiver name + mobile, packages with one labelled photo each, cost basis and the courier’s delivery date.',
+        'At dispatch: enter the actual ₹ and upload the docket photo.',
+        'Porter / Wefast / transport claims in Petty cash must pick the 🚚 request they belong to.']),
       !seen ? React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
         React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
         'I have read this') : null,
@@ -53655,6 +53778,17 @@ function PettyCashPage({
   }, [isCashier, isAdmin, reqs]);
   const jobNums = form.jobs.split(/[\s,/&]+/).map(x => x.trim().split('-')[0]).filter(x => /^\d+$/.test(x));
   const closedSt = cfg && cfg.job_closed_statuses || ['Billing Done', 'Cancelled', 'Cash Pending', 'Cash Received'];
+  // 21 Oct 2026 (Jigar): courier / transport claims must name the 🚚 request (first mile to station / airport, or the delivery itself)
+  const CR_CATS = ['Courier - Porter', 'Courier - Wefast', 'Transport / Cargo'];
+  const crNeeded = CR_CATS.includes(form.category);
+  const [crOpts, setCrOpts] = useState(null);
+  const crJobKey = jobNums.join(',');
+  useEffect(() => {
+    if (!crNeeded || !jobNums.length) { setCrOpts(null); return; }
+    let dead = false;
+    sb.rpc('erp_courier_for_jobs', { p_jobs: jobNums }).then(r => { if (!dead) setCrOpts(r.error ? [] : (r.data || [])); });
+    return () => { dead = true; };
+  }, [crNeeded, crJobKey]);
   const exemptCats = cfg && cfg.job_exempt_categories || ['Office Pantry', 'Office Expense', 'Bank Work', 'Mobile Recharge', 'Repairs / Maintenance'];
   useEffect(() => {
     let dead = false;
@@ -54030,6 +54164,10 @@ function PettyCashPage({
       show('Job number is required. Only office expenses (' + exemptCats.join(', ') + ') can go without a job.', false);
       return;
     }
+    if (crNeeded && !form.courier) {
+      show('Pick the \ud83d\ude9a courier request this payment is for', false);
+      return;
+    }
     if (!form.firm) {
       show('Pick the firm' + (jobFirms.length === 1 ? ' - job is ' + jobFirms[0] : ''), false);
       return;
@@ -54069,7 +54207,8 @@ function PettyCashPage({
       firm: form.firm || null,
       category: form.category && form.category !== 'Other' ? form.category : null,
       meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
-      mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null
+      mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null,
+      courier_request_id: crNeeded && form.courier ? Number(form.courier) : null
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
@@ -55004,7 +55143,13 @@ function PettyCashPage({
       color: j.ok ? '#10b981' : '#f47067',
       lineHeight: 1.6
     }
-  }, j.ok ? '\u2713 ' : '\u2717 ', j.text))) : null, form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
+  }, j.ok ? '\u2713 ' : '\u2717 ', j.text))) : null, crNeeded ? React.createElement("div", {
+    style: { marginBottom: 12 }
+  }, React.createElement("label", { style: lbl }, "\ud83d\ude9a Courier request this is for - required"),
+    crOpts && crOpts.length ? React.createElement("select", { value: form.courier || '', onChange: e => setF('courier', e.target.value), style: inp },
+      React.createElement("option", { value: '' }, '-- pick the \ud83d\ude9a request --'),
+      crOpts.map(o => React.createElement("option", { key: o.id, value: String(o.id) }, o.label)))
+    : React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, jobNums.length ? (crOpts === null ? 'Checking\u2026' : 'No \ud83d\ude9a request on these jobs - ask Manoj / Murli to raise it first') : 'Enter the job number first')) : null, form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: '#64748b',
