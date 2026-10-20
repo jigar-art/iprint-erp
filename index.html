@@ -35905,7 +35905,7 @@ function CourierFab({ user }) {
   const [open, setOpen] = React.useState(false);
   const [rows, setRows] = React.useState([]);
   const [modes, setModes] = React.useState([]);
-  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '' });
+  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '' });
   const [f, setF] = React.useState(blank);
   const [dcs, setDcs] = React.useState(null);
   const [sum, setSum] = React.useState(null);
@@ -35957,12 +35957,16 @@ function CourierFab({ user }) {
   const ask = async () => {
     setMsg('');
     const pics = photos.slice(0, n).filter(Boolean);
+    if (f.mode === 'Running Bus' && f.busFrom.trim().length < 4) { setMsg('⚠️ Bus: write where the receiver collects it (bus office / stand)'); return; }
+    if (f.mode === 'Running Bus' && !f.busDep) { setMsg('⚠️ Bus: give the departure date and time'); return; }
+    const busNote = f.mode === 'Running Bus' ? 'Bus departs ' + new Date(f.busDep).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · collect from ' + f.busFrom.trim() : '';
     const onIdx = dcItems.map((x, i) => i).filter(i => tick[i]);
     if (dcItems.length && !onIdx.length) { setMsg('⚠️ Tick at least one item going in this booking'); return; }
     const itemIds = dcItems.length && onIdx.length < dcItems.length ? onIdx.map(i => dcItems[i].item_id).filter(Boolean) : null;
     const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
       install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
-      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, eta_courier: f.eta, note: f.note, item_ids: itemIds };
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds };
+    if (f.mode === 'Running Bus') p.dest_address = 'Collect from: ' + f.busFrom.trim();
     setBusy(true);
     const r = await sb.rpc('erp_courier_request_v2', { p });
     setBusy(false);
@@ -36016,7 +36020,11 @@ function CourierFab({ user }) {
     f.dest === 'warehouse' ? React.createElement("input", { className: 'in', value: f.addr, onChange: e => setF({ ...f, addr: e.target.value }), placeholder: 'Warehouse / place address', style: inp }) : null,
     lab('3 · Mode and packing'),
     React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, modes.map(m => React.createElement("button", { key: m.mode, type: 'button', onClick: () => setF({ ...f, mode: m.mode, type: m.rate_basis === 'per_roll' ? 'roll' : f.type }), style: chip(f.mode === m.mode) }, m.mode))),
-    React.createElement("input", { className: 'in', value: f.courier, onChange: e => setF({ ...f, courier: e.target.value }), placeholder: 'Courier / transporter name', style: inp }),
+    React.createElement("input", { className: 'in', value: f.courier, onChange: e => setF({ ...f, courier: e.target.value }), placeholder: f.mode === 'Running Bus' ? 'Bus operator / bus no.' : 'Courier / transporter name', style: inp }),
+    // 21 Oct 2026 (Jigar): bus parcels are collected from the bus office at the destination - where + when
+    f.mode === 'Running Bus' ? React.createElement("input", { className: 'in', value: f.busFrom, onChange: e => setF({ ...f, busFrom: e.target.value }), placeholder: 'Collect from: bus office / stand at destination (name + area)', style: inp }) : null,
+    f.mode === 'Running Bus' ? React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, 'Bus departs',
+      React.createElement("input", { className: 'in', type: 'datetime-local', value: f.busDep, onChange: e => setF({ ...f, busDep: e.target.value }), style: inp })) : null,
     React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'numeric', value: f.n, onChange: e => setF({ ...f, n: e.target.value }), placeholder: 'How many', style: { ...inp, width: 90 } }),
       CR_PKG.map(t => React.createElement("button", { key: t, type: 'button', disabled: basis === 'per_roll' && t !== 'roll', onClick: () => setF({ ...f, type: t }), style: { ...chip(type === t), opacity: basis === 'per_roll' && t !== 'roll' ? .35 : 1 } }, t))),
@@ -36045,6 +36053,7 @@ function CourierFab({ user }) {
       React.createElement("span", { style: { fontSize: 11, color: r.status === 'approved' ? '#4ade80' : r.status === 'rejected' ? '#f87171' : '#fbbf24', whiteSpace: 'nowrap' } }, st(r))),
     r.v2 ? React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', marginTop: 2 } },
       [r.pkg_count + ' ' + r.pkg_type + 's', r.weight_kg ? r.weight_kg + ' kg' : null, r.dc_no ? 'DC ' + r.dc_no : null, destTxt(r)].filter(Boolean).join(' · '),
+      r.mode === 'Running Bus' && r.dest_address ? React.createElement(React.Fragment, null, React.createElement("br"), React.createElement("span", { style: { color: '#fde68a' } }, '🚌 ' + r.dest_address + ((r.note || '').match(/Bus departs [^·]+/) ? ' · ' + (r.note || '').match(/Bus departs [^·]+/)[0].trim() : ''))) : null,
       React.createElement("br"), '→ ' + (r.consignee_name || '') + ' · ' + (r.consignee_phone || '') + ' · ' + (r.dest_pincode || '') + (r.eta_courier ? ' · ETA ' + fd(r.eta_courier) : ''),
       React.createElement("br"), r.calc_cost != null ? '₹' + Math.round(r.calc_cost) + (r.rate ? ' (' + Math.round(r.rate) + ' ' + (CR_BASIS[r.rate_basis] || '').replace('₹ ', '') + ')' : '') : 'rate later',
       +r.firstmile ? ' · first mile ₹' + Math.round(r.firstmile) : '',
