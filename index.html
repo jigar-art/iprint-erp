@@ -1390,8 +1390,108 @@ async function erpTaskAct(ids, kind, note) {
   for (const c of chunks) { const r = await sb.from('daily_tasks').update(patch).in('id', c); if (r.error) return { error: r.error.message }; }
   return { n: ids.length, label: kind === 'done' ? 'done' : kind === 'stuck' ? 'marked not done' : 'dropped' };
 }
+// 21 Oct 2026 (Jigar): tasks split. Late ERP items are no longer copied into daily_tasks as "Clear X —" rows.
+// They show live in "Waiting on you" from erp_my_waiting_v1() and drop off the moment the job / PO / complaint moves on.
+// "My tasks" keeps only real tasks (typed, assigned, recurring, courier, v5 ticks).
+function erpIsMirrorTask(t) { return !!(t && (t.linked_complaint_id || /^Clear \S+ — /.test(t.task_text || ''))); }
+const ERP_WAIT_LBL = { complaint: '📣 Complaints', po: '📦 PO inward (GRN)', quote: '💬 Quotes to send', email_handover: '✉️ Client emails', bank: '🏦 POD / installed photos' };
+function erpWaitGroup(r) {
+  const k = r.kind || '';
+  if (k.indexOf('complaint') === 0) return 'complaint';
+  if (k === 'bank_pod' || k === 'bank_image') return 'bank';
+  if (k === 'stage') return 'stage:' + (r.stage || 'Job stage');
+  return k;
+}
+function erpWaitGroupLabel(g) { return g.indexOf('stage:') === 0 ? '🏭 ' + g.slice(6) : (ERP_WAIT_LBL[g] || g); }
+function erpWaitOpen(r) {
+  const nav = window._navigateToRecord; if (!nav) return;
+  const k = r.kind || '';
+  if (k.indexOf('complaint') === 0) return nav('complaint', r.ref);
+  if (k === 'po') return nav('po', r.ref);
+  if (k === 'quote') return nav('quote', r.ref);
+  const j = ['stage', 'bank_pod', 'bank_image'].includes(k) ? r.ref : r.job_id;
+  if (j) nav('job', j);
+}
+function erpWaitDedupe(rows) {
+  const seen = new Set();
+  return (rows || []).filter(r => { const key = (r.kind || '').indexOf('complaint') === 0 ? 'c' + r.ref : r.kind + '|' + r.ref + '|' + (r.stage || ''); if (seen.has(key)) return false; seen.add(key); return true; });
+}
+function WaitingOnYouCard({ rows: given, compact, onMore }) {
+  const [own, setOwn] = React.useState(null);
+  const [openG, setOpenG] = React.useState({});
+  const selfLoad = given === undefined;
+  React.useEffect(() => {
+    if (!selfLoad) return;
+    let off = false;
+    sb.rpc('erp_my_waiting_v1').then(r => { if (!off) setOwn(r.error ? [] : (r.data || [])); });
+    return () => { off = true; };
+  }, [selfLoad]);
+  const src = selfLoad ? own : given;
+  const box = { background: '#120f0a', border: '1px solid #e3a00855', borderRadius: 10, padding: compact ? '8px 10px' : 12, marginBottom: compact ? 8 : 10 };
+  if (src === null) return React.createElement("div", { style: box }, React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, '⏳ Waiting on you — loading…'));
+  const rows = erpWaitDedupe(src);
+  const groups = {};
+  rows.forEach(r => { const g = erpWaitGroup(r); (groups[g] = groups[g] || []).push(r); });
+  const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+  const todayISO = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10);
+  const fd = d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+  const cap = compact ? 12 : 150;
+  return React.createElement("div", { style: box },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("span", { style: { fontSize: compact ? 12 : 14, fontWeight: 800, color: '#e3a008' } }, '⏳ Waiting on you'),
+      React.createElement("span", { style: { fontSize: compact ? 11 : 12, fontWeight: 800, color: rows.length ? '#fca5a5' : '#4ade80' } }, rows.length ? rows.length + ' late' : 'nothing late')),
+    compact ? null : React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, 'Live from the ERP. An item clears itself when the job, PO or complaint moves on — nothing to tick here. Tap a line to open it.'),
+    rows.length === 0 ? React.createElement("div", { style: { fontSize: 11.5, color: '#64748b', padding: '6px 0 2px' } }, '✨ Nothing late on you right now.') : null,
+    keys.map(g => {
+      const list = groups[g]; const on = !!openG[g];
+      const oldest = Math.max(...list.map(r => Number(r.days_late) || 0));
+      return React.createElement("div", { key: g, style: { borderTop: '1px solid #2a2314', marginTop: 4 } },
+        React.createElement("button", { type: 'button', onClick: () => setOpenG(p => ({ ...p, [g]: !p[g] })), style: { display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: compact ? '6px 2px' : '8px 2px', background: 'transparent', border: 'none', color: '#e2e8f0', cursor: 'pointer', textAlign: 'left', fontSize: compact ? 12 : 13 } },
+          React.createElement("span", { style: { width: 12, color: '#94a3b8' } }, on ? '▾' : '▸'),
+          React.createElement("span", { style: { flex: 1, fontWeight: 700 } }, erpWaitGroupLabel(g)),
+          React.createElement("span", { style: { fontSize: 11, color: '#f87171', whiteSpace: 'nowrap' } }, 'oldest ' + Math.floor(oldest) + ' d'),
+          React.createElement("span", { style: { minWidth: 30, textAlign: 'center', fontSize: 11.5, fontWeight: 800, padding: '1px 7px', borderRadius: 10, background: '#7f1d1d', color: '#fecaca' } }, list.length)),
+        on ? React.createElement("div", { style: { paddingBottom: 6 } },
+          list.slice(0, cap).map(r => {
+            const txt = r.detail ? String(r.detail).replace(/^Clear #?\S+ — /, '') : (r.stage || r.kind) + (r.client_name ? ' · ' + r.client_name : '');
+            const cf = r.committed_for;
+            return React.createElement("div", { key: r.kind + r.ref + (r.stage || ''), onClick: () => erpWaitOpen(r), style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 4px 5px 20px', fontSize: compact ? 11 : 12, cursor: 'pointer', borderRadius: 6 } },
+              React.createElement("span", { style: { fontWeight: 800, color: '#e2e8f0', minWidth: compact ? 56 : 74, whiteSpace: 'nowrap' } }, r.kind && r.kind.indexOf('complaint') === 0 ? '#' + r.ref : r.ref),
+              React.createElement("span", { style: { flex: 1, minWidth: 0, color: '#cbd5e1', overflowWrap: 'anywhere', lineHeight: 1.35 } }, txt,
+                cf ? React.createElement("span", { style: { marginLeft: 6, fontSize: 10, padding: '1px 6px', borderRadius: 4, fontWeight: 700, whiteSpace: 'nowrap', background: '#0f2a1a', color: '#86efac' } }, (cf === todayISO ? 'promised today' : 'promised ' + fd(cf))) : null),
+              React.createElement("span", { style: { color: '#f87171', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap' } }, Math.floor(Number(r.days_late) || 0) + ' d'));
+          }),
+          list.length > cap ? React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', padding: '4px 20px', cursor: onMore ? 'pointer' : 'default' }, onClick: () => onMore && onMore() }, '+ ' + (list.length - cap) + ' more' + (onMore ? ' — open My Tasks →' : '')) : null) : null);
+    }));
+}
+// 21 Oct 2026 (Jigar): lead view — late items per person by type. Rows come only for JIGAR (all) and AMOL (all except accounts).
+function TeamWaitingCard() {
+  const [rows, setRows] = React.useState(null);
+  const [openP, setOpenP] = React.useState(null);
+  React.useEffect(() => { let off = false; sb.rpc('erp_team_waiting_v1').then(r => { if (!off) setRows(r.error ? [] : (r.data || [])); }); return () => { off = true; }; }, []);
+  if (!rows || rows.length === 0) return null;
+  const per = {};
+  rows.forEach(r => { const p = per[r.person] = per[r.person] || { person: r.person, n: 0, oldest: 0, groups: [] }; p.n += r.n; p.oldest = Math.max(p.oldest, Number(r.oldest_days) || 0); p.groups.push(r); });
+  const list = Object.values(per).sort((a, b) => b.n - a.n);
+  const total = list.reduce((s, p) => s + p.n, 0);
+  const lbl = g => ERP_WAIT_LBL[g] || ('🏭 ' + g);
+  return React.createElement("div", { style: { background: '#0d1220', border: '1px solid #60a5fa55', borderRadius: 10, padding: 12, marginBottom: 10 } },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("span", { style: { fontSize: 14, fontWeight: 800, color: '#93c5fd' } }, '👥 Team — waiting on each person'),
+      React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, total + ' late items · ' + list.length + ' people')),
+    React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, 'Live counts. Tap a name to see the split by type.'),
+    list.map(p => React.createElement("div", { key: p.person, style: { borderTop: '1px solid #1f2937' } },
+      React.createElement("button", { type: 'button', onClick: () => setOpenP(openP === p.person ? null : p.person), style: { display: 'flex', width: '100%', gap: 8, alignItems: 'center', padding: '7px 2px', background: 'transparent', border: 'none', color: '#e2e8f0', cursor: 'pointer', textAlign: 'left', fontSize: 12.5 } },
+        React.createElement("span", { style: { width: 12, color: '#94a3b8' } }, openP === p.person ? '▾' : '▸'),
+        React.createElement("span", { style: { flex: 1, fontWeight: 700 } }, p.person.charAt(0) + p.person.slice(1).toLowerCase()),
+        React.createElement("span", { style: { fontSize: 11, color: p.oldest >= 14 ? '#f87171' : '#fbbf24', whiteSpace: 'nowrap' } }, 'oldest ' + Math.floor(p.oldest) + ' d'),
+        React.createElement("span", { style: { minWidth: 34, textAlign: 'center', fontSize: 12, fontWeight: 800, padding: '1px 7px', borderRadius: 10, background: p.n >= 50 ? '#7f1d1d' : '#3b2f0b', color: p.n >= 50 ? '#fecaca' : '#fde68a' } }, p.n)),
+      openP === p.person ? React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 2px 8px 22px' } },
+        p.groups.slice().sort((a, b) => b.n - a.n).map(g => React.createElement("span", { key: g.grp, style: { fontSize: 11, padding: '2px 8px', borderRadius: 6, background: '#1a2333', color: '#cbd5e1' } }, lbl(g.grp) + ' · ' + g.n + ' · ' + Math.floor(Number(g.oldest_days) || 0) + ' d'))) : null)));
+}
 function MyTasksFloatingWidget({
   tasks,
+  waiting,
   autoTasks,
   onOpen
 }) {
@@ -1477,7 +1577,7 @@ function MyTasksFloatingWidget({
       overflowY: 'auto',
       padding: '8px 10px'
     }
-  }, badgeCount === 0 && done.length === 0 && auto.length === 0 && React.createElement("div", {
+  }, React.createElement(WaitingOnYouCard, { rows: waiting || [], compact: true, onMore: () => { setOpen(false); onOpen?.(); } }), badgeCount === 0 && done.length === 0 && auto.length === 0 && React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '24px 8px',
@@ -1489,7 +1589,7 @@ function MyTasksFloatingWidget({
       fontSize: 32,
       marginBottom: 6
     }
-  }, "\u2728"), React.createElement("div", null, "No tasks for today."), React.createElement("div", {
+  }, "\u2728"), React.createElement("div", null, "No tasks of your own today."), React.createElement("div", {
     style: {
       fontSize: 9,
       marginTop: 4
@@ -1769,7 +1869,9 @@ function MainApp({
       pr: 'myprs',
       grn: 'grn',
       sales_activity: 'sales',
-      complaint: 'complaints'
+      complaint: 'complaints',
+      po: 'grn2',
+      quote: 'quotes'
     };
     const dest = map[rt];
     if (!dest) return;
@@ -1781,6 +1883,7 @@ function MainApp({
       }));
     } catch (e) {}
     if (rt === 'complaint' && typeof window._complaintFocus === 'function') window._complaintFocus(rid);
+    if (rt === 'job') setSearch(String(rid));
     setPg(dest);
   };
   const [myTasks, setMyTasks] = useState([]);
@@ -1801,7 +1904,7 @@ function MainApp({
           ascending: false
         }).limit(50)]);
         if (!cancelled) {
-          setMyTasks(taskRes.data || []);
+          setMyTasks((taskRes.data || []).filter(t => !erpIsMirrorTask(t)));
           setMyInvoicesToday(invRes.data || []);
         }
       } catch (e) {
@@ -1816,6 +1919,15 @@ function MainApp({
     };
   }, [user?.name]);
   const myTaskPendingCount = (myTasks || []).filter(t => t.status === 'pending' || t.status === 'stuck').length;
+  const [myWaiting, setMyWaiting] = useState([]);
+  useEffect(() => {
+    if (!user?.name) return;
+    let off = false;
+    const f = () => sb.rpc('erp_my_waiting_v1').then(r => { if (!off && !r.error) setMyWaiting(r.data || []); });
+    f(); window._refreshWaiting = f;
+    const tid = setInterval(f, 600000);
+    return () => { off = true; clearInterval(tid); };
+  }, [user?.name]);
   window._refreshMyTasks = async () => {
     if (!user?.name) return;
     const uname = (user.name || '').toUpperCase();
@@ -1829,7 +1941,7 @@ function MainApp({
       } = await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,linked_complaint_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
         ascending: true
       }).limit(200);
-      setMyTasks(data || []);
+      setMyTasks((data || []).filter(t => !erpIsMirrorTask(t)));
     } catch (e) {}
   };
   const myAutoTasks = React.useMemo(() => {
@@ -4160,6 +4272,7 @@ function MainApp({
     }
   }, "\u2713 ", toast.m), React.createElement(MyTasksFloatingWidget, {
     tasks: myTasks,
+    waiting: myWaiting,
     autoTasks: myAutoTasks,
     onOpen: () => setPg('mytasks')
   }), React.createElement(QuickActionsFab, null));
@@ -26016,7 +26129,7 @@ function GRNReceivePage({
   const STATUS_FILTERS = ['PO Generated', 'Partially Received', 'PO Sent', 'Approved', 'All', 'Site / service'];
   const [filter, setFilter] = React.useState('PO Generated');
   const [receiving, setReceiving] = React.useState(null);
-  const [searchQ, setSearchQ] = React.useState('');
+  const [searchQ, setSearchQ] = React.useState(() => { try { const f = JSON.parse(sessionStorage.getItem('erp_focus_ref') || 'null'); if (f && f.rt === 'po' && Date.now() - f.at < 15000) { sessionStorage.removeItem('erp_focus_ref'); return String(f.rid); } } catch (e) {} return ''; });
   const grnPanelRef = React.useRef(null);
   const invoiceInputRef = React.useRef(null);
   const [gf, setGf] = React.useState({
@@ -36300,6 +36413,7 @@ function CommitGate({ user }) {
   const k = r => r.kind + '|' + r.ref + '|' + (r.stage || '');
   React.useEffect(() => {
     try { if (sessionStorage.getItem('commit_done_' + todayISO) === '1') { setRows([]); return; } } catch (e) {}
+    try { if (localStorage.getItem('commit_seen_' + me + '_' + todayISO) === '1') { setRows([]); return; } } catch (e) {}
     sb.rpc('erp_my_commit_needed_v2').then(r => setRows(r.error ? [] : (r.data || [])));
   }, [user && user.name]);
   const shell = (title, sub, body) => React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99990, background: 'rgba(3,6,12,.94)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
@@ -36325,7 +36439,10 @@ function CommitGate({ user }) {
     const items = rows.map(r => ({ kind: r.kind, ref: r.ref, stage: r.stage || '', date: plan[k(r)].date, reason: plan[k(r)].reason || '' }));
     const r = await sb.rpc('erp_commit_items', { p_items: items });
     if (r.error) { setBusy(false); setErr(r.error.message); return; }
-    try {
+    // 21 Oct 2026 (Jigar): commitments still save; gate items are no longer copied into daily_tasks (they live in "Waiting on you").
+    if (window._refreshWaiting) window._refreshWaiting();
+    try { localStorage.setItem('commit_seen_' + me + '_' + todayISO, '1'); } catch (e) {}
+    if (false) try {
       const uname = (user.name || '').toUpperCase();
       const ex = await sb.from('daily_tasks').select('task_text,linked_complaint_id').eq('user_name', uname).eq('task_date', todayISO);
       const have = new Set((ex.data || []).map(x => (x.task_text || '').trim().toLowerCase()));
@@ -36342,10 +36459,11 @@ function CommitGate({ user }) {
     setBusy(false); setRows([]);
   };
   const fd = d => new Date(d + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  const later = () => { try { localStorage.setItem('commit_seen_' + me + '_' + todayISO, '1'); sessionStorage.setItem('commit_done_' + todayISO, '1'); } catch (e) {} setRows([]); };
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99990, background: 'rgba(3,6,12,.94)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
     React.createElement("div", { style: { maxWidth: 760, margin: '0 auto', background: '#0f172a', border: '1px solid #e0574f', borderRadius: 12, padding: 14 } },
       React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#fca5a5' } }, '⏰ Before you start — ' + rows.length + ' late job' + (rows.length > 1 ? 's' : '')),
-      React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '4px 0 10px' } }, 'For each late job, commit when you will clear it: today, or a later date with the reason. Jobs for today go into your plan. Late jobs keep costing points every day until cleared, and missed commitments are shown to your lead.'),
+      React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '4px 0 10px' } }, 'Promise a date for each late job: today, or a later date with the reason. Late jobs keep costing points every day until cleared, and missed promises are shown to your lead. You can also skip for now — the full list stays under ⏳ Waiting on you in My Tasks.'),
       React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', position: 'sticky', top: 0, background: '#0f172a', padding: '6px 0', zIndex: 1, borderBottom: '1px solid #1f2937' } },
         React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 4, alignItems: 'center' } },
           React.createElement("input", { type: 'checkbox', checked: picked.length === rows.length, onChange: e => { const o = {}; if (e.target.checked) rows.forEach(r => { o[k(r)] = true; }); setSel(o); } }), picked.length + ' selected'),
@@ -36360,6 +36478,7 @@ function CommitGate({ user }) {
         React.createElement("span", { style: { color: c ? '#4ade80' : '#f59e0b', fontSize: 11, minWidth: 90, textAlign: 'right', whiteSpace: 'nowrap' } }, c ? (c.date === todayISO ? 'today' : fd(c.date)) : 'no date')); }),
       React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' } },
         React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: done === rows.length ? '#15803d' : '#1f2937' } }, busy ? '…' : 'Save & open ERP (' + done + ' / ' + rows.length + ')'),
+        React.createElement("button", { type: 'button', disabled: busy, onClick: later, style: { padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#cbd5e1', border: '1px solid #475569', background: 'transparent' } }, 'Later — open ERP'),
         err ? React.createElement("span", { style: { fontSize: 12, color: '#f87171' } }, err) : null)));
 }
 // ── v4.1 Site crew per job (2026-10-14): who actually goes to site; crew share the job's installation items ──
@@ -36481,7 +36600,7 @@ function DayPlanCard({ user }) {
       sb.from('daily_tasks').select('id,task_text,status,stuck_note,linked_job_id,carry_count,source').eq('user_name', uname).eq('task_date', todayISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
       sb.from('daily_tasks').select('id,task_text,status,linked_job_id,source_task_id,carry_count').eq('user_name', uname).eq('task_date', tomISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
       sb.rpc('erp_my_at_risk')]);
-    setToday(a.data || []); setTom(b.data || []); setRisk(c.error ? [] : (c.data || []));
+    setToday((a.data || []).filter(t => !erpIsMirrorTask(t))); setTom((b.data || []).filter(t => !erpIsMirrorTask(t))); setRisk(c.error ? [] : (c.data || []));
   };
   React.useEffect(() => { if (uname) load(); }, [uname]);
   if (!uname || today === null) return null;
@@ -36492,7 +36611,7 @@ function DayPlanCard({ user }) {
   const tomTexts = new Set(tom.map(t => (t.task_text || '').trim().toLowerCase()));
   const carryOpts = today.filter(t => t.status !== 'done' && !carried.has(t.id));
   const riskOpts = risk.filter(r => r.kind === 'stage' || r.kind === 'bank_image' || r.kind === 'bank_pod').slice(0, 30)
-    .map(r => ({ key: 'r' + r.kind + r.ref, text: 'Clear ' + r.ref + ' — ' + (r.kind === 'stage' ? r.stage : r.kind === 'bank_pod' ? 'upload POD' : 'upload installed image') + (r.client_name ? ' (' + r.client_name + ')' : ''), job: r.ref, late: new Date(r.due_at).getTime() < Date.now() }))
+    .map(r => ({ key: 'r' + r.kind + r.ref, text: 'Finish ' + r.ref + ' — ' + (r.kind === 'stage' ? r.stage : r.kind === 'bank_pod' ? 'upload POD' : 'upload installed image') + (r.client_name ? ' (' + r.client_name + ')' : ''), job: r.ref, late: new Date(r.due_at).getTime() < Date.now() }))
     .filter(o => !tomTexts.has(o.text.toLowerCase()));
   const close = async (t, st) => {
     if (st === 'stuck' && !(why[t.id] || '').trim()) { setAskWhy(t.id); return; }
@@ -45577,7 +45696,7 @@ function ReportsPage({
       setSiteInvoices(si.data || []);
       setDcs(dc.data || []);
       setTodayLogs(dl.data || []);
-      setTodayTasks(dt.data || []);
+      setTodayTasks((dt.data || []).filter(t => !erpIsMirrorTask(t)));
       setGrnRows(gr.data || []);
       setSalesActivities(sa.data || []);
       const mine = (dl.data || []).find(l => (l.user_name || '').toUpperCase() === uname);
@@ -45647,6 +45766,7 @@ function ReportsPage({
           }
           pastUnfinished.forEach(t => {
             if (hasChild.has(t.id)) return;
+            if (erpIsMirrorTask(t)) return;
             const tKey = (t.task_text || '').trim().toLowerCase();
             if (textsToday.has(tKey)) return;
             textsToday.add(tKey);
@@ -46991,7 +47111,7 @@ function ReportsPage({
       padding: 20,
       fontSize: 11
     }
-  }, "Loading\u2026"), !loading && tab === 'me' && React.createElement("div", null, React.createElement("div", {
+  }, "Loading\u2026"), !loading && tab === 'me' && React.createElement("div", null, forceTab === 'me' && /^(JIGAR|AMOL)\b/.test(uname) && React.createElement(TeamWaitingCard, null), forceTab === 'me' && React.createElement(WaitingOnYouCard, null), React.createElement("div", {
     style: {
       ...cardStyle,
       borderColor: '#7f77dd40',
@@ -47011,7 +47131,7 @@ function ReportsPage({
       fontWeight: 700,
       color: '#afa9ec'
     }
-  }, "\uD83D\uDCCB My Tasks"), React.createElement("span", {
+  }, "\uD83D\uDCDD My tasks"), React.createElement("span", {
     style: {
       fontSize: 9,
       color: '#64748b'
@@ -48028,7 +48148,7 @@ function ReportsPage({
       fontSize: 9,
       color: '#64748b'
     }
-  }, "auto-tagged: ", tagsFor(uname)))), React.createElement("div", {
+  }, "auto-tagged: ", tagsFor(uname)))), !forceTab && React.createElement(React.Fragment, null, React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'baseline',
@@ -48168,7 +48288,7 @@ function ReportsPage({
       fontSize: 10,
       marginTop: 4
     }
-  }, "Production/printing actions are not yet attributed (Phase 2)."))), !loading && tab === 'stalls' && isTeamViewer && React.createElement("div", null, React.createElement("div", {
+  }, "Production/printing actions are not yet attributed (Phase 2).")))), !loading && tab === 'stalls' && isTeamViewer && React.createElement("div", null, React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(3, 1fr)',
