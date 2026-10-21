@@ -1489,6 +1489,67 @@ function TeamWaitingCard() {
       openP === p.person ? React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 2px 8px 22px' } },
         p.groups.slice().sort((a, b) => b.n - a.n).map(g => React.createElement("span", { key: g.grp, style: { fontSize: 11, padding: '2px 8px', borderRadius: 6, background: '#1a2333', color: '#cbd5e1' } }, lbl(g.grp) + ' · ' + g.n + ' · ' + Math.floor(Number(g.oldest_days) || 0) + ' d'))) : null)));
 }
+// ===== Duties inside the My Tasks widget (21 Oct 2026, Jigar) ==============
+// Shows today's / this period's duties (incl. shared team duties) from erp_my_duties_today().
+// Tick = erp_duty_mark2. File-proof duties open the file picker; note duties ask a one-line note.
+function DutyTasksStrip() {
+  const [rows, setRows] = React.useState(null);
+  const [busy, setBusy] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+  const [noteFor, setNoteFor] = React.useState(null);
+  const [note, setNote] = React.useState('');
+  const fileRef = React.useRef(null);
+  const pendingCode = React.useRef(null);
+  const load = () => { sb.rpc('erp_my_duties_today').then(r => setRows(r.error ? [] : (r.data || []))); };
+  React.useEffect(() => { load(); }, []);
+  if (!rows || !rows.length) return null;
+  const freqLbl = { daily: 'today', weekly: 'this week (Sat)', tuesday: 'this week (Tue)', monthly: 'this month', fortnightly: 'this fortnight' };
+  const mark = async (d, proof, txt) => {
+    setBusy(d.code); setMsg('');
+    const r = await sb.rpc('erp_duty_mark2', { p_code: d.code, p_note: txt || null, p_proof: proof || null, p_period: null });
+    setBusy('');
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    setMsg('✓ ' + d.label + ' — ' + (r.data === 'late' ? 'marked (late)' : 'done on time'));
+    setNoteFor(null); setNote(''); load();
+  };
+  const tap = d => {
+    setMsg('');
+    if (d.proof === 'file') { pendingCode.current = d.code; if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } return; }
+    if (d.proof === 'note') { setNoteFor(d.code); setNote(''); return; }
+    mark(d, null, null);
+  };
+  const onFile = async e => {
+    const f = e.target.files && e.target.files[0];
+    const d = rows.find(x => x.code === pendingCode.current);
+    if (!f || !d) return;
+    setBusy(d.code); setMsg('Uploading…');
+    const url = await uploadFile(f, 'duty-proof');
+    if (!url) { setBusy(''); setMsg('⚠️ Upload failed — try again'); return; }
+    mark(d, url, null);
+  };
+  const pending = rows.filter(d => !d.done);
+  const done = rows.filter(d => d.done);
+  const btn = c => ({ padding: '5px 11px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#111', border: 'none', background: c });
+  return React.createElement("div", { style: { margin: '6px 0 8px', padding: 8, borderRadius: 8, background: '#1a1630', border: '1px solid #3b2f6b' } },
+    React.createElement("input", { ref: fileRef, type: 'file', accept: 'image/*,.pdf,.xlsx,.xls,.csv', style: { display: 'none' }, onChange: onFile }),
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 } },
+      React.createElement("b", { style: { fontSize: 12.5, color: '#c4b5fd' } }, "📋 Duties" + (pending.length ? ' — ' + pending.length + ' to do' : ' — all done')),
+      React.createElement("span", { style: { fontSize: 10.5, color: '#94a3b8' } }, "count in My Score")),
+    msg ? React.createElement("div", { style: { fontSize: 11.5, margin: '2px 0 4px', color: msg[0] === '✓' ? '#4ade80' : msg[0] === 'U' ? '#cbd5e1' : '#fca5a5' } }, msg) : null,
+    pending.map(d => React.createElement("div", { key: d.code, style: { padding: '5px 0', borderTop: '1px solid #2a2350' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 12.5, color: '#e2e8f0', lineHeight: 1.3 } }, d.label,
+          React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8' } },
+            (freqLbl[d.freq] || d.freq) + ' · ' + d.points + ' pts' + (d.proof === 'file' ? ' · 📎 file/photo needed' : d.proof === 'note' ? ' · note needed' : '') + (d.shared ? ' · team duty' : ''))),
+        React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => tap(d), style: btn('#a78bfa') },
+          busy === d.code ? '…' : d.proof === 'file' ? '📎 Done' : '✓ Done')),
+      noteFor === d.code ? React.createElement("div", { style: { display: 'flex', gap: 5, marginTop: 5 } },
+        React.createElement("input", { className: 'in', value: note, onChange: e => setNote(e.target.value), placeholder: 'What was done (one line)', style: { flex: 1, fontSize: 12 } }),
+        React.createElement("button", { type: 'button', disabled: !!busy || !note.trim(), onClick: () => mark(d, null, note.trim()), style: btn('#4ade80') }, 'Save')) : null)),
+    done.length ? React.createElement("div", { style: { fontSize: 11, color: '#86efac', marginTop: 4 } },
+      done.map(d => '✓ ' + d.label + (d.done_on_time ? '' : ' (late)') + (d.shared && d.done_by ? ' — ' + d.done_by.charAt(0) + d.done_by.slice(1).toLowerCase() : '')).join('  ·  ')) : null);
+}
+
 function MyTasksFloatingWidget({
   tasks,
   waiting,
@@ -1577,7 +1638,7 @@ function MyTasksFloatingWidget({
       overflowY: 'auto',
       padding: '8px 10px'
     }
-  }, React.createElement(WaitingOnYouCard, { rows: waiting || [], compact: true, onMore: () => { setOpen(false); onOpen?.(); } }), badgeCount === 0 && done.length === 0 && auto.length === 0 && React.createElement("div", {
+  }, React.createElement(WaitingOnYouCard, { rows: waiting || [], compact: true, onMore: () => { setOpen(false); onOpen?.(); } }), React.createElement(DutyTasksStrip, null), badgeCount === 0 && done.length === 0 && auto.length === 0 && React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '24px 8px',
