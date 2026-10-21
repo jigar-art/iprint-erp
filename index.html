@@ -35239,7 +35239,8 @@ function HowMyScore({ user }) {
 const BLK_STAGES = {
   print: ['Printing - In House', 'Printing · In-House', 'Printing - Outsource', 'Printing · Outsource'],
   fab: ['Fabrication - In House', 'Fabrication · In-House', 'Fabrication - Outsource', 'Fabrication · Outsource'],
-  inst: ['Installation WIP']
+  inst: ['Installation WIP'],
+  design: ['Designing - In House', 'Designing - Outsource'] // 21 Oct 2026: client waits on design
 };
 const BLK_REASONS = [
   ['PR_FILE', 'print', 'not_ready', 'File / artwork not received or wrong', 'Design'],
@@ -35256,7 +35257,9 @@ const BLK_REASONS = [
   ['IN_MATERIAL', 'inst', 'not_ready', 'Material not delivered to site', 'Murli'],
   ['IN_DAMAGED', 'inst', 'not_ready', 'Wrong or damaged item from production', 'Harish'],
   ['IN_SITE', 'inst', 'blocked', 'Site not ready / civil work pending', 'Client servicing', true],
-  ['IN_CLIENT', 'inst', 'blocked', 'Client hold / access not given', 'Client servicing', true]
+  ['IN_CLIENT', 'inst', 'blocked', 'Client hold / access not given', 'Client servicing', true],
+  ['DS_CLIENT', 'design', 'blocked', 'Waiting for client artwork / inputs / approval', 'Nobody (client)', true],
+  ['DS_BRIEF', 'design', 'not_ready', 'Brief / sizes / references incomplete', 'Client servicing']
 ];
 const blkGroup = st => Object.keys(BLK_STAGES).find(k => BLK_STAGES[k].includes(st)) || null;
 const blkName = k => k === 'NONE' ? 'Nobody (system fault)' : (k || '').charAt(0) + (k || '').slice(1).toLowerCase();
@@ -53223,6 +53226,45 @@ function ClientPortal({
     }
   }, "Powered by iPrint ERP \xB7 \xA9 ", new Date().getFullYear())));
 }
+// ===== Quote client hold (21 Oct 2026, Jigar) ==============================
+// Waiting on the client for a quote artwork/inputs: put the quote on hold with a screenshot; the clock pauses.
+// Resume moves the deadline by the time spent on hold (erp_quote_hold).
+function QuoteHoldBtn({ r, show, reload }) {
+  const [busy, setBusy] = React.useState(false);
+  const fileRef = React.useRef(null);
+  if (!r || r.status !== 'Pending') return null;
+  const st = { padding: "3px 9px", fontSize: 10, borderRadius: 5, cursor: "pointer", fontWeight: 700 };
+  const call = async (on, proof) => {
+    setBusy(true);
+    const res = await sb.rpc('erp_quote_hold', { p_id: r.id, p_on: on, p_proof: proof || null, p_note: null });
+    setBusy(false);
+    if (res.error) { if (show) show(res.error.message, false); return; }
+    if (show) show(on ? 'Quote on hold — clock paused' : 'Resumed — deadline moved by the hold time', true);
+    if (reload) reload();
+  };
+  const onFile = async e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBusy(true);
+    const url = await uploadFile(f, 'quote-hold-proof');
+    setBusy(false);
+    if (!url) { if (show) show('Screenshot upload failed — try again', false); return; }
+    call(true, url);
+  };
+  if (r.hold_since) {
+    const since = new Date(r.hold_since).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return React.createElement("span", { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+      React.createElement("span", { style: { fontSize: 10, color: '#c4b5fd', fontWeight: 700 } }, "⏸ Client hold since " + since),
+      r.hold_proof ? React.createElement("a", { href: r.hold_proof, target: '_blank', rel: 'noreferrer', style: { fontSize: 10, color: '#60a5fa' } }, "📎") : null,
+      React.createElement("button", { type: 'button', disabled: busy, onClick: () => call(false), style: { ...st, background: '#4ade80', color: '#060810', border: 'none' } }, busy ? '...' : "▶ Resume"));
+  }
+  return React.createElement("span", null,
+    React.createElement("input", { ref: fileRef, type: 'file', accept: 'image/*,.pdf', style: { display: 'none' }, onChange: onFile }),
+    React.createElement("button", { type: 'button', disabled: busy, title: 'Waiting on the client? Attach the email / WhatsApp screenshot — the clock pauses',
+      onClick: () => { if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } },
+      style: { ...st, background: '#1a1630', color: '#c4b5fd', border: '1px solid #3b2f6b' } }, busy ? '...' : "⏸ Client hold"));
+}
+
 function QuotesPage({
   user,
   show,
@@ -53648,7 +53690,7 @@ function QuotesPage({
         display: "flex",
         gap: 6
       }
-    }, React.createElement("button", {
+    }, React.createElement(QuoteHoldBtn, { r: r, show: show, reload: reload }), React.createElement("button", {
       disabled: busy === r.id,
       onClick: () => dropIt(r),
       style: {
