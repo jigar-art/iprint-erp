@@ -35969,7 +35969,7 @@ function CourierFab({ user }) {
   const [open, setOpen] = React.useState(false);
   const [rows, setRows] = React.useState([]);
   const [modes, setModes] = React.useState([]);
-  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '' });
+  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '', sent: false, sentOn: '', docket: '' });
   const [f, setF] = React.useState(blank);
   const [dcs, setDcs] = React.useState(null);
   const [sum, setSum] = React.useState(null);
@@ -36020,7 +36020,9 @@ function CourierFab({ user }) {
   const setPhoto = async (i, file) => { if (!file) return; setBusy(true); const url = await uploadFile(file, 'courier-pkg'); setBusy(false); if (!url) return; setPhotos(p => { const a = p.slice(); a[i] = url; return a; }); };
   const ask = async () => {
     setMsg('');
-    const pics = photos.slice(0, n).filter(Boolean);
+    const pics = f.sent ? (f.docket ? [f.docket] : []) : photos.slice(0, n).filter(Boolean);
+    if (f.sent && !f.sentOn) { setMsg('⚠️ Give the date it was sent'); return; }
+    if (f.sent && !f.docket) { setMsg('⚠️ Upload the docket / courier bill photo'); return; }
     if (f.mode === 'Running Bus' && f.busFrom.trim().length < 4) { setMsg('⚠️ Bus: write where the receiver collects it (bus office / stand)'); return; }
     if (f.mode === 'Running Bus' && !f.busDep) { setMsg('⚠️ Bus: give the departure date and time'); return; }
     const busNote = f.mode === 'Running Bus' ? 'Bus departs ' + new Date(f.busDep).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · collect from ' + f.busFrom.trim() : '';
@@ -36029,7 +36031,7 @@ function CourierFab({ user }) {
     const itemIds = dcItems.length && onIdx.length < dcItems.length ? onIdx.map(i => dcItems[i].item_id).filter(Boolean) : null;
     const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
       install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
-      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds };
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds };
     if (f.mode === 'Running Bus') p.dest_address = 'Collect from: ' + f.busFrom.trim();
     setBusy(true);
     const r = await sb.rpc('erp_courier_request_v2', { p });
@@ -36093,7 +36095,16 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'numeric', value: f.n, onChange: e => setF({ ...f, n: e.target.value }), placeholder: 'How many', style: { ...inp, width: 90 } }),
       CR_PKG.map(t => React.createElement("button", { key: t, type: 'button', disabled: basis === 'per_roll' && t !== 'roll', onClick: () => setF({ ...f, type: t }), style: { ...chip(type === t), opacity: basis === 'per_roll' && t !== 'roll' ? .35 : 1 } }, t))),
     basis === 'per_kg' || f.kg ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.kg, onChange: e => setF({ ...f, kg: e.target.value }), placeholder: 'Total weight (kg)' + (basis === 'per_kg' ? ' — required' : ''), style: inp }) : null,
-    n > 0 && type ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
+    // 21 Oct 2026 (Jigar): goods already sent / delivered before this request (old In Transit jobs)
+    React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: f.sent ? '#fde68a' : '#cbd5e1', cursor: 'pointer', padding: '6px 8px', border: '1px solid ' + (f.sent ? '#a16207' : '#1f2937'), borderRadius: 8 } },
+      React.createElement("input", { type: 'checkbox', checked: f.sent, onChange: e => setF({ ...f, sent: e.target.checked }) }),
+      'Already sent — raising this after dispatch'),
+    f.sent ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
+      React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, 'Sent on',
+        React.createElement("input", { className: 'in', type: 'date', value: f.sentOn, onChange: e => setF({ ...f, sentOn: e.target.value }), style: inp })),
+      React.createElement("label", { style: { fontSize: 12, color: f.docket ? '#4ade80' : '#fbbf24', display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' } }, (f.docket ? '✓ ' : '') + 'Docket / courier bill photo',
+        React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; setBusy(true); const url = await uploadFile(fl, 'courier-docket'); setBusy(false); if (url) setF(p => ({ ...p, docket: url })); }, style: { fontSize: 12 } }))) : null,
+    !f.sent && n > 0 && type ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
       React.createElement("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
         React.createElement("span", { style: { fontSize: 12, color: photos.slice(0, n).filter(Boolean).length === n ? '#4ade80' : '#fbbf24' } }, 'Photo of each ' + type + ' with its label: ' + photos.slice(0, n).filter(Boolean).length + ' of ' + n),
         React.createElement("button", { type: 'button', onClick: () => crPrintLabels({ n, type, job: f.jobId, dc: sum ? sum.dc_no : '', to: f.name, pin: f.pin, mode: f.mode }), style: chip(false) }, '🖨 Print ' + n + ' labels')),
@@ -36106,8 +36117,9 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.rate, onChange: e => setF({ ...f, rate: e.target.value }), placeholder: CR_BASIS[basis] + (basis === 'per_roll' ? ' (can add later)' : ''), style: { ...inp, flex: 1, minWidth: 150 } }),
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.extras, onChange: e => setF({ ...f, extras: e.target.value }), placeholder: '+ extras ₹', style: { ...inp, width: 100 } }),
       React.createElement("span", { style: { fontSize: 12.5, color: '#e2e8f0', fontWeight: 800 } }, calc != null ? '= ₹' + Math.round(calc) : basis === 'per_roll' ? 'rate later' : '')) : React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'Pick the mode first'),
+    (basis === 'per_kg' && +f.rate > 300) || (calc != null && calc > 5000) ? React.createElement("div", { style: { fontSize: 12, color: '#fca5a5', fontWeight: 700 } }, '⚠️ ₹' + Math.round(calc || 0).toLocaleString('en-IN') + (basis === 'per_kg' ? ' (₹' + f.rate + ' per kg × ' + (f.kg || 0) + ' kg)' : '') + ' — is that right? ' + (basis === 'per_kg' ? 'Enter the rate PER KG, not the total.' : '')) : null,
     basis === 'per_roll' ? React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'Porter / Wefast to the station or airport: claim it in Petty cash and pick this 🚚 request there.') : null,
-    React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, 'Delivery date the courier promised',
+    React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, f.sent ? 'Delivered on / expected' : 'Delivery date the courier promised',
       React.createElement("input", { className: 'in', type: 'date', value: f.eta, onChange: e => setF({ ...f, eta: e.target.value }), style: inp })),
     React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Why this mode? (optional)', style: inp }),
     React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '11px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Please wait…' : 'Send for approval')) : null;
@@ -36129,6 +36141,12 @@ function CourierFab({ user }) {
     Array.isArray(r.pkg_photo_urls) && r.pkg_photo_urls.length ? React.createElement("div", { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 } }, r.pkg_photo_urls.map((u, i) => React.createElement("a", { key: i, href: erpFileUrl(u), target: '_blank', rel: 'noreferrer', style: { width: 46, height: 46, borderRadius: 6, overflow: 'hidden', border: '1px solid #334155', display: 'block', position: 'relative' } },
       React.createElement("img", { src: erpFileUrl(u), alt: (i + 1) + '/' + r.pkg_count, style: { width: '100%', height: '100%', objectFit: 'cover' } }),
       React.createElement("span", { style: { position: 'absolute', bottom: 0, right: 2, fontSize: 10, fontWeight: 800, color: '#fff', textShadow: '0 0 3px #000' } }, (i + 1) + '/' + r.pkg_count)))) : null,
+    r.v2 && r.status === 'pending' && (String(r.requested_by || '').toUpperCase() === me || ['JIGAR', 'AMOL'].includes(me)) ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => {
+        const rt = prompt('Correct rate for #' + r.id + ' (' + (CR_BASIS[r.rate_basis] || '₹') + '):', r.rate || ''); if (rt === null) return;
+        let kg = r.weight_kg; if (r.rate_basis === 'per_kg') { const k = prompt('Weight (kg):', kg || ''); if (k === null) return; kg = k; }
+        setBusy(true); const x = await sb.rpc('erp_courier_edit', { p_id: r.id, p: { rate: rt, weight_kg: kg } }); setBusy(false);
+        setMsg(x.error ? '⚠️ ' + x.error.message : '✓ #' + r.id + ' ' + x.data); load(); },
+      style: { marginTop: 6, padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fde68a', border: '1px solid #a16207', background: 'transparent' } }, '✏️ Correct rate / weight') : null,
     r.waiting_for_me ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
       React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
       React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, false), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')) : null);
