@@ -53941,6 +53941,17 @@ function PettyCashPage({
     sb.rpc('erp_courier_for_jobs', { p_jobs: jobNums }).then(r => { if (!dead) setCrOpts(r.error ? [] : (r.data || [])); });
     return () => { dead = true; };
   }, [crNeeded, crJobKey]);
+  // 21 Oct 2026 (Jigar, after Manoj / Murli): a Porter / transport trip is either a delivery (🚚 request) or a material pickup from a supplier (the PO being collected)
+  const crTrip = form.crTrip || '';
+  const [poOpts, setPoOpts] = useState(null);
+  useEffect(() => {
+    if (!crNeeded || crTrip !== 'pickup' || !jobNums.length) { setPoOpts(null); return; }
+    let dead = false;
+    sb.from('purchase_requests').select('po_no,vendor_name,status,job_id').not('po_no', 'is', null).is('po_cancelled_at', null)
+      .or(jobNums.map(n => 'job_id.like.' + n + '-*').join(',')).order('po_generated_at', { ascending: false }).limit(40)
+      .then(r => { if (dead) return; const seen = {}; setPoOpts((r.data || []).filter(x => { if (seen[x.po_no]) return false; seen[x.po_no] = 1; return true; })); });
+    return () => { dead = true; };
+  }, [crNeeded, crTrip, crJobKey]);
   const exemptCats = cfg && cfg.job_exempt_categories || ['Office Pantry', 'Office Expense', 'Bank Work', 'Mobile Recharge', 'Repairs / Maintenance'];
   useEffect(() => {
     let dead = false;
@@ -54316,8 +54327,16 @@ function PettyCashPage({
       show('Job number is required. Only office expenses (' + exemptCats.join(', ') + ') can go without a job.', false);
       return;
     }
-    if (crNeeded && !form.courier) {
+    if (crNeeded && !crTrip) {
+      show('Is this trip a delivery or a material pickup?', false);
+      return;
+    }
+    if (crNeeded && crTrip === 'delivery' && !form.courier) {
       show('Pick the \ud83d\ude9a courier request this payment is for', false);
+      return;
+    }
+    if (crNeeded && crTrip === 'pickup' && !form.pickupPo) {
+      show('Pick the PO being collected', false);
       return;
     }
     if (!form.firm) {
@@ -54360,7 +54379,8 @@ function PettyCashPage({
       category: form.category && form.category !== 'Other' ? form.category : null,
       meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
       mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null,
-      courier_request_id: crNeeded && form.courier ? Number(form.courier) : null
+      courier_request_id: crNeeded && crTrip === 'delivery' && form.courier ? Number(form.courier) : null,
+      pickup_po: crNeeded && crTrip === 'pickup' && form.pickupPo ? form.pickupPo : null
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
@@ -55297,11 +55317,19 @@ function PettyCashPage({
     }
   }, j.ok ? '\u2713 ' : '\u2717 ', j.text))) : null, crNeeded ? React.createElement("div", {
     style: { marginBottom: 12 }
-  }, React.createElement("label", { style: lbl }, "\ud83d\ude9a Courier request this is for - required"),
-    crOpts && crOpts.length ? React.createElement("select", { value: form.courier || '', onChange: e => setF('courier', e.target.value), style: inp },
-      React.createElement("option", { value: '' }, '-- pick the \ud83d\ude9a request --'),
-      crOpts.map(o => React.createElement("option", { key: o.id, value: String(o.id) }, o.label)))
-    : React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, jobNums.length ? (crOpts === null ? 'Checking\u2026' : 'No \ud83d\ude9a request on these jobs - ask Manoj / Murli to raise it first') : 'Enter the job number first')) : null, form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
+  }, React.createElement("label", { style: lbl }, "This trip is - required"),
+    React.createElement("div", { style: { display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
+      [['pickup', '\ud83d\udce6 Material pickup from supplier'], ['delivery', '\ud83d\ude9a Delivery / to station or airport']].map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF('crTrip', k),
+        style: { padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (crTrip === k ? '#10b981' : '#334155'), background: crTrip === k ? '#10b98122' : 'transparent', color: crTrip === k ? '#6ee7b7' : '#e2e8f0' } }, l))),
+    !crTrip ? null : !jobNums.length ? React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, 'Enter the job number first')
+    : crTrip === 'pickup' ? (poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
+        React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
+        poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))))
+      : React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, poOpts === null ? 'Checking\u2026' : 'No PO on these jobs - ask Murli / Amol to raise the PO first'))
+    : (crOpts && crOpts.length ? React.createElement("select", { value: form.courier || '', onChange: e => setF('courier', e.target.value), style: inp },
+        React.createElement("option", { value: '' }, '-- pick the \ud83d\ude9a request --'),
+        crOpts.map(o => React.createElement("option", { key: o.id, value: String(o.id) }, o.label)))
+      : React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, crOpts === null ? 'Checking\u2026' : 'No \ud83d\ude9a request on these jobs - ask Manoj / Murli to raise it first'))) : null, form.kind === 'booking' ? /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: '#64748b',
