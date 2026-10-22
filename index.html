@@ -1364,8 +1364,29 @@ function Login({
 // 18 Oct 2026 (Jigar): staff went back to Excel because tasks had no visible tick. Shared actions for the 📋 panel:
 // done / not done (reason) / move to tomorrow / drop, for one task or many at once.
 function erpTomorrowISO() { const d = new Date(); d.setDate(d.getDate() + 1); if (d.getDay() === 0) d.setDate(d.getDate() + 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-async function erpTaskAct(ids, kind, note) {
+// 22 Oct 2026 (Jigar): recurring duties need proof on tick (note or file, set per duty in Reports → Duties).
+// The DB trigger erp_recurring_proof_guard enforces it; the app opens RecurringProofModal to collect it.
+async function erpRecurringProofNeeded(ids) {
+  const out = [];
+  const a = await sb.from('daily_tasks').select('id,task_text,source,source_duty_id').in('id', ids).eq('source', 'recurring');
+  if (a.error || !(a.data || []).length) return out;
+  const dIds = [...new Set(a.data.map(t => t.source_duty_id).filter(Boolean))];
+  const b = await sb.from('recurring_duties').select('id,proof').in('id', dIds);
+  const pm = new Map((b.data || []).map(d => [d.id, d.proof || 'note']));
+  a.data.forEach(t => { const pr = pm.get(t.source_duty_id) || 'note'; if (pr !== 'none') out.push({ id: t.id, text: t.task_text, proof: pr }); });
+  return out;
+}
+async function erpTaskAct(ids, kind, note, onProofDone) {
   ids = (ids || []).filter(Boolean); if (!ids.length) return { n: 0 };
+  if (kind === 'done') {
+    const need = await erpRecurringProofNeeded(ids);
+    if (need.length) {
+      const skip = new Set(need.map(x => x.id));
+      ids = ids.filter(i => !skip.has(i));
+      if (window._erpDutyProof) window._erpDutyProof(need, onProofDone || (() => { if (window._refreshMyTasks) window._refreshMyTasks(); }));
+      if (!ids.length) return { error: need.length === 1 ? 'This duty needs proof — add it in the box that opened' : need.length + ' duties need proof — add it in the box that opened' };
+    }
+  }
   const now = new Date().toISOString();
   const chunks = []; for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
   if (kind === 'tomorrow') {
@@ -1488,6 +1509,55 @@ function TeamWaitingCard() {
         React.createElement("span", { style: { minWidth: 34, textAlign: 'center', fontSize: 12, fontWeight: 800, padding: '1px 7px', borderRadius: 10, background: p.n >= 50 ? '#7f1d1d' : '#3b2f0b', color: p.n >= 50 ? '#fecaca' : '#fde68a' } }, p.n)),
       openP === p.person ? React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 2px 8px 22px' } },
         p.groups.slice().sort((a, b) => b.n - a.n).map(g => React.createElement("span", { key: g.grp, style: { fontSize: 11, padding: '2px 8px', borderRadius: 6, background: '#1a2333', color: '#cbd5e1' } }, lbl(g.grp) + ' · ' + g.n + ' · ' + Math.floor(Number(g.oldest_days) || 0) + ' d'))) : null)));
+}
+function RecurringProofModal() {
+  const [q, setQ] = React.useState([]);
+  const [note, setNote] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const cbRef = React.useRef(null);
+  const fileRef = React.useRef(null);
+  React.useEffect(() => {
+    window._erpDutyProof = (list, cb) => { cbRef.current = cb || null; setQ(list || []); setNote(''); setMsg(''); };
+    return () => { delete window._erpDutyProof; };
+  }, []);
+  if (!q.length) return null;
+  const t = q[0];
+  const finish = async (proofUrl) => {
+    setBusy(true); setMsg('');
+    const now = new Date().toISOString();
+    const r = await sb.from('daily_tasks').update({ status: 'done', done_at: now, updated_at: now, done_note: note.trim() || null, done_proof: proofUrl || null }).eq('id', t.id).select().single();
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    if (cbRef.current) { try { cbRef.current(r.data); } catch (e) {} }
+    if (window._refreshMyTasks) window._refreshMyTasks();
+    setNote(''); setQ(prev => prev.slice(1));
+  };
+  const onFile = async e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBusy(true); setMsg('Uploading…');
+    const url = await uploadFile(f, 'duty-proof');
+    setBusy(false);
+    if (!url) { setMsg('⚠️ Upload failed — try again'); return; }
+    finish(url);
+  };
+  const btn = c => ({ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: busy ? 'wait' : 'pointer', color: '#111', border: 'none', background: c });
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 } },
+    React.createElement("div", { style: { width: 'min(420px, 100%)', background: '#0f0f1a', border: '1px solid #d4a52a80', borderRadius: 12, padding: 16 } },
+      React.createElement("div", { style: { fontSize: 11, color: '#d4a52a', fontWeight: 800, marginBottom: 4 } }, '🔁 Recurring duty — proof needed' + (q.length > 1 ? ' (' + q.length + ' left)' : '')),
+      React.createElement("div", { style: { fontSize: 14, color: '#e2e8f0', marginBottom: 10, lineHeight: 1.35 } }, t.text),
+      t.proof === 'file'
+        ? React.createElement(React.Fragment, null,
+            React.createElement("input", { ref: fileRef, type: 'file', accept: 'image/*,.pdf,.xlsx,.xls,.csv,.docx', style: { display: 'none' }, onChange: onFile }),
+            React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginBottom: 8 } }, 'Attach the file you sent or a screenshot of the sent email.'),
+            React.createElement("input", { className: 'in', value: note, onChange: e => setNote(e.target.value), placeholder: 'Note (optional)', style: { width: '100%', fontSize: 13, marginBottom: 10 } }),
+            React.createElement("button", { type: 'button', disabled: busy, onClick: () => { if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } }, style: btn('#d4a52a') }, busy ? '…' : '📎 Attach & mark done'))
+        : React.createElement(React.Fragment, null,
+            React.createElement("input", { className: 'in', autoFocus: true, value: note, onChange: e => setNote(e.target.value), onKeyDown: e => { if (e.key === 'Enter' && note.trim() && !busy) finish(null); }, placeholder: 'What was done (one line)', style: { width: '100%', fontSize: 13, marginBottom: 10 } }),
+            React.createElement("button", { type: 'button', disabled: busy || !note.trim(), onClick: () => finish(null), style: btn('#4ade80') }, busy ? '…' : '✓ Save & mark done')),
+      React.createElement("button", { type: 'button', disabled: busy, onClick: () => setQ(prev => prev.slice(1)), style: { marginLeft: 8, padding: '8px 12px', borderRadius: 8, fontSize: 12, background: 'transparent', color: '#94a3b8', border: '1px solid #2a3548', cursor: 'pointer' } }, 'Cancel'),
+      msg ? React.createElement("div", { style: { fontSize: 12, color: msg.startsWith('⚠') ? '#f87171' : '#94a3b8', marginTop: 8 } }, msg) : null));
 }
 // ===== Duties inside the My Tasks widget (21 Oct 2026, Jigar) ==============
 // Shows today's / this period's duties (incl. shared team duties) from erp_my_duties_today().
@@ -4343,7 +4413,7 @@ function MainApp({
     waiting: myWaiting,
     autoTasks: myAutoTasks,
     onOpen: () => setPg('mytasks')
-  }), React.createElement(QuickActionsFab, null));
+  }), React.createElement(RecurringProofModal, null), React.createElement(QuickActionsFab, null));
 }
 // 17 Oct 2026 (Deploy F): one + button holds the quick actions (was 4 stacked floating buttons).
 // Each action component renders a QuickSlot instead of its own button; QuickActionsFab lists them.
@@ -37186,6 +37256,7 @@ function DayPlanCard({ user }) {
     .filter(o => !tomTexts.has(o.text.toLowerCase()));
   const close = async (t, st) => {
     if (st === 'stuck' && !(why[t.id] || '').trim()) { setAskWhy(t.id); return; }
+    if (st === 'done' && t.source === 'recurring') { const rr = await erpTaskAct([t.id], 'done', '', () => load()); if (rr.error && !/proof/.test(rr.error)) setMsg('⚠️ ' + rr.error); else load(); return; }
     const patch = st === 'done' ? { status: 'done', done_at: new Date().toISOString(), updated_at: new Date().toISOString() } : { status: 'stuck', stuck_note: why[t.id].trim(), updated_at: new Date().toISOString() };
     const r = await sb.from('daily_tasks').update(patch).eq('id', t.id);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
@@ -46127,6 +46198,10 @@ function ReportsPage({
   const [editDutyFreq, setEditDutyFreq] = React.useState('daily');
   const [newDutyDays, setNewDutyDays] = React.useState([]);
   const [editDutyDays, setEditDutyDays] = React.useState([]);
+  const [newDutyProof, setNewDutyProof] = React.useState('note');
+  const [editDutyProof, setEditDutyProof] = React.useState('note');
+  const [dutyHist, setDutyHist] = React.useState({});
+  const DUTY_PROOF_LBL = { note: '✍ note', file: '📎 file', none: 'no proof' };
   // 2026-10-22: custom weekdays stored as 'days:1,4' (0=Sun..6=Sat)
   const DUTY_DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const dutyFreqValue = (freq, days) => freq === 'custom' ? 'days:' + [...new Set(days)].sort((a, b) => a - b).join(',') : freq;
@@ -46180,7 +46255,7 @@ function ReportsPage({
       const {
         data,
         error
-      } = await sb.from('recurring_duties').select('id,user_name,duty_text,frequency,active,created_by,created_at,updated_at').order('user_name', {
+      } = await sb.from('recurring_duties').select('id,user_name,duty_text,frequency,proof,active,created_by,created_at,updated_at').order('user_name', {
         ascending: true
       }).order('active', {
         ascending: false
@@ -46192,6 +46267,11 @@ function ReportsPage({
         return;
       }
       setRecurringDuties(data || []);
+      const since = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+      const h = await sb.from('daily_tasks').select('id,source_duty_id,task_date,status,done_at,done_note,done_proof').eq('source', 'recurring').gte('task_date', since).neq('status', 'cancelled').order('task_date', { ascending: false }).limit(2000);
+      const m = {};
+      (h.data || []).forEach(r => { (m[r.source_duty_id] ||= []).push(r); });
+      setDutyHist(m);
     } finally {
       setDutiesLoading(false);
     }
@@ -46224,6 +46304,7 @@ function ReportsPage({
         user_name: user.toUpperCase(),
         duty_text: text,
         frequency: dutyFreqValue(newDutyFreq, newDutyDays),
+        proof: newDutyProof,
         active: true,
         created_by: uname
       }).select().single();
@@ -46236,6 +46317,7 @@ function ReportsPage({
       setNewDutyUser('');
       setNewDutyFreq('daily');
       setNewDutyDays([]);
+      setNewDutyProof('note');
     } finally {
       setSavingDuty(false);
     }
@@ -46260,6 +46342,7 @@ function ReportsPage({
   const startEditDuty = duty => {
     setEditDutyId(duty.id);
     setEditDutyText(duty.duty_text);
+    setEditDutyProof(duty.proof || 'note');
     const f = (duty.frequency || 'daily').toLowerCase();
     if (f.startsWith('days:')) {
       setEditDutyFreq('custom');
@@ -46286,6 +46369,7 @@ function ReportsPage({
     } = await sb.from('recurring_duties').update({
       duty_text: text,
       frequency: freqVal,
+      proof: editDutyProof,
       updated_at: new Date().toISOString()
     }).eq('id', editDutyId);
     if (error) {
@@ -46295,7 +46379,8 @@ function ReportsPage({
     setRecurringDuties(prev => prev.map(d => d.id === editDutyId ? {
       ...d,
       duty_text: text,
-      frequency: freqVal
+      frequency: freqVal,
+      proof: editDutyProof
     } : d));
     setEditDutyId(null);
     setEditDutyText('');
@@ -46948,6 +47033,12 @@ function ReportsPage({
     show?.('Task added');
   };
   const markTaskDone = async (taskId, actualCount) => {
+    const rt = (todayTasks || []).find(t => t.id === taskId);
+    if (rt && rt.source === 'recurring') {
+      const rr = await erpTaskAct([taskId], 'done', '', row => { if (row) setTodayTasks(prev => (prev || []).map(t => t.id === row.id ? row : t)); });
+      if (rr.error && !/proof/.test(rr.error)) show?.('Failed: ' + rr.error, false);
+      return;
+    }
     const nowISO = new Date().toISOString();
     const patch = {
       status: 'done',
@@ -49837,7 +49928,7 @@ function ReportsPage({
   }, "\u2795 Add new recurring duty"), React.createElement("div", {
     style: {
       display: 'grid',
-      gridTemplateColumns: '160px 1fr 130px auto',
+      gridTemplateColumns: '160px 1fr 130px 110px auto',
       gap: 6,
       alignItems: 'center'
     }
@@ -49877,7 +49968,21 @@ function ReportsPage({
     value: "mon-fri"
   }, "Mon\u2013Fri"), React.createElement("option", {
     value: "custom"
-  }, "Pick days\u2026")), React.createElement("button", {
+  }, "Pick days\u2026")), React.createElement("select", {
+    className: "in",
+    value: newDutyProof,
+    onChange: e => setNewDutyProof(e.target.value),
+    title: "Proof needed when the duty is ticked",
+    style: {
+      fontSize: 11
+    }
+  }, React.createElement("option", {
+    value: "note"
+  }, "Proof: note"), React.createElement("option", {
+    value: "file"
+  }, "Proof: file"), React.createElement("option", {
+    value: "none"
+  }, "No proof")), React.createElement("button", {
     className: "b bp",
     onClick: addRecurringDuty,
     disabled: savingDuty,
@@ -49956,7 +50061,7 @@ function ReportsPage({
       }, isEditing ? React.createElement("div", null, React.createElement("div", {
         style: {
           display: 'grid',
-          gridTemplateColumns: '1fr 130px auto auto',
+          gridTemplateColumns: '1fr 130px 110px auto auto',
           gap: 6,
           alignItems: 'center'
         }
@@ -49985,7 +50090,20 @@ function ReportsPage({
         value: "alt-days"
       }, "Every other day"), React.createElement("option", {
         value: "custom"
-      }, "Pick days\u2026")), React.createElement("button", {
+      }, "Pick days\u2026")), React.createElement("select", {
+        className: "in",
+        value: editDutyProof,
+        onChange: e => setEditDutyProof(e.target.value),
+        style: {
+          fontSize: 11
+        }
+      }, React.createElement("option", {
+        value: "note"
+      }, "Proof: note"), React.createElement("option", {
+        value: "file"
+      }, "Proof: file"), React.createElement("option", {
+        value: "none"
+      }, "No proof")), React.createElement("button", {
         className: "b bp",
         onClick: saveEditDuty,
         style: {
@@ -50024,7 +50142,7 @@ function ReportsPage({
           background: '#1a2030',
           whiteSpace: 'nowrap'
         }
-      }, dutyFreqLabel(d.frequency)), React.createElement("button", {
+      }, dutyFreqLabel(d.frequency) + ' · ' + (DUTY_PROOF_LBL[d.proof || 'note'] || d.proof)), React.createElement("button", {
         className: "b",
         onClick: () => toggleDutyActive(d.id, d.active),
         style: {
@@ -50048,7 +50166,31 @@ function ReportsPage({
           padding: '3px 8px',
           color: '#ef4444'
         }
-      }, "\uD83D\uDDD1")));
+      }, "\uD83D\uDDD1")), !isEditing && (() => {
+        const hs = (dutyHist[d.id] || []).filter(r => r.task_date < new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10) || r.status === 'done');
+        if (!hs.length) return null;
+        const dn = hs.filter(r => r.status === 'done');
+        const last = dn[0];
+        const fmt = x => new Date(x + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        return React.createElement("div", {
+          style: {
+            fontSize: 9.5,
+            color: '#94a3b8',
+            marginTop: 4,
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            alignItems: 'center'
+          }
+        }, React.createElement("span", {
+          style: { color: dn.length === hs.length ? '#4ade80' : dn.length === 0 ? '#f87171' : '#facc15', fontWeight: 700 }
+        }, "Last 14 days: " + dn.length + " of " + hs.length + " done"), last ? React.createElement("span", null, "Last done " + fmt(last.task_date) + (last.done_note ? ' — “' + last.done_note + '”' : '')) : null, last && last.done_proof ? React.createElement("a", {
+          href: last.done_proof,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          style: { color: '#60a5fa' }
+        }, "\uD83D\uDCCE View proof") : null, last && !last.done_note && !last.done_proof ? React.createElement("span", { style: { color: '#f87171' } }, "no proof") : null);
+      })());
     })));
   })()), !loading && tab === 'worklog' && isTeamViewer && React.createElement(WorkLogView, { jobs: jobs, prs: prs, salesActs: salesActs, team: team, user: user }), !loading && tab === 'team' && isTeamViewer && React.createElement("div", null, React.createElement("div", {
     style: {
