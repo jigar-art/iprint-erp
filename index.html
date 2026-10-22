@@ -3997,6 +3997,8 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(WhatsNewGate, {
     user: user
+  }) : null, user ? React.createElement(TaskAlertsGate, {
+    user: user
   }) : null, user ? React.createElement(TasksNoteGate, {
     user: user
   }) : null, user ? React.createElement(CommitGate, {
@@ -36528,6 +36530,61 @@ function V5ChangeGate({ user }) {
 }
 // 19 Oct 2026 (Jigar): "What's new" - once per person after login: 45 s video + 6 swipe cards (own points card first).
 // Recorded in point_brief_responses (brief_version 2026-10-19-whatsnew). Reopen from the + menu until 2 Nov.
+// ── Assigned-task alerts (22 Oct 2026) ──
+// Assignee: new tasks until "Got it" (sets daily_tasks.seen_at) + own overdue once a day.
+// Assigner: tasks they assigned that are overdue, once a day. Data: erp_my_task_alerts().
+function TaskAlertsGate({ user }) {
+  const [rows, setRows] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const day = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const key = 'ta_seen_' + ((user && user.name) || '');
+  const load = () => sb.rpc('erp_my_task_alerts').then(r => {
+    if (r.error) return;
+    const d = r.data || [];
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(key) === day(); } catch (e) {}
+    setRows(d);
+    setOpen(d.some(x => x.kind === 'new') || (!dismissed && d.length > 0));
+  });
+  React.useEffect(() => {
+    if (!user) return;
+    load();
+    const t = setInterval(load, 30 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [user && user.name]);
+  if (!user || !open || !rows.length) return null;
+  const fd = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' }) : '';
+  const first = s => (s || '').split(' - ')[0];
+  const late = n => n + (n === 1 ? ' day' : ' days') + ' late';
+  const nw = rows.filter(r => r.kind === 'new');
+  const mine = rows.filter(r => r.kind === 'overdue_mine');
+  const theirs = rows.filter(r => r.kind === 'overdue_assigned');
+  const ack = async () => {
+    setBusy(true);
+    if (nw.length) await sb.rpc('erp_ack_task_alerts', { p_ids: nw.map(r => r.id) });
+    setBusy(false);
+    try { localStorage.setItem(key, day()); } catch (e) {}
+    setOpen(false);
+  };
+  const sec = (title, color, list, line) => list.length ? React.createElement("div", { style: { marginTop: 12 } },
+    React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color, marginBottom: 6 } }, title),
+    list.map(r => React.createElement("div", { key: r.kind + r.id, style: { fontSize: 14, color: '#e2e8f0', lineHeight: 1.45, padding: '7px 10px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, marginTop: 5 } }, line(r)))) : null;
+  return React.createElement("div", { role: 'dialog', 'aria-label': 'Assigned task alerts', style: { position: 'fixed', inset: 0, zIndex: 99989, background: 'rgba(3,6,12,.92)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 520, background: '#0f172a', border: '1px solid #e3a00877', borderRadius: 14, padding: 16 } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#e3a008' } }, '📌 Assigned tasks'),
+      sec('🔔 New task' + (nw.length > 1 ? 's' : '') + ' for you', '#fbbf24', nw, r => [
+        React.createElement("b", { key: 't' }, r.task_text),
+        React.createElement("div", { key: 'm', style: { fontSize: 12, color: '#94a3b8', marginTop: 2 } }, 'from ' + first(r.assigned_by) + ' · due ' + fd(r.due_date) + (r.days_late > 0 ? ' · ' + late(r.days_late) : ''))]),
+      sec('⚠️ Overdue — yours', '#f87171', mine, r => [
+        React.createElement("b", { key: 't' }, r.task_text),
+        React.createElement("div", { key: 'm', style: { fontSize: 12, color: '#fca5a5', marginTop: 2 } }, 'was due ' + fd(r.due_date) + ' · ' + late(r.days_late) + ' · from ' + first(r.assigned_by))]),
+      sec('⏰ Tasks you assigned — overdue', '#f87171', theirs, r => [
+        React.createElement("b", { key: 'u' }, first(r.user_name) + ': '), r.task_text,
+        React.createElement("div", { key: 'm', style: { fontSize: 12, color: '#fca5a5', marginTop: 2 } }, 'was due ' + fd(r.due_date) + ' · ' + late(r.days_late))]),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 12 } }, 'Mark them Done in My Tasks. Overdue tasks stay on your list until done or cancelled.'),
+      React.createElement("button", { type: 'button', className: 'b', disabled: busy, onClick: ack, style: { marginTop: 12, width: '100%', padding: '10px 0', fontSize: 14, fontWeight: 800, background: '#e3a008', color: '#111', border: 'none' } }, busy ? 'Saving…' : 'Got it')));
+}
 function WhatsNewGate({ user }) {
   const V = '2026-10-19-whatsnew';
   const me = pbKey(user);
@@ -46050,6 +46107,8 @@ function ReportsPage({
   const [adminTaskJob, setAdminTaskJob] = React.useState('');
   const [adminTaskSite, setAdminTaskSite] = React.useState('');
   const [adminTaskSaving, setAdminTaskSaving] = React.useState(false);
+  const atIso = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const [adminTaskDue, setAdminTaskDue] = React.useState(() => atIso(3)); // 22 Oct 2026: compulsory due date
   React.useEffect(() => {
     if (typeof window._refreshMyTasks === 'function') {
       window._refreshMyTasks();
@@ -46973,25 +47032,20 @@ function ReportsPage({
       show?.('Task text required', false);
       return;
     }
+    if (!adminTaskDue) {
+      show?.('Pick a due date', false);
+      return;
+    }
     setAdminTaskSaving(true);
-    const row = {
-      user_name: targetUser,
-      task_text: trimmed,
-      task_date: todayISO,
-      status: 'pending',
-      source: 'admin',
-      added_by: uname,
-      linked_job_id: (adminTaskJob || '').trim() || null,
-      linked_site_id: (adminTaskSite || '').trim() || null
-    };
     const {
       error
-    } = await sb.from('daily_tasks').insert(row).select().single();
+    } = await sb.rpc('erp_assign_task', { p_user: targetUser, p_text: trimmed, p_due: adminTaskDue, p_job: (adminTaskJob || '').trim() || null, p_site: (adminTaskSite || '').trim() || null });
     setAdminTaskSaving(false);
     if (error) {
       show?.('Failed: ' + error.message, false);
       return;
     }
+    setAdminTaskDue(atIso(3));
     setAdminTaskUser('');
     setAdminTaskText('');
     setAdminTaskJob('');
@@ -48651,6 +48705,17 @@ function ReportsPage({
       if (e.key === 'Enter' && adminTaskText.trim() && adminTaskUser.trim()) adminAssignTask();
     }
   }), React.createElement("div", {
+    style: { display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap', marginBottom: 5 }
+  }, React.createElement("span", { style: { fontSize: 10, color: '#f0997b' } }, 'Due by'),
+    [['Today', 0], ['+1', 1], ['+3', 3], ['+7', 7]].map(([l, n]) => React.createElement("button", {
+      key: l, type: 'button', className: 'b', onClick: () => setAdminTaskDue(atIso(n)),
+      style: { fontSize: 10, padding: '3px 8px', borderColor: adminTaskDue === atIso(n) ? '#e3a008' : undefined, color: adminTaskDue === atIso(n) ? '#e3a008' : undefined }
+    }, l)),
+    React.createElement("input", {
+      className: "in", type: 'date', value: adminTaskDue, min: atIso(0),
+      onChange: e => setAdminTaskDue(e.target.value),
+      style: { fontSize: 10, padding: '3px 6px', width: 130 }
+    })), React.createElement("div", {
     style: {
       display: 'flex',
       gap: 5,
