@@ -46125,6 +46125,54 @@ function ReportsPage({
   const [editDutyId, setEditDutyId] = React.useState(null);
   const [editDutyText, setEditDutyText] = React.useState('');
   const [editDutyFreq, setEditDutyFreq] = React.useState('daily');
+  const [newDutyDays, setNewDutyDays] = React.useState([]);
+  const [editDutyDays, setEditDutyDays] = React.useState([]);
+  // 2026-10-22: custom weekdays stored as 'days:1,4' (0=Sun..6=Sat)
+  const DUTY_DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dutyFreqValue = (freq, days) => freq === 'custom' ? 'days:' + [...new Set(days)].sort((a, b) => a - b).join(',') : freq;
+  const dutyFreqLabel = f => {
+    const v = (f || 'daily').toLowerCase();
+    if (v.startsWith('days:')) return v.slice(5).split(',').map(n => DUTY_DAY_LABELS[Number(n)]).filter(Boolean).join(' · ');
+    return {
+      daily: 'Daily',
+      'mon-sat': 'Mon–Sat',
+      'mon-fri': 'Mon–Fri',
+      weekdays: 'Mon–Fri',
+      'alt-days': 'Every other day'
+    }[v] || v;
+  };
+  const renderDutyDayTicks = (days, setDays) => React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginTop: 8,
+      alignItems: 'center'
+    }
+  }, React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: '#94a3b8',
+      marginRight: 2
+    }
+  }, "Fires on:"), DUTY_DAY_LABELS.map((lbl, i) => {
+    const on = days.includes(i);
+    return React.createElement("button", {
+      key: lbl,
+      type: "button",
+      className: "b",
+      onClick: () => setDays(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]),
+      style: {
+        fontSize: 11,
+        padding: '5px 10px',
+        minWidth: 44,
+        background: on ? '#d4a52a' : 'transparent',
+        color: on ? '#0b0f17' : '#c9d1d9',
+        borderColor: on ? '#d4a52a' : '#2a3548',
+        fontWeight: on ? 700 : 400
+      }
+    }, lbl);
+  }));
   const loadRecurringDuties = React.useCallback(async () => {
     if (!isTeamViewer) return;
     setDutiesLoading(true);
@@ -46159,8 +46207,12 @@ function ReportsPage({
       alert('User and duty text are required.');
       return;
     }
-    if (!['daily', 'mon-sat', 'mon-fri', 'weekdays'].includes(newDutyFreq)) {
+    if (!['daily', 'mon-sat', 'mon-fri', 'custom'].includes(newDutyFreq)) {
       alert('Invalid frequency.');
+      return;
+    }
+    if (newDutyFreq === 'custom' && newDutyDays.length === 0) {
+      alert('Tick at least one day.');
       return;
     }
     setSavingDuty(true);
@@ -46171,7 +46223,7 @@ function ReportsPage({
       } = await sb.from('recurring_duties').insert({
         user_name: user.toUpperCase(),
         duty_text: text,
-        frequency: newDutyFreq,
+        frequency: dutyFreqValue(newDutyFreq, newDutyDays),
         active: true,
         created_by: uname
       }).select().single();
@@ -46183,6 +46235,7 @@ function ReportsPage({
       setNewDutyText('');
       setNewDutyUser('');
       setNewDutyFreq('daily');
+      setNewDutyDays([]);
     } finally {
       setSavingDuty(false);
     }
@@ -46207,7 +46260,14 @@ function ReportsPage({
   const startEditDuty = duty => {
     setEditDutyId(duty.id);
     setEditDutyText(duty.duty_text);
-    setEditDutyFreq(duty.frequency);
+    const f = (duty.frequency || 'daily').toLowerCase();
+    if (f.startsWith('days:')) {
+      setEditDutyFreq('custom');
+      setEditDutyDays(f.slice(5).split(',').map(Number));
+    } else {
+      setEditDutyFreq(f === 'weekdays' ? 'mon-fri' : f);
+      setEditDutyDays([]);
+    }
   };
   const saveEditDuty = async () => {
     if (!isTeamViewer || !editDutyId) return;
@@ -46216,11 +46276,16 @@ function ReportsPage({
       alert('Duty text cannot be empty.');
       return;
     }
+    if (editDutyFreq === 'custom' && editDutyDays.length === 0) {
+      alert('Tick at least one day.');
+      return;
+    }
+    const freqVal = dutyFreqValue(editDutyFreq, editDutyDays);
     const {
       error
     } = await sb.from('recurring_duties').update({
       duty_text: text,
-      frequency: editDutyFreq,
+      frequency: freqVal,
       updated_at: new Date().toISOString()
     }).eq('id', editDutyId);
     if (error) {
@@ -46230,7 +46295,7 @@ function ReportsPage({
     setRecurringDuties(prev => prev.map(d => d.id === editDutyId ? {
       ...d,
       duty_text: text,
-      frequency: editDutyFreq
+      frequency: freqVal
     } : d));
     setEditDutyId(null);
     setEditDutyText('');
@@ -46472,7 +46537,7 @@ function ReportsPage({
             if (existingDutyIds.has(duty.id)) return;
             const f = (duty.frequency || 'daily').toLowerCase();
             let firesToday = false;
-            if (f === 'daily') firesToday = true;else if (f === 'mon-sat') firesToday = dow >= 1 && dow <= 6;else if (f === 'mon-fri' || f === 'weekdays') firesToday = dow >= 1 && dow <= 5;else if (f === 'alt-days' || f === 'alt-day' || f === 'every-other-day') {
+            if (f === 'daily') firesToday = true;else if (f === 'mon-sat') firesToday = dow >= 1 && dow <= 6;else if (f === 'mon-fri' || f === 'weekdays') firesToday = dow >= 1 && dow <= 5;else if (f.startsWith('days:')) firesToday = f.slice(5).split(',').map(Number).includes(dow);else if (f === 'alt-days' || f === 'alt-day' || f === 'every-other-day') {
               const anchorDate = (duty.created_at || '').slice(0, 10);
               if (anchorDate) {
                 const [ay, am, ad] = anchorDate.split('-').map(Number);
@@ -49811,8 +49876,8 @@ function ReportsPage({
   }, "Mon\u2013Sat"), React.createElement("option", {
     value: "mon-fri"
   }, "Mon\u2013Fri"), React.createElement("option", {
-    value: "weekdays"
-  }, "Weekdays")), React.createElement("button", {
+    value: "custom"
+  }, "Pick days\u2026")), React.createElement("button", {
     className: "b bp",
     onClick: addRecurringDuty,
     disabled: savingDuty,
@@ -49821,7 +49886,7 @@ function ReportsPage({
       padding: '6px 14px',
       whiteSpace: 'nowrap'
     }
-  }, savingDuty ? 'Adding…' : '+ Add')), React.createElement("div", {
+  }, savingDuty ? 'Adding…' : '+ Add')), newDutyFreq === 'custom' && renderDutyDayTicks(newDutyDays, setNewDutyDays), React.createElement("div", {
     style: {
       fontSize: 9,
       color: '#64748b',
@@ -49888,7 +49953,7 @@ function ReportsPage({
           marginBottom: 4,
           opacity: d.active ? 1 : 0.65
         }
-      }, isEditing ? React.createElement("div", {
+      }, isEditing ? React.createElement("div", null, React.createElement("div", {
         style: {
           display: 'grid',
           gridTemplateColumns: '1fr 130px auto auto',
@@ -49917,8 +49982,10 @@ function ReportsPage({
       }, "Mon\u2013Sat"), React.createElement("option", {
         value: "mon-fri"
       }, "Mon\u2013Fri"), React.createElement("option", {
-        value: "weekdays"
-      }, "Weekdays")), React.createElement("button", {
+        value: "alt-days"
+      }, "Every other day"), React.createElement("option", {
+        value: "custom"
+      }, "Pick days\u2026")), React.createElement("button", {
         className: "b bp",
         onClick: saveEditDuty,
         style: {
@@ -49935,7 +50002,7 @@ function ReportsPage({
           fontSize: 10,
           padding: '4px 10px'
         }
-      }, "Cancel")) : React.createElement("div", {
+      }, "Cancel")), editDutyFreq === 'custom' && renderDutyDayTicks(editDutyDays, setEditDutyDays)) : React.createElement("div", {
         style: {
           display: 'flex',
           alignItems: 'center',
@@ -49957,7 +50024,7 @@ function ReportsPage({
           background: '#1a2030',
           whiteSpace: 'nowrap'
         }
-      }, d.frequency), React.createElement("button", {
+      }, dutyFreqLabel(d.frequency)), React.createElement("button", {
         className: "b",
         onClick: () => toggleDutyActive(d.id, d.active),
         style: {
