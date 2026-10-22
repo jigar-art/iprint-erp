@@ -3884,6 +3884,9 @@ function MainApp({
     clients: clients,
     jobs: filteredJobs,
     s: search
+  }), pg === "acc" && React.createElement(DocketSignTray, {
+    user: user,
+    show: show
   }), pg === "acc" && React.createElement(NoBillApprovalCard, {
     user: user,
     show: show,
@@ -31250,6 +31253,23 @@ function AccPage({
 }) {
   const [tab, setTab] = useState('pending');
   const [nbOpen, setNbOpen] = useState({});
+  // 22 Oct 2026 docket signing: Aparna sends a batch docket, Jigar/Amol sign (spec 2026-10-22-docket-sign-spec).
+  const [dkMap, setDkMap] = useState({});
+  const _dkU = (user?.name || '').toUpperCase();
+  const canSendDk = ['APARNA', 'JIGAR', 'AMOL'].some(t => _dkU === t || _dkU.startsWith(t + ' '));
+  const loadDk = () => sb.from('billing_dockets').select('id,batch_id,sign_status,prepared_at,signed_by,signed_at,returned_reason,returned_by').not('batch_id', 'is', null).not('sign_status', 'is', null).gte('prepared_at', new Date(Date.now() - 120 * 864e5).toISOString()).then(r => {
+    if (r.error) return;
+    const m = {};
+    (r.data || []).forEach(d => { m[d.batch_id] = d; });
+    setDkMap(m);
+  });
+  useEffect(() => { loadDk(); }, []);
+  const sendDk = async ids => {
+    const r = await sb.rpc('erp_docket_send', { p_batch_ids: ids, p_site_ids: [] });
+    if (r.error) { show('\u26A0\uFE0F ' + r.error.message, false); return; }
+    show('\uD83D\uDCDD ' + r.data + ' docket(s) sent to Jigar/Amol for sign');
+    loadDk();
+  };
   const [invoices, setInvoices] = useState({});
   const [invoiceDates, setInvoiceDates] = useState({});
   const [invBatchSel, setInvBatchSel] = useState({});
@@ -31442,6 +31462,16 @@ function AccPage({
     const ok = await updateJobStatus(j.id, 'Billing Done');
     if (ok) show("✅ " + j.id + " → Billing Done (" + existingInv.length + " invoice(s))");
   };
+  const dkEl = b => {
+    const d = dkMap[b.id];
+    const st = d && d.sign_status;
+    const ts = v => String(v || '').slice(0, 16).replace('T', ' ');
+    if (st === 'Sent') return React.createElement("span", { className: "bd", style: { background: '#a855f720', color: '#a855f7', fontSize: 8 }, title: 'Sent ' + ts(d.prepared_at) }, "\u23F3 With Jigar/Amol to sign");
+    if (st === 'Signed') return React.createElement("span", { className: "bd", style: { background: '#22c55e20', color: '#22c55e', fontSize: 8 }, title: 'Signed ' + ts(d.signed_at) }, "\u270D Signed by " + String(d.signed_by || '?').split(' - ')[0]);
+    return React.createElement(React.Fragment, null,
+      st === 'Returned' && React.createElement("span", { className: "bd", style: { background: '#ef444420', color: '#ef4444', fontSize: 8 }, title: 'Returned by ' + (d.returned_by || '?') }, "\u21A9 Returned: " + String(d.returned_reason || '').slice(0, 40)),
+      canSendDk && React.createElement("button", { className: "b bs", style: { fontSize: 8, padding: '1px 5px', color: '#a855f7', borderColor: '#a855f788' }, title: 'Send this batch docket to Jigar/Amol for signature', onClick: () => sendDk([b.id]) }, st === 'Returned' ? "\uD83D\uDCDD Re-send for sign" : "\uD83D\uDCDD Send for sign"));
+  };
   const NB_C = '#94a3b8';
   const noBillBlock = j => {
     const ub = (j.batches || []).filter(b => !String(b.bill_no || '').trim() && (b.items || []).length > 0);
@@ -31513,7 +31543,7 @@ function AccPage({
           if (!confirm('Mark the whole batch "' + (b.note || 'Batch') + '" (' + live.length + ' items, ' + money(amt) + ') as NO BILL?\n\nIt will not be invoiced and will not block Billing Done. Recorded against your name.')) return;
           markNoBill(live.map(it => it.id), true);
         }
-      }, "\u2298 No Bill")), open && its.map(it => React.createElement("div", {
+      }, "\u2298 No Bill"), !allNB && dkEl(b)), open && its.map(it => React.createElement("div", {
         key: it.id,
         style: {
           display: 'flex',
@@ -38319,6 +38349,65 @@ function NoBillApprovalCard({ user, show, setItems }) {
       React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => decide(true), style: { background: '#15803d', color: '#fff' } }, "\u2714 Approve No Bill (" + ids.length + ")"),
       React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => decide(false) }, "\u21ba Send back to billable")));
 }
+// 22 Oct 2026: docket signing tray for Jigar / Amol (spec 2026-10-22-docket-sign-spec).
+function DocketSignTray({ user, show }) {
+  const [rows, setRows] = React.useState(null);
+  const [cnt, setCnt] = React.useState(null);
+  const [sel, setSel] = React.useState({});
+  const [busy, setBusy] = React.useState(false);
+  const [open, setOpen] = React.useState(true);
+  const u = (user?.name || '').toUpperCase();
+  const isSigner = ['JIGAR', 'AMOL'].some(t => u === t || u.startsWith(t + ' '));
+  const load = () => {
+    sb.from('v_docket_to_sign').select('*').order('sent_at', { ascending: true }).then(r => { setRows(r.error ? [] : (r.data || [])); setSel({}); });
+    const since = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+    sb.from('v_docket_daily').select('event_date,action,n').gte('event_date', since).then(r => {
+      if (r.error) return;
+      const today = new Date(Date.now() + 5.5 * 36e5).toISOString().slice(0, 10);
+      const c = { sentToday: 0, sent7: 0, signedToday: 0, returned7: 0 };
+      (r.data || []).forEach(x => {
+        if (x.action === 'sent') { c.sent7 += x.n; if (x.event_date === today) c.sentToday += x.n; }
+        if (x.action === 'signed' && x.event_date === today) c.signedToday += x.n;
+        if (x.action === 'returned') c.returned7 += x.n;
+      });
+      setCnt(c);
+    });
+  };
+  React.useEffect(() => { if (isSigner) load(); }, [isSigner]);
+  if (!isSigner || !rows) return null;
+  const ids = Object.keys(sel).filter(k => sel[k]).map(Number);
+  const act = async sign => {
+    if (!ids.length) return;
+    let reason = '';
+    if (!sign) { reason = (prompt('Reason for returning ' + ids.length + ' docket(s) to Aparna:') || '').trim(); if (!reason) return; }
+    setBusy(true);
+    const r = sign ? await sb.rpc('erp_docket_sign', { p_ids: ids }) : await sb.rpc('erp_docket_return', { p_ids: ids, p_reason: reason });
+    setBusy(false);
+    if (r.error) return show && show('\u26a0\ufe0f ' + r.error.message, false);
+    show && show(sign ? '\u270D ' + r.data + ' docket(s) signed' : '\u21A9 ' + r.data + ' docket(s) returned');
+    load();
+  };
+  const byClient = {};
+  rows.forEach(r => { const k = r.client_name || r.bank || '\u2014'; (byClient[k] = byClient[k] || []).push(r); });
+  const box = { background: 'var(--card, #0f172a)', border: '1px solid #a855f7', borderRadius: 10, padding: 12, margin: '0 0 12px' };
+  const summary = cnt ? ' \u00b7 sent today ' + cnt.sentToday + ' \u00b7 last 7 days ' + cnt.sent7 + ' \u00b7 signed today ' + cnt.signedToday + (cnt.returned7 ? ' \u00b7 returned 7d ' + cnt.returned7 : '') : '';
+  return React.createElement("div", { style: box },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }, onClick: () => setOpen(!open) },
+      React.createElement("b", { style: { fontSize: 13 } }, "\u270D Dockets to sign"),
+      React.createElement("span", { style: { fontSize: 12, opacity: .8 } }, rows.length + " waiting" + summary),
+      React.createElement("span", { style: { marginLeft: 'auto', fontSize: 12 } }, open ? "\u25b2" : "\u25bc")),
+    open && rows.length > 0 && React.createElement("div", { style: { marginTop: 8, maxHeight: 360, overflowY: 'auto' } },
+      Object.keys(byClient).map(c => React.createElement("div", { key: c, style: { padding: '6px 0', borderTop: '1px solid #1e293b' } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 2 } }, c + " (" + byClient[c].length + ")"),
+        byClient[c].map(r => React.createElement("label", { key: r.id, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '2px 0' } },
+          React.createElement("input", { type: "checkbox", checked: !!sel[r.id], onChange: e => setSel(p => ({ ...p, [r.id]: e.target.checked })) }),
+          React.createElement("span", { style: { flex: 1 } }, r.unit === 'site' ? ('Job ' + (r.job_id || '?') + ' \u00b7 ATM ' + (r.atm_id || r.site_id) + (r.city ? ' \u00b7 ' + r.city : '')) : (r.job_id + ' \u00b7 ' + (r.batch_note || 'Batch') + (r.batch_date ? ' \u00b7 ' + r.batch_date : ''))),
+          React.createElement("span", { style: { opacity: .7, fontSize: 11, color: r.hours_waiting > 24 ? '#ef4444' : undefined } }, Math.round(r.hours_waiting || 0) + "h \u00b7 " + String(r.sent_by || '?').split(' - ')[0])))))),
+    open && rows.length > 0 && React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
+      React.createElement("button", { className: "btn", onClick: () => setSel(Object.fromEntries(rows.map(r => [r.id, true]))) }, "Select all"),
+      React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => act(true), style: { background: '#15803d', color: '#fff' } }, "\u270D Signed (" + ids.length + ")"),
+      React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => act(false) }, "\u21A9 Return to Aparna")));
+}
 // 17 Oct 2026: forced PIN change. After login, if the account is flagged, the user must set a new PIN.
 function ErpPinChangeGate() {
   const [need, setNeed] = React.useState(false);
@@ -39104,6 +39193,35 @@ function BankCRMPage({
   const [editRemarks, setEditRemarks] = useState(null);
   const [editInvoice, setEditInvoice] = useState(null);
   const [editPmt, setEditPmt] = useState(null);
+  // 22 Oct 2026 docket signing per banking site.
+  const [siteDk, setSiteDk] = useState({});
+  const _sdU = (user?.name || '').toUpperCase();
+  const canSendSiteDk = ['APARNA', 'JIGAR', 'AMOL'].some(t => _sdU === t || _sdU.startsWith(t + ' '));
+  const loadSiteDk = () => sb.from('billing_dockets').select('id,site_id,sign_status,prepared_at,signed_by,signed_at,returned_reason,returned_by').not('site_id', 'is', null).not('sign_status', 'is', null).gte('prepared_at', new Date(Date.now() - 120 * 864e5).toISOString()).then(r => {
+    if (r.error) return;
+    const m = {};
+    (r.data || []).forEach(d => { m[d.site_id] = d; });
+    setSiteDk(m);
+  });
+  useEffect(() => { loadSiteDk(); }, []);
+  const DK_SKIP_CAT = ['Invoiced', 'Given for Billing', 'Cancelled', 'Duplicate'];
+  const sendSiteDk = async ids => {
+    if (!ids.length) { show('Nothing to send', false); return; }
+    const r = await sb.rpc('erp_docket_send', { p_batch_ids: [], p_site_ids: ids });
+    if (r.error) { show('\u26A0\uFE0F ' + r.error.message, false); return; }
+    show('\uD83D\uDCDD ' + r.data + ' site docket(s) sent to Jigar/Amol for sign');
+    loadSiteDk();
+  };
+  const siteDkEl = s => {
+    const d = siteDk[s.id];
+    const st = d && d.sign_status;
+    if (st === 'Sent') return React.createElement("div", { style: { fontSize: 7, color: '#a855f7' }, title: 'Sent ' + String(d.prepared_at || '').slice(0, 16).replace('T', ' ') }, "\u23F3 to sign");
+    if (st === 'Signed') return React.createElement("div", { style: { fontSize: 7, color: '#22c55e' } }, "\u270D " + String(d.signed_by || '?').split(' - ')[0]);
+    if (DK_SKIP_CAT.includes(s.billing_category)) return null;
+    return React.createElement("div", { style: { display: 'flex', gap: 2, alignItems: 'center' } },
+      st === 'Returned' && React.createElement("span", { style: { fontSize: 7, color: '#ef4444' }, title: 'Returned by ' + (d.returned_by || '?') + ': ' + (d.returned_reason || '') }, "\u21A9 returned"),
+      canSendSiteDk && React.createElement("button", { className: "b bs", style: { fontSize: 7, padding: '0 4px', color: '#a855f7', borderColor: '#a855f788' }, title: 'Send this site docket to Jigar/Amol for signature', onClick: () => sendSiteDk([s.id]) }, "\uD83D\uDCDD sign"));
+  };
   const [cardLabels, setCardLabels] = useState({
     photoNA: 'N/A'
   });
@@ -40617,7 +40735,18 @@ function BankCRMPage({
     style: {
       fontSize: 9
     }
-  }, "\uD83D\uDCE5 Export"), React.createElement("button", {
+  }, "\uD83D\uDCE5 Export"), canSendSiteDk && React.createElement("button", {
+    className: "b bs",
+    style: { fontSize: 9, color: '#a855f7', borderColor: '#a855f788' },
+    title: 'Send dockets for all filtered sites (install done, not yet given for billing) to Jigar/Amol',
+    onClick: () => {
+      const el = filtered.filter(s => ['Completed', 'Done'].includes(s.installation_status) && !DK_SKIP_CAT.includes(s.billing_category) && !(siteDk[s.id] && ['Sent', 'Signed'].includes(siteDk[s.id].sign_status)));
+      if (!el.length) { show('No eligible sites in this filter (install done, not yet given for billing, not already sent)', false); return; }
+      if (el.length > 200) { show('Too many sites (' + el.length + ') \u2014 filter by job first (max 200)', false); return; }
+      if (!confirm('Send ' + el.length + ' site docket(s) to Jigar/Amol for signature?')) return;
+      sendSiteDk(el.map(s => s.id));
+    }
+  }, "\uD83D\uDCDD Send for sign"), React.createElement("button", {
     className: "b bp bs",
     onClick: () => setShowAddSite(true),
     style: {
@@ -42401,7 +42530,7 @@ function BankCRMPage({
         color: billingColor,
         fontSize: 8
       }
-    }, s.billing_category || 'Pending')), React.createElement("td", null, React.createElement("select", {
+    }, s.billing_category || 'Pending'), siteDkEl(s)), React.createElement("td", null, React.createElement("select", {
       className: "in",
       value: s.work_category || '',
       onChange: e => updateSite(s.id, 'work_category', e.target.value),
