@@ -4689,18 +4689,32 @@ const VB_ADD = VB_ACC.concat(['MURLI', 'MANOJ', 'AMOL']);
 function VendorBillsCard({ user }) {
   const me = pbKey(user);
   const [rows, setRows] = React.useState(null);
+  const [toPay, setToPay] = React.useState([]);
   const [open, setOpen] = React.useState(false);
+  const [tab, setTab] = React.useState('book');
   const [add, setAdd] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const toast = (m, ok = true) => { try { window._showToast && window._showToast(m, ok); } catch (e) {} };
   const canAdd = VB_ADD.includes(me), canBook = VB_ACC.includes(me);
-  const load = () => sb.from('vendor_bills').select('*').eq('status', 'received').order('received_at', { ascending: true }).then(r => setRows(r.error ? [] : r.data || []));
+  const load = () => {
+    sb.from('vendor_bills').select('*').eq('status', 'received').order('received_at', { ascending: true }).then(r => setRows(r.error ? [] : r.data || []));
+    if (canBook) sb.from('vendor_bills').select('*').eq('status', 'booked').is('paid_at', null).order('bill_date', { ascending: true }).then(r => setToPay(r.error ? [] : r.data || []));
+  };
   React.useEffect(() => { if (canAdd) load(); }, [canAdd]);
   if (!canAdd || rows === null) return null;
+  const today = new Date().toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10);
   const book = async r => {
     const v = window.prompt('Booked in Tally — voucher no. for ' + (r.bill_no || r.subject || 'this bill') + '?'); if (!v) return;
-    const bn = r.bill_no ? r.bill_no : (window.prompt('Vendor bill no.? (optional)') || null);
-    const x = await sb.rpc('erp_vendor_bill_book', { p_id: r.id, p_voucher: v, p_bill_no: bn, p_amount: null, p_supplier: null });
+    const bn = r.bill_no ? r.bill_no : (window.prompt('Vendor bill no.?') || null);
+    const t = window.prompt('Vendor payment terms in days (0 = pay immediately)?'); if (t === null || t === '') return;
+    const bd = window.prompt('Bill date (YYYY-MM-DD)?', new Date(r.received_at).toLocaleString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 10)); if (!bd) return;
+    const x = await sb.rpc('erp_vendor_bill_book', { p_id: r.id, p_voucher: v, p_bill_no: bn, p_amount: null, p_supplier: null, p_terms: parseInt(t, 10), p_bill_date: bd });
+    if (x.error) return toast('⚠️ ' + x.error.message, false); toast('✓ ' + x.data); load();
+  };
+  const pay = async r => {
+    const d = window.prompt('Paid on (YYYY-MM-DD)?', today); if (!d) return;
+    const u = window.prompt('UTR / cheque no.?'); if (!u) return;
+    const x = await sb.rpc('erp_vendor_bill_pay', { p_id: r.id, p_date: d, p_utr: u });
     if (x.error) return toast('⚠️ ' + x.error.message, false); toast('✓ ' + x.data); load();
   };
   const dismiss = async r => {
@@ -4720,13 +4734,22 @@ function VendorBillsCard({ user }) {
   };
   const age = t => { const h = (Date.now() - new Date(t).getTime()) / 36e5; return h < 24 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd'; };
   const late = t => (Date.now() - new Date(t).getTime()) / 36e5 > 48;
+  const dueOf = r => { const d = new Date(r.bill_date + 'T00:00:00'); d.setDate(d.getDate() + (r.terms_days || 0)); return d; };
   const nLate = rows.filter(r => late(r.received_at)).length;
+  const nOver = toPay.filter(r => dueOf(r) < new Date(today + 'T00:00:00')).length;
   const inp = { width: '100%', boxSizing: 'border-box', marginTop: 4 };
-  return React.createElement("div", { className: "cd", style: { padding: 10, border: '1px solid ' + (nLate ? '#f8717155' : '#33415588') } },
-    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 } },
-      React.createElement("b", { style: { color: nLate ? '#fca5a5' : '#cbd5e1', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) },
-        (open ? '▾ ' : '▸ ') + '🧾 Vendor bills to book · ' + rows.length + (nLate ? ' (' + nLate + ' over 2 days)' : '')),
-      React.createElement("button", { type: 'button', className: 'b', onClick: () => { setOpen(true); setAdd(add ? null : { firm: 'JXT' }); }, style: { fontSize: 11 } }, add ? 'Cancel' : '+ Add bill')),
+  const tabBtn = (k, t) => React.createElement("button", { type: 'button', className: 'b' + (tab === k ? ' bp' : ''), onClick: () => { setTab(k); setOpen(true); }, style: { fontSize: 11 } }, t);
+  const line = (r, extra, btns) => React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1f2937', padding: '7px 0', fontSize: 12, color: '#e2e8f0' } },
+    React.createElement("div", null, React.createElement("b", null, (r.supplier || r.from_addr || 'Vendor')), (r.firm ? ' · ' + r.firm : '') + (r.bill_no ? ' · bill ' + r.bill_no : '') + (r.amount ? ' · ₹' + Number(r.amount).toLocaleString('en-IN') : '')),
+    React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } }, extra,
+      r.file_url ? React.createElement("a", { href: r.file_url, target: '_blank', rel: 'noopener noreferrer', style: { marginLeft: 6, color: '#7dd3fc' } }, 'bill') : null),
+    btns ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 4 } }, btns) : null);
+  return React.createElement("div", { className: "cd", style: { padding: 10, border: '1px solid ' + (nLate || nOver ? '#f8717155' : '#33415588') } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+      React.createElement("b", { style: { color: nLate || nOver ? '#fca5a5' : '#cbd5e1', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) },
+        (open ? '▾ ' : '▸ ') + '🧾 Vendor bills · ' + rows.length + ' to book' + (nLate ? ' (' + nLate + ' over 2 days)' : '') + (canBook ? ' · ' + toPay.length + ' to pay' + (nOver ? ' (' + nOver + ' overdue)' : '') : '')),
+      React.createElement("div", { style: { display: 'flex', gap: 6 } }, canBook ? tabBtn('book', 'To book') : null, canBook ? tabBtn('pay', 'To pay') : null,
+        React.createElement("button", { type: 'button', className: 'b', onClick: () => { setOpen(true); setAdd(add ? null : { firm: 'JXT' }); }, style: { fontSize: 11 } }, add ? 'Cancel' : '+ Add bill'))),
     add ? React.createElement("div", { style: { borderTop: '1px solid #1f2937', marginTop: 6, paddingTop: 6, fontSize: 12, color: '#cbd5e1' } },
       React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } }, 'For bills that came on WhatsApp or by hand. Emailed bills appear here by themselves.'),
       React.createElement("select", { className: 'in', value: add.firm, onChange: e => setAdd({ ...add, firm: e.target.value }), style: inp },
@@ -4737,24 +4760,24 @@ function VendorBillsCard({ user }) {
       React.createElement("input", { className: 'in', placeholder: 'Note (optional)', value: add.note || '', onChange: e => setAdd({ ...add, note: e.target.value }), style: inp }),
       React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: e => setAdd({ ...add, file: e.target.files && e.target.files[0] || null }), style: { marginTop: 6, fontSize: 12 } }),
       React.createElement("button", { type: 'button', className: 'b bp', disabled: busy, onClick: saveAdd, style: { marginTop: 8, width: '100%' } }, busy ? 'Saving…' : 'Save bill')) : null,
-    open ? (rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', marginTop: 6 } }, 'Nothing pending.') :
-      rows.map(r => React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1f2937', padding: '7px 0', fontSize: 12, color: '#e2e8f0' } },
-        React.createElement("div", null, React.createElement("b", null, (r.supplier || r.from_addr || 'Vendor')), (r.firm ? ' · ' + r.firm : '') + (r.bill_no ? ' · bill ' + r.bill_no : '') + (r.amount ? ' · ₹' + Number(r.amount).toLocaleString('en-IN') : '')),
-        React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } },
+    !open ? null : tab === 'pay' && canBook ? (toPay.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', marginTop: 6 } }, 'No booked bills waiting for payment.') :
+      toPay.map(r => { const due = dueOf(r); const over = due < new Date(today + 'T00:00:00');
+        return line(r, React.createElement("span", { style: { color: over ? '#f87171' : '#fbbf24', fontWeight: 700 } }, (over ? 'Overdue · was due ' : 'Pay by ') + due.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' (' + r.terms_days + ' days)'),
+          [React.createElement("button", { key: 'p', type: 'button', className: 'b', onClick: () => pay(r), style: { fontSize: 11, color: '#4ade80', borderColor: '#4ade8066' } }, '₹ Paid (UTR)')]); })) :
+    (rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', marginTop: 6 } }, 'Nothing to book.') :
+      rows.map(r => line(r, React.createElement(React.Fragment, null,
           (r.subject ? r.subject + ' · ' : '') + 'received ' + new Date(r.received_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ',
           React.createElement("span", { style: { color: late(r.received_at) ? '#f87171' : '#fbbf24', fontWeight: 700 } }, age(r.received_at) + ' ago'),
-          r.source === 'email' ? ' · from ' + (r.mailbox || 'email') : r.source === 'site_po' ? ' · site PO' : ' · added by ' + (r.added_by || '?'),
-          r.file_url ? React.createElement("a", { href: r.file_url, target: '_blank', rel: 'noopener noreferrer', style: { marginLeft: 6, color: '#7dd3fc' } }, 'bill') : null),
-        canBook ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 4 } },
-          React.createElement("button", { type: 'button', className: 'b', onClick: () => book(r), style: { fontSize: 11, color: '#4ade80', borderColor: '#4ade8066' } }, '✓ Booked (voucher no.)'),
-          React.createElement("button", { type: 'button', className: 'b', onClick: () => dismiss(r), style: { fontSize: 11, color: '#94a3b8' } }, 'Not a bill')) : null))) : null);
+          r.source === 'email' ? ' · from ' + (r.mailbox || 'email') : r.source === 'site_po' ? ' · site PO' : ' · added by ' + (r.added_by || '?')),
+        canBook ? [React.createElement("button", { key: 'b', type: 'button', className: 'b', onClick: () => book(r), style: { fontSize: 11, color: '#4ade80', borderColor: '#4ade8066' } }, '✓ Booked (voucher + terms)'),
+          React.createElement("button", { key: 'n', type: 'button', className: 'b', onClick: () => dismiss(r), style: { fontSize: 11, color: '#94a3b8' } }, 'Not a bill')] : null))));
 }
 // Samruddhi checks the proof behind ticks that need a checker (vendor reco, purchase entries); unchecked = no points
 function DutyVerifyCard({ user }) {
   const me = pbKey(user);
   const [rows, setRows] = React.useState(null);
   const [open, setOpen] = React.useState(false);
-  const ok = ['SAMRUDDHI', 'JIGAR'].includes(me);
+  const ok = ['SAMRUDDHI', 'AMOL', 'JIGAR'].includes(me);
   const toast = (m, good = true) => { try { window._showToast && window._showToast(m, good); } catch (e) {} };
   const load = () => sb.rpc('erp_duty_verify_queue').then(r => setRows(r.error ? [] : r.data || []));
   React.useEffect(() => { if (ok) load(); }, [ok]);
@@ -4765,7 +4788,7 @@ function DutyVerifyCard({ user }) {
     if (x.error) return toast('⚠️ ' + x.error.message, false); toast((yes ? '✓ ' : '✗ ') + x.data); load();
   };
   return React.createElement("div", { className: "cd", style: { padding: 10, border: '1px solid #f59e0b55' } },
-    React.createElement("b", { style: { color: '#fbbf24', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + '🔎 Ticks to check · ' + rows.length),
+    React.createElement("b", { style: { color: '#fbbf24', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + '🔎 Ticks to check · ' + rows.length + ' — check within 2 working days, or it counts and you lose the point'),
     open ? rows.map(r => React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1f2937', padding: '7px 0', fontSize: 12, color: '#e2e8f0' } },
       React.createElement("div", null, React.createElement("b", null, r.label), ' · ' + (r.person || '') + ' · ' + (r.period_key || '')),
       React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } }, (r.note || 'No note') + ' · ' + new Date(r.done_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
@@ -18586,6 +18609,7 @@ function PrintPage({
           start_time: f.start_time || '',
           end_time: f.end_time || '',
           notes: f.notes || '',
+          reprint_cause: f.reprint_cause || null,
           photo_url: photoUrl,
           ink_cyan: isFirstRow ? +f.ink_cyan || 0 : 0,
           ink_magenta: isFirstRow ? +f.ink_magenta || 0 : 0,
@@ -20394,7 +20418,18 @@ function PrintPage({
       notes: e.target.value
     })),
     placeholder: "Reprint reason, quality remarks..."
-  }))), React.createElement("div", {
+  })), React.createElement(F, {
+    l: "Is this a reprint?"
+  }, React.createElement("select", {
+    className: "in",
+    value: f.reprint_cause || '',
+    onChange: e => sF(p => ({
+      ...p,
+      reprint_cause: e.target.value
+    }))
+  }, React.createElement("option", { value: "" }, "No — first print"), React.createElement("option", { value: "print" }, "Reprint — our print error"),
+     React.createElement("option", { value: "file" }, "Reprint — wrong file from design"), React.createElement("option", { value: "material" }, "Reprint — material defect"),
+     React.createElement("option", { value: "client" }, "Reprint — client changed / extra")))), React.createElement("div", {
     style: {
       marginTop: 8,
       padding: 8,
@@ -35943,9 +35978,35 @@ function ComplaintsPage({ user }) {
         React.createElement("button", { type: 'button', onClick: () => act(r, 'not_complaint'), style: btn('#64748b') }, 'Not a complaint')) : null,
       !r.needs_review && isOpen(r) && (boss || r.owner === me) ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' } },
         !r.first_reply_at ? React.createElement("button", { type: 'button', onClick: () => act(r, 'replied'), style: btn('#60a5fa') }, 'Replied to client') : null,
-        React.createElement("input", { ...inp, placeholder: 'How was it resolved?', value: note[r.id] || '', onChange: e => setNote(p => ({ ...p, [r.id]: e.target.value })), style: { ...inp.style, flex: '1 1 200px' } }),
-        React.createElement("button", { type: 'button', onClick: () => act(r, 'resolved', { note: note[r.id] }), style: btn('#22c55e') }, 'Resolved'),
+        React.createElement(ComplaintCloseBox, { r: r, inp: inp, btn: btn, nm: nm, onDone: m => { setMsg(m); load(); } }),
         boss ? React.createElement("button", { type: 'button', onClick: () => act(r, 'not_complaint'), style: btn('#64748b') }, 'Not a complaint') : null) : null)));
+}
+// ── 22 Oct 2026 (Jigar, rulebook v5.1 rule 6): a complaint is closed with its cause. "Our mistake" records the mistake against the person.
+const CMP_FAULT_KINDS = [['REJECTED', 'Installed photo rejected by bank'], ['WRONG_SITE', 'Wrong site / wrong photo'], ['WRONG_DELIVERY', 'Wrong delivery'], ['DC_POD', 'DC / POD mistake'],
+  ['SITE_DMG', 'Damaged in transit / packing'], ['DAMAGE', 'Damage at site'], ['RETURN', 'Installation / work not right'], ['PRINT_ERR', 'Print error'], ['WRONG_FILE', 'Wrong design file'], ['INVOICE_ERR', 'Invoice mistake'], ['OTHER', 'Other']];
+function ComplaintCloseBox({ r, inp, btn, nm, onDone }) {
+  const [note, setNote] = React.useState('');
+  const [fault, setFault] = React.useState('');
+  const [person, setPerson] = React.useState('');
+  const [kind, setKind] = React.useState('');
+  const [err, setErr] = React.useState('');
+  const close = async () => {
+    setErr('');
+    const x = await sb.rpc('erp_complaint_resolve', { p_id: r.id, p_note: note, p_fault: fault, p_person: fault === 'our' ? person : null, p_kind: fault === 'our' ? kind : null });
+    if (x.error) { setErr('⚠️ ' + x.error.message); return; }
+    onDone('✓ Complaint #' + r.id + ' resolved' + (fault === 'our' ? ' · mistake recorded for ' + nm(person) : ''));
+  };
+  return React.createElement(React.Fragment, null,
+    React.createElement("input", { ...inp, placeholder: 'How was it resolved?', value: note, onChange: e => setNote(e.target.value), style: { ...inp.style, flex: '1 1 200px' } }),
+    React.createElement("select", { ...inp, value: fault, onChange: e => setFault(e.target.value) },
+      React.createElement("option", { value: '' }, 'Cause?'), React.createElement("option", { value: 'our' }, 'Our mistake'),
+      React.createElement("option", { value: 'client' }, 'Client side'), React.createElement("option", { value: 'none' }, 'Nobody’s fault')),
+    fault === 'our' ? React.createElement("select", { ...inp, value: person, onChange: e => setPerson(e.target.value) }, React.createElement("option", { value: '' }, 'Whose?'),
+      CMP_STAFF.concat(['MANISH', 'ANIL', 'UMESH', 'SANKET', 'HIMANSHU', 'PRINCE', 'ABHIJIT', 'ANKIT', 'SHAHAJAD', 'SONU', 'SHIV', 'FAISAL', 'JAGDISH', 'KAIF', 'MUSTAFA', 'RASHID', 'SAHIL']).map(k => React.createElement("option", { key: k, value: k }, nm(k)))) : null,
+    fault === 'our' ? React.createElement("select", { ...inp, value: kind, onChange: e => setKind(e.target.value) }, React.createElement("option", { value: '' }, 'What went wrong?'),
+      CMP_FAULT_KINDS.map(k => React.createElement("option", { key: k[0], value: k[0] }, k[1]))) : null,
+    React.createElement("button", { type: 'button', onClick: close, style: btn('#22c55e') }, 'Resolved'),
+    err ? React.createElement("div", { style: { fontSize: 11.5, color: '#f87171', width: '100%' } }, err) : null);
 }
 // ── v4.2 One-tap call log (2026-10-14, Jigar): 📞 button → who/what/outcome → task, follow-up, complaint ──
 // ── v5 Part 2 (2026-10-15, Jigar): proof photos + material used (📷), courier approvals (🚚), mistakes, queries, settings, 1 Nov notice ──
@@ -35981,9 +36042,9 @@ function ProofFab({ user }) {
   const card = mine ? mine.card : null;
   const allowed = ['JIGAR', 'AMOL'].includes(me) || ['PRINTING', 'FABRICATION', 'DISPATCH', 'STORES', 'INST_COORD', 'SITE_LEAD', 'DESIGN'].includes(card);
   if (!allowed) return null;
-  const KINDS = [['print_batch', '🖨 Printed batch', 1], ['fab_angle', '📐 Fabrication — 2 angles', 2], ['pre_pack', '📦 Pre-packing', 1], ['post_pack', '📦 Post-packing', 1], ['material', '🧾 Material used', 0], ['recce_drawing', '📏 Recce drawing', 1]];
+  const KINDS = [['print_batch', '🖨 Printed batch', 1], ['fab_angle', '📐 Fabrication — 2 angles', 2], ['pre_pack', '📦 Pre-packing', 1], ['post_pack', '📦 Post-packing', 1], ['material', '🧾 Material used', 0], ['recce_drawing', '📏 Recce drawing', 1], ['client_approval', '✅ Client approval', 1]];
   const isDes = card === 'DESIGN' && !['JIGAR', 'AMOL'].includes(me);
-  const KS = isDes ? KINDS.filter(k => k[0] === 'recce_drawing') : ['JIGAR', 'AMOL'].includes(me) ? KINDS : KINDS.filter(k => k[0] !== 'recce_drawing');
+  const KS = isDes ? KINDS.filter(k => k[0] === 'recce_drawing' || k[0] === 'client_approval') : ['JIGAR', 'AMOL'].includes(me) ? KINDS : KINDS.filter(k => k[0] !== 'recce_drawing' && k[0] !== 'client_approval');
   const chip = on => ({ padding: '9px 12px', borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
   const save = async () => {
     setMsg('');
@@ -36035,12 +36096,26 @@ function ProofFab({ user }) {
           React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: mat.qty, onChange: e => setMat({ ...mat, qty: e.target.value }), placeholder: 'Qty', style: { width: 100, fontSize: 14, padding: '9px 11px' } }),
           ['sqft', 'sqm', 'rmt', 'pcs', 'kg', 'roll'].map(u => React.createElement("button", { key: u, type: 'button', onClick: () => setMat({ ...mat, unit: u }), style: chip(mat.unit === u) }, u)))) : kind ?
       React.createElement("div", { style: { marginTop: 10 } },
-        kind === 'recce_drawing' ? React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', multiple: true, onChange: e => setFiles([...e.target.files]) }) : React.createElement("input", { type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: e => setFiles([...e.target.files]) }),
+        kind === 'recce_drawing' || kind === 'client_approval' ? React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', multiple: true, onChange: e => setFiles([...e.target.files]) }) : React.createElement("input", { type: 'file', accept: 'image/*', multiple: true, capture: 'environment', onChange: e => setFiles([...e.target.files]) }),
         React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, files.length + ' selected' + (need(kind) > 1 ? ' — need ' + need(kind) + ' (different angles)' : ''))) : null,
       msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
       React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: { width: '100%', marginTop: 12, padding: '13px 0', borderRadius: 12, border: 'none', background: busy ? '#475569' : '#22c55e', color: '#06210f', fontSize: 15.5, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Saving…' : 'Save')));
 }
 
+// 22 Oct 2026 (Jigar, rulebook v5.1): a quote revision is logged with its reason; "our mistake" counts against the estimator
+function QuoteReviseBtn({ r, show, reload }) {
+  const go = async e => {
+    e.stopPropagation();
+    const why = window.prompt('Revise quote #' + r.id + ' — type C if the client changed the requirement, O if it was our mistake'); if (!why) return;
+    const f = why.trim().toUpperCase() === 'O' ? 'our' : why.trim().toUpperCase() === 'C' ? 'client' : null;
+    if (!f) { show('Type C or O', false); return; }
+    const note = window.prompt('What changed?'); if (!note) return;
+    const x = await sb.rpc('erp_quote_revise', { p_id: r.id, p_fault: f, p_note: note });
+    if (x.error) { show('⚠️ ' + x.error.message, false); return; }
+    show('✓ ' + x.data); if (reload) reload();
+  };
+  return React.createElement("button", { type: 'button', onClick: go, title: 'Quote needs revising', style: { padding: '1px 7px', fontSize: 9, borderRadius: 9, background: 'transparent', color: '#fbbf24', border: '1px solid #fbbf2455', cursor: 'pointer' } }, '↺ Revise');
+}
 // 21 Oct 2026 (Jigar): courier request v2 — DC, destination, receiver, packages + one labelled photo each, cost basis, ETA, approver checks.
 // Spec: claude/iPrint_ERP_spec_2026-10-21_courier_request_v2.md. DB: erp_courier_request_v2 / erp_courier_inbox_v2 / erp_courier_record.
 const CR_DEST = [['client', 'Client'], ['warehouse', 'Warehouse / place'], ['site_installer', 'Site + installer'], ['vendor', 'Vendor']];
@@ -53751,7 +53826,7 @@ function QuotesPage({
         color: "#38bdf8",
         textDecoration: "none"
       }
-    }, "Open mail"), r.status === 'Sent' && r.sent_method && React.createElement("span", {
+    }, "Open mail"), r.status === 'Sent' && !r.needs_review && React.createElement(QuoteReviseBtn, { r: r, show: show, reload: reload }), r.status === 'Sent' && r.sent_method && React.createElement("span", {
       title: r.sent_proof || '',
       style: {
         fontSize: 9,
