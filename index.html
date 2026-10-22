@@ -4681,6 +4681,99 @@ function ComplaintAlertCard({ user, sp }) {
           !c.job_id ? React.createElement("span", { style: { color: '#64748b' } }, 'no job linked') : null));
     })) : null);
 }
+// ── 2026-10-22 (Jigar): vendor bill register. Bills are logged when they arrive (vendor emails to accounts@ / finance@ /
+// accounts.digital@, site-PO bills, or added by hand for WhatsApp / hand-delivered bills). Accounts marks each one
+// Booked with the Tally voucher no.; the point system checks it was booked within 2 working days.
+const VB_ACC = ['SHREYA', 'VIDYA', 'PRACHI', 'SAMRUDDHI', 'JIGAR'];
+const VB_ADD = VB_ACC.concat(['MURLI', 'MANOJ', 'AMOL']);
+function VendorBillsCard({ user }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [add, setAdd] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const toast = (m, ok = true) => { try { window._showToast && window._showToast(m, ok); } catch (e) {} };
+  const canAdd = VB_ADD.includes(me), canBook = VB_ACC.includes(me);
+  const load = () => sb.from('vendor_bills').select('*').eq('status', 'received').order('received_at', { ascending: true }).then(r => setRows(r.error ? [] : r.data || []));
+  React.useEffect(() => { if (canAdd) load(); }, [canAdd]);
+  if (!canAdd || rows === null) return null;
+  const book = async r => {
+    const v = window.prompt('Booked in Tally — voucher no. for ' + (r.bill_no || r.subject || 'this bill') + '?'); if (!v) return;
+    const bn = r.bill_no ? r.bill_no : (window.prompt('Vendor bill no.? (optional)') || null);
+    const x = await sb.rpc('erp_vendor_bill_book', { p_id: r.id, p_voucher: v, p_bill_no: bn, p_amount: null, p_supplier: null });
+    if (x.error) return toast('⚠️ ' + x.error.message, false); toast('✓ ' + x.data); load();
+  };
+  const dismiss = async r => {
+    const why = window.prompt('Not a vendor bill — why? (e.g. client email, proforma, duplicate)'); if (!why) return;
+    const x = await sb.rpc('erp_vendor_bill_dismiss', { p_id: r.id, p_reason: why });
+    if (x.error) return toast('⚠️ ' + x.error.message, false); toast('✓ ' + x.data); load();
+  };
+  const saveAdd = async () => {
+    if (!add.file) return toast('⚠️ Upload the bill (photo / PDF)', false);
+    setBusy(true);
+    const url = await uploadFile(add.file, 'vendor-bills');
+    if (!url) { setBusy(false); return; }
+    const x = await sb.rpc('erp_vendor_bill_add', { p_firm: add.firm, p_supplier: add.supplier || '', p_bill_no: add.bill_no || '', p_amount: add.amount ? Number(add.amount) : null, p_file: url, p_note: add.note || null });
+    setBusy(false);
+    if (x.error) return toast('⚠️ ' + x.error.message, false);
+    toast('✓ Vendor bill logged'); setAdd(null); load();
+  };
+  const age = t => { const h = (Date.now() - new Date(t).getTime()) / 36e5; return h < 24 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd'; };
+  const late = t => (Date.now() - new Date(t).getTime()) / 36e5 > 48;
+  const nLate = rows.filter(r => late(r.received_at)).length;
+  const inp = { width: '100%', boxSizing: 'border-box', marginTop: 4 };
+  return React.createElement("div", { className: "cd", style: { padding: 10, border: '1px solid ' + (nLate ? '#f8717155' : '#33415588') } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 } },
+      React.createElement("b", { style: { color: nLate ? '#fca5a5' : '#cbd5e1', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) },
+        (open ? '▾ ' : '▸ ') + '🧾 Vendor bills to book · ' + rows.length + (nLate ? ' (' + nLate + ' over 2 days)' : '')),
+      React.createElement("button", { type: 'button', className: 'b', onClick: () => { setOpen(true); setAdd(add ? null : { firm: 'JXT' }); }, style: { fontSize: 11 } }, add ? 'Cancel' : '+ Add bill')),
+    add ? React.createElement("div", { style: { borderTop: '1px solid #1f2937', marginTop: 6, paddingTop: 6, fontSize: 12, color: '#cbd5e1' } },
+      React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } }, 'For bills that came on WhatsApp or by hand. Emailed bills appear here by themselves.'),
+      React.createElement("select", { className: 'in', value: add.firm, onChange: e => setAdd({ ...add, firm: e.target.value }), style: inp },
+        ['JXT', 'JPP', 'VHD'].map(f => React.createElement("option", { key: f, value: f }, f))),
+      React.createElement("input", { className: 'in', placeholder: 'Vendor name', value: add.supplier || '', onChange: e => setAdd({ ...add, supplier: e.target.value }), style: inp }),
+      React.createElement("input", { className: 'in', placeholder: 'Vendor bill no.', value: add.bill_no || '', onChange: e => setAdd({ ...add, bill_no: e.target.value }), style: inp }),
+      React.createElement("input", { className: 'in', type: 'number', placeholder: 'Amount (optional)', value: add.amount || '', onChange: e => setAdd({ ...add, amount: e.target.value }), style: inp }),
+      React.createElement("input", { className: 'in', placeholder: 'Note (optional)', value: add.note || '', onChange: e => setAdd({ ...add, note: e.target.value }), style: inp }),
+      React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: e => setAdd({ ...add, file: e.target.files && e.target.files[0] || null }), style: { marginTop: 6, fontSize: 12 } }),
+      React.createElement("button", { type: 'button', className: 'b bp', disabled: busy, onClick: saveAdd, style: { marginTop: 8, width: '100%' } }, busy ? 'Saving…' : 'Save bill')) : null,
+    open ? (rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', marginTop: 6 } }, 'Nothing pending.') :
+      rows.map(r => React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1f2937', padding: '7px 0', fontSize: 12, color: '#e2e8f0' } },
+        React.createElement("div", null, React.createElement("b", null, (r.supplier || r.from_addr || 'Vendor')), (r.firm ? ' · ' + r.firm : '') + (r.bill_no ? ' · bill ' + r.bill_no : '') + (r.amount ? ' · ₹' + Number(r.amount).toLocaleString('en-IN') : '')),
+        React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } },
+          (r.subject ? r.subject + ' · ' : '') + 'received ' + new Date(r.received_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ',
+          React.createElement("span", { style: { color: late(r.received_at) ? '#f87171' : '#fbbf24', fontWeight: 700 } }, age(r.received_at) + ' ago'),
+          r.source === 'email' ? ' · from ' + (r.mailbox || 'email') : r.source === 'site_po' ? ' · site PO' : ' · added by ' + (r.added_by || '?'),
+          r.file_url ? React.createElement("a", { href: r.file_url, target: '_blank', rel: 'noopener noreferrer', style: { marginLeft: 6, color: '#7dd3fc' } }, 'bill') : null),
+        canBook ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 4 } },
+          React.createElement("button", { type: 'button', className: 'b', onClick: () => book(r), style: { fontSize: 11, color: '#4ade80', borderColor: '#4ade8066' } }, '✓ Booked (voucher no.)'),
+          React.createElement("button", { type: 'button', className: 'b', onClick: () => dismiss(r), style: { fontSize: 11, color: '#94a3b8' } }, 'Not a bill')) : null))) : null);
+}
+// Samruddhi checks the proof behind ticks that need a checker (vendor reco, purchase entries); unchecked = no points
+function DutyVerifyCard({ user }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const ok = ['SAMRUDDHI', 'JIGAR'].includes(me);
+  const toast = (m, good = true) => { try { window._showToast && window._showToast(m, good); } catch (e) {} };
+  const load = () => sb.rpc('erp_duty_verify_queue').then(r => setRows(r.error ? [] : r.data || []));
+  React.useEffect(() => { if (ok) load(); }, [ok]);
+  if (!ok || !rows || rows.length === 0) return null;
+  const decide = async (r, yes) => {
+    let why = null; if (!yes) { why = window.prompt('Reject — reason?'); if (!why) return; }
+    const x = await sb.rpc('erp_duty_verify', { p_id: r.id, p_ok: yes, p_reason: why });
+    if (x.error) return toast('⚠️ ' + x.error.message, false); toast((yes ? '✓ ' : '✗ ') + x.data); load();
+  };
+  return React.createElement("div", { className: "cd", style: { padding: 10, border: '1px solid #f59e0b55' } },
+    React.createElement("b", { style: { color: '#fbbf24', fontSize: 13, cursor: 'pointer' }, onClick: () => setOpen(!open) }, (open ? '▾ ' : '▸ ') + '🔎 Ticks to check · ' + rows.length),
+    open ? rows.map(r => React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1f2937', padding: '7px 0', fontSize: 12, color: '#e2e8f0' } },
+      React.createElement("div", null, React.createElement("b", null, r.label), ' · ' + (r.person || '') + ' · ' + (r.period_key || '')),
+      React.createElement("div", { style: { color: '#94a3b8', fontSize: 11 } }, (r.note || 'No note') + ' · ' + new Date(r.done_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+        r.proof_url ? React.createElement("a", { href: r.proof_url, target: '_blank', rel: 'noopener noreferrer', style: { marginLeft: 6, color: '#7dd3fc' } }, 'proof') : React.createElement("span", { style: { marginLeft: 6, color: '#f87171' } }, 'no proof')),
+      React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 4 } },
+        React.createElement("button", { type: 'button', className: 'b', onClick: () => decide(r, true), style: { fontSize: 11, color: '#4ade80', borderColor: '#4ade8066' } }, '✓ Verified'),
+        React.createElement("button", { type: 'button', className: 'b', onClick: () => decide(r, false), style: { fontSize: 11, color: '#f87171', borderColor: '#f8717166' } }, '✗ Reject')))) : null);
+}
 function DashPage({
   s,
   stock,
@@ -4900,7 +4993,7 @@ function DashPage({
       flexDirection: "column",
       gap: 8
     }
-  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), !isDashViewOnly && React.createElement("div", {
+  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
     className: "c",
     style: {
       padding: 10
