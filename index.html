@@ -54939,6 +54939,14 @@ function PettyCashPage({
       show('Pick the PO being collected', false);
       return;
     }
+    if (crNeeded && crTrip === 'siterun' && amt > 500) {
+      show('Site run is limited to \u20b9500 - above that raise a \ud83d\ude9a courier request', false);
+      return;
+    }
+    if (crNeeded && crTrip === 'siterun' && !form.files.length) {
+      show('Site run: attach a photo of the material / tools being sent', false);
+      return;
+    }
     if (!form.firm) {
       show('Pick the firm' + (jobFirms.length === 1 ? ' - job is ' + jobFirms[0] : ''), false);
       return;
@@ -54980,7 +54988,8 @@ function PettyCashPage({
       meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
       mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null,
       courier_request_id: crNeeded && crTrip === 'delivery' && form.courier ? Number(form.courier) : null,
-      pickup_po: crNeeded && crTrip === 'pickup' && form.pickupPo ? form.pickupPo : null
+      pickup_po: crNeeded && crTrip === 'pickup' && form.pickupPo ? form.pickupPo : null,
+      site_run: !!(crNeeded && crTrip === 'siterun')
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
@@ -55919,9 +55928,10 @@ function PettyCashPage({
     style: { marginBottom: 12 }
   }, React.createElement("label", { style: lbl }, "This trip is - required"),
     React.createElement("div", { style: { display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
-      [['pickup', '\ud83d\udce6 Material pickup from supplier'], ['delivery', '\ud83d\ude9a Delivery / to station or airport']].map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF('crTrip', k),
+      [['pickup', '\ud83d\udce6 Material pickup from supplier'], ['delivery', '\ud83d\ude9a Delivery / to station or airport'], ['siterun', '\ud83d\udee0 Site run (material / tools to site)']].map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF('crTrip', k),
         style: { padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (crTrip === k ? '#10b981' : '#334155'), background: crTrip === k ? '#10b98122' : 'transparent', color: crTrip === k ? '#6ee7b7' : '#e2e8f0' } }, l))),
     !crTrip ? null : !jobNums.length ? React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, 'Enter the job number first')
+    : crTrip === 'siterun' ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', lineHeight: 1.5 } }, 'Office \u2192 site with material or tools for this job. Max \u20b9500 (above that raise a \ud83d\ude9a request). Attach a photo of the material being sent.')
     : crTrip === 'pickup' ? (poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
         React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
         poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))))
