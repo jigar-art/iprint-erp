@@ -6751,7 +6751,8 @@ function JobDetail({
     firm: j.firm || '',
     recce_date: j.recce_date || '',
     install_date: j.install_date || '',
-    vendor_direct: !!j.vendor_direct
+    vendor_direct: !!j.vendor_direct,
+    po_awaited: !!j.po_awaited
   });
   const [jfSaved, setJfSaved] = useState(() => ({
     client_name: j.client_name || '',
@@ -6769,7 +6770,8 @@ function JobDetail({
     firm: j.firm || '',
     recce_date: j.recce_date || '',
     install_date: j.install_date || '',
-    vendor_direct: !!j.vendor_direct
+    vendor_direct: !!j.vendor_direct,
+    po_awaited: !!j.po_awaited
   }));
   const jfDirty = Object.keys(jfSaved).some(k => String(jf[k] == null ? '' : jf[k]) !== String(jfSaved[k] == null ? '' : jfSaved[k]));
   const setJF = (k, v) => {
@@ -7138,7 +7140,16 @@ function JobDetail({
     type: "checkbox",
     checked: !!jf.vendor_direct,
     onChange: e => setJF('vendor_direct', e.target.checked)
-  }), "Executed fully by vendor \u2014 no material dispatched from us (no POD needed)")), canSeeRates && React.createElement(F, {
+  }), "Executed fully by vendor \u2014 no material dispatched from us (no POD needed)")), React.createElement(F, {
+    l: "Client PO awaited"
+  }, React.createElement("label", {
+    style: { fontSize: 10, color: jf.po_awaited ? "#f59e0b" : "#94a3b8", display: "flex", gap: 5, alignItems: "center", cursor: "pointer" },
+    title: "Job already dispatched but the client PO has not come yet. Tick this instead of moving the job back to PO Pending (Jigar, 23 Oct 2026)."
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: !!jf.po_awaited,
+    onChange: e => setJF('po_awaited', e.target.checked)
+  }), "Dispatched \u2014 waiting for client PO (keep status, don't move back to PO Pending)")), canSeeRates && React.createElement(F, {
     l: "Client Email"
   }, React.createElement("input", {
     className: "in",
