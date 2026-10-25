@@ -54974,8 +54974,8 @@ function PettyCashPage({
       show('\u26a0\ufe0f ' + badJob.text, false);
       return;
     }
-    if (myFloat && (form.kind === 'advance' || form.kind === 'booking') && floatBlock.includes(form.category || 'Other')) {
-      show('\u26a0\ufe0f You have a \u20b9' + myFloat.amount + ' float - pay from it and use "I already paid". Shreya refills it every day.', false);
+    if (myFloat && (form.kind === 'advance' || form.kind === 'booking') && (floatBlock.includes(form.category || 'Other') || form.kind === 'booking') && amt <= Number(myFloat.amount)) {
+      show('\u26a0\ufe0f You have a \u20b9' + myFloat.amount + ' float - for amounts up to \u20b9' + myFloat.amount + ' pay from it and use "I already paid". Shreya refills it every day.', false);
       return;
     }
     if (form.kind === 'advance' && quoteCats.includes(form.category || 'Other') && !form.files.length) {
@@ -55580,7 +55580,7 @@ function PettyCashPage({
       style: {
         color: '#f47067'
       }
-    }, shopCatsF.includes(r.category) ? 'Sent to your lead: ' : 'Screenshot not accepted: ', r.ai_final.reasons.join('; '), shopCatsF.includes(r.category) ? '. Wrong bill? Tap "Add bill" below to upload the right one.' : '. Tap "Add bill" below to upload the correct trip screenshot - it will be checked again.')) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, shopCatsF.includes(r.category) || r.category === MEAL_CAT ? 'Sent to your lead: ' : 'Screenshot not accepted: ', r.ai_final.reasons.join('; '), shopCatsF.includes(r.category) || r.category === MEAL_CAT ? '. Wrong bill? Tap "Add bill" below to upload the right one.' : '. Tap "Add bill" below to upload the correct trip screenshot - it will be checked again.')) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#f0b429'
       }
@@ -55809,7 +55809,7 @@ function PettyCashPage({
   }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, isCashier || isAdmin ? tabBtn('review', 'Review', rev.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", { style: card }, myFloat ? /*#__PURE__*/React.createElement("div", { style: { border: '1px solid #10b981', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13, color: '#d1fae5', background: '#10b98114' } },
   /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700 } }, "\ud83d\udcbc Your float ", pcRupee(myFloat.amount), " \u2013 cash with you about ", pcRupee(myFloat.with_staff)),
   myFloat.topup_n || myFloat.pending_n ? /*#__PURE__*/React.createElement("div", null, myFloat.topup_n ? pcRupee(myFloat.topup) + ' coming in today\'s top-up' : '', myFloat.topup_n && myFloat.pending_n ? ' \u00b7 ' : '', myFloat.pending_n ? myFloat.pending_n + ' claim(s) waiting approval' : '') : null,
-  /*#__PURE__*/React.createElement("div", { style: { color: '#9ca3af', marginTop: 4 } }, "Pay auto, parking, hardware, food etc. from it, then use \u201cI already paid\u201d with the bill. Shreya refills it every day."),
+  /*#__PURE__*/React.createElement("div", { style: { color: '#9ca3af', marginTop: 4 } }, "Pay auto, parking, hardware, food etc. from it, then use \u201cI already paid\u201d with the bill. Shreya refills it every day. Bigger than the float (team trips)? Use \u201cI need cash before spending\u201d as before."),
   (() => { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return d.getDate() >= last - 1 && !myFloat.checked_this_month; })() ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
     /*#__PURE__*/React.createElement("span", { style: { color: '#fbbf24' } }, "Month-end float check \u2013 cash in hand:"),
     /*#__PURE__*/React.createElement("input", { type: 'number', inputMode: 'numeric', value: fcCash, onChange: e => setFcCash(e.target.value), style: { ...inp, width: 110, marginBottom: 0 } }),
