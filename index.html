@@ -54951,6 +54951,14 @@ function PettyCashPage({
       show('Is this trip a delivery or a material pickup?', false);
       return;
     }
+    if (crNeeded && crTrip === 'errand' && (!(form.errFrom || '').trim() || !(form.errTo || '').trim() || !(form.errItem || '').trim())) {
+      show('Write from where, to where and what was carried', false);
+      return;
+    }
+    if (crNeeded && crTrip === 'errand' && !form.errandPhoto) {
+      show('Attach a photo of the sample / catalogue / documents', false);
+      return;
+    }
     if (crNeeded && crTrip === 'delivery' && !form.courier) {
       show('Pick the \ud83d\ude9a courier request this payment is for', false);
       return;
@@ -55009,6 +55017,14 @@ function PettyCashPage({
     if (preNeeded && preIssues.some(x => !x.system) && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
     const jobs = form.jobs.split(/[\s,/&]+/).map(s => s.trim().split('-')[0]).filter(s => /^\d+$/.test(s));
     setBusy(true);
+    let errandPath = null;
+    if (crNeeded && crTrip === 'errand') {
+      errandPath = await pcUploadPath(form.errandPhoto, me + '/errand/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg');
+      if (!errandPath) {
+        setBusy(false);
+        return;
+      }
+    }
     const {
       data,
       error
@@ -55023,7 +55039,12 @@ function PettyCashPage({
       mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null,
       courier_request_id: crNeeded && crTrip === 'delivery' && form.courier ? Number(form.courier) : null,
       pickup_po: crNeeded && crTrip === 'pickup' && form.pickupPo ? form.pickupPo : null,
-      site_run: !!(crNeeded && crTrip === 'siterun')
+      site_run: !!(crNeeded && crTrip === 'siterun'),
+      errand_run: !!(crNeeded && crTrip === 'errand'),
+      errand_from: crNeeded && crTrip === 'errand' ? (form.errFrom || '').trim() : null,
+      errand_to: crNeeded && crTrip === 'errand' ? (form.errTo || '').trim() : null,
+      errand_item: crNeeded && crTrip === 'errand' ? (form.errItem || '').trim() : null,
+      errand_photo: errandPath
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
@@ -55571,7 +55592,7 @@ function PettyCashPage({
         color: '#64748b',
         lineHeight: 1.6
       }
-    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', r.errand_run ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), React.createElement("span", { style: { color: '#fbbf24' } }, '\ud83d\udcce ' + (r.errand_item || '') + ': ' + (r.errand_from || '') + ' \u2192 ' + (r.errand_to || '')), r.errand_photo ? React.createElement("a", { href: '#', onClick: e => { e.preventDefault(); viewPath(r.errand_photo); }, style: { color: '#6ee7b7', marginLeft: 6 } }, 'item photo') : null) : null, /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#94a3b8'
       }
@@ -55968,9 +55989,17 @@ function PettyCashPage({
     style: { marginBottom: 12 }
   }, React.createElement("label", { style: lbl }, "This trip is - required"),
     React.createElement("div", { style: { display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
-      [['pickup', '\ud83d\udce6 Material pickup from supplier'], ['delivery', '\ud83d\ude9a Delivery / to station or airport'], ['siterun', '\ud83d\udee0 Site run (material / tools to site)']].map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF('crTrip', k),
+      [['pickup', '\ud83d\udce6 Material pickup from supplier'], ['delivery', '\ud83d\ude9a Delivery / to station or airport'], ['siterun', '\ud83d\udee0 Site run (material / tools to site)'], ['errand', '\ud83d\udcce Sample / catalogue / document run']].map(([k, l]) => React.createElement("button", { key: k, type: 'button', onClick: () => setF('crTrip', k),
         style: { padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (crTrip === k ? '#10b981' : '#334155'), background: crTrip === k ? '#10b98122' : 'transparent', color: crTrip === k ? '#6ee7b7' : '#e2e8f0' } }, l))),
     !crTrip ? null : !jobNums.length ? React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, 'Enter the job number first')
+    : crTrip === 'errand' ? React.createElement("div", null,
+        React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', lineHeight: 1.5, marginBottom: 6 } }, 'Sample, catalogue or documents taken from one place to another for this job. Up to \u20b9500 your lead approves; above that only Jigar. Never approved automatically.'),
+        React.createElement("input", { value: form.errFrom || '', onChange: e => setF('errFrom', e.target.value), placeholder: 'From (e.g. Shree Krishna Marketing, Bhiwandi)', style: { ...inp, marginBottom: 6 } }),
+        React.createElement("input", { value: form.errTo || '', onChange: e => setF('errTo', e.target.value), placeholder: 'To (e.g. client office, BKC)', style: { ...inp, marginBottom: 6 } }),
+        React.createElement("input", { value: form.errItem || '', onChange: e => setF('errItem', e.target.value), placeholder: 'What was carried (e.g. 2 vinyl samples)', style: { ...inp, marginBottom: 6 } }),
+        React.createElement("label", { style: { ...lbl, marginTop: 4 } }, 'Photo of the sample / catalogue / documents - required'),
+        React.createElement("input", { type: 'file', accept: 'image/*', onChange: e => setF('errandPhoto', e.target.files && e.target.files[0] || null), style: { fontSize: 12, color: '#e2e8f0' } }),
+        form.errandPhoto ? React.createElement("div", { style: { fontSize: 12, color: '#6ee7b7', marginTop: 4 } }, '\u2713 ' + form.errandPhoto.name) : null)
     : crTrip === 'siterun' ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', lineHeight: 1.5 } }, 'Office \u2192 site with material or tools for this job. Max \u20b9500 (above that raise a \ud83d\ude9a request). Attach a photo of the material being sent.')
     : crTrip === 'pickup' ? (poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
         React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
