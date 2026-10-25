@@ -54663,6 +54663,12 @@ function PettyCashPage({
     const out = [];
     const amt = parseFloat(form.amount);
     const goods = pre.service === 'goods_delivery' || /porter|wefast|borzo/i.test(pre.app || '');
+    // 25 Oct 2026 (Jigar): a goods trip must be claimed as courier and linked to the 🚚 request / PO / site run
+    if (goods && !CR_CATS.includes(form.category)) out.push({
+      red: true,
+      block: true,
+      text: 'This is a Porter / Wefast goods trip - pick category Courier - Porter / Wefast and link the \ud83d\ude9a request, the PO being collected, or Site run.'
+    });
     if (pre.system) {
       out.push({
         red: false,
@@ -54994,6 +55000,10 @@ function PettyCashPage({
     }
     if (preNeeded && pre && pre.loading) {
       show('Wait a moment - still checking the screenshot', false);
+      return;
+    }
+    if (preNeeded && preIssues.some(x => x.block)) {
+      show('\u26a0\ufe0f ' + preIssues.find(x => x.block).text, false);
       return;
     }
     if (preNeeded && preIssues.some(x => !x.system) && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
