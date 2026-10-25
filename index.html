@@ -54457,6 +54457,13 @@ function PettyCashPage({
   const [jobInfo, setJobInfo] = useState([]);
   const [pays, setPays] = useState([]);
   const [exts, setExts] = useState([]);
+  const [floats, setFloats] = useState([]);
+  const [giveTo, setGiveTo] = useState('');
+  const [fcCash, setFcCash] = useState('');
+  const myFloat = floats.find(f => f.person_id === me) || null;
+  const floatBlock = cfg && cfg.float_block_categories || [];
+  const quoteCats = cfg && cfg.quote_categories || [];
+  const shopCatsF = cfg && cfg.float_bill_categories || [];
   const [pre, setPre] = useState(null);
   const [rev, setRev] = useState([]);
   const [revOther, setRevOther] = useState({});
@@ -54484,6 +54491,8 @@ function PettyCashPage({
     }
     const pm = await sb.from('petty_cash_payments').select('request_id,amount,paid_at,mode,ref');
     if (!pm.error) setPays(pm.data || []);
+    const fs_ = await sb.rpc('erp_pc_float_status');
+    if (!fs_.error) setFloats(fs_.data || []);
     const ex = await sb.from('petty_cash_extensions').select('id,request_id,amount,reason,status,requested_by,requested_at,decided_by,decided_at,remark').order('requested_at');
     if (!ex.error) setExts(ex.data || []);
     const st = await sb.rpc('erp_pc_close_status');
@@ -54601,7 +54610,7 @@ function PettyCashPage({
     return null;
   })();
   const appCatsF = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
-  const preNeeded = form.files.length > 0 && (form.kind === 'booking' || form.kind === 'reimbursement' && appCatsF.includes(form.category));
+  const preNeeded = form.files.length > 0 && (form.kind === 'booking' || form.kind === 'reimbursement' && (appCatsF.includes(form.category) || shopCatsF.includes(form.category)));
   const preKey = preNeeded ? form.files[0].name + '|' + form.files[0].size + '|' + form.files[0].lastModified + '|' + (form.category || '') : '';
   useEffect(() => {
     if (!preKey) {
@@ -54668,9 +54677,13 @@ function PettyCashPage({
       });
       return out;
     }
+    if (shopCatsF.includes(form.category) && amt > Number(cfg && cfg.float_auto_limit || 1000)) out.push({
+      red: false,
+      text: 'Above ' + pcRupee(cfg && cfg.float_auto_limit || 1000) + ' - your lead will check this one.'
+    });
     if (pre.screen === 'not_a_receipt') out.push({
       red: true,
-      text: "This doesn't look like a transport / cargo receipt."
+      text: shopCatsF.includes(form.category) ? "This doesn't look like a bill." : "This doesn't look like a transport / cargo receipt."
     });
     if (pre.paid === 'balance_due') out.push({
       red: true,
@@ -54960,7 +54973,17 @@ function PettyCashPage({
       show('\u26a0\ufe0f ' + badJob.text, false);
       return;
     }
-    if (form.kind === 'reimbursement' && !form.files.length) {
+    if (myFloat && (form.kind === 'advance' || form.kind === 'booking') && floatBlock.includes(form.category || 'Other')) {
+      show('\u26a0\ufe0f You have a \u20b9' + myFloat.amount + ' float - pay from it and use "I already paid". Shreya refills it every day.', false);
+      return;
+    }
+    if (form.kind === 'advance' && quoteCats.includes(form.category || 'Other') && !form.files.length) {
+      show('Attach the quote / estimate photo - big advances need a quote', false);
+      return;
+    }
+    const mres0 = form.category === MEAL_CAT && form.meal && form.mealCtx ? mealResolve(form.meal, form.mealCtx) : null;
+    const mealNoBill = !!(mres0 && mres0.amount != null && amt <= mres0.amount);
+    if (form.kind === 'reimbursement' && !form.files.length && !mealNoBill) {
       show('Attach the bill photo - reimbursements need proof', false);
       return;
     }
@@ -54997,7 +55020,9 @@ function PettyCashPage({
       return;
     }
     if (form.files.length) {
-      const ok = await attachBills(data.id, form.files, null, form.kind === 'booking' ? 'quote' : 'bill', form.kind);
+      const qStage = form.kind === 'advance' && quoteCats.includes(form.category || 'Other');
+      const ok = await attachBills(data.id, form.files, null, form.kind === 'booking' || qStage ? 'quote' : 'bill', form.kind);
+      if (qStage) { const qb = await sb.from('petty_cash_bills').select('id').eq('request_id', data.id).eq('stage', 'quote').limit(1).maybeSingle(); if (qb.data) sb.functions.invoke('verify-fare-screenshot', { body: { bill_id: qb.data.id } }).then(() => load()); }
       if (ok < form.files.length) show('\u26a0\ufe0f ' + (form.files.length - ok) + ' file(s) did not upload - add them from My requests', false);
     }
     setBusy(false);
@@ -55397,7 +55422,7 @@ function PettyCashPage({
   const fmtMins = m => m < 60 ? m + ' min' : Math.floor(m / 60) + 'h ' + m % 60 + 'm';
   const needsExtra = r => r.kind === 'booking' && r.status === 'paid' && r.final_fare != null && Number(r.final_fare) > Math.round(Number(r.quote_fare || r.amount) * 110) / 100 && !r.extra_approved_at;
   const extraQueue = reqs.filter(r => needsExtra(r) && (r.l1_approver_id || r.l2_approver_id || r.l3_approver_id) === me);
-  const toPay = reqs.filter(r => r.status === 'approved');
+  const toPay = reqs.filter(r => r.status === 'approved' && !r.float_id);
   const advOut = reqs.filter(r => r.status === 'paid').sort((a, b) => new Date(a.paid_at) - new Date(b.paid_at));
   const approveAll = async () => {
     const ready = queue.filter(r => r.kind === 'advance' || billsOf(r.id).length);
@@ -55487,7 +55512,7 @@ function PettyCashPage({
   const row = (r, opts = {}) => {
     const st = PC_STATUS[r.status] || [r.status, '#94a3b8'];
     const bs = billsOf(r.id);
-    const billed = bs.filter(b => !(b.ai && b.ai.dup)).reduce((s, b) => s + Number(b.amount || 0), 0);
+    const billed = bs.filter(b => !(b.ai && b.ai.dup) && b.stage !== 'quote').reduce((s, b) => s + Number(b.amount || 0), 0);
     const flagged = bs.filter(b => b.ai && b.ai.reasons && b.ai.reasons.length && r.kind === 'advance');
     const late = r.status === 'paid' && pcDays(r.paid_at) > (cfg?.advance_open_days || 3);
     const canAdd = !['settled', 'rejected', 'cancelled'].includes(r.status) && (r.requester_id === me || isCashier);
@@ -55780,11 +55805,15 @@ function PettyCashPage({
       flexWrap: 'wrap',
       marginBottom: 12
     }
-  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, isCashier || isAdmin ? tabBtn('review', 'Review', rev.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", {
-    style: card
-  }, /*#__PURE__*/React.createElement("label", {
-    style: lbl
-  }, "What kind?"), /*#__PURE__*/React.createElement("div", {
+  }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, isCashier || isAdmin ? tabBtn('review', 'Review', rev.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", { style: card }, myFloat ? /*#__PURE__*/React.createElement("div", { style: { border: '1px solid #10b981', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13, color: '#d1fae5', background: '#10b98114' } },
+  /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700 } }, "\ud83d\udcbc Your float ", pcRupee(myFloat.amount), " \u2013 cash with you about ", pcRupee(myFloat.with_staff)),
+  myFloat.topup_n || myFloat.pending_n ? /*#__PURE__*/React.createElement("div", null, myFloat.topup_n ? pcRupee(myFloat.topup) + ' coming in today\'s top-up' : '', myFloat.topup_n && myFloat.pending_n ? ' \u00b7 ' : '', myFloat.pending_n ? myFloat.pending_n + ' claim(s) waiting approval' : '') : null,
+  /*#__PURE__*/React.createElement("div", { style: { color: '#9ca3af', marginTop: 4 } }, "Pay auto, parking, hardware, food etc. from it, then use \u201cI already paid\u201d with the bill. Shreya refills it every day."),
+  (() => { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return d.getDate() >= last - 1 && !myFloat.checked_this_month; })() ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+    /*#__PURE__*/React.createElement("span", { style: { color: '#fbbf24' } }, "Month-end float check \u2013 cash in hand:"),
+    /*#__PURE__*/React.createElement("input", { type: 'number', inputMode: 'numeric', value: fcCash, onChange: e => setFcCash(e.target.value), style: { ...inp, width: 110, marginBottom: 0 } }),
+    /*#__PURE__*/React.createElement("button", { disabled: busy || fcCash === '', onClick: () => rpc('erp_pc_float_check', { p_cash: parseFloat(fcCash) }).then(() => setFcCash('')), style: btn('#10b981') }, "Submit")) : null) : null,
+  /*#__PURE__*/React.createElement("label", { style: lbl }, "What kind?"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6,
@@ -56221,7 +56250,26 @@ function PettyCashPage({
   })), queue.length ? queue.map(r => row(r, {
     who: true,
     approve: true
-  })) : extraQueue.length || cs && cs.is_approver && cs.pending_adjust ? null : empty('Nothing waiting for you.')) : null, tab === 'desk' ? /*#__PURE__*/React.createElement(React.Fragment, null, cs && cs.gate ? /*#__PURE__*/React.createElement("div", {
+  })) : extraQueue.length || cs && cs.is_approver && cs.pending_adjust ? null : empty('Nothing waiting for you.')) : null, tab === 'desk' ? /*#__PURE__*/React.createElement(React.Fragment, null,
+  floats.some(f => f.topup_n) ? /*#__PURE__*/React.createElement("div", { style: { ...card, borderColor: '#10b981' } },
+    /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: '#e2e8f0', marginBottom: 6 } }, "Float top-ups (", floats.filter(f => f.topup_n).length, ")"),
+    floats.filter(f => f.topup_n).map(f => /*#__PURE__*/React.createElement("div", { key: f.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid #1a2030', flexWrap: 'wrap' } },
+      /*#__PURE__*/React.createElement("span", { style: { color: '#e2e8f0' } }, f.name, " \u2013 ", pcRupee(f.topup), " (", f.topup_n, f.topup_n > 1 ? ' claims' : ' claim', ")"),
+      /*#__PURE__*/React.createElement("span", { style: { display: 'flex', gap: 6 } },
+        /*#__PURE__*/React.createElement("button", { disabled: busy, onClick: () => confirm('Give ' + f.name + ' ' + pcRupee(f.topup) + ' cash as float top-up?') && rpc('erp_pc_pay_float_topup', { p_person: f.person_id, p_mode: 'cash', p_ref: null }), style: btn('#10b981') }, "Pay cash"),
+        /*#__PURE__*/React.createElement("button", { disabled: busy, onClick: () => { const ref = prompt('Bank transfer ref (UTR) for ' + f.name + ' ' + pcRupee(f.topup)); if (ref) rpc('erp_pc_pay_float_topup', { p_person: f.person_id, p_mode: 'bank', p_ref: ref }); }, style: btn('#3b82f6') }, "Paid by bank"))))) : null,
+  cs && cs.is_cashier || isAdmin ? /*#__PURE__*/React.createElement("div", { style: card },
+    /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: '#e2e8f0', marginBottom: 6 } }, "Cash with staff (floats) \u2013 ", pcRupee(floats.reduce((s, f) => s + Number(f.amount), 0))),
+    floats.map(f => /*#__PURE__*/React.createElement("div", { key: f.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '1px solid #1a2030', fontSize: 13, flexWrap: 'wrap' } },
+      /*#__PURE__*/React.createElement("span", { style: { color: '#e2e8f0' } }, f.name, " ", pcRupee(f.amount), " since ", pcWhen(f.issued_at), " \u00b7 with them ~", pcRupee(f.with_staff),
+        f.last_gap != null && Math.abs(f.last_gap) > 20 ? /*#__PURE__*/React.createElement("span", { style: { color: '#f47067' } }, " \u00b7 last check gap ", pcRupee(f.last_gap)) : null),
+      /*#__PURE__*/React.createElement("button", { disabled: busy, onClick: () => { const v = prompt('Cash returned by ' + f.name + ' (float ' + pcRupee(f.amount) + ')', String(f.amount)); if (v === null) return; const amt = parseFloat(v); const note = amt !== Number(f.amount) ? prompt('Why is it different?') : null; rpc('erp_pc_return_float', { p_float: f.id, p_amount: amt, p_mode: 'cash', p_note: note }); }, style: btn('#6b7280') }, "Float returned"))),
+    /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' } },
+      /*#__PURE__*/React.createElement("select", { value: giveTo, onChange: e => setGiveTo(e.target.value), style: { ...inp, marginBottom: 0, flex: '1 1 160px' } },
+        /*#__PURE__*/React.createElement("option", { value: '' }, "Give float to\u2026"),
+        Object.entries(names).filter(([id]) => !floats.some(f => f.person_id === id)).sort((a, b) => String(a[1]).localeCompare(String(b[1]))).map(([id, n]) => /*#__PURE__*/React.createElement("option", { key: id, value: id }, n))),
+      /*#__PURE__*/React.createElement("button", { disabled: busy || !giveTo, onClick: () => confirm('Give ' + (names[giveTo] || '') + ' a ' + pcRupee(cfg && cfg.float_amount || 1000) + ' float in cash from the box?') && rpc('erp_pc_give_float', { p_person: giveTo, p_mode: 'cash', p_ref: null }).then(() => setGiveTo('')), style: btn('#10b981') }, "Give float (cash)"),
+      /*#__PURE__*/React.createElement("button", { disabled: busy || !giveTo, onClick: () => { const ref = prompt('Bank transfer ref (UTR)'); if (ref) rpc('erp_pc_give_float', { p_person: giveTo, p_mode: 'bank', p_ref: ref }).then(() => setGiveTo('')); }, style: btn('#3b82f6') }, "Give by bank"))) : null, cs && cs.gate ? /*#__PURE__*/React.createElement("div", {
     style: {
       ...card,
       borderColor: '#f47067',
