@@ -54974,7 +54974,7 @@ function PettyCashPage({
       show('\u26a0\ufe0f ' + badJob.text, false);
       return;
     }
-    if (myFloat && (form.kind === 'booking' && (!form.category || floatBlock.includes(form.category)) || form.kind === 'advance' && !(form.category && form.category !== 'Other' && quoteCats.includes(form.category))) && amt <= Number(myFloat.with_staff)) {
+    if (myFloat && (form.kind === 'advance' || form.kind === 'booking') && amt <= Number(myFloat.with_staff)) {
       show('\u26a0\ufe0f You still have \u20b9' + myFloat.with_staff + ' in your float - pay from it and use "I already paid". Shreya refills it every day.', false);
       return;
     }
@@ -55809,7 +55809,7 @@ function PettyCashPage({
   }, tabBtn('new', 'Request cash'), tabBtn('mine', 'My requests', mine.filter(r => !['settled', 'rejected', 'cancelled'].includes(r.status)).length), queue.length || extraQueue.length || isAdmin ? tabBtn('approve', 'To approve', queue.length + extraQueue.length + (cs && cs.is_approver && cs.pending_adjust ? 1 : 0)) : null, isCashier || isAdmin ? tabBtn('desk', 'Cash desk', toPay.length + advOut.length) : null, isCashier || isAdmin ? tabBtn('review', 'Review', rev.length) : null, seeAll ? tabBtn('all', 'All') : null), tab === 'new' ? /*#__PURE__*/React.createElement("div", { style: card }, myFloat ? /*#__PURE__*/React.createElement("div", { style: { border: '1px solid #10b981', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13, color: '#d1fae5', background: '#10b98114' } },
   /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700 } }, "\ud83d\udcbc Your float ", pcRupee(myFloat.amount), " \u2013 cash with you about ", pcRupee(myFloat.with_staff), myFloat.own_pocket > 0 ? " \u00b7 you paid " + pcRupee(myFloat.own_pocket) + " from your own pocket (comes back in the top-up)" : ""),
   myFloat.topup_n || myFloat.pending_n ? /*#__PURE__*/React.createElement("div", null, myFloat.topup_n ? pcRupee(myFloat.topup) + ' coming in today\'s top-up' : '', myFloat.topup_n && myFloat.pending_n ? ' \u00b7 ' : '', myFloat.pending_n ? myFloat.pending_n + ' claim(s) waiting approval' : '') : null,
-  /*#__PURE__*/React.createElement("div", { style: { color: '#9ca3af', marginTop: 4 } }, "Pay auto, parking, hardware, food etc. from it, then use \u201cI already paid\u201d with the bill. Shreya refills it every day. Bigger than the float (team trips)? Use \u201cI need cash before spending\u201d as before."),
+  /*#__PURE__*/React.createElement("div", { style: { color: '#9ca3af', marginTop: 4 } }, "Pay any small expense from it (auto, Porter, parking, hardware, food\u2026), then use \u201cI already paid\u201d with the bill. Shreya refills it every day. More than what is left (team trips)? Use \u201cI need cash before spending\u201d as before."),
   (() => { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); return d.getDate() >= last - 1 && !myFloat.checked_this_month; })() ? /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
     /*#__PURE__*/React.createElement("span", { style: { color: '#fbbf24' } }, "Month-end float check \u2013 float money you still have (cash + unspent bank money):"),
     /*#__PURE__*/React.createElement("input", { type: 'number', inputMode: 'numeric', value: fcCash, onChange: e => setFcCash(e.target.value), style: { ...inp, width: 110, marginBottom: 0 } }),
@@ -56269,7 +56269,7 @@ function PettyCashPage({
       /*#__PURE__*/React.createElement("select", { value: giveTo, onChange: e => setGiveTo(e.target.value), style: { ...inp, marginBottom: 0, flex: '1 1 160px' } },
         /*#__PURE__*/React.createElement("option", { value: '' }, "Give float to\u2026"),
         Object.entries(names).filter(([id]) => !floats.some(f => f.person_id === id)).sort((a, b) => String(a[1]).localeCompare(String(b[1]))).map(([id, n]) => /*#__PURE__*/React.createElement("option", { key: id, value: id }, n))),
-      /*#__PURE__*/React.createElement("button", { disabled: busy || !giveTo, onClick: () => confirm('Give ' + (names[giveTo] || '') + ' a ' + pcRupee(cfg && cfg.float_amount || 1000) + ' float in cash from the box?') && rpc('erp_pc_give_float', { p_person: giveTo, p_mode: 'cash', p_ref: null }).then(() => setGiveTo('')), style: btn('#10b981') }, "Give float (cash)"),
+      /*#__PURE__*/React.createElement("button", { disabled: busy || !giveTo, onClick: () => confirm('Give ' + (names[giveTo] || '') + ' a ' + pcRupee(cfg && cfg.float_amounts && cfg.float_amounts[giveTo] || cfg && cfg.float_amount || 1000) + ' float in cash from the box?') && rpc('erp_pc_give_float', { p_person: giveTo, p_mode: 'cash', p_ref: null }).then(() => setGiveTo('')), style: btn('#10b981') }, "Give float (cash)"),
       /*#__PURE__*/React.createElement("button", { disabled: busy || !giveTo, onClick: () => { const ref = prompt('Bank transfer ref (UTR)'); if (ref) rpc('erp_pc_give_float', { p_person: giveTo, p_mode: 'bank', p_ref: ref }).then(() => setGiveTo('')); }, style: btn('#3b82f6') }, "Give by bank"))) : null, cs && cs.gate ? /*#__PURE__*/React.createElement("div", {
     style: {
       ...card,
