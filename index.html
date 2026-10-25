@@ -36298,7 +36298,11 @@ function CourierFab({ user }) {
   const n = Math.max(0, parseInt(f.n || '0', 10) || 0);
   const type = basis === 'per_roll' ? 'roll' : f.type;
   const calc = (() => { const r = +f.rate || 0, e = +f.extras || 0; if (!r) return null; if (basis === 'per_kg') return r * (+f.kg || 0) + e; if (basis === 'per_pkg' || basis === 'per_roll') return r * n + e; if (basis === 'per_trip') return r + e; return null; })();
-  const setPhoto = async (i, file) => { if (!file) return; setBusy(true); const url = await uploadFile(file, 'courier-pkg'); setBusy(false); if (!url) return; setPhotos(p => { const a = p.slice(); a[i] = url; return a; }); };
+  const setPhoto = async (i, file) => { if (!file) return;
+    // 25 Oct 2026 (Jigar): one different photo per package
+    const sig = file.name + '|' + file.size + '|' + file.lastModified; const sigs = (window._crSigs = window._crSigs || {});
+    if (Object.keys(sigs).some(k => +k !== i && sigs[k] === sig && photos[+k])) { setMsg('\u26a0\ufe0f That photo is already used for another package - take a fresh photo of this one'); return; }
+    sigs[i] = sig; setBusy(true); const url = await uploadFile(file, 'courier-pkg'); setBusy(false); if (!url) return; setPhotos(p => { const a = p.slice(); a[i] = url; return a; }); };
   const ask = async () => {
     setMsg('');
     const pics = f.sent ? (f.docket ? [f.docket] : []) : photos.slice(0, n).filter(Boolean);
@@ -36306,19 +36310,23 @@ function CourierFab({ user }) {
     if (f.sent && !f.docket) { setMsg('⚠️ Upload the docket / courier bill photo'); return; }
     if (f.mode === 'Running Bus' && f.busFrom.trim().length < 4) { setMsg('⚠️ Bus: write where the receiver collects it (bus office / stand)'); return; }
     if (f.mode === 'Running Bus' && !f.busDep) { setMsg('⚠️ Bus: give the departure date and time'); return; }
+    if (f.mode === 'Running Bus' && isNaN(new Date(f.busDep).getTime())) { setMsg('⚠️ Bus: the departure date and time is not valid - pick it again'); return; }
+    if (basis === 'per_kg' && sum && !(+sum.sqft > 0) && !(+f.sqft > 0)) { setMsg('⚠️ This DC has no sizes - enter the total sqft being sent'); return; }
     const busNote = f.mode === 'Running Bus' ? 'Bus departs ' + new Date(f.busDep).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · collect from ' + f.busFrom.trim() : '';
     const onIdx = dcItems.map((x, i) => i).filter(i => tick[i]);
     if (dcItems.length && !onIdx.length) { setMsg('⚠️ Tick at least one item going in this booking'); return; }
-    const itemIds = dcItems.length && onIdx.length < dcItems.length ? onIdx.map(i => dcItems[i].item_id).filter(Boolean) : null;
+    const tickedIds = onIdx.map(i => dcItems[i].item_id).filter(Boolean);
+    const itemIds = dcItems.length && (onIdx.length < dcItems.length || tickedIds.length === onIdx.length) ? tickedIds : null;
     const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
       install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
-      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds };
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds,
+      bus_departs: f.mode === 'Running Bus' && f.busDep ? new Date(f.busDep).toISOString() : null, collect_from: f.mode === 'Running Bus' ? f.busFrom.trim() : null, sqft: f.sqft || null };
     if (f.mode === 'Running Bus') p.dest_address = 'Collect from: ' + f.busFrom.trim();
     setBusy(true);
     const r = await sb.rpc('erp_courier_request_v2', { p });
     setBusy(false);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
-    setMsg('✓ Request #' + r.data + ' sent for job ' + f.jobId); setF(blank()); setDcs(null); setSum(null); setVendors([]); setPhotos([]); setDcItems([]); setTick({}); load();
+    setMsg('✓ Request #' + r.data + ' sent for job ' + f.jobId); setF(blank()); setDcs(null); setSum(null); setVendors([]); setPhotos([]); setDcItems([]); setTick({}); window._crSigs = {}; load();
   };
   const decide = async (id, ok) => { setBusy(true); const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: null }); setBusy(false); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load(); };
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
@@ -36376,6 +36384,7 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'numeric', value: f.n, onChange: e => setF({ ...f, n: e.target.value }), placeholder: 'How many', style: { ...inp, width: 90 } }),
       CR_PKG.map(t => React.createElement("button", { key: t, type: 'button', disabled: basis === 'per_roll' && t !== 'roll', onClick: () => setF({ ...f, type: t }), style: { ...chip(type === t), opacity: basis === 'per_roll' && t !== 'roll' ? .35 : 1 } }, t))),
     basis === 'per_kg' || f.kg ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.kg, onChange: e => setF({ ...f, kg: e.target.value }), placeholder: 'Total weight (kg)' + (basis === 'per_kg' ? ' — required' : ''), style: inp }) : null,
+    basis === 'per_kg' && sum && !(+sum.sqft > 0) ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.sqft || '', onChange: e => setF({ ...f, sqft: e.target.value }), placeholder: 'Total size being sent (sqft) — DC has no sizes, required', style: inp }) : null,
     // 21 Oct 2026 (Jigar): goods already sent / delivered before this request (old In Transit jobs)
     React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: f.sent ? '#fde68a' : '#cbd5e1', cursor: 'pointer', padding: '6px 8px', border: '1px solid ' + (f.sent ? '#a16207' : '#1f2937'), borderRadius: 8 } },
       React.createElement("input", { type: 'checkbox', checked: f.sent, onChange: e => setF({ ...f, sent: e.target.checked }) }),
