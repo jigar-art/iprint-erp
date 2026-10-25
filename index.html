@@ -36250,6 +36250,9 @@ function CourierFab({ user }) {
   const [open, setOpen] = React.useState(false);
   const [rows, setRows] = React.useState([]);
   const [modes, setModes] = React.useState([]);
+  // 25 Oct 2026 (Jigar): shared PODs that Manoj / Murli must sort out
+  const [pods, setPods] = React.useState([]);
+  const [podTick, setPodTick] = React.useState({});
   const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '', sent: false, sentOn: '', docket: '' });
   const [f, setF] = React.useState(blank);
   const [dcs, setDcs] = React.useState(null);
@@ -36261,7 +36264,7 @@ function CourierFab({ user }) {
   const [rec, setRec] = React.useState(null);
   const [msg, setMsg] = React.useState('');
   const [busy, setBusy] = React.useState(false);
-  const load = () => sb.rpc('erp_courier_inbox_v2').then(r => setRows(r.error ? [] : (r.data || [])));
+  const load = () => { sb.rpc('erp_pod_review_list').then(r => setPods(r.error ? [] : (r.data || []))); return sb.rpc('erp_courier_inbox_v2').then(r => setRows(r.error ? [] : (r.data || []))); };
   React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 300000); return () => clearInterval(t); }, []);
   React.useEffect(() => { if (open && !modes.length) sb.from('dispatch_mode_config').select('mode,rate_basis,required_fields').eq('active', true).order('sort').then(r => setModes((r.data || []).filter(x => x.rate_basis && x.rate_basis !== 'none'))); }, [open]);
   const findJob = async () => {
@@ -36291,7 +36294,7 @@ function CourierFab({ user }) {
   const requester = ['DISPATCH', 'STORES'].includes(card) || ['JIGAR', 'AMOL'].includes(me);
   const approver = ['JIGAR', 'AMOL', 'PRIYANKA'].includes(me);
   if (!requester && !approver) return null;
-  const waiting = rows.filter(r => r.waiting_for_me).length;
+  const waiting = rows.filter(r => r.waiting_for_me).length + pods.length;
   if (!open) return React.createElement(QuickSlot, { k: 'courier', order: 1, label: 'Courier booking', icon: 'courier', badge: waiting, onClick: () => { setOpen(true); setMsg(''); load(); } });
   const mcfg = modes.find(m => m.mode === f.mode) || null;
   const basis = mcfg ? mcfg.rate_basis : '';
@@ -36413,6 +36416,13 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', type: 'date', value: f.eta, onChange: e => setF({ ...f, eta: e.target.value }), style: inp })),
     React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Why this mode? (optional)', style: inp }),
     React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '11px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Please wait…' : 'Send for approval')) : null;
+  const podResolve = async (p, ids, url) => {
+    if (!url && (!ids || !ids.length)) { setMsg('\u26a0\ufe0f Tick at least one item, or upload the POD for this job'); return; }
+    setBusy(true); const r = await sb.rpc('erp_pod_resolve', { p_log: String(p.id), p_item_ids: ids && ids.length ? ids : null, p_pod_url: url || null }); setBusy(false);
+    setMsg(r.error ? '\u26a0\ufe0f ' + r.error.message : '\u2713 ' + p.job_id + ': ' + r.data); load();
+  };
+  const reviewLine = r => r.review_flag && !r.review_cleared_at ? React.createElement("div", { style: { marginTop: 4, padding: '4px 8px', borderRadius: 6, background: '#3b0d0d', color: '#fca5a5', fontSize: 11.5 } }, '\u2691 Under review: ' + r.review_flag,
+    me === 'JIGAR' ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const x = await sb.rpc('erp_review_clear', { p_kind: 'courier', p_id: String(r.id) }); setMsg(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2713 #' + r.id + ' ' + x.data); load(); }, style: { ...chip(false), marginLeft: 8 } }, '\u2713 Reviewed') : null) : null;
   const card_ = r => React.createElement("div", { key: r.id, style: { padding: '9px 0', borderTop: '1px solid #1f2937', fontSize: 12.5, color: '#e2e8f0' } },
     React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
       React.createElement("span", null, React.createElement("b", null, '#' + r.id + ' · ' + r.job_id), ' · ', r.client_name || '', ' · ', r.mode, r.courier_name ? ' (' + r.courier_name + ')' : ''),
@@ -36426,6 +36436,7 @@ function CourierFab({ user }) {
       r.actual_cost != null ? ' · actual ₹' + Math.round(r.actual_cost) + (r.variance ? ' (' + (r.variance > 0 ? '+' : '') + Math.round(r.variance) + ')' : '') : '') :
       React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, (r.est_cost ? '₹' + r.est_cost + ' · ' : '') + 'old request — no package details'),
     React.createElement("div", { style: { fontSize: 11, color: '#94a3b8' } }, 'by ' + nm(r.requested_by) + ' · ' + new Date(r.requested_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })),
+    reviewLine(r),
     Array.isArray(r.checks) && r.checks.length ? React.createElement("div", { style: { display: 'grid', gap: 3, marginTop: 6 } }, r.checks.map(c => React.createElement("div", { key: c.k, style: { display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 8px', borderRadius: 6, fontSize: 11.5, background: (lvl[c.level] || lvl.grey)[0], color: (lvl[c.level] || lvl.grey)[1] } },
       React.createElement("span", null, c.label), React.createElement("span", { style: { textAlign: 'right' } }, c.text)))) : null,
     Array.isArray(r.pkg_photo_urls) && r.pkg_photo_urls.length ? React.createElement("div", { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 } }, r.pkg_photo_urls.map((u, i) => React.createElement("a", { key: i, href: erpFileUrl(u), target: '_blank', rel: 'noreferrer', style: { width: 46, height: 46, borderRadius: 6, overflow: 'hidden', border: '1px solid #334155', display: 'block', position: 'relative' } },
@@ -36448,6 +36459,22 @@ function CourierFab({ user }) {
       React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 4 } }, 'Any courier / transport (not own vehicle or client pickup) needs Priyanka (banking) or Amol, then Jigar — before the dispatch can be logged.'),
       form,
       msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 8, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
+      pods.length ? React.createElement("div", { style: { margin: '12px 0', padding: 8, border: '1px solid #a16207', borderRadius: 8 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#fbbf24', marginBottom: 4 } }, '\u2691 Shared POD - ' + pods.length + ' to sort out'),
+        React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginBottom: 6 } }, 'The same POD photo is on other jobs going to other places. For each job: tick the items on our ERP DC that this POD really covers, or upload the POD signed for this job.'),
+        pods.map(p => { const its = Array.isArray(p.items) ? p.items : []; const tk = podTick[p.id] || {};
+          return React.createElement("div", { key: p.id, style: { padding: '6px 0', borderTop: '1px solid #1f2937', fontSize: 12 } },
+            React.createElement("div", null, React.createElement("b", null, p.job_id), ' \u00b7 ', p.client_name || '', ' \u00b7 DC ', p.dc_no || '-', ' \u00b7 ', p.pod_url ? React.createElement("a", { href: erpFileUrl(p.pod_url), target: '_blank', rel: 'noreferrer', style: { color: '#93c5fd' } }, 'see POD') : null),
+            React.createElement("div", { style: { color: '#fbbf24', fontSize: 11.5 } }, p.review_flag),
+            its.map(it => React.createElement("label", { key: it.key, style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5 } },
+              React.createElement("input", { type: 'checkbox', checked: !!tk[it.key], onChange: e => setPodTick(q => ({ ...q, [p.id]: { ...(q[p.id] || {}), [it.key]: e.target.checked } })) }),
+              (it.description || 'item') + (it.qty ? ' \u00b7 qty ' + it.qty : ''))),
+            React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 } },
+              React.createElement("button", { type: 'button', disabled: busy, style: chip(false), onClick: () => podResolve(p, its.map(x => x.key), null) }, 'POD covers all items on this DC'),
+              React.createElement("button", { type: 'button', disabled: busy, style: chip(false), onClick: () => podResolve(p, Object.keys(tk).filter(k => tk[k]), null) }, 'Ticked items only'),
+              React.createElement("label", { style: { ...chip(false), cursor: 'pointer' } }, 'Upload this job\'s own POD',
+                React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; setBusy(true); const url = await uploadFile(fl, 'delivery'); setBusy(false); if (url) podResolve(p, null, url); } }))));
+        })) : null,
       React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 4px' } }, 'LAST 14 DAYS'),
       rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'No requests yet.') : rows.map(card_),
       approver || ['SHREYA'].includes(me) ? React.createElement("div", { style: { marginTop: 12 } },
@@ -55601,7 +55628,7 @@ function PettyCashPage({
         color: '#64748b',
         lineHeight: 1.6
       }
-    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', r.errand_run ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), React.createElement("span", { style: { color: '#fbbf24' } }, '\ud83d\udcce ' + (r.errand_item || '') + ': ' + (r.errand_from || '') + ' \u2192 ' + (r.errand_to || '')), r.errand_photo ? React.createElement("a", { href: '#', onClick: e => { e.preventDefault(); viewPath(r.errand_photo); }, style: { color: '#6ee7b7', marginLeft: 6 } }, 'item photo') : null) : null, /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', r.errand_run ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), React.createElement("span", { style: { color: '#fbbf24' } }, '\ud83d\udcce ' + (r.errand_item || '') + ': ' + (r.errand_from || '') + ' \u2192 ' + (r.errand_to || '')), r.errand_photo ? React.createElement("a", { href: '#', onClick: e => { e.preventDefault(); viewPath(r.errand_photo); }, style: { color: '#6ee7b7', marginLeft: 6 } }, 'item photo') : null) : null, r.review_flag && !r.review_cleared_at ? React.createElement("div", { style: { marginTop: 4, padding: '4px 8px', borderRadius: 6, background: '#3b0d0d', color: '#fca5a5', fontSize: 11.5 } }, '\u2691 Under review: ' + r.review_flag, pbKey(user) === 'JIGAR' ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const x = await sb.rpc('erp_review_clear', { p_kind: 'petty', p_id: String(r.id) }); show(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2705 ' + r.req_no + ' ' + x.data, !x.error); load(); }, style: { marginLeft: 8, fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid #f87171', background: 'transparent', color: '#fca5a5', cursor: 'pointer' } }, '\u2713 Reviewed') : null) : null, /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#94a3b8'
       }
