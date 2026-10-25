@@ -36295,7 +36295,7 @@ function CourierFab({ user }) {
   const approver = ['JIGAR', 'AMOL', 'PRIYANKA'].includes(me);
   if (!requester && !approver) return null;
   const waiting = rows.filter(r => r.waiting_for_me).length + pods.length;
-  if (!open) return React.createElement(QuickSlot, { k: 'courier', order: 1, label: 'Courier booking', icon: 'courier', badge: waiting, onClick: () => { setOpen(true); setMsg(''); load(); } });
+  if (!open) return React.createElement(QuickSlot, { k: 'courier', order: 1, label: 'Courier booking', icon: 'courier', badge: waiting, onClick: () => { window._crSigs = {}; setOpen(true); setMsg(''); load(); } });
   const mcfg = modes.find(m => m.mode === f.mode) || null;
   const basis = mcfg ? mcfg.rate_basis : '';
   const n = Math.max(0, parseInt(f.n || '0', 10) || 0);
@@ -36448,6 +36448,9 @@ function CourierFab({ user }) {
         setBusy(true); const x = await sb.rpc('erp_courier_edit', { p_id: r.id, p: { rate: rt, weight_kg: kg } }); setBusy(false);
         setMsg(x.error ? '⚠️ ' + x.error.message : '✓ #' + r.id + ' ' + x.data); load(); },
       style: { marginTop: 6, padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fde68a', border: '1px solid #a16207', background: 'transparent' } }, '✏️ Correct rate / weight') : null,
+    r.can_cancel ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const why = prompt('Cancel 🚚 #' + r.id + ' (approved, not dispatched). Why? e.g. courier refused the parcel, mode changed'); if (why === null) return;
+        setBusy(true); const x = await sb.rpc('erp_courier_cancel', { p_id: r.id, p_note: why }); setBusy(false); setMsg(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2713 #' + r.id + ' ' + x.data); load(); },
+      style: { marginTop: 6, marginLeft: 6, padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fca5a5', border: '1px solid #7f1d1d', background: 'transparent' } }, '\u2715 Cancel request') : null,
     r.waiting_for_me ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
       React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
       React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, false), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')) : null);
@@ -54508,6 +54511,10 @@ function PettyCashPage({
   const [catQ, setCatQ] = useState('');
   const [catOpen, setCatOpen] = useState(false);
   const [addFor, setAddFor] = useState(null);
+  // 26 Oct 2026 (Jigar): extra charge needs the requester's reason + proof; only Jigar approves
+  const [extraFor, setExtraFor] = useState(null);
+  const [extraTxt, setExtraTxt] = useState('');
+  const [extraFile, setExtraFile] = useState(null);
   const [addAmt, setAddAmt] = useState('');
   const isCashier = !!cfg && (me === cfg.cashier_id || me === cfg.cashier_backup_id);
   const seeAll = isAdmin || (user?.role || '') === 'accounts';
@@ -55055,7 +55062,7 @@ function PettyCashPage({
     setBusy(true);
     let errandPath = null;
     if (crNeeded && crTrip === 'errand') {
-      errandPath = await pcUploadPath(form.errandPhoto, me + '/errand/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.jpg');
+      errandPath = await pcUploadPath(form.errandPhoto, me + '/errand/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ((/^image\/(png|webp)$/i.test(form.errandPhoto.type || '') ? form.errandPhoto.type.split('/')[1] : 'jpg')));
       if (!errandPath) {
         setBusy(false);
         return;
@@ -55084,6 +55091,7 @@ function PettyCashPage({
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
+      if (errandPath) sb.storage.from('petty-cash-bills').remove([errandPath]).catch(() => {});
       show('\u26a0\ufe0f Could not send: ' + error.message, false);
       return;
     }
@@ -55175,9 +55183,20 @@ function PettyCashPage({
     load();
   };
   const approveExtra = r => {
-    if (confirm('Approve final fare ' + pcRupee(r.final_fare) + ' (quote ' + pcRupee(r.quote_fare || r.amount) + ') for ' + nm(r.requester_id) + '?')) rpc('erp_pc_approve_extra', {
+    if (!r.extra_reason) { show('\u26a0\ufe0f ' + nm(r.requester_id) + ' must first file "Explain extra charge" (reason + proof) on ' + r.req_no, false); return; }
+    if (confirm('Approve extra on ' + r.req_no + ' for ' + nm(r.requester_id) + '?\n\nAmount: ' + pcRupee(r.final_fare || r.amount) + (r.quote_fare ? ' (quote ' + pcRupee(r.quote_fare) + ')' : '') + '\nReason: ' + r.extra_reason)) rpc('erp_pc_approve_extra', {
       p_id: r.id
-    }, 'Extra fare approved');
+    }, 'Extra approved');
+  };
+  const sendExtra = async r => {
+    if ((extraTxt || '').trim().length < 15) { show('Explain what caused the extra and who was responsible', false); return; }
+    if (!extraFile) { show('Attach the proof (receipt line showing the extra charge)', false); return; }
+    setBusy(true);
+    const path = await pcUploadPath(extraFile, me + '/extra/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ((/^image\/(png|webp)$/i.test(extraFile.type || '') ? extraFile.type.split('/')[1] : 'jpg')));
+    setBusy(false);
+    if (!path) return;
+    const ok = await rpc('erp_pc_extra_explain', { p_id: r.id, p_reason: extraTxt.trim(), p_proof_path: path }, 'Extra charge sent to Jigar');
+    if (ok !== false) { setExtraFor(null); setExtraTxt(''); setExtraFile(null); }
   };
   const cancelReq = r => {
     if (confirm('Cancel ' + r.req_no + '?')) rpc('erp_pc_cancel', {
@@ -55488,8 +55507,8 @@ function PettyCashPage({
     };
   };
   const fmtMins = m => m < 60 ? m + ' min' : Math.floor(m / 60) + 'h ' + m % 60 + 'm';
-  const needsExtra = r => r.kind === 'booking' && r.status === 'paid' && r.final_fare != null && Number(r.final_fare) > Math.round(Number(r.quote_fare || r.amount) * 110) / 100 && !r.extra_approved_at;
-  const extraQueue = reqs.filter(r => needsExtra(r) && (r.l1_approver_id || r.l2_approver_id || r.l3_approver_id) === me);
+  const needsExtra = r => !r.extra_approved_at && ((r.kind === 'booking' && r.status === 'paid' && r.final_fare != null && Number(r.final_fare) > Math.round(Number(r.quote_fare || r.amount) * 110) / 100) || !!r.extra_requested_at);
+  const extraQueue = reqs.filter(r => needsExtra(r) && pbKey(user) === 'JIGAR');
   const toPay = reqs.filter(r => r.status === 'approved' && !r.float_id);
   const advOut = reqs.filter(r => r.status === 'paid').sort((a, b) => new Date(a.paid_at) - new Date(b.paid_at));
   const approveAll = async () => {
@@ -55628,7 +55647,7 @@ function PettyCashPage({
         color: '#64748b',
         lineHeight: 1.6
       }
-    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', r.errand_run ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), React.createElement("span", { style: { color: '#fbbf24' } }, '\ud83d\udcce ' + (r.errand_item || '') + ': ' + (r.errand_from || '') + ' \u2192 ' + (r.errand_to || '')), r.errand_photo ? React.createElement("a", { href: '#', onClick: e => { e.preventDefault(); viewPath(r.errand_photo); }, style: { color: '#6ee7b7', marginLeft: 6 } }, 'item photo') : null) : null, r.review_flag && !r.review_cleared_at ? React.createElement("div", { style: { marginTop: 4, padding: '4px 8px', borderRadius: 6, background: '#3b0d0d', color: '#fca5a5', fontSize: 11.5 } }, '\u2691 Under review: ' + r.review_flag, pbKey(user) === 'JIGAR' ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const x = await sb.rpc('erp_review_clear', { p_kind: 'petty', p_id: String(r.id) }); show(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2705 ' + r.req_no + ' ' + x.data, !x.error); load(); }, style: { marginLeft: 8, fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid #f87171', background: 'transparent', color: '#fca5a5', cursor: 'pointer' } }, '\u2713 Reviewed') : null) : null, /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, r.req_no, r.job_ids && r.job_ids.length ? ' \u00b7 Job ' + r.job_ids.join(', ') : '', ' \u00b7 ', r.firm || 'firm to pick', r.category ? ' \u00b7 ' + r.category : '', r.errand_run ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), React.createElement("span", { style: { color: '#fbbf24' } }, '\ud83d\udcce ' + (r.errand_item || '') + ': ' + (r.errand_from || '') + ' \u2192 ' + (r.errand_to || '')), r.errand_photo ? React.createElement("a", { href: '#', onClick: e => { e.preventDefault(); viewPath(r.errand_photo); }, style: { color: '#6ee7b7', marginLeft: 6 } }, 'item photo') : null) : null, r.extra_requested_at ? React.createElement(React.Fragment, null, React.createElement("br", null), React.createElement("span", { style: { color: r.extra_approved_at ? '#6ee7b7' : '#fbbf24' } }, '\u20b9 Extra charge: ' + (r.extra_reason || '') + (r.extra_approved_at ? ' \u00b7 approved by Jigar' : ' \u00b7 waiting for Jigar')), r.extra_proof ? React.createElement("a", { href: '#', onClick: e => { e.preventDefault(); viewPath(r.extra_proof); }, style: { color: '#6ee7b7', marginLeft: 6 } }, 'proof') : null) : null, r.requester_id === me && ['approved', 'paid'].includes(r.status) && !r.extra_approved_at ? React.createElement(React.Fragment, null, React.createElement("br", null), React.createElement("button", { type: 'button', onClick: () => { setExtraFor(extraFor === r.id ? null : r.id); setExtraTxt(''); setExtraFile(null); }, style: { marginTop: 4, fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid #a16207', background: 'transparent', color: '#fde68a', cursor: 'pointer' } }, r.extra_requested_at ? 'Change extra-charge explanation' : 'Explain extra charge'), extraFor === r.id ? React.createElement("div", { style: { marginTop: 6, display: 'grid', gap: 6 } }, React.createElement("textarea", { value: extraTxt, onChange: e => setExtraTxt(e.target.value), rows: 2, placeholder: 'What caused the extra and who was responsible? e.g. 40 min waiting - material not ready (Harish); Porter booked before the job was packed', style: { ...inp, fontSize: 12 } }), React.createElement("input", { type: 'file', accept: 'image/*', onChange: e => setExtraFile(e.target.files && e.target.files[0] || null), style: { fontSize: 12, color: '#e2e8f0' } }), React.createElement("button", { type: 'button', disabled: busy, onClick: () => sendExtra(r), style: { fontSize: 12, padding: '6px 12px', borderRadius: 6, border: 'none', background: '#a16207', color: '#fff', cursor: 'pointer', justifySelf: 'start' } }, 'Send to Jigar')) : null) : null, r.review_flag && !r.review_cleared_at ? React.createElement("div", { style: { marginTop: 4, padding: '4px 8px', borderRadius: 6, background: '#3b0d0d', color: '#fca5a5', fontSize: 11.5 } }, '\u2691 Under review: ' + r.review_flag, pbKey(user) === 'JIGAR' ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const x = await sb.rpc('erp_review_clear', { p_kind: 'petty', p_id: String(r.id) }); show(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2705 ' + r.req_no + ' ' + x.data, !x.error); load(); }, style: { marginLeft: 8, fontSize: 11, padding: '2px 8px', borderRadius: 6, border: '1px solid #f87171', background: 'transparent', color: '#fca5a5', cursor: 'pointer' } }, '\u2713 Reviewed') : null) : null, /*#__PURE__*/React.createElement("br", null), "Approvals: ", chain(r), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#94a3b8'
       }
@@ -55763,7 +55782,7 @@ function PettyCashPage({
       disabled: busy,
       style: btn('#f0b429', '#1a1200'),
       onClick: () => approveExtra(r)
-    }, "Approve extra fare") : null, opts.approve ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    }, "Approve extra charge") : null, opts.approve ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
       disabled: busy,
       style: btn('#10b981'),
       onClick: () => approve(r)
