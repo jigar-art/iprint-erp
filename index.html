@@ -54464,6 +54464,7 @@ function PettyCashPage({
   const floatBlock = cfg && cfg.float_block_categories || [];
   const quoteCats = cfg && cfg.quote_categories || [];
   const shopCatsF = cfg && cfg.float_bill_categories || [];
+  const stLabel = r => r.status === 'approved' && r.float_id ? ['Approved - added to float top-up', '#10b981'] : PC_STATUS[r.status] || [r.status, '#94a3b8'];
   const [pre, setPre] = useState(null);
   const [rev, setRev] = useState([]);
   const [revOther, setRevOther] = useState({});
@@ -54818,7 +54819,7 @@ function PettyCashPage({
     setBusy(false);
     const appC = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
     const lastId = attachBills.lastIds && attachBills.lastIds[attachBills.lastIds.length - 1];
-    if (ok && lastId && (r.kind === 'booking' || r.kind === 'reimbursement' && appC.includes(r.category))) await checkFare(lastId);else show(ok ? '\u2705 ' + r.req_no + ' resubmitted for approval' : '\u26a0\ufe0f Resubmitted, but the bill did not upload - use Add bill', !!ok);
+    if (ok && lastId && (r.kind === 'booking' || r.kind === 'reimbursement' && (appC.includes(r.category) || shopCatsF.includes(r.category)))) await checkFare(lastId);else show(ok ? '\u2705 ' + r.req_no + ' resubmitted for approval' : '\u26a0\ufe0f Resubmitted, but the bill did not upload - use Add bill', !!ok);
     load();
   };
   const removeBill = async r => {
@@ -54869,9 +54870,9 @@ function PettyCashPage({
     }
     const f = data.fare != null ? pcRupee(data.fare) : 'no fare';
     const msg = {
-      auto_approved: '\u2705 ERP matched ' + f + ' on the ' + (data.app || 'app') + ' screenshot - approved, collect cash from Shreya',
+      auto_approved: '\u2705 ERP matched ' + f + (data.screen === 'receipt' ? ' on the bill' : ' on the ' + (data.app || 'app') + ' screenshot') + ' - approved, ' + (myFloat ? 'added to your float top-up' : 'collect cash from Shreya'),
       skipped: '\u2705 Sent for approval',
-      sent_for_approval: '\u26a0\ufe0f Screenshot not accepted: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'it did not match') + '. Tap "Add bill" on your request to upload the correct trip screenshot, or wait for your lead.',
+      sent_for_approval: data.screen === 'receipt' ? '\u26a0\ufe0f Sent to your lead: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'bill did not match') + '. Wrong bill? Tap "Add bill" on your request.' : '\u26a0\ufe0f Screenshot not accepted: ' + (data.reasons && data.reasons.length ? data.reasons.join('; ') : 'it did not match') + '. Tap "Add bill" on your request to upload the correct trip screenshot, or wait for your lead.',
       duplicate: '\u26a0\ufe0f This trip was already claimed - sent to your lead',
       auto_settled: '\u2705 Final fare ' + f + ' matches - closed',
       ready_to_close: '\u2705 Final fare ' + f + ' accepted - settle the difference with Shreya',
@@ -55027,7 +55028,7 @@ function PettyCashPage({
     }
     setBusy(false);
     const appCats = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
-    if ((form.kind === 'booking' || form.kind === 'reimbursement' && appCats.includes(form.category)) && attachBills.lastIds && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + data.req_no + ' sent - ' + (PC_STATUS[data.status] || [data.status])[0]);
+    if ((form.kind === 'booking' || form.kind === 'reimbursement' && (appCats.includes(form.category) || shopCatsF.includes(form.category))) && attachBills.lastIds && attachBills.lastIds[0]) await checkFare(attachBills.lastIds[0]);else show('\u2705 ' + data.req_no + ' sent - ' + stLabel(data)[0]);
     setForm({
       kind: 'reimbursement',
       amount: '',
@@ -55229,7 +55230,7 @@ function PettyCashPage({
     if (!ok) return;
     const appCatsU = cfg && cfg.app_auto_categories || ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'];
     const lastId = attachBills.lastIds[attachBills.lastIds.length - 1];
-    if (r.kind === 'booking' && stage === 'final' && lastId) await checkFare(lastId);else if (r.kind === 'reimbursement' && appCatsU.includes(r.category) && /^pending_l/.test(r.status) && lastId) await checkFare(lastId);else if (r.kind === 'advance' && lastId) {
+    if (r.kind === 'booking' && stage === 'final' && lastId) await checkFare(lastId);else if (r.kind === 'reimbursement' && (appCatsU.includes(r.category) || shopCatsF.includes(r.category)) && /^pending_l/.test(r.status) && lastId) await checkFare(lastId);else if (r.kind === 'advance' && lastId) {
       show('Reading the bill...');
       const {
         data,
@@ -55510,7 +55511,7 @@ function PettyCashPage({
   }, label, n ? ' (' + n + ')' : '');
   const chain = r => [[r.l1_approver_id, r.l1_decided_at], [r.l2_approver_id, r.l2_decided_at], [r.l3_approver_id, r.l3_decided_at]].filter(x => x[0]).map(x => nm(x[0]) + (x[1] ? ' \u2713' : r.rejected_by === x[0] ? ' \u2717' : '')).join('  \u203a  ') || 'No approval needed';
   const row = (r, opts = {}) => {
-    const st = PC_STATUS[r.status] || [r.status, '#94a3b8'];
+    const st = stLabel(r);
     const bs = billsOf(r.id);
     const billed = bs.filter(b => !(b.ai && b.ai.dup) && b.stage !== 'quote').reduce((s, b) => s + Number(b.amount || 0), 0);
     const flagged = bs.filter(b => b.ai && b.ai.reasons && b.ai.reasons.length && r.kind === 'advance');
@@ -55575,11 +55576,11 @@ function PettyCashPage({
       style: {
         color: '#10b981'
       }
-    }, '\u2713', " ERP-verified app receipt", r.trip_ref ? ' \u00b7 ' + r.trip_ref : '')) : null, r.kind === 'reimbursement' && !r.auto_verified && r.ai_final && r.ai_final.reasons && r.ai_final.reasons.length ? r.requester_id === me && /^pending_l/.test(r.status) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, '\u2713', r.trip_app === 'meal allowance' ? ' Meal allowance - approved automatically' : shopCatsF.includes(r.category) ? ' ERP-verified bill' : ' ERP-verified app receipt', r.trip_ref ? ' \u00b7 ' + r.trip_ref : '')) : null, r.kind === 'reimbursement' && !r.auto_verified && r.ai_final && r.ai_final.reasons && r.ai_final.reasons.length ? r.requester_id === me && /^pending_l/.test(r.status) ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#f47067'
       }
-    }, "Screenshot not accepted: ", r.ai_final.reasons.join('; '), ". Tap \"Add bill\" below to upload the correct trip screenshot - it will be checked again.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    }, shopCatsF.includes(r.category) ? 'Sent to your lead: ' : 'Screenshot not accepted: ', r.ai_final.reasons.join('; '), shopCatsF.includes(r.category) ? '. Wrong bill? Tap "Add bill" below to upload the right one.' : '. Tap "Add bill" below to upload the correct trip screenshot - it will be checked again.')) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#f0b429'
       }
