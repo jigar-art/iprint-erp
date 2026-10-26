@@ -55232,6 +55232,10 @@ function PettyCashPage({
       show('\u26a0\ufe0f You still have \u20b9' + myFloat.with_staff + ' in your float - pay from it and use "I already paid". Shreya refills it every day.', false);
       return;
     }
+    if (form.kind === 'advance' && !form.files.length) {
+      show('Attach the basis for \u20b9' + amt + ': app fare estimate (Ola / Uber / Rapido / Porter), Google Maps route for a meter auto, shop quote or rate on WhatsApp', false);
+      return;
+    }
     if (form.kind === 'advance' && quoteCats.includes(form.category || 'Other') && !form.files.length) {
       show('Attach the quote / estimate photo - big advances need a quote', false);
       return;
@@ -55306,7 +55310,7 @@ function PettyCashPage({
       return;
     }
     if (form.files.length) {
-      const qStage = form.kind === 'advance' && quoteCats.includes(form.category || 'Other');
+      const qStage = form.kind === 'advance';
       const ok = await attachBills(data.id, form.files, null, form.kind === 'booking' || qStage ? 'quote' : 'bill', form.kind);
       if (qStage) { const qb = await sb.from('petty_cash_bills').select('id').eq('request_id', data.id).eq('stage', 'quote').limit(1).maybeSingle(); if (qb.data) sb.functions.invoke('verify-fare-screenshot', { body: { bill_id: qb.data.id } }).then(() => load()); }
       if (ok < form.files.length) show('\u26a0\ufe0f ' + (form.files.length - ok) + ' file(s) did not upload - add them from My requests', false);
@@ -55838,7 +55842,10 @@ function PettyCashPage({
         color: '#94a3b8',
         fontSize: 12
       }
-    }, r.kind === 'advance' ? 'advance' : r.kind === 'booking' ? 'booking' : 'reimbursement', opts.who ? ' for ' + nm(r.requester_id) : '')), /*#__PURE__*/React.createElement("span", {
+    }, r.kind === 'advance' ? 'advance' : r.kind === 'booking' ? 'booking' : 'reimbursement', opts.who ? ' for ' + nm(r.requester_id) : '')), opts.who && (r.kind === 'advance' || r.kind === 'booking') && /^pending_l/.test(r.status) && (() => {
+      const op = reqs.filter(x => x.id !== r.id && x.requester_id === r.requester_id && (x.kind === 'advance' || x.kind === 'booking') && ['approved', 'paid', 'verifying', 'pending_l1', 'pending_l2', 'pending_l3'].includes(x.status));
+      return op.length ? React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: '#fbbf24', background: '#2a210b', border: '1px solid #a16207', borderRadius: 6, padding: '1px 6px' } }, '\u26a0\ufe0f ' + op.length + ' open: ' + pcRupee(op.reduce((a, x) => a + Number(x.amount || 0), 0)) + ' (' + op.map(x => x.req_no.replace('PCR-', '')).join(', ') + ')') : null;
+    })(), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 11,
         fontWeight: 700,
@@ -56110,6 +56117,14 @@ function PettyCashPage({
     /*#__PURE__*/React.createElement("span", { style: { color: '#fbbf24' } }, "Month-end float check \u2013 float money you still have (cash + unspent bank money):"),
     /*#__PURE__*/React.createElement("input", { type: 'number', inputMode: 'numeric', value: fcCash, onChange: e => setFcCash(e.target.value), style: { ...inp, width: 110, marginBottom: 0 } }),
     /*#__PURE__*/React.createElement("button", { disabled: busy || fcCash === '', onClick: () => rpc('erp_pc_float_check', { p_cash: parseFloat(fcCash) }).then(() => setFcCash('')), style: btn('#10b981') }, "Submit")) : null) : null,
+  (form.kind === 'advance' || form.kind === 'booking') && (() => {
+    const op = mine.filter(r => (r.kind === 'advance' || r.kind === 'booking') && ['approved', 'paid', 'verifying', 'pending_l1', 'pending_l2', 'pending_l3'].includes(r.status));
+    if (!op.length) return null;
+    return /*#__PURE__*/React.createElement("div", { style: { border: '1px solid #f0b429', background: '#2a210b', color: '#fde68a', borderRadius: 10, padding: '8px 10px', marginBottom: 12, fontSize: 12.5 } },
+      React.createElement("b", null, '\u26a0\ufe0f You already have ' + op.length + ' open advance' + (op.length > 1 ? 's' : '') + ' - ' + pcRupee(op.reduce((a, r) => a + Number(r.amount || 0), 0))),
+      op.map(r => React.createElement("div", { key: r.id, style: { marginTop: 3 } }, r.req_no + ' \u00b7 ' + pcRupee(r.amount) + ' \u00b7 ' + (r.purpose || '').slice(0, 40) + ' \u00b7 ' + (PC_STATUS[r.status] || [r.status])[0])),
+      React.createElement("div", { style: { marginTop: 4, color: '#fcd34d' } }, 'Close them with bills first (My requests \u2192 Add bill). Your lead sees this list too.'));
+  })(),
   /*#__PURE__*/React.createElement("label", { style: lbl }, "What kind?"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -56395,7 +56410,7 @@ function PettyCashPage({
     }, c)));
   })()), /*#__PURE__*/React.createElement("label", {
     style: lbl
-  }, form.kind === 'booking' ? 'Fare screenshot from the app (required)' : form.kind === 'reimbursement' ? 'Bill photo (required)' : 'Bill photo (add after spending)'), form.kind === 'reimbursement' && ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'].includes(form.category) ? /*#__PURE__*/React.createElement("div", {
+  }, form.kind === 'booking' ? 'Fare screenshot from the app (required)' : form.kind === 'reimbursement' ? 'Bill photo (required)' : 'Basis of the amount (required): fare estimate / Google Maps route / quote - bills come after spending'), form.kind === 'reimbursement' && ['Courier - Porter', 'Courier - Wefast', 'Travel - Local'].includes(form.category) ? /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: '#10b981',
