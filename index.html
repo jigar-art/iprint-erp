@@ -2693,7 +2693,7 @@ function MainApp({
     } = await sb.from('jobs').select('id,status,status_dates,updated_at').eq('id', jobId).single();
     // 2026-10-14 (Jigar): moving a job BACK to an earlier stage needs a reason, logged against the person
     let _backDone = false;
-    if (dbRow && dbRow.status && newStatus && dbRow.status !== newStatus && newStatus !== 'Rectification' && newStatus !== 'Cancelled' && newStatus !== 'No Bill') {
+    if (dbRow && dbRow.status && newStatus && dbRow.status !== newStatus && dbRow.status !== 'Recee' && newStatus !== 'Rectification' && newStatus !== 'Cancelled' && newStatus !== 'No Bill') {
       const rk = st => { const R = { 'Draft': 0, 'Active': 0, 'Quotation Sent': 1, 'PO Pending': 2, 'Designing - In House': 3, 'Designing - Outsource': 3, 'Printing · In-House': 4, 'Printing · Outsource': 4, 'Fabrication · In-House': 5, 'Fabrication · Outsource': 5, 'Recee': 2.5, 'DC Pending': 6, 'In Transit': 6, 'Delivered': 6.5, 'Installation WIP': 7, 'IC Pending': 8, 'Billing Pending': 9, 'Given for Billing': 9, 'Cash Pending': 10, 'Billing Done': 11, 'Cash Received': 12 }; return R[st]; };
       const a = rk(dbRow.status), b = rk(newStatus);
       if (a != null && b != null && b < a) {
@@ -3582,10 +3582,10 @@ function MainApp({
   const nav = allNav.filter(n => {
     const uName = (user.name || '').toUpperCase();
     if (n.hideUsers && n.hideUsers.some(u => uName === u || uName.startsWith(u + ' '))) return false;
-    if (FULL_ACCESS.some(u => uName.includes(u))) return true;
+    if (FULL_ACCESS.some(u => uName === u || uName.startsWith(u + ' '))) return true;
     if (!n.roles.includes(user.role)) return false;
     if (n.users) {
-      return n.users.some(u => uName.includes(u));
+      return n.users.some(u => uName === u || uName.startsWith(u + ' '));
     }
     return true;
   });
@@ -8187,7 +8187,7 @@ function JobDetail({
       const fy = getFY();
       const {
         data
-      } = await sb.from('purchase_requests').select('pr_no').eq('firm_code', firmCode).eq('fy', fy);
+      } = await sb.from('purchase_requests').select('pr_no').eq('firm_code', firmCode).eq('fy', fy).order('created_at', { ascending: false }).limit(1000);
       const nums = (data || []).map(r => {
         const m = r.pr_no?.match(/\/(\d+)$/);
         return m ? +m[1] : 0;
@@ -14981,7 +14981,7 @@ function NewJobPage({
   }, []);
   const [dbMaxNum, setDbMaxNum] = useState(0);
   useEffect(() => {
-    sb.from('jobs').select('id').like('id', '%-' + curFY).then(({
+    sb.from('jobs').select('id').like('id', '%-' + curFY).order('created_at', { ascending: false }).limit(1000).then(({
       data
     }) => {
       if (data) {
@@ -20663,7 +20663,7 @@ function PrintPage({
       onClick: () => {
         if (!canFwd) return;
         if (confirm('Move job "' + job.id + '" to Fabrication?\nAll ' + cov.all.length + ' items are logged or outsourced.')) {
-          updateJobStatus && updateJobStatus(job.id, 'Fabrication');
+          updateJobStatus && updateJobStatus(job.id, 'Fabrication · In-House');
           resetForm();
           setShowModal(false);
         }
@@ -26697,10 +26697,10 @@ function GRNReceivePage({
         const {
           error: grnErr
         } = await sb.from('grn').insert(grnRows);
-        if (grnErr) console.warn('[GRN] insert failed:', grnErr.message);
+        if (grnErr) { console.warn('[GRN] insert failed:', grnErr.message); show('⚠️ PR saved, but STOCK ENTRY FAILED (' + grnErr.message + '). Screenshot this and send to Jigar — ref ' + grn_id, false); try { alert('PR saved, but the stock entry failed:\n\n' + grnErr.message + '\n\nRef ' + grn_id + ' — please send a screenshot to Jigar.'); } catch (_) {} }
       }
     } catch (e) {
-      console.warn('[GRN] insert exception:', e);
+      console.warn('[GRN] insert exception:', e); show('⚠️ PR saved, but STOCK ENTRY FAILED. Screenshot this and send to Jigar — ref ' + grn_id, false);
     }
     const updated = {
       ...receiving,
@@ -27918,7 +27918,7 @@ function POPage({
     const fy = getFY();
     const {
       data
-    } = await sb.from('purchase_requests').select('po_no').eq('firm_code', firmCode).eq('fy', fy).not('po_no', 'is', null);
+    } = await sb.from('purchase_requests').select('po_no').eq('firm_code', firmCode).eq('fy', fy).not('po_no', 'is', null).order('po_generated_at', { ascending: false, nullsFirst: false }).limit(1000);
     const nums = (data || []).map(r => {
       const m = r.po_no?.match(/\/(\d+)$/);
       return m ? +m[1] : 0;
@@ -37631,7 +37631,7 @@ function ScoreReasonsCard({ user }) {
     ['missed_promise', '🔴 Promised date missed', 'You gave a date at login and the job was not done by then — counts DOUBLE.'],
     ['late_open', '🟠 Still late — not done', 'Past the deadline and still open. Finish it, or give a date at login (done by that date = not counted late).'],
     ['late_done', '⚪ Finished late', 'Done, but after the deadline. These stay for this month.'],
-    ['backlog_pending', '🟡 Old backlog — finish by 30 Oct', 'Work waiting since before 1 Oct. No points lost if finished by 30 Oct 7 pm; anything still open after that counts late.']
+    ['backlog_pending', '🟡 Old backlog — finish by 7 Nov', 'Work waiting since before 1 Oct. No points lost if finished by 7 Nov 7 pm; anything still open after that counts late.']
   ];
   const pill = on => ({ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#cbd5e1' });
   const list = grp[tab] || [];
@@ -37644,7 +37644,7 @@ function ScoreReasonsCard({ user }) {
       React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '6px 0 8px', lineHeight: 1.5, background: '#60a5fa12', border: '1px solid #60a5fa33', borderRadius: 8, padding: 8 } },
         React.createElement("b", null, 'Why scores changed on 15 Oct: '),
         'the old score (till 14 Oct) counted only how many stages you finished on time. The new score starts at 100 and cuts points for ', React.createElement("b", null, 'every job past its deadline'),
-        ' and for ', React.createElement("b", null, 'promised dates missed (double)'), '. Old backlog (waiting since before 1 Oct) costs nothing if finished by ', React.createElement("b", null, '30 Oct'), ' — after that it counts late. The score updates every hour.'),
+        ' and for ', React.createElement("b", null, 'promised dates missed (double)'), '. Old backlog (waiting since before 1 Oct) costs nothing if finished by ', React.createElement("b", null, '7 Nov'), ' — after that it counts late. The score updates every hour.'),
       card ? React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 8 } },
         [['Score', card.final_score == null ? '—' : Number(card.final_score).toFixed(1) + (card.band ? ' (' + card.band + ')' : ''), '#f8fafc'],
          ['Late work', '−' + Number(card.late_lost || 0).toFixed(1) + ' / 80', '#fca5a5'], ['Output', '−' + Number(card.out_lost || 0).toFixed(1) + ' / 30', '#fbbf24'],
@@ -37662,7 +37662,7 @@ function ScoreReasonsCard({ user }) {
             React.createElement("b", { style: { color: '#e2e8f0', minWidth: 78 } }, r.ref),
             React.createElement("span", { style: { flex: 1, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, lbl(r) + (r.client_name ? ' · ' + r.client_name : '')),
             r.promise ? React.createElement("span", { style: { fontSize: 10.5, color: tab === 'missed_promise' ? '#f87171' : '#94a3b8', whiteSpace: 'nowrap' } }, 'promised ' + fd(r.promise)) : null,
-            tab === 'backlog_pending' ? React.createElement("span", { style: { fontSize: 10.5, color: '#fbbf24', fontWeight: 700, whiteSpace: 'nowrap' } }, 'by 30 Oct') : React.createElement("span", { style: { fontSize: 10.5, color: '#fca5a5', fontWeight: 700, whiteSpace: 'nowrap' } }, Math.floor(r.days_late || 0) + 'd late'),
+            tab === 'backlog_pending' ? React.createElement("span", { style: { fontSize: 10.5, color: '#fbbf24', fontWeight: 700, whiteSpace: 'nowrap' } }, 'by 7 Nov') : React.createElement("span", { style: { fontSize: 10.5, color: '#fca5a5', fontWeight: 700, whiteSpace: 'nowrap' } }, Math.floor(r.days_late || 0) + 'd late'),
             React.createElement("span", { style: { fontSize: 10.5, color: '#64748b', whiteSpace: 'nowrap', minWidth: 52, textAlign: 'right' } }, '−' + Number(r.weight || 0).toFixed(1) + ' pt'))),
           list.length > 300 ? React.createElement("div", { style: { fontSize: 11, color: '#64748b', padding: 6 } }, '+ ' + (list.length - 300) + ' more') : null),
         React.createElement("div", { style: { fontSize: 10.5, color: '#64748b', marginTop: 6 } }, '"pt" = how much that item weighs (1 = a full late item, 2 = missed promise). Your Late cut = 100 × total weight ÷ items due, capped at 80.'))));
@@ -38523,8 +38523,8 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
           remaining = pendingBatches.filter(b => !effBatches.includes(b.id)).length;
         }
         if (markComplete && remaining === 0 && updateJobStatus && selJob && ['Installation WIP', 'In Transit'].includes(selJob.status)) {
-          try { await updateJobStatus(sel, 'IC Pending'); } catch (e) {}
-          show('✅ ' + T('Saved'), true);
+          let _mv = false; try { _mv = (await updateJobStatus(sel, 'IC Pending')) === true; } catch (e) {}
+          if (_mv) show('✅ ' + T('Saved'), true); else show('⚠️ Install log saved, but the job did NOT move to IC Pending — see the message above.', false);
         } else if (markComplete && remaining === 0 && selJob) {
           show('✅ ' + T('Saved') + ' \u00b7 job already at ' + selJob.status + ', stage not changed', true);
         } else if (markComplete) {
@@ -38534,8 +38534,8 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         }
       } else if (markComplete && sel !== NOJOB && updateJobStatus && selJob) {
         const nxt = await erpPrevStage(sel, selJob.status, wt === 'Rectification' ? 'Billing Pending' : 'Quotation Sent');
-        try { await updateJobStatus(sel, nxt); } catch (e) {}
-        show('✅ ' + wt + ' saved · job moved back to ' + nxt, true);
+        let _mv = false; try { _mv = (await updateJobStatus(sel, nxt)) === true; } catch (e) {}
+        if (_mv) show('✅ ' + wt + ' saved · job moved back to ' + nxt, true); else show('⚠️ ' + wt + ' log saved, but the job did NOT move — see the message above.', false);
       } else {
         show('✅ ' + T('Saved') + (sel === NOJOB ? ' · sent to Quote Pending' : ''), true);
       }
@@ -38894,7 +38894,7 @@ function RootApp() {
   }, [user]);
   useEffect(() => {
     async function fetchMasters() {
-      return Promise.all([sb.from('firms').select('*'), sb.from('clients').select('*').order('name'), sb.from('suppliers').select('*').order('name'), sb.from('products').select('*').order('internal_name'), sb.from('materials').select('*').order('name'), sb.from('machines').select('*'), sb.from('outsource_agencies').select('*'), sb.from('delivery_boys').select('*'), sb.from('team_members').select('id,name,email,phone,role,active,created_at,is_operator').eq('active', true), sb.from('materials_master_v2').select('*').eq('active', true).order('name'), sb.from('lead_sources').select('*').eq('active', true).order('name')]);
+      return Promise.all([sb.from('firms').select('*'), sb.from('clients').select('*').order('name'), sb.from('suppliers').select('*').order('name'), (async () => { let out = [], from = 0; while (true) { const r = await sb.from('products').select('*').order('internal_name').order('id').range(from, from + 999); if (r.error) return out.length ? { data: out, error: null } : r; out = out.concat(r.data || []); if (!r.data || r.data.length < 1000) break; from += 1000; } return { data: out, error: null }; })(), sb.from('materials').select('*').order('name'), sb.from('machines').select('*'), sb.from('outsource_agencies').select('*'), sb.from('delivery_boys').select('*'), sb.from('team_members').select('id,name,email,phone,role,active,created_at,is_operator').eq('active', true), sb.from('materials_master_v2').select('*').eq('active', true).order('name'), sb.from('lead_sources').select('*').eq('active', true).order('name')]);
     }
     async function loadMaster() {
       // ERP lockdown: no session token -> only the safe names view is readable; masters load after login.
