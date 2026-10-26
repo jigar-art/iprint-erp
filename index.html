@@ -1619,11 +1619,11 @@ function DutyTasksStrip() {
         React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => tap(d), style: btn('#a78bfa') },
           busy === d.code ? '…' : d.proof === 'file' ? '📎 Done' : '✓ Done')),
       noteFor === d.code && d.count_label ? (() => {
-        const n = dutyNameCount(names), want = Number(cnt) || 0, okc = want >= 1 && n === want;
+        const n = dutyNameCount(names), want = Number(cnt) || 0, mn = d.count_min || 1, okc = want >= mn && n === want;
         return React.createElement("div", { style: { display: 'grid', gap: 5, marginTop: 5 } },
-          React.createElement("input", { className: 'in', type: 'number', min: 1, inputMode: 'numeric', value: cnt, onChange: e => setCnt(e.target.value.replace(/[^0-9]/g, '')), placeholder: d.count_label + ' — how many? *', style: { fontSize: 12 } }),
-          React.createElement("textarea", { className: 'in', rows: 3, value: names, onChange: e => setNames(e.target.value), placeholder: 'Vendor names — one per line or comma-separated *', style: { fontSize: 12, resize: 'vertical' } }),
-          React.createElement("div", { style: { fontSize: 11, color: okc ? '#4ade80' : '#fca5a5' } }, n + ' name' + (n === 1 ? '' : 's') + ' listed' + (want ? ' · ' + want + ' entered' : '') + (okc ? ' ✓' : want && n !== want ? ' — must match' : '')),
+          React.createElement("input", { className: 'in', type: 'number', min: 1, inputMode: 'numeric', value: cnt, onChange: e => setCnt(e.target.value.replace(/[^0-9]/g, '')), placeholder: d.count_label + (mn > 1 ? ' (min ' + mn + ')' : '') + ' — how many? *', style: { fontSize: 12 } }),
+          React.createElement("textarea", { className: 'in', rows: 3, value: names, onChange: e => setNames(e.target.value), placeholder: 'Names — one per line or comma-separated *', style: { fontSize: 12, resize: 'vertical' } }),
+          React.createElement("div", { style: { fontSize: 11, color: okc ? '#4ade80' : '#fca5a5' } }, n + ' name' + (n === 1 ? '' : 's') + ' listed' + (want ? ' · ' + want + ' entered' : '') + (okc ? ' ✓' : want && want < mn ? ' — minimum ' + mn : want && n !== want ? ' — must match' : '')),
           React.createElement("div", { style: { display: 'flex', gap: 5 } },
             React.createElement("button", { type: 'button', disabled: !!busy || !okc, onClick: () => { if (d.proof === 'file') { pendingCode.current = d.code; if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } } else mark(d, null, note.trim() || null); }, style: { ...btn('#4ade80'), opacity: okc ? 1 : 0.5 } }, d.proof === 'file' ? '📎 Attach proof & done' : 'Save'),
             React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => { setNoteFor(null); setCnt(''); setNames(''); }, style: btn('#94a3b8') }, 'Cancel')));
@@ -35869,9 +35869,10 @@ function DutiesCard({ user }) {
     if (d.proof === 'file' && !form.file) { setErr('Attach the file / screenshot as proof'); return; }
     if (d.proof === 'note' && !form.note.trim()) { setErr('Add a short note'); return; }
     if (d.count_label) {
-      const want = Number(form.cnt) || 0, n = dutyNameCount(form.names);
-      if (want < 1) { setErr('Enter how many ledgers you reconciled'); return; }
-      if (n !== want) { setErr('You wrote ' + want + ' but listed ' + n + ' vendor names — they must match'); return; }
+      const want = Number(form.cnt) || 0, n = dutyNameCount(form.names), mn = d.count_min || 1;
+      if (want < 1) { setErr('Enter the number of ' + d.count_label.toLowerCase()); return; }
+      if (want < mn) { setErr('Minimum ' + mn + ' needed — you entered ' + want); return; }
+      if (n !== want) { setErr('You entered ' + want + ' but listed ' + n + ' names — they must match'); return; }
     }
     setBusy(true); setErr('');
     let proof = null;
@@ -35936,9 +35937,9 @@ function DutiesCard({ user }) {
           cur && cur.item_count ? ' · ' + cur.item_count + ' ledger' + (cur.item_count === 1 ? '' : 's') : '', cur && cur.note ? ' · "' + cur.note + '"' : '', cur && cur.proof_url ? ' · ' : '', cur && cur.proof_url ? React.createElement("a", { href: cur.proof_url, target: '_blank', rel: 'noreferrer', style: { color: '#60a5fa' } }, '📎 proof') : null),
         !cur && (target === me || adm) ? (form && form.def.code === d.code
           ? React.createElement("div", { style: { display: 'grid', gap: 6, marginTop: 6 } },
-              d.count_label ? React.createElement("input", { className: 'in', type: 'number', min: 1, inputMode: 'numeric', value: form.cnt || '', onChange: e => setForm({ ...form, cnt: e.target.value.replace(/[^0-9]/g, '') }), placeholder: d.count_label + ' — how many? *' }) : null,
-              d.count_label ? React.createElement("textarea", { className: 'in', rows: 3, value: form.names || '', onChange: e => setForm({ ...form, names: e.target.value }), placeholder: 'Vendor names — one per line or comma-separated *', style: { resize: 'vertical' } }) : null,
-              d.count_label ? React.createElement("div", { style: { fontSize: 11, color: (Number(form.cnt) >= 1 && dutyNameCount(form.names) === Number(form.cnt)) ? '#4ade80' : '#94a3b8' } }, dutyNameCount(form.names) + ' names listed' + (form.cnt ? ' · ' + form.cnt + ' entered' : '') + ' — must match') : null,
+              d.count_label ? React.createElement("input", { className: 'in', type: 'number', min: 1, inputMode: 'numeric', value: form.cnt || '', onChange: e => setForm({ ...form, cnt: e.target.value.replace(/[^0-9]/g, '') }), placeholder: d.count_label + ((d.count_min || 1) > 1 ? ' (min ' + d.count_min + ')' : '') + ' — how many? *' }) : null,
+              d.count_label ? React.createElement("textarea", { className: 'in', rows: 3, value: form.names || '', onChange: e => setForm({ ...form, names: e.target.value }), placeholder: 'Names — one per line or comma-separated *', style: { resize: 'vertical' } }) : null,
+              d.count_label ? React.createElement("div", { style: { fontSize: 11, color: (Number(form.cnt) >= (d.count_min || 1) && dutyNameCount(form.names) === Number(form.cnt)) ? '#4ade80' : '#94a3b8' } }, dutyNameCount(form.names) + ' names listed' + (form.cnt ? ' · ' + form.cnt + ' entered' : '') + ((d.count_min || 1) > 1 ? ' · min ' + d.count_min : '') + ' — must match') : null,
               React.createElement("input", { className: 'in', value: form.note, onChange: e => setForm({ ...form, note: e.target.value }), placeholder: d.proof === 'note' ? 'What was done? *' : 'Note (optional)' }),
               React.createElement("div", { style: { fontSize: 11, color: d.proof === 'file' ? '#fde68a' : '#94a3b8' } }, d.proof === 'file' ? 'Proof file / screenshot * ' : 'Proof (optional) ',
                 React.createElement("input", { type: 'file', accept: 'image/*,.pdf,.xlsx,.xls,.csv', onChange: e => setForm({ ...form, file: e.target.files[0] || null }) })),
