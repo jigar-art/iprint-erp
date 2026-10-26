@@ -4097,6 +4097,9 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(TaskAlertsGate, {
     user: user
+  }) : null, user ? React.createElement(DocketSignPopup, {
+    user: user,
+    onOpen: () => setPg('acc')
   }) : null, user ? React.createElement(TasksNoteGate, {
     user: user
   }) : null, user ? React.createElement(CommitGate, {
@@ -36730,6 +36733,74 @@ function V5ChangeGate({ user }) {
 // ── Assigned-task alerts (22 Oct 2026) ──
 // Assignee: new tasks until "Got it" (sets daily_tasks.seen_at) + own overdue once a day.
 // Assigner: tasks they assigned that are overdue, once a day. Data: erp_my_task_alerts().
+// 26 Oct 2026: popup on new docket sign / return (Jigar). Prachi, Samruddhi, Vidya, Amol: signed, not yet invoiced.
+// Aparna: returned to fix + signed. Shows only when there are new events; "Later" hides till tomorrow or the next new sign.
+const DK_POP_INV = ['PRACHI', 'SAMRUDDHI', 'VIDYA', 'AMOL'];
+function DocketSignPopup({ user, onOpen }) {
+  const me = pbKey(user);
+  const isAp = me === 'APARNA';
+  const inRole = isAp || DK_POP_INV.includes(me);
+  const [rows, setRows] = React.useState([]);
+  const [top, setTop] = React.useState(0);
+  const [open, setOpen] = React.useState(false);
+  const seenKey = 'dkpop_seen_' + me, snzKey = 'dkpop_snooze_' + me;
+  const day = () => new Date(Date.now() + 5.5 * 36e5).toISOString().slice(0, 10);
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const load = async () => {
+    const seen = Number(lsGet(seenKey) || 0);
+    let q = sb.from('billing_docket_events').select('id,docket_id,action,by_key,at').in('action', isAp ? ['signed', 'returned'] : ['signed']);
+    q = seen ? q.gt('id', seen) : q.gte('at', new Date(Date.now() - 3 * 864e5).toISOString());
+    const ev = await q.order('id', { ascending: true }).limit(500);
+    if (ev.error) return;
+    const evs = (ev.data || []).filter(e => e.by_key !== me);
+    if (!evs.length) { setOpen(false); return; }
+    const mx = evs[evs.length - 1].id;
+    const dk = await sb.from('billing_dockets').select('id,job_id,client_name,firm,batch_id,site_id,sign_status,signed_by,returned_reason').in('id', [...new Set(evs.map(e => e.docket_id))]);
+    if (dk.error) return;
+    const d = dk.data || [];
+    const bIds = d.filter(x => x.batch_id).map(x => x.batch_id);
+    const sIds = d.filter(x => x.site_id).map(x => x.site_id);
+    const [b, st] = await Promise.all([
+      bIds.length ? sb.from('batches').select('id,bill_no').in('id', bIds) : Promise.resolve({ data: [] }),
+      sIds.length ? sb.from('banking_sites').select('id,atm_id,bank,billing_category').in('id', sIds) : Promise.resolve({ data: [] })]);
+    const bm = {}; (b.data || []).forEach(x => { bm[x.id] = x; });
+    const sm = {}; (st.data || []).forEach(x => { sm[x.id] = x; });
+    const done = x => x.batch_id ? !!(bm[x.batch_id] && bm[x.batch_id].bill_no) : ['Invoiced', 'Cancelled', 'Duplicate'].includes((sm[x.site_id] || {}).billing_category);
+    const out = d.filter(x => (x.sign_status === 'Signed' || (isAp && x.sign_status === 'Returned')) && !done(x)).map(x => ({ ...x, site: sm[x.site_id] || null }));
+    setRows(out);
+    setTop(mx);
+    if (!out.length) { lsSet(seenKey, String(mx)); setOpen(false); return; }
+    setOpen(lsGet(snzKey) !== day() + '|' + mx);
+  };
+  React.useEffect(() => {
+    if (!inRole) return;
+    load();
+    const t = setInterval(load, 10 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [me]);
+  if (!inRole || !open || !rows.length) return null;
+  const seen = () => { lsSet(seenKey, String(top)); setOpen(false); };
+  const later = () => { lsSet(snzKey, day() + '|' + top); setOpen(false); };
+  const signed = rows.filter(r => r.sign_status === 'Signed');
+  const ret = rows.filter(r => r.sign_status === 'Returned');
+  const label = r => r.site ? 'ATM ' + (r.site.atm_id || r.site_id) + ' · ' + (r.site.bank || r.client_name || '') : (r.job_id || '') + ' · ' + String(r.client_name || '').trim();
+  const sec = (title, color, list, sub) => list.length ? React.createElement("div", { style: { marginTop: 12 } },
+    React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color, marginBottom: 6 } }, title + ' (' + list.length + ')'),
+    list.map(r => React.createElement("div", { key: r.id, style: { fontSize: 13.5, color: '#e2e8f0', lineHeight: 1.4, padding: '6px 10px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, marginBottom: 5 } },
+      React.createElement("b", null, label(r)), r.firm ? React.createElement("span", { style: { color: '#94a3b8', fontSize: 11 } }, ' · ' + r.firm) : null,
+      sub(r) ? React.createElement("div", { style: { fontSize: 11.5, color, marginTop: 2 } }, sub(r)) : null))) : null;
+  const btn = { marginTop: 12, flex: 1, padding: '10px 0', fontSize: 14, fontWeight: 800, borderRadius: 8 };
+  return React.createElement("div", { role: 'dialog', 'aria-label': 'Docket sign alerts', style: { position: 'fixed', inset: 0, zIndex: 99988, background: 'rgba(3,6,12,.92)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px 24px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 520, background: '#0f172a', border: '1px solid #a855f7', borderRadius: 14, padding: 16 } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: '#c084fc' } }, isAp ? '✍ Docket updates' : '✍ Dockets signed — raise invoices'),
+      sec('↩ Returned to you — fix and re-send', '#f87171', ret, r => (r.returned_reason || '')),
+      sec(isAp ? '✔ Signed — with Prachi for invoice' : '✍ Signed, invoice not raised yet', '#4ade80', signed, r => 'Signed by ' + String(r.signed_by || '?').split(' - ')[0]),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 12 } }, isAp ? 'Returned dockets: fix the documents, then Re-send for sign on Accounts (jobs) or Banking CRM (sites).' : 'Each signed batch shows “✍ Signed by” on Accounts. Add the invoice# there; the item drops off this list once invoiced.'),
+      React.createElement("div", { style: { display: 'flex', gap: 8 } },
+        React.createElement("button", { type: 'button', className: 'b', onClick: later, style: { ...btn, background: 'transparent', color: '#cbd5e1', border: '1px solid #334155' } }, 'Later'),
+        React.createElement("button", { type: 'button', className: 'b', onClick: () => { seen(); onOpen && onOpen(); }, style: { ...btn, background: '#a855f7', color: '#fff', border: 'none' } }, 'Seen — open Accounts'))));
+}
 function TaskAlertsGate({ user }) {
   const [rows, setRows] = React.useState([]);
   const [open, setOpen] = React.useState(false);
