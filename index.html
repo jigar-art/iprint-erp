@@ -36277,7 +36277,7 @@ function CourierFab({ user }) {
   // 25 Oct 2026 (Jigar): shared PODs that Manoj / Murli must sort out
   const [pods, setPods] = React.useState([]);
   const [podTick, setPodTick] = React.useState({});
-  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '', sent: false, sentOn: '', docket: '' });
+  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '', sent: false, sentOn: '', docket: '', docketNo: '' });
   const [f, setF] = React.useState(blank);
   const [dcs, setDcs] = React.useState(null);
   const [sum, setSum] = React.useState(null);
@@ -36335,6 +36335,7 @@ function CourierFab({ user }) {
     const pics = f.sent ? (f.docket ? [f.docket] : []) : photos.slice(0, n).filter(Boolean);
     if (f.sent && !f.sentOn) { setMsg('⚠️ Give the date it was sent'); return; }
     if (f.sent && !f.docket) { setMsg('⚠️ Upload the docket / courier bill photo'); return; }
+    if (f.sent && String(f.docketNo || '').replace(/\s/g, '').length < 4) { setMsg('⚠️ Write the docket / LR number'); return; }
     if (f.mode === 'Running Bus' && f.busFrom.trim().length < 4) { setMsg('⚠️ Bus: write where the receiver collects it (bus office / stand)'); return; }
     if (f.mode === 'Running Bus' && !f.busDep) { setMsg('⚠️ Bus: give the departure date and time'); return; }
     if (f.mode === 'Running Bus' && isNaN(new Date(f.busDep).getTime())) { setMsg('⚠️ Bus: the departure date and time is not valid - pick it again'); return; }
@@ -36346,7 +36347,7 @@ function CourierFab({ user }) {
     const itemIds = dcItems.length && (onIdx.length < dcItems.length || tickedIds.length === onIdx.length) ? tickedIds : null;
     const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
       install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
-      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds,
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, docket_no: f.sent ? String(f.docketNo || '').trim() : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds,
       bus_departs: f.mode === 'Running Bus' && f.busDep ? new Date(f.busDep).toISOString() : null, collect_from: f.mode === 'Running Bus' ? f.busFrom.trim() : null, sqft: f.sqft || null };
     if (f.mode === 'Running Bus') p.dest_address = 'Collect from: ' + f.busFrom.trim();
     setBusy(true);
@@ -36355,7 +36356,12 @@ function CourierFab({ user }) {
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
     setMsg('✓ Request #' + r.data + ' sent for job ' + f.jobId); setF(blank()); setDcs(null); setSum(null); setVendors([]); setPhotos([]); setDcItems([]); setTick({}); window._crSigs = {}; load();
   };
-  const decide = async (id, ok) => { setBusy(true); const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: null }); setBusy(false); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load(); };
+  const decide = async (id, ok, row) => {
+    let note = null;
+    const reds = row ? (Array.isArray(row.checks) ? row.checks : []).filter(c => c.level === 'red').map(c => c.label) : [];
+    if (ok && row && row.already_sent) reds.push('raised after dispatch');
+    if (ok && reds.length) { note = prompt('Red checks on #' + id + ': ' + reds.join(', ') + '\n\nWrite why you approve it:', ''); if (note === null) return; if (note.trim().length < 5) { setMsg('\u26a0\ufe0f Write a short reason to approve with red checks'); return; } }
+    setBusy(true); const r = await sb.rpc('erp_courier_decide', { p_id: id, p_approve: ok, p_note: note }); setBusy(false); setMsg(r.error ? '⚠️ ' + r.error.message : '✓ ' + r.data); load(); };
   const nm = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const st = r => r.status === 'approved' ? '✓ approved' : r.status === 'rejected' ? '✗ rejected' : r.l1_action === 'approved' ? 'waiting for Jigar' : 'waiting for ' + nm(r.l1_key);
   const chip = on => ({ padding: '8px 11px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
@@ -36419,6 +36425,8 @@ function CourierFab({ user }) {
     f.sent ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
       React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, 'Sent on',
         React.createElement("input", { className: 'in', type: 'date', value: f.sentOn, onChange: e => setF({ ...f, sentOn: e.target.value }), style: inp })),
+      React.createElement("input", { className: 'in', value: f.docketNo || '', onChange: e => setF({ ...f, docketNo: e.target.value }), placeholder: 'Docket / LR number - required', style: inp }),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#fbbf24' } }, 'Approval after dispatch goes to Jigar and is logged on your score.'),
       React.createElement("label", { style: { fontSize: 12, color: f.docket ? '#4ade80' : '#fbbf24', display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' } }, (f.docket ? '✓ ' : '') + 'Docket / courier bill photo',
         React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; setBusy(true); const url = await uploadFile(fl, 'courier-docket'); setBusy(false); if (url) setF(p => ({ ...p, docket: url })); }, style: { fontSize: 12 } }))) : null,
     !f.sent && n > 0 && type ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
@@ -36476,7 +36484,7 @@ function CourierFab({ user }) {
         setBusy(true); const x = await sb.rpc('erp_courier_cancel', { p_id: r.id, p_note: why }); setBusy(false); setMsg(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2713 #' + r.id + ' ' + x.data); load(); },
       style: { marginTop: 6, marginLeft: 6, padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fca5a5', border: '1px solid #7f1d1d', background: 'transparent' } }, '\u2715 Cancel request') : null,
     r.waiting_for_me ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6 } },
-      React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
+      React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, true, r), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, 'Approve'),
       React.createElement("button", { type: 'button', disabled: busy, onClick: () => decide(r.id, false), style: { padding: '6px 16px', borderRadius: 7, fontSize: 12.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, 'Reject')) : null);
   return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) setOpen(false); } },
     React.createElement("div", { style: { width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #a78bfa', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))' } },
@@ -54917,9 +54925,14 @@ function PettyCashPage({
     if (!confirm('Remove bill ' + v + '? You can then add the correct one.')) return;
     const {
       error
-    } = await sb.from('petty_cash_bills').delete().eq('id', b.id);
+      , data: gone
+    } = await sb.from('petty_cash_bills').delete().eq('id', b.id).select('id');
     if (error) {
       show('\u26a0\ufe0f ' + error.message, false);
+      return;
+    }
+    if (!gone || !gone.length) {
+      show('\u26a0\ufe0f Bills can not be removed after approval - ask Shreya / your lead', false);
       return;
     }
     sb.storage.from('petty-cash-bills').remove([b.file_path]).catch(() => {});
@@ -55014,6 +55027,10 @@ function PettyCashPage({
       show('Job number is required. Only office expenses (' + exemptCats.join(', ') + ') can go without a job.', false);
       return;
     }
+    if (form.kind === 'booking' && !['Courier - Porter', 'Courier - Wefast', 'Travel - Local'].includes(form.category)) {
+      show('Pick what the trip carries: Goods (Porter / Wefast) or People (Ola / Uber / Rapido)', false);
+      return;
+    }
     if (crNeeded && !crTrip) {
       show('Is this trip a delivery or a material pickup?', false);
       return;
@@ -55038,7 +55055,7 @@ function PettyCashPage({
       show('Site run is limited to \u20b9500 - above that raise a \ud83d\ude9a courier request', false);
       return;
     }
-    if (crNeeded && crTrip === 'siterun' && !form.files.length) {
+    if (crNeeded && crTrip === 'siterun' && !form.sitePhoto) {
       show('Site run: attach a photo of the material / tools being sent', false);
       return;
     }
@@ -55084,7 +55101,14 @@ function PettyCashPage({
     if (preNeeded && preIssues.some(x => !x.system) && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
     const jobs = form.jobs.split(/[\s,/&]+/).map(s => s.trim().split('-')[0]).filter(s => /^\d+$/.test(s));
     setBusy(true);
-    let errandPath = null;
+    let errandPath = null, sitePath = null;
+    if (crNeeded && crTrip === 'siterun' && form.sitePhoto) {
+      sitePath = await pcUploadPath(form.sitePhoto, me + '/siterun/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ((/^image\/(png|webp)$/i.test(form.sitePhoto.type || '') ? form.sitePhoto.type.split('/')[1] : 'jpg')));
+      if (!sitePath) {
+        setBusy(false);
+        return;
+      }
+    }
     if (crNeeded && crTrip === 'errand') {
       errandPath = await pcUploadPath(form.errandPhoto, me + '/errand/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ((/^image\/(png|webp)$/i.test(form.errandPhoto.type || '') ? form.errandPhoto.type.split('/')[1] : 'jpg')));
       if (!errandPath) {
@@ -55111,11 +55135,13 @@ function PettyCashPage({
       errand_from: crNeeded && crTrip === 'errand' ? (form.errFrom || '').trim() : null,
       errand_to: crNeeded && crTrip === 'errand' ? (form.errTo || '').trim() : null,
       errand_item: crNeeded && crTrip === 'errand' ? (form.errItem || '').trim() : null,
-      errand_photo: errandPath
+      errand_photo: errandPath,
+      site_photo: sitePath
     }).select('id,req_no,status').single();
     if (error) {
       setBusy(false);
       if (errandPath) sb.storage.from('petty-cash-bills').remove([errandPath]).catch(() => {});
+      if (sitePath) sb.storage.from('petty-cash-bills').remove([sitePath]).catch(() => {});
       show('\u26a0\ufe0f Could not send: ' + error.message, false);
       return;
     }
@@ -55946,7 +55972,12 @@ function PettyCashPage({
       fontWeight: 700,
       cursor: 'pointer'
     }
-  }, l))), /*#__PURE__*/React.createElement("label", {
+  }, l))), form.kind === 'booking' ? React.createElement("div", { style: { marginBottom: 12 } },
+    React.createElement("label", { style: lbl }, "This trip carries - required"),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+      [['Courier - Porter', '\ud83d\udce6 Goods - Porter'], ['Courier - Wefast', '\ud83d\udce6 Goods - Wefast / Borzo'], ['Travel - Local', '\ud83e\uddcd People - Ola / Uber / Rapido']].map(([c, l]) => React.createElement("button", { key: c, type: 'button', onClick: () => setF('category', c),
+        style: { flex: '1 1 30%', minWidth: 96, padding: '9px 8px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (form.category === c ? '#10b981' : '#1a2030'), background: form.category === c ? '#10b98122' : 'transparent', color: form.category === c ? '#10b981' : '#94a3b8' } }, l))),
+    form.category === 'Travel - Local' ? React.createElement("div", { style: { fontSize: 11, color: '#64748b', marginTop: 4 } }, 'Material / goods on the trip? Pick Goods - it needs the \ud83d\ude9a request or the PO.') : null) : null, /*#__PURE__*/React.createElement("label", {
     style: lbl
   }, "Amount (₹)"), form.category === 'Food - Site/Late Night' && cfg && cfg.meal_rates ? /*#__PURE__*/React.createElement("div", {
     style: {
@@ -56079,7 +56110,10 @@ function PettyCashPage({
         React.createElement("label", { style: { ...lbl, marginTop: 4 } }, 'Photo of the sample / catalogue / documents - required'),
         React.createElement("input", { type: 'file', accept: 'image/*', onChange: e => setF('errandPhoto', e.target.files && e.target.files[0] || null), style: { fontSize: 12, color: '#e2e8f0' } }),
         form.errandPhoto ? React.createElement("div", { style: { fontSize: 12, color: '#6ee7b7', marginTop: 4 } }, '\u2713 ' + form.errandPhoto.name) : null)
-    : crTrip === 'siterun' ? React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', lineHeight: 1.5 } }, 'Office \u2192 site with material or tools for this job. Max \u20b9500 (above that raise a \ud83d\ude9a request). Attach a photo of the material being sent.')
+    : crTrip === 'siterun' ? React.createElement("div", null, React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', lineHeight: 1.5 } }, 'Office \u2192 site with material or tools for this job. Max \u20b9500 (above that raise a \ud83d\ude9a request). Your lead checks every site run.'),
+        React.createElement("label", { style: { ...lbl, marginTop: 6 } }, 'Photo of the material / tools being sent - required'),
+        React.createElement("input", { type: 'file', accept: 'image/*', capture: 'environment', onChange: e => setF('sitePhoto', e.target.files && e.target.files[0] || null), style: { fontSize: 12, color: '#e2e8f0' } }),
+        form.sitePhoto ? React.createElement("div", { style: { fontSize: 12, color: '#6ee7b7', marginTop: 4 } }, '\u2713 ' + form.sitePhoto.name) : null)
     : crTrip === 'pickup' ? (poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
         React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
         poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))))
