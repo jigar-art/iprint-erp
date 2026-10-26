@@ -332,11 +332,38 @@ const compressImage = async file => {
     if (revoke) URL.revokeObjectURL(revoke);
   }
 };
+// 26 Oct 2026 (Jigar): a repeated document is caught at the moment of upload - re-used where the repeat is legitimate, refused where it is not
+const ERP_GATED_FOLDERS = ['courier-docket', 'courier-pkg', 'dc', 'delivery', 'dispatch-signed-dc'];
+const erpFileSha = async file => {
+  try {
+    if (!window.crypto || !crypto.subtle || !file || file.size > UPLOAD_MAX_BYTES) return null;
+    const h = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(h)).map(x => x.toString(16).padStart(2, '0')).join('');
+  } catch (e) { return null; }
+};
+const erpFileGate = async (file, bucket, folder, ref) => {
+  const sha = await erpFileSha(file);
+  if (!sha) return { sha: null, action: 'ok' };
+  try {
+    const r = await sb.rpc('erp_file_check', { p_sha: sha, p_bucket: bucket, p_folder: folder, p_ref: ref || null });
+    if (r.error || !r.data) return { sha, action: 'ok' };
+    if (r.data.action === 'block') { try { window.dispatchEvent(new CustomEvent('erp-rule-block', { detail: { msg: r.data.msg, action: 'upload:' + folder } })); } catch (e) {} }
+    return Object.assign({ sha }, r.data);
+  } catch (e) { return { sha, action: 'ok' }; }
+};
+const erpFileRegister = (sha, bucket, path) => { if (sha && path) sb.rpc('erp_file_register', { p_sha: sha, p_bucket: bucket, p_path: path }).then(() => {}, () => {}); };
 const uploadFile = async (file, folder = 'general') => {
   if (!file) return null;
   if (file.size > UPLOAD_MAX_BYTES) {
     if (window._showToast) window._showToast('\u26a0\ufe0f ' + (file.name || 'File') + ' is ' + (file.size / 1048576).toFixed(1) + ' MB \u2014 max 40 MB', false);
     return null;
+  }
+  const gateFolder = String(folder || '').split('/')[0];
+  const gate = ERP_GATED_FOLDERS.includes(gateFolder) ? await erpFileGate(file, 'Uploads', gateFolder) : null;
+  if (gate && gate.action === 'block') return null;
+  if (gate && gate.action === 'reuse' && gate.path) {
+    if (window._showToast) window._showToast('\u2713 ' + gate.msg, true);
+    return sb.storage.from('Uploads').getPublicUrl(gate.path).data.publicUrl;
   }
   _upOverlay.push();
   let lastErr = null;
@@ -356,7 +383,7 @@ const uploadFile = async (file, folder = 'general') => {
           const {
             data: urlData
           } = sb.storage.from('Uploads').getPublicUrl(path);
-          if (urlData?.publicUrl) return urlData.publicUrl;
+          if (urlData?.publicUrl) { if (gate) erpFileRegister(gate.sha, 'Uploads', path); return urlData.publicUrl; }
           lastErr = {
             message: 'no public URL returned'
           };
@@ -54575,6 +54602,8 @@ async function pcUploadBill(file, me, reqId, maxDim) {
     if (window._showToast) window._showToast('\u26a0\ufe0f ' + file.name + ' is over 10 MB', false);
     return null;
   }
+  const gate = await erpFileGate(file, 'petty-cash-bills', 'pc-bill', reqId);
+  if (gate.action === 'block') return null;
   _upOverlay.push();
   try {
     const toSend = maxDim ? await pcShrink(file, maxDim) : await compressImage(file);
@@ -54590,6 +54619,7 @@ async function pcUploadBill(file, me, reqId, maxDim) {
       if (window._showToast) window._showToast('\u26a0\ufe0f Bill upload failed: ' + error.message, false);
       return null;
     }
+    erpFileRegister(gate.sha, 'petty-cash-bills', path);
     return path;
   } finally {
     _upOverlay.pop();
@@ -54597,6 +54627,8 @@ async function pcUploadBill(file, me, reqId, maxDim) {
 }
 const PC_DENOMS = ['2000', '500', '200', '100', '50', '20', '10'];
 async function pcUploadPath(file, path) {
+  const gate = /\/(errand|siterun|extra)\//.test(path) ? await erpFileGate(file, 'petty-cash-bills', 'pc-photo') : null;
+  if (gate && gate.action === 'block') return null;
   _upOverlay.push();
   try {
     const f = await compressImage(file);
@@ -54609,6 +54641,7 @@ async function pcUploadPath(file, path) {
       if (window._showToast) window._showToast('\u26a0\ufe0f Photo upload failed: ' + error.message, false);
       return null;
     }
+    if (gate) erpFileRegister(gate.sha, 'petty-cash-bills', path);
     return path;
   } finally {
     _upOverlay.pop();
@@ -55224,6 +55257,10 @@ function PettyCashPage({
     if (preNeeded && preIssues.some(x => !x.system) && !confirm('The screenshot check found a problem:\n\n- ' + preIssues.map(x => x.text).join('\n- ') + '\n\nIt will NOT be approved automatically - it goes to your lead. Send anyway?')) return;
     const jobs = form.jobs.split(/[\s,/&]+/).map(s => s.trim().split('-')[0]).filter(s => /^\d+$/.test(s));
     setBusy(true);
+    for (const bf of form.files) {
+      const g = await erpFileGate(bf, 'petty-cash-bills', 'pc-bill', null);
+      if (g.action === 'block') { setBusy(false); return; }
+    }
     let errandPath = null, sitePath = null;
     if (crNeeded && crTrip === 'siterun' && form.sitePhoto) {
       sitePath = await pcUploadPath(form.sitePhoto, me + '/siterun/' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ((/^image\/(png|webp)$/i.test(form.sitePhoto.type || '') ? form.sitePhoto.type.split('/')[1] : 'jpg')));
