@@ -6553,6 +6553,13 @@ function JobDetail({
       dc_template: dcTplKey,
       client_dc_no: clientDcNo
     };
+    // 26 Oct 2026 (Jigar): packing proof before DC - warning until Mon 2 Nov 2026, then the ERP blocks it
+    try {
+      const pm = await sb.rpc('erp_dc_proof_missing', { p_job: j.id });
+      if (pm && !pm.error && pm.data) {
+        if (!confirm('\u26a0\ufe0f Packing proof missing on job ' + j.id + ':\n\n' + pm.data + '\n\nUpload them with the \ud83d\udcf7 button on the job (fabrication team / Heramb) before the material leaves.\n\nFrom Mon 2 Nov the ERP will NOT allow a DC without these photos.\n\nSave this DC anyway?')) return;
+      }
+    } catch (e) {}
     const {
       error
     } = await sb.from('delivery_challans').insert(rec);
