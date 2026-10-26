@@ -195,6 +195,19 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   global: {
     fetch: async (...a) => {
       const r = await fetch(...a);
+      // 26 Oct 2026 (Jigar): no dead ends - every rule refusal is logged and can be sent to Jigar
+      if (r.status >= 400 && r.status < 500 && r.status !== 401) {
+        try {
+          const u = String(a[0] && a[0].url || a[0] || '');
+          if (!/erp_rule_blocks|erp_rule_ask/.test(u)) {
+            const body = await r.clone().text();
+            if (/"code"\s*:\s*"P0001"/.test(body)) {
+              const j = JSON.parse(body);
+              window.dispatchEvent(new CustomEvent('erp-rule-block', { detail: { msg: String(j.message || ''), action: (u.split('/rest/v1/')[1] || u).split('?')[0] } }));
+            }
+          }
+        } catch (e) {}
+      }
       if (r.status === 401) {
         try {
           const body = await r.clone().text();
@@ -1994,6 +2007,7 @@ function MainApp({
   const [fyFilter, setFyFilter] = useState('2627');
   const [portalAlert, setPortalAlert] = useState(null);
   const show = useCallback((m, ok = true) => {
+    if (!ok) { try { window.dispatchEvent(new CustomEvent('erp-client-block', { detail: { msg: String(m || '') } })); } catch (e) {} }
     setToast({
       m,
       ok
@@ -4092,6 +4106,8 @@ function MainApp({
   }) : null, user ? React.createElement(ProofFab, {
     user: user
   }) : null, user ? React.createElement(CourierFab, {
+    user: user
+  }) : null, user ? React.createElement(RuleBlockBar, {
     user: user
   }) : null, pg === "complaints" && React.createElement(ComplaintsPage, {
     user: user
@@ -36519,6 +36535,35 @@ function CourierFab({ user }) {
           React.createElement("span", { style: { color: '#94a3b8', whiteSpace: 'nowrap' } }, (x.avg_rate != null ? '₹' + x.avg_rate + ' ' + (CR_BASIS[x.basis] || '').replace('₹ ', '') + ' · ' : '') + x.on_time + ' on time · ' + x.late + ' late' + (x.over_budget ? ' · ' + x.over_budget + ' over budget' : '')))))
           : React.createElement("div", { style: { fontSize: 12, color: '#64748b', marginTop: 6 } }, 'No completed bookings yet — the record builds as Manoj / Murli book.')) : null) : null));
 }
+// 26 Oct 2026 (Jigar): a refusal is never a dead end - the user sees what blocked them and can send it to Jigar with a reason
+function RuleBlockBar({ user }) {
+  const [b, setB] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    const log = (msg, action, source) => sb.from('erp_rule_blocks').insert({ message: msg, action: action || null, page: (() => { try { return localStorage.getItem('erp_pg'); } catch (e) { return null; } })(), source }).select('id').single().then(r => r.data ? r.data.id : null, () => null);
+    const onDb = async e => { const d = e.detail || {}; if (!d.msg) return; const id = await log(d.msg, d.action, 'db'); setB({ id, msg: d.msg, sent: '' }); };
+    const onClient = e => { const d = e.detail || {}; if (d.msg && !/^\u2713|^\u2705/.test(d.msg)) log(d.msg, null, 'client'); };
+    window.addEventListener('erp-rule-block', onDb); window.addEventListener('erp-client-block', onClient);
+    return () => { window.removeEventListener('erp-rule-block', onDb); window.removeEventListener('erp-client-block', onClient); };
+  }, []);
+  if (!b) return null;
+  const ask = async () => {
+    if (!b.id) { setB({ ...b, sent: 'Could not log this - send Jigar a screenshot' }); return; }
+    const why = prompt('This goes to Jigar as a task.\n\nBlocked: ' + b.msg + '\n\nWhy should it go through? (job, what happened)', '');
+    if (why === null) return;
+    setBusy(true); const r = await sb.rpc('erp_rule_ask', { p_id: b.id, p_reason: why }); setBusy(false);
+    setB({ ...b, sent: r.error ? '\u26a0\ufe0f ' + r.error.message : '\u2713 Sent to Jigar - he will reply in your tasks / WhatsApp' });
+  };
+  return React.createElement("div", { style: { position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 1300, maxWidth: 640, margin: '0 auto', background: '#2a1215', border: '1px solid #f47067', borderRadius: 10, padding: '10px 12px', color: '#fecaca', fontSize: 13, boxShadow: '0 6px 24px rgba(0,0,0,.5)' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
+      React.createElement("b", null, '\u26d4 The ERP stopped this'),
+      React.createElement("button", { type: 'button', onClick: () => setB(null), style: { background: 'none', border: 'none', color: '#fca5a5', fontSize: 18, cursor: 'pointer', lineHeight: 1 } }, '\u2715')),
+    React.createElement("div", { style: { marginTop: 4, color: '#fee2e2' } }, b.msg),
+    b.sent ? React.createElement("div", { style: { marginTop: 6, color: /^\u2713/.test(b.sent) ? '#86efac' : '#fca5a5' } }, b.sent)
+      : React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' } },
+        React.createElement("span", { style: { fontSize: 12, color: '#fca5a5' } }, 'Fix it as the message says - or, if it is genuinely right:'),
+        React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '6px 12px', borderRadius: 8, border: '1px solid #f47067', background: '#7f1d1d', color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' } }, busy ? 'Sending\u2026' : 'Ask Jigar for an exception')));
+}
 function ReportMistakeCard({ user }) {
   const [opts, setOpts] = React.useState(null);
   const [f, setF] = React.useState({ person: '', code: '', job: '', note: '' });
@@ -55047,7 +55092,7 @@ function PettyCashPage({
       show('Pick the \ud83d\ude9a courier request this payment is for', false);
       return;
     }
-    if (crNeeded && crTrip === 'pickup' && !form.pickupPo) {
+    if (crNeeded && crTrip === 'pickup' && !(form.pickupPo && form.pickupPo !== '__other' ? form.pickupPo : String(form.pickupPoTyped || '').trim().toUpperCase())) {
       show('Pick the PO being collected', false);
       return;
     }
@@ -55129,7 +55174,7 @@ function PettyCashPage({
       meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
       mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null,
       courier_request_id: crNeeded && crTrip === 'delivery' && form.courier ? Number(form.courier) : null,
-      pickup_po: crNeeded && crTrip === 'pickup' && form.pickupPo ? form.pickupPo : null,
+      pickup_po: crNeeded && crTrip === 'pickup' && (form.pickupPo && form.pickupPo !== '__other' ? form.pickupPo : String(form.pickupPoTyped || '').trim().toUpperCase()) ? (form.pickupPo && form.pickupPo !== '__other' ? form.pickupPo : String(form.pickupPoTyped || '').trim().toUpperCase()) : null,
       site_run: !!(crNeeded && crTrip === 'siterun'),
       errand_run: !!(crNeeded && crTrip === 'errand'),
       errand_from: crNeeded && crTrip === 'errand' ? (form.errFrom || '').trim() : null,
@@ -56114,10 +56159,13 @@ function PettyCashPage({
         React.createElement("label", { style: { ...lbl, marginTop: 6 } }, 'Photo of the material / tools being sent - required'),
         React.createElement("input", { type: 'file', accept: 'image/*', capture: 'environment', onChange: e => setF('sitePhoto', e.target.files && e.target.files[0] || null), style: { fontSize: 12, color: '#e2e8f0' } }),
         form.sitePhoto ? React.createElement("div", { style: { fontSize: 12, color: '#6ee7b7', marginTop: 4 } }, '\u2713 ' + form.sitePhoto.name) : null)
-    : crTrip === 'pickup' ? (poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
-        React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
-        poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))))
-      : React.createElement("div", { style: { fontSize: 12, color: '#f47067' } }, poOpts === null ? 'Checking\u2026' : 'No PO on these jobs - ask Murli / Amol to raise the PO first'))
+    : crTrip === 'pickup' ? React.createElement("div", null,
+        poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
+          React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
+          poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))),
+          React.createElement("option", { value: '__other' }, 'PO of another job / stock order \u2026'))
+        : React.createElement("div", { style: { fontSize: 12, color: poOpts === null ? '#94a3b8' : '#fbbf24', marginBottom: 6 } }, poOpts === null ? 'Checking\u2026' : 'No PO on this job. Material ordered on another job\'s PO? Type that PO number below - your lead checks it. Nothing ordered yet? Ask Murli / Amol to raise the PO.'),
+        poOpts && (!poOpts.length || form.pickupPo === '__other') ? React.createElement("input", { value: form.pickupPoTyped || '', onChange: e => setF('pickupPoTyped', e.target.value), placeholder: 'PO number, e.g. JXT/PO/26-27/644', style: { ...inp, marginTop: 6 } }) : null)
     : (crOpts && crOpts.length ? React.createElement("select", { value: form.courier || '', onChange: e => setF('courier', e.target.value), style: inp },
         React.createElement("option", { value: '' }, '-- pick the \ud83d\ude9a request --'),
         crOpts.map(o => React.createElement("option", { key: o.id, value: String(o.id) }, o.label)))
