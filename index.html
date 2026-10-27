@@ -359,6 +359,11 @@ const uploadFile = async (file, folder = 'general') => {
     return null;
   }
   const gateFolder = String(folder || '').split('/')[0];
+  // 27 Oct 2026 (Jigar): heavy PDFs on courier/dispatch uploads are refused - send a screenshot (JPEG) instead
+  if (ERP_GATED_FOLDERS.includes(gateFolder) && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) && file.size > 2 * 1048576) {
+    if (window._showToast) window._showToast('\u26a0\ufe0f Can\u2019t upload this PDF \u2014 it is ' + (file.size / 1048576).toFixed(1) + ' MB (max 2 MB). Take a screenshot of it and upload the JPEG / image instead.', false);
+    return null;
+  }
   const gate = ERP_GATED_FOLDERS.includes(gateFolder) ? await erpFileGate(file, 'Uploads', gateFolder) : null;
   if (gate && gate.action === 'block') return null;
   if (gate && gate.action === 'reuse' && gate.path) {
@@ -36525,7 +36530,7 @@ function CourierFab({ user }) {
     Array.isArray(r.checks) && r.checks.length ? React.createElement("div", { style: { display: 'grid', gap: 3, marginTop: 6 } }, r.checks.map(c => React.createElement("div", { key: c.k, style: { display: 'flex', justifyContent: 'space-between', gap: 8, padding: '4px 8px', borderRadius: 6, fontSize: 11.5, background: (lvl[c.level] || lvl.grey)[0], color: (lvl[c.level] || lvl.grey)[1] } },
       React.createElement("span", null, c.label), React.createElement("span", { style: { textAlign: 'right' } }, c.text)))) : null,
     Array.isArray(r.pkg_photo_urls) && r.pkg_photo_urls.length ? React.createElement("div", { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 } }, r.pkg_photo_urls.map((u, i) => React.createElement("a", { key: i, href: erpFileUrl(u), target: '_blank', rel: 'noreferrer', style: { width: 46, height: 46, borderRadius: 6, overflow: 'hidden', border: '1px solid #334155', display: 'block', position: 'relative' } },
-      React.createElement("img", { src: erpFileUrl(u), alt: (i + 1) + '/' + r.pkg_count, style: { width: '100%', height: '100%', objectFit: 'cover' } }),
+      /\.pdf(\?|#|$)/i.test(String(u || '')) ? React.createElement("div", { title: 'PDF - tap to open', style: { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#1e293b', color: '#fca5a5', fontSize: 10, fontWeight: 800, lineHeight: 1.1 } }, React.createElement("span", { style: { fontSize: 18 } }, '\ud83d\udcc4'), 'PDF') : React.createElement("img", { src: erpFileUrl(u), alt: (i + 1) + '/' + r.pkg_count, style: { width: '100%', height: '100%', objectFit: 'cover' } }),
       React.createElement("span", { style: { position: 'absolute', bottom: 0, right: 2, fontSize: 10, fontWeight: 800, color: '#fff', textShadow: '0 0 3px #000' } }, (i + 1) + '/' + r.pkg_count)))) : null,
     r.v2 && r.status === 'pending' && (String(r.requested_by || '').toUpperCase() === me || ['JIGAR', 'AMOL'].includes(me)) ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => {
         const rt = prompt('Correct rate for #' + r.id + ' (' + (CR_BASIS[r.rate_basis] || '₹') + '):', r.rate || ''); if (rt === null) return;
