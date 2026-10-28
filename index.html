@@ -3473,7 +3473,7 @@ function MainApp({
     l: "Installation",
     e: "\ud83e\uddf0",
     roles: ["admin", "production", "dispatch", "sales"],
-    users: ["JIGAR", "AMOL", "POONAM", "KULDEEP", "MURLI", "MANOJ", "SHIV", "MUSTAFA", "KAIF", "SAHIL", "PRIYANKA", "HARSHALA"]
+    users: ["JIGAR", "AMOL", "POONAM", "KULDEEP", "MURLI", "MANOJ", "SHIV", "MUSTAFA", "KAIF", "SAHIL", "PRIYANKA", "HARSHALA", "FAISAL", "JAGDISH", "RASHID"]
   }, {
     id: "mytasks",
     l: "My Tasks",
@@ -7895,7 +7895,9 @@ function JobDetail({
         }
       }, d)));
     }))) : null;
-  })(), React.createElement(JobCredit, {
+  })(), React.createElement(JobSitePhotos, {
+    job: j
+  }), React.createElement(JobCredit, {
     job: j,
     user: user
   }), React.createElement(JobDateChanges, {
@@ -36016,6 +36018,48 @@ function DutiesCard({ user }) {
     err ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5, marginTop: 6 } }, err) : null);
 }
 // ── Credit strip in job detail (point system, 2026-09-28): Designed by · banking Assigned to · who uploaded ──
+// 28 Oct 2026 (Jigar): site photos (Recce / Installation / Supervision / Rectification) on every job's detail view,
+// so everyone who can open the job (sales, design, printing, fabrication, accounts) sees them. Read-only.
+function JobSitePhotos({ job }) {
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(true);
+  React.useEffect(() => {
+    if (!job || !job.id) return;
+    let off = false;
+    sb.from('install_logs').select('id,work_type,date,crew,person,start_time,end_time,report,photo_urls,photo_notes,created_at')
+      .eq('job_id', job.id).order('created_at', { ascending: false }).limit(40)
+      .then(r => { if (off) return; const d = r.error ? [] : (r.data || []).filter(x => Array.isArray(x.photo_urls) && x.photo_urls.length);
+        setRows(d); setOpen(d.reduce((a, x) => a + x.photo_urls.length, 0) <= 24); });
+    return () => { off = true; };
+  }, [job && job.id]);
+  if (!rows || !rows.length) return null;
+  const total = rows.reduce((a, r) => a + r.photo_urls.length, 0);
+  const col = { 'Recce/Survey': '#3b82f6', 'Installation': '#10b981', 'Supervision': '#a78bfa', 'Rectification': '#f59e0b' };
+  const fd = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '';
+  return React.createElement("div", { className: "c", style: { padding: 12, marginTop: 10 } },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }, onClick: () => setOpen(!open) },
+      React.createElement("b", { style: { fontSize: 13 } }, "\ud83d\udcf7 Site photos"),
+      React.createElement("span", { style: { fontSize: 12, color: '#94a3b8' } }, total + " photo(s) \u00b7 " + rows.length + " visit(s)"),
+      React.createElement("span", { style: { marginLeft: 'auto', fontSize: 12 } }, open ? "\u25b2" : "\u25bc")),
+    open && rows.map(r => {
+      const notes = Array.isArray(r.photo_notes) ? r.photo_notes : [];
+      const c = col[r.work_type] || '#94a3b8';
+      return React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1e293b', marginTop: 8, paddingTop: 8 } },
+        React.createElement("div", { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 } },
+          React.createElement("span", { style: { border: '1px solid ' + c, color: c, borderRadius: 6, padding: '1px 6px', fontWeight: 700, fontSize: 11 } }, r.work_type === 'Recce/Survey' ? 'Recce' : (r.work_type || 'Installation')),
+          React.createElement("span", null, fd(r.date) + (r.start_time ? ' \u00b7 ' + [r.start_time, r.end_time].filter(Boolean).join('\u2013') : '')),
+          React.createElement("span", { style: { color: '#94a3b8' } }, (r.crew && r.crew.length ? r.crew : [r.person]).map(x => String(x || '').split(' - ')[0]).join(', '))),
+        r.report ? React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', margin: '4px 0' } }, r.report) : null,
+        React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 } },
+          r.photo_urls.map((u, i) => {
+            const n = notes.find(x => x && x.url === u) || {};
+            const cap = [n.caption, n.w && n.h ? n.w + '\u00d7' + n.h + ' ' + (n.unit || '') : ''].filter(Boolean).join(' \u00b7 ');
+            return React.createElement("a", { key: i, href: erpFileUrl(u), target: '_blank', rel: 'noopener', title: cap || 'Open photo', style: { display: 'block', width: 84, textDecoration: 'none' } },
+              React.createElement("img", { src: erpFileUrl(u), loading: 'lazy', alt: cap || 'site photo', style: { width: 84, height: 84, objectFit: 'cover', borderRadius: 6, display: 'block', background: '#0b1220' } }),
+              cap ? React.createElement("div", { style: { fontSize: 10, color: '#94a3b8', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, cap) : null);
+          })));
+    }));
+}
 function JobCredit({ job, user }) {
   const me = pbKey(user);
   const [cls, setCls] = React.useState(job && job.job_class || null);
