@@ -38477,6 +38477,160 @@ async function erpPrevStage(jobId, cur, fallback) {
   } catch (e) {}
   return fallback;
 }
+// ===== Recce photo report: PPT / PDF (28 Oct 2026, Jigar) ================
+// Site crew logs a Recce/Survey with photos (optional caption + W x H per photo),
+// then taps PPT or PDF to build a report in the phone browser and share it to the design team.
+// Libraries are self-hosted (HR-15) and load only when a report is made.
+const ERP_LIB_P = {};
+function erpLoadLib(src, globalName) {
+  if (window[globalName]) return Promise.resolve(window[globalName]);
+  if (!ERP_LIB_P[src]) ERP_LIB_P[src] = new Promise((res, rej) => {
+    const el = document.createElement('script');
+    el.src = src; el.async = true;
+    el.onload = () => window[globalName] ? res(window[globalName]) : rej(new Error(globalName + ' did not load'));
+    el.onerror = () => { delete ERP_LIB_P[src]; rej(new Error('Could not load ' + src)); };
+    document.head.appendChild(el);
+  });
+  return ERP_LIB_P[src];
+}
+// Fetch one stored photo (private bucket via /api/file) and shrink it to max 1600 px JPEG.
+async function erpRecceImg(u) {
+  const r = await fetch(erpFileUrl(u), { credentials: 'same-origin' });
+  if (!r.ok) throw new Error('Photo could not be opened (' + r.status + ')');
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Not an image')); i.src = url; });
+    const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight));
+    const w = Math.max(1, Math.round(im.naturalWidth * k)), h = Math.max(1, Math.round(im.naturalHeight * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h); cx.drawImage(im, 0, 0, w, h);
+    return { data: c.toDataURL('image/jpeg', 0.8), w, h };
+  } finally { URL.revokeObjectURL(url); }
+}
+function erpRecceFit(iw, ih, bw, bh) {
+  const k = Math.min(bw / iw, bh / ih);
+  return { w: iw * k, h: ih * k, dx: (bw - iw * k) / 2, dy: (bh - ih * k) / 2 };
+}
+// log = install_logs row; fmt = 'pptx' | 'pdf'; onProg(text). Returns a File.
+async function erpRecceExport(log, job, fmt, onProg) {
+  const urls = Array.isArray(log.photo_urls) ? log.photo_urls : [];
+  const notes = Array.isArray(log.photo_notes) ? log.photo_notes : [];
+  const noteFor = (u, i) => notes.find(n => n && n.url === u) || notes[i] || {};
+  const title = job ? (job.client_name || '') + (job.project ? ' · ' + job.project : '') : (log.site_name || 'Site');
+  const ref = job ? 'Job ' + job.id : 'No job yet (new enquiry)';
+  const dt = log.date ? new Date(log.date + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+  const by = (Array.isArray(log.crew) && log.crew.length ? log.crew : [log.person]).filter(Boolean).map(x => String(x).split(' - ')[0]).join(', ');
+  const time = [log.start_time, log.end_time].filter(Boolean).join(' – ');
+  const label = (n, i) => {
+    const sz = n.w || n.h ? (n.w || '?') + ' × ' + (n.h || '?') + ' ' + (n.unit || 'ft') : '';
+    return ['Photo ' + (i + 1) + ' of ' + urls.length, n.caption || '', sz].filter(Boolean).join('  ·  ');
+  };
+  const lib = fmt === 'pdf' ? erpLoadLib('/jspdf.umd.min.js', 'jspdf') : erpLoadLib('/pptxgen.bundle.js', 'PptxGenJS');
+  onProg && onProg('Loading…');
+  await lib;
+  const imgs = [];
+  for (let i = 0; i < urls.length; i++) {
+    onProg && onProg('Photo ' + (i + 1) + '/' + urls.length);
+    try { imgs.push(await erpRecceImg(urls[i])); } catch (e) { imgs.push(null); }
+  }
+  const safe = String(job ? job.id : (log.site_name || 'site')).replace(/[^\w\-]+/g, '_').slice(0, 40);
+  const name = 'Recce_' + safe + '_' + (log.date || td()) + '.' + fmt;
+  onProg && onProg('Building file…');
+  if (fmt === 'pdf') {
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    doc.setFontSize(22); doc.text('Recce Report', 15, 25);
+    doc.setFontSize(14); doc.text(doc.splitTextToSize(title, 265), 15, 37);
+    doc.setFontSize(11);
+    doc.text([ref, 'Date: ' + dt + (time ? '   Time: ' + time : ''), 'Done by: ' + by, 'Photos: ' + urls.length], 15, 52);
+    doc.setFontSize(10); doc.text(doc.splitTextToSize('Report: ' + (log.report || ''), 265).slice(0, 25), 15, 78);
+    imgs.forEach((im, i) => {
+      doc.addPage();
+      if (im) { const f = erpRecceFit(im.w, im.h, 277, 178); doc.addImage(im.data, 'JPEG', 10 + f.dx, 8 + f.dy, f.w, f.h); }
+      else { doc.setFontSize(12); doc.text('Photo could not be loaded', 15, 30); }
+      doc.setFontSize(11); doc.text(doc.splitTextToSize(label(noteFor(urls[i], i), i), 277).slice(0, 2), 10, 196);
+    });
+    return new File([doc.output('blob')], name, { type: 'application/pdf' });
+  }
+  const pptx = new window.PptxGenJS();
+  pptx.layout = 'LAYOUT_WIDE';
+  const s0 = pptx.addSlide();
+  s0.addText('Recce Report', { x: 0.6, y: 0.5, w: 12, h: 0.8, fontSize: 32, bold: true, color: '1F2937' });
+  s0.addText(title, { x: 0.6, y: 1.3, w: 12, h: 0.7, fontSize: 20, color: '374151' });
+  s0.addText([ref, 'Date: ' + dt + (time ? '    Time: ' + time : ''), 'Done by: ' + by, 'Photos: ' + urls.length].join('\n'), { x: 0.6, y: 2.1, w: 12, h: 1.4, fontSize: 14, color: '4B5563', valign: 'top' });
+  s0.addText('Report: ' + (log.report || ''), { x: 0.6, y: 3.6, w: 12.1, h: 3.4, fontSize: 13, color: '111827', valign: 'top', fit: 'shrink' });
+  imgs.forEach((im, i) => {
+    const sl = pptx.addSlide();
+    if (im) { const f = erpRecceFit(im.w, im.h, 12.73, 6.45); sl.addImage({ data: im.data, x: 0.3 + f.dx, y: 0.2 + f.dy, w: f.w, h: f.h }); }
+    else sl.addText('Photo could not be loaded', { x: 0.6, y: 3, w: 12, h: 0.6, fontSize: 16, color: 'B91C1C' });
+    sl.addText(label(noteFor(urls[i], i), i), { x: 0.3, y: 6.75, w: 12.73, h: 0.55, fontSize: 14, bold: true, color: '111827' });
+  });
+  const blob = await pptx.write({ outputType: 'blob' });
+  return new File([blob], name, { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+}
+function erpShareOrDownload(file) {
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: file.name }).then(() => true, e => e && e.name === 'AbortError' ? true : (erpDownloadFile(file), true));
+    }
+  } catch (e) {}
+  erpDownloadFile(file);
+  return Promise.resolve(true);
+}
+function erpDownloadFile(file) {
+  const u = URL.createObjectURL(file);
+  const a = document.createElement('a'); a.href = u; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+// Recent recces with PPT / PDF buttons (shown on the Installation page in Recce/Survey mode)
+function RecceReports({ jobs, show, reloadKey }) {
+  const [rows, setRows] = React.useState(null);
+  const [st, setSt] = React.useState({}); // id -> { busy, prog, file }
+  React.useEffect(() => {
+    let off = false;
+    sb.from('install_logs').select('id,job_id,site_name,date,person,crew,start_time,end_time,report,photo_urls,photo_notes,created_at')
+      .eq('work_type', 'Recce/Survey').order('created_at', { ascending: false }).limit(20)
+      .then(r => { if (!off) setRows(r.error ? [] : (r.data || [])); });
+    return () => { off = true; };
+  }, [reloadKey]);
+  const make = async (r, fmt) => {
+    const job = r.job_id ? (jobs || []).find(j => j.id === r.job_id) || { id: r.job_id } : null;
+    setSt(p => ({ ...p, [r.id]: { busy: true, prog: '…' } }));
+    try {
+      const file = await erpRecceExport(r, job, fmt, t => setSt(p => ({ ...p, [r.id]: { busy: true, prog: t } })));
+      setSt(p => ({ ...p, [r.id]: { file } }));
+    } catch (e) {
+      setSt(p => ({ ...p, [r.id]: {} }));
+      show && show('⚠️ ' + (e.message || 'Could not make the report'), false);
+    }
+  };
+  if (!rows) return React.createElement("div", { style: { fontSize: 12, color: "#64748b", marginTop: 18 } }, "Loading recent recces…");
+  if (!rows.length) return null;
+  const btn = { padding: "6px 10px", fontSize: 12 };
+  return React.createElement("div", { style: { marginTop: 22, borderTop: "1px solid #1a2030", paddingTop: 12 } },
+    React.createElement("div", { style: { fontSize: 14, fontWeight: 600, marginBottom: 4 } }, "📊 Recce reports"),
+    React.createElement("div", { style: { fontSize: 11.5, color: "#94a3b8", marginBottom: 10 } }, "Make a PPT or PDF of a saved recce, then share it to the design team."),
+    rows.map(r => {
+      const job = r.job_id ? (jobs || []).find(j => j.id === r.job_id) : null;
+      const s = st[r.id] || {};
+      const n = Array.isArray(r.photo_urls) ? r.photo_urls.length : 0;
+      return React.createElement("div", { key: r.id, style: { border: "1px solid #1a2030", borderRadius: 8, padding: "8px 10px", marginBottom: 8 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } },
+          r.job_id ? r.job_id + ' · ' + ((job && job.client_name) || '') + (job && job.project ? ' · ' + job.project : '') : (r.site_name || 'No job yet')),
+        React.createElement("div", { style: { fontSize: 11.5, color: "#94a3b8", margin: "2px 0 6px" } },
+          (r.date || '') + ' · ' + String(r.person || '').split(' - ')[0] + ' · ' + n + ' photo(s)'),
+        s.file ? React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" } },
+            React.createElement("button", { className: "b", style: { ...btn, borderColor: "#10b981", color: "#10b981", fontWeight: 600 }, onClick: () => erpShareOrDownload(s.file) }, "📤 Share"),
+            React.createElement("button", { className: "b", style: btn, onClick: () => erpDownloadFile(s.file) }, "⬇ Download"),
+            React.createElement("span", { style: { fontSize: 11, color: "#64748b" } }, s.file.name + ' · ' + (s.file.size / 1048576).toFixed(1) + ' MB'),
+            React.createElement("button", { className: "b", style: btn, onClick: () => setSt(p => ({ ...p, [r.id]: {} })) }, "✕"))
+          : React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+            React.createElement("button", { className: "b", style: btn, disabled: !!s.busy || !n, onClick: () => make(r, 'pptx') }, "Make PPT"),
+            React.createElement("button", { className: "b", style: btn, disabled: !!s.busy || !n, onClick: () => make(r, 'pdf') }, "Make PDF"),
+            s.busy ? React.createElement("span", { style: { fontSize: 11.5, color: "#e3a008" } }, s.prog) : null));
+    }));
+}
 function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [sel, setSel] = React.useState('');
   const [jq, setJq] = React.useState(''); // 3 Oct 2026: search jobs by number / client / project
@@ -38486,6 +38640,11 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [endT, setEndT] = React.useState('');
   const [report, setReport] = React.useState('');
   const [files, setFiles] = React.useState([]);
+  const [pnotes, setPnotes] = React.useState([]); // 28 Oct 2026: recce caption + W x H per photo (optional)
+  const [punit, setPunit] = React.useState('ft');
+  const [recceKey, setRecceKey] = React.useState(0);
+  const thumbs = React.useMemo(() => files.map(f => { try { return URL.createObjectURL(f); } catch (e) { return ''; } }), [files]);
+  React.useEffect(() => () => thumbs.forEach(u => { try { u && URL.revokeObjectURL(u); } catch (e) {} }), [thumbs]);
   const [crew, setCrew] = React.useState([]);
   const [busy, setBusy] = React.useState(false);
   // Work type (2026-10-02, Jigar): site crew logs Recce/Survey, Supervision, Rectification as well as Installation
@@ -38545,6 +38704,9 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         end_time: endT,
         report: report.trim(),
         photo_urls: urls,
+        photo_notes: wt === 'Recce/Survey' && pnotes.some(n => n && (n.caption || n.w || n.h))
+          ? urls.map((u, i) => ({ url: u, caption: ((pnotes[i] || {}).caption || '').trim(), w: ((pnotes[i] || {}).w || '').trim(), h: ((pnotes[i] || {}).h || '').trim(), unit: punit }))
+          : null,
         site_complete: wt === 'Installation' && !!markComplete,
         batch_ids: effBatches.length ? effBatches : null
       };
@@ -38578,7 +38740,8 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
       } else {
         show('✅ ' + T('Saved') + (sel === NOJOB ? ' · sent to Quote Pending' : ''), true);
       }
-      setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setCrew([]); setSiteName('');
+      setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setPnotes([]); setCrew([]); setSiteName('');
+      if (wt === 'Recce/Survey') setRecceKey(k => k + 1);
     } catch (e) {
       show('⚠️ ' + (e.message || 'Save failed'), false);
     }
@@ -38646,16 +38809,32 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
 
     F(TL('Photos'), React.createElement("input", {
       className: "in", type: "file", accept: "image/*", multiple: true,
-      onChange: e => setFiles(Array.from(e.target.files || [])),
+      onChange: e => { const a = Array.from(e.target.files || []); setFiles(a); setPnotes(a.map(() => ({ caption: '', w: '', h: '' }))); },
       style: { width: "100%", padding: 8, fontSize: 13 } })),
     files.length ? React.createElement("div", { style: { fontSize: 11, color: "#64748b", marginBottom: 10 } }, files.length + ' photo(s) selected') : null,
+    wt === 'Recce/Survey' && files.length ? React.createElement("div", { style: { marginBottom: 12 } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "#94a3b8", marginBottom: 6 } },
+        React.createElement("span", { style: { flex: 1 } }, "Caption and size for each photo (optional — shows on the PPT slide)"),
+        React.createElement("select", { className: "in", value: punit, onChange: e => setPunit(e.target.value), style: { padding: 4, fontSize: 12 } },
+          ['ft', 'inch', 'mm'].map(u => React.createElement("option", { key: u, value: u }, u)))),
+      files.map((f, i) => {
+        const n = pnotes[i] || {};
+        const set = (k, v) => setPnotes(p => { const q = p.slice(); q[i] = { ...(q[i] || {}), [k]: v }; return q; });
+        return React.createElement("div", { key: i, style: { display: "flex", gap: 6, alignItems: "center", marginBottom: 6 } },
+          thumbs[i] ? React.createElement("img", { src: thumbs[i], alt: "", style: { width: 48, height: 48, objectFit: "cover", borderRadius: 6, flex: "0 0 48px" } }) : null,
+          React.createElement("input", { className: "in", value: n.caption || '', onChange: e => set('caption', e.target.value), placeholder: "e.g. Main fascia", style: { flex: 1, minWidth: 0, padding: 8, fontSize: 13 } }),
+          React.createElement("input", { className: "in", inputMode: "decimal", value: n.w || '', onChange: e => set('w', e.target.value), placeholder: "W", style: { width: 52, padding: 8, fontSize: 13 } }),
+          React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, "×"),
+          React.createElement("input", { className: "in", inputMode: "decimal", value: n.h || '', onChange: e => set('h', e.target.value), placeholder: "H", style: { width: 52, padding: 8, fontSize: 13 } }));
+      })) : null,
 
     React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
       React.createElement("button", { className: "b", disabled: busy, onClick: () => save(false),
         style: { flex: 1, padding: 12, fontSize: 14 } }, busy ? '…' : TL('Save')),
       doneLabel ? React.createElement("button", { className: "b", disabled: busy, onClick: () => save(true),
         style: { flex: 1, padding: 12, fontSize: 14, borderColor: "#2fb37a", color: "#2fb37a", fontWeight: 600 } },
-        busy ? '…' : doneLabel) : null)
+        busy ? '…' : doneLabel) : null),
+    wt === 'Recce/Survey' ? React.createElement(RecceReports, { jobs: jobs, show: show, reloadKey: recceKey }) : null
   );
 }
 
