@@ -2103,7 +2103,8 @@ function MainApp({
       }
     };
     fetchTasks();
-    const tid = setInterval(fetchTasks, 60000);
+    // 2026-10-28: skip the 60 s poll while the tab is in the background
+    const tid = setInterval(() => { if (document.visibilityState !== 'hidden') fetchTasks(); }, 60000);
     return () => {
       cancelled = true;
       clearInterval(tid);
@@ -2240,7 +2241,8 @@ function MainApp({
         parts[i] = r.data || [];
       }
     };
-    await Promise.all(Array.from({ length: Math.min(6, offsets.length) }, worker));
+    // 2026-10-28: 6 -> 3 parallel pages per table (6 x 5 tables x every user at 10 am overloaded the DB)
+    await Promise.all(Array.from({ length: Math.min(3, offsets.length) }, worker));
     for (const p of parts) if (p) all = all.concat(p);
     if (failed) { warn(failed.from, failed.error); return all; }
     // rows added while loading: pick up anything past the counted total
@@ -3423,11 +3425,16 @@ function MainApp({
   }, [user && user.name]);
   useEffect(() => {
     let dead = false;
-    const run = () => { if (!dead) loadInstDelay(); };
+    // 2026-10-28: was re-run on every page change (pg) and in background tabs - the top DB load.
+    // Now: once on open, every 5 min while the tab is visible, and on return if >5 min stale.
+    let last = 0;
+    const run = () => { if (dead || document.visibilityState === 'hidden') return; last = Date.now(); loadInstDelay(); };
+    const onVis = () => { if (document.visibilityState === 'visible' && Date.now() - last > 300000) run(); };
     run();
     const tmr = setInterval(run, 300000);
-    return () => { dead = true; clearInterval(tmr); };
-  }, [loadInstDelay, pg]);
+    document.addEventListener('visibilitychange', onVis);
+    return () => { dead = true; clearInterval(tmr); document.removeEventListener('visibilitychange', onVis); };
+  }, [loadInstDelay]);
   const [navShut, setNavShut] = useState(() => { try { return JSON.parse(localStorage.getItem('erp_nav_shut') || '[]'); } catch (e) { return []; } });
   const allNav = [{
     id: "dash",
@@ -58553,11 +58560,24 @@ ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.c
     d.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#0b0e17;color:#dde3f0;font-family:sans-serif;padding:24px';
     d.innerHTML = '<div style="max-width:560px;text-align:center"><div style="font-size:42px">\u26A0\uFE0F</div>' +
       '<h2 style="margin:12px 0">iPrint ERP loaded, but can\u2019t reach the database</h2>' +
-      '<p style="color:#8a93a8;font-size:14px">Data cannot be read or saved right now. Please do not enter data \u2014 it will not save. Try again in a minute.</p>' +
+      '<p style="color:#8a93a8;font-size:14px">Data cannot be read or saved right now. Please do not enter data \u2014 it will not save.</p>' +
+      '<p id="iprint-data-dead-status" style="color:#9fb4ff;font-size:14px">Reconnecting automatically \u2014 no need to press Retry.</p>' +
       '<button onclick="location.reload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px">\uD83D\uDD04 Retry</button>' +
       '<button onclick="__iprintClearAndReload()" style="margin:8px;padding:12px 22px;border:0;border-radius:8px;background:#374151;color:#fff;font-size:15px">\uD83E\uDDF9 Clear cache &amp; retry</button>' +
       '<p style="color:#566;font-size:12px">This error was reported automatically.</p></div>';
     document.body.appendChild(d);
+    // 2026-10-28: auto-recover. Probe every 20 s; once the DB answers, reload after a random
+    // 0-40 s delay so every open tab does not reload in the same second (that re-overloads the DB).
+    (function reprobe() {
+      setTimeout(function () {
+        dataProbe().then(function () {
+          var wait = Math.floor(Math.random() * 40000);
+          var st = document.getElementById('iprint-data-dead-status');
+          if (st) st.textContent = 'Database is back \u2014 reloading in ' + Math.ceil(wait / 1000) + ' s\u2026';
+          setTimeout(function () { location.reload(); }, wait);
+        }, reprobe);
+      }, 20000);
+    })();
   }
   (function waitMount(n) {
     if (new URLSearchParams(location.search).get('health') === '1') return;
