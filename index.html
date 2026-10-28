@@ -38775,6 +38775,8 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
     setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setPnotes([]); setCrew([]); setSiteName('');
     loadCks();
   };
+  // 28 Oct 2026 (Jigar): type picker right above Photos; keeps job/crew/times (top buttons reset the job)
+  const pickWt = w => { setWt(w); if (sel === NOJOB && w !== 'Recce/Survey') setSel(''); };
   const checkOut = c => {
     setWt(c.work_type || 'Installation'); setSel(c.job_id || NOJOB); setSiteName(c.site_name || '');
     setCrew(c.crew || []); setSelB(c.batch_ids || []); setStartT(c.start_time || ''); setEndT(nowHM());
@@ -38962,6 +38964,13 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
       placeholder: wt === 'Recce/Survey' ? 'Measurements, site conditions, access, power' : wt === 'Supervision' ? 'Who installed, what was checked, issues' : wt === 'Rectification' ? 'What was wrong and what was fixed' : T('What was done on site'),
       style: { width: "100%", minHeight: 70, padding: 10, fontSize: 14, fontFamily: "inherit" } })),
 
+    React.createElement("div", { style: { marginBottom: 10, padding: 10, borderRadius: 10, border: "1px solid #e3a008" } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 6 } }, "These photos are for *"),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 } },
+        ['Recce/Survey', 'Installation', 'Supervision', 'Rectification'].map(w => React.createElement("button", {
+          key: w, type: "button", className: "b", onClick: () => pickWt(w),
+          style: { padding: "10px 6px", fontSize: 14, borderColor: wt === w ? "#10b981" : undefined, color: wt === w ? "#10b981" : undefined, fontWeight: wt === w ? 700 : 400, background: wt === w ? "#10b98118" : undefined }
+        }, (wt === w ? '\u2713 ' : '') + (w === 'Recce/Survey' ? 'Recce' : w))))),
     F(TL('Photos'), React.createElement("input", {
       className: "in", type: "file", accept: "image/*", multiple: true,
       onChange: e => { const a = Array.from(e.target.files || []); setFiles(a); setPnotes(a.map(() => ({ caption: '', w: '', h: '' }))); },
