@@ -38746,6 +38746,48 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const [siteName, setSiteName] = React.useState('');
   const NOJOB = '__nojob__';
   const [, force] = React.useState(0);
+  // 28 Oct 2026 (Jigar): check-in on arrival, check-out (full log) when leaving. Check-ins live in site_checkins,
+  // NOT install_logs, so scorecard / proof gates / survey trigger only ever see finished visits.
+  const [cks, setCks] = React.useState([]);
+  const [ckId, setCkId] = React.useState(null);
+  const [ckDate, setCkDate] = React.useState(null);
+  const nowHM = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  const loadCks = () => sb.from('site_checkins').select('*').is('closed_at', null).order('created_at', { ascending: false }).limit(50)
+    .then(r => setCks(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { loadCks(); }, []);
+  const checkIn = async () => {
+    if (!sel) { show(T('Select a job'), false); return; }
+    if (sel === NOJOB && !siteName.trim()) { show('Client / site name required', false); return; }
+    if (!crew.length) { show((wt === 'Installation' ? TL('Installed by') : 'Done by') + ' ' + T('required'), false); return; }
+    if (multiBatch && !selB.length) { show(TL('Select batch') + ' ' + T('required'), false); return; }
+    const dup = cks.find(c => c.work_type === wt && (sel === NOJOB ? (c.site_name || '').toLowerCase() === siteName.trim().toLowerCase() : c.job_id === sel));
+    if (dup) { show('Already checked in at ' + dup.start_time + ' \u2014 tap Check out on it', false); return; }
+    setBusy(true);
+    const st = startT || nowHM();
+    const r = await sb.from('site_checkins').insert({
+      job_id: sel === NOJOB ? null : sel, site_name: sel === NOJOB ? siteName.trim() : null, work_type: wt,
+      crew: crew, batch_ids: multiBatch && selB.length ? selB : null, start_time: st, date: td(),
+      note: report.trim() || null, created_by: user?.name || crew[0] || ''
+    });
+    setBusy(false);
+    if (r.error) { show('\u26a0\ufe0f ' + r.error.message, false); return; }
+    show('\ud83d\udccd Checked in at ' + st + ' \u00b7 tap Check out when you leave', true);
+    setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setFiles([]); setPnotes([]); setCrew([]); setSiteName('');
+    loadCks();
+  };
+  const checkOut = c => {
+    setWt(c.work_type || 'Installation'); setSel(c.job_id || NOJOB); setSiteName(c.site_name || '');
+    setCrew(c.crew || []); setSelB(c.batch_ids || []); setStartT(c.start_time || ''); setEndT(nowHM());
+    setReport(c.note || ''); setFiles([]); setPnotes([]); setCkId(c.id); setCkDate(c.date || null);
+    show('Add what was done + photos, then Save', true);
+  };
+  const cancelCk = async c => {
+    if (!window.confirm('Cancel this check-in? (use only if it was a mistake)')) return;
+    const r = await sb.from('site_checkins').update({ closed_at: new Date().toISOString(), closed_note: 'cancelled by ' + (user?.name || '') }).eq('id', c.id);
+    if (r.error) { show('\u26a0\ufe0f ' + r.error.message, false); return; }
+    if (ckId === c.id) { setCkId(null); setCkDate(null); }
+    loadCks();
+  };
 
   const WT_ST = { 'Installation': ['Installation WIP', 'In Transit', 'IC Pending', 'DC Pending'], 'Supervision': ['Installation WIP', 'In Transit'], 'Rectification': ['Rectification'] };
   const SURVEY_CLOSED = ['Cancelled', 'Cash Received', 'Billing Done', 'Billing Pending', 'Given for Billing', 'No Bill', 'Delivered', 'IC Pending', 'DC Pending', 'Cash Pending'];
@@ -38771,7 +38813,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   const save = async (markComplete) => {
     if (!sel) { show(T('Select a job'), false); return; }
     if (sel === NOJOB && !siteName.trim()) { show('Client / site name required', false); return; }
-    if (!startT || !endT) { show(TL('Start time') + ' + ' + TL('End time') + ' ' + T('required'), false); return; }
+    if (!startT || !endT) { show(!endT && startT ? 'End time required \u2014 just reached site? Tap \ud83d\udccd Check in instead' : TL('Start time') + ' + ' + TL('End time') + ' ' + T('required'), false); return; }
     if (!report.trim()) { show(TL('Report') + ' ' + T('required'), false); return; }
     if (!files.length) { show(TL('Photos') + ' ' + T('required'), false); return; }
     if (!crew.length) { show((wt === 'Installation' ? TL('Installed by') : 'Done by') + ' ' + T('required'), false); return; }
@@ -38791,7 +38833,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         job_id: sel === NOJOB ? null : sel,
         work_type: wt,
         site_name: sel === NOJOB ? siteName.trim() : null,
-        date: td(),
+        date: (ckId && ckDate) || td(),
         person: crew[0] || user?.name || '',
         crew: crew,
         start_time: startT,
@@ -38804,8 +38846,14 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         site_complete: wt === 'Installation' && !!markComplete,
         batch_ids: effBatches.length ? effBatches : null
       };
-      const ins = await sb.from('install_logs').insert(row);
+      const ins = await sb.from('install_logs').insert(row).select('id');
       if (ins.error) throw ins.error;
+      if (ckId) {
+        const lid = ins.data && ins.data[0] ? ins.data[0].id : null;
+        const cu = await sb.from('site_checkins').update({ closed_at: new Date().toISOString(), install_log_id: lid }).eq('id', ckId);
+        if (cu.error) console.warn('check-in close failed', cu.error);
+        setCkId(null); setCkDate(null); loadCks();
+      }
       if (wt === 'Installation') {
         let remaining = pendingBatches.length;
         if (markComplete && effBatches.length) {
@@ -38848,6 +38896,19 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   return React.createElement("div", { style: { padding: 4, maxWidth: 560 } },
     React.createElement(LangToggle, { onChange: () => force(x => x + 1) }),
     React.createElement("h2", { style: { fontSize: 18, margin: "4px 0 10px" } }, wt === 'Installation' ? TL('Installation') : wt),
+    cks.length ? React.createElement("div", { style: { border: "1px solid #3b82f6", borderRadius: 10, padding: 10, marginBottom: 12 } },
+      React.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 6 } }, "\ud83d\udccd On site now (" + cks.length + ")"),
+      cks.map(c => {
+        const j = c.job_id ? (jobs || []).find(x => x.id === c.job_id) : null;
+        const old = c.date && c.date !== td();
+        return React.createElement("div", { key: c.id, style: { display: "flex", gap: 6, alignItems: "center", padding: "6px 0", borderTop: "1px solid #1e293b", background: ckId === c.id ? "#3b82f612" : "transparent" } },
+          React.createElement("div", { style: { flex: 1, minWidth: 0, fontSize: 12.5 } },
+            React.createElement("div", { style: { fontWeight: 600 } }, (c.crew || []).map(x => String(x || '').split(' - ')[0]).join(', ') + ' \u00b7 ' + (c.work_type || '')),
+            React.createElement("div", { style: { color: old ? "#f87171" : "#94a3b8", fontSize: 11.5 } },
+              (c.job_id ? c.job_id + (j ? ' \u00b7 ' + (j.client_name || '') : '') : (c.site_name || 'No job')) + ' \u00b7 since ' + c.start_time + (old ? ' (' + c.date + ' \u2014 not checked out)' : ''))),
+          React.createElement("button", { className: "b", disabled: busy, onClick: () => checkOut(c), style: { padding: "6px 10px", fontSize: 12.5, borderColor: "#10b981", color: "#10b981", fontWeight: 600 } }, ckId === c.id ? "Filling\u2026" : "Check out"),
+          React.createElement("button", { className: "b", disabled: busy, onClick: () => cancelCk(c), title: "Cancel check-in", style: { padding: "6px 8px", fontSize: 12 } }, "\u2715"));
+      })) : null,
     React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 } },
       ['Installation', 'Recce/Survey', 'Supervision', 'Rectification'].map(w => React.createElement("button", {
         key: w, type: "button", className: "b",
@@ -38922,6 +38983,9 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
           React.createElement("input", { className: "in", inputMode: "decimal", value: n.h || '', onChange: e => set('h', e.target.value), placeholder: "H", style: { width: 52, padding: 8, fontSize: 13 } }));
       })) : null,
 
+    !ckId ? React.createElement("button", { className: "b", disabled: busy, onClick: checkIn,
+      style: { width: "100%", padding: 12, fontSize: 14, marginTop: 6, borderColor: "#3b82f6", color: "#3b82f6", fontWeight: 600 } },
+      busy ? '\u2026' : '\ud83d\udccd Check in (just reached site)') : null,
     React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 6 } },
       React.createElement("button", { className: "b", disabled: busy, onClick: () => save(false),
         style: { flex: 1, padding: 12, fontSize: 14 } }, busy ? '…' : TL('Save')),
