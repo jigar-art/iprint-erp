@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
 <head>
 <meta charset="UTF-8">
+<meta name="google" content="notranslate">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>iPrint ERP</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e3a008'/><text x='5' y='23' font-size='18' font-weight='900' fill='%23060810'>iP</text></svg>">
@@ -57,7 +58,7 @@ tr:hover td{background:#0a0f1a}
 .f3{grid-template-columns:1fr 1fr 1fr}
 .f4{grid-template-columns:1fr 1fr 1fr 1fr}
 .loader{width:24px;height:24px;border:3px solid #1a2030;border-top-color:#e3a008;border-radius:50%;animation:spin .6s linear infinite}
-@media(max-width:600px){.portal-item-grid{grid-template-columns:2fr 2fr 1fr!important}}
+@media(max-width:600px){.portal-item-grid{grid-template-columns:2fr 2fr 1fr!important}.f3,.f4{grid-template-columns:1fr!important}}
 
 /* ───── MOBILE LAYOUT (P1+P2 — 20 May 2026) ─────
    Activates below 768px. Sidebar becomes off-canvas drawer.
@@ -83,6 +84,14 @@ tr:hover td{background:#0a0f1a}
   main > div[style*="padding:12"]{padding:8px!important}
   /* Tables — let them scroll horizontally rather than crush */
   table{min-width:max-content}
+  /* 29 Oct 2026 audit: readable text + 44px tap targets on phone */
+  td{font-size:13px}
+  th{font-size:11px;color:#94a3b8}
+  .ni{min-height:44px}
+  .b{min-height:44px}
+  .bs{min-height:40px}
+  .mnav-btn{width:44px!important;height:44px!important}
+  .ck{width:22px!important;height:22px!important}
   /* Wrapper around any overflow-x:auto table containers stays as-is */
 }
 .mnav-btn{display:none} /* hidden on desktop by default */
@@ -548,6 +557,26 @@ const validInvDate = (d, show) => {
   }
   return s;
 };
+// 29 Oct 2026 audit: read every row past the PostgREST 1,000-row cap. mk() must return a fresh, ordered query.
+async function erpPageAll(mk) {
+  let out = [], from = 0;
+  for (let i = 0; i < 100; i++) {
+    const r = await mk().range(from, from + 999);
+    if (r.error) return out.length ? { data: out, error: null } : r;
+    out = out.concat(r.data || []);
+    if (!r.data || r.data.length < 1000) break;
+    from += 1000;
+  }
+  return { data: out, error: null };
+}
+// 29 Oct 2026 audit: banking = job class B or client class B (rule of 23 Oct); old client-name list kept as fallback
+function erpIsBankJob(j) {
+  if (!j) return false;
+  if (j.job_class === 'B') return true;
+  try { if (j.client_id && window.__erpBankCli && window.__erpBankCli.has(j.client_id)) return true; } catch (e) {}
+  const u = String(j.client_name || '').toUpperCase();
+  return ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'].some(b => u.includes(b));
+}
 const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
   if (!status) return null;
@@ -2413,8 +2442,10 @@ function MainApp({
       if (typed !== null) show("Cancelled — type DELETE exactly to confirm", false);
       return;
     }
-    await sb.from('line_items').delete().eq('batch_id', batchId);
-    await sb.from('batches').delete().eq('id', batchId);
+    const __di = await sb.from('line_items').delete().eq('batch_id', batchId);
+    if (__di.error) { show('\u26a0\ufe0f Batch NOT deleted: ' + __di.error.message, false); return; }
+    const __db = await sb.from('batches').delete().eq('id', batchId).select('id');
+    if (__db.error || !(__db.data || []).length) { show('\u26a0\ufe0f Items removed but the batch itself was NOT deleted' + (__db.error ? ': ' + __db.error.message : '') + '. Refresh and check.', false); setItems(p => p.filter(i => i.batch_id !== batchId)); return; }
     setItems(p => p.filter(i => i.batch_id !== batchId));
     setBatches(p => p.filter(b => b.id !== batchId));
     try {
@@ -2429,9 +2460,10 @@ function MainApp({
     show("Batch deleted");
   }, [show, items, batches, user]);
   const updateBatchNote = useCallback(async (batchId, note) => {
-    await sb.from('batches').update({
+    const __bn = await sb.from('batches').update({
       note
     }).eq('id', batchId);
+    if (__bn.error) { show('\u26a0\ufe0f Note NOT saved: ' + __bn.error.message, false); return; }
     setBatches(p => p.map(b => b.id === batchId ? {
       ...b,
       note
@@ -2661,7 +2693,8 @@ function MainApp({
     } else show("Error: " + error.message, false);
   }, [show]);
   const deleteExpense = useCallback(async id => {
-    await sb.from('expenses').delete().eq('id', id);
+    const __de = await sb.from('expenses').delete().eq('id', id);
+    if (__de.error) { show('\u26a0\ufe0f Expense NOT deleted: ' + __de.error.message, false); return; }
     setExpenses(p => p.filter(e => e.id !== id));
     show("Expense deleted");
   }, [show]);
@@ -3014,7 +3047,8 @@ function MainApp({
     }
     const msg = amt > 0 ? `⚠️ DELETE ITEM?\n\n"${item.internal_name}"\nQty: ${item.qty} | Amount: ₹${amt.toFixed(2)}\nJob: ${item.job_id}\n\nThis amount will be lost permanently.\nAre you sure?` : `Delete item "${item.internal_name}"?`;
     if (!confirm(msg)) return;
-    await sb.from('line_items').delete().eq('id', itemId);
+    const __dl = await sb.from('line_items').delete().eq('id', itemId).select('id');
+    if (__dl.error || !(__dl.data || []).length) { show('\u26a0\ufe0f Item NOT deleted' + (__dl.error ? ': ' + __dl.error.message : ' (not allowed or already gone). Refresh and check.'), false); return; }
     setItems(p => p.filter(i => i.id !== itemId));
     try {
       await sb.from('client_notes').insert({
@@ -3028,9 +3062,10 @@ function MainApp({
     show("Item deleted");
   }, [show, items, user]);
   const updateJobFile = useCallback(async (jobId, field, url) => {
-    await sb.from('jobs').update({
+    const __uf = await sb.from('jobs').update({
       [field]: url
     }).eq('id', jobId);
+    if (__uf.error) { show('\u26a0\ufe0f File uploaded but NOT linked to the job: ' + __uf.error.message, false); return; }
     setJobs(p => p.map(j => j.id === jobId ? {
       ...j,
       [field]: url
@@ -3853,12 +3888,13 @@ function MainApp({
       transform: "translateY(-50%)",
       fontSize: 10
     }
-  }, "\uD83D\uDD0D"))), React.createElement("div", {
+  }, "\uD83D\uDD0D"))), React.createElement(ErpPageBoundary, {
     style: {
       flex: 1,
       overflow: "auto",
       padding: 12
     },
+    pg: pg,
     key: pg
   }, pg === "dash" && React.createElement(RecceDrawingTray, { user: user, jobs: fullJobs, show: show }), pg === "dash" && React.createElement(DashPage, {
     s: stats,
@@ -4990,8 +5026,8 @@ function DashPage({
     const u = cn.toUpperCase();
     return BANKING_CLIENTS.some(b => u.includes(b));
   };
-  const bankJobs = jobs.filter(j => isBanking(j.client_name));
-  const nonBankJobs = jobs.filter(j => !isBanking(j.client_name));
+  const bankJobs = jobs.filter(j => erpIsBankJob(j));
+  const nonBankJobs = jobs.filter(j => !erpIsBankJob(j));
   const activeStatuses = ['Billing Done', 'Cancelled', 'No Bill', 'Cash Received'];
   const bStats = jl => ({
     total: jl.length,
@@ -8519,9 +8555,10 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       setPrs(p => [...p, rec]);
       if (prFromBom && prFromBom.length) {
         try {
-          await sb.from('line_item_materials').update({
+          const __lm = await sb.from('line_item_materials').update({
             pr_id: rec.id
           }).in('id', prFromBom);
+          if (__lm.error) show('\u26a0\ufe0f PR saved, but BOM lines NOT linked: ' + __lm.error.message, false);
           const liIds = [...new Set(liMats.filter(m => prFromBom.includes(m.id)).map(m => m.line_item_id))];
           if (liIds.length) await sb.from('line_items').update({
             outsourced: true
@@ -12268,7 +12305,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
     onClick: () => setCopyBatch(null)
   }, "Cancel"))), sa ? (() => {
     const _BANKING_CLIENTS = ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'NUVAMA WEALTH', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'];
-    const _isBnk = _BANKING_CLIENTS.some(b => (j.client_name || '').toUpperCase().includes(b));
+    const _isBnk = erpIsBankJob(j);
     const _submit = async () => {
       const atmVal = document.getElementById('_newBatchAtm')?.value || '';
       const suidVal = document.getElementById('_newBatchSuid')?.value || '';
@@ -15196,7 +15233,7 @@ function NewJobPage({
           return;
         }
       }
-      await sb.from('banking_sites').insert({
+      const __bsNJ = await sb.from('banking_sites').insert({
         id: siteId,
         project: bankProjectNJ,
         client: bm[0],
@@ -15218,6 +15255,7 @@ function NewJobPage({
         work_category: 'Pending',
         created_at: new Date().toISOString()
       });
+      if (__bsNJ.error) alert('\u26a0\ufe0f Job created, but the Banking CRM site row was NOT saved:\n' + __bsNJ.error.message + '\n\nAdd the site in Banking CRM manually.');
     }
     setSubmitting(false);
   };
@@ -19053,7 +19091,7 @@ function PrintPage({
     onClick: () => sortBy(k)
   }, label, sortIcon(k));
   const printQueue = applySort((jobs || []).filter(j => j.status === 'Printing' || j.status === 'Printing · In-House' || j.status === 'Printing · Outsource'));
-  const FORWARD_STATUSES = ['Fabrication', 'Fabrication · In-House', 'Fabrication · Outsource', 'Dispatch'];
+  const FORWARD_STATUSES = ['Fabrication · In-House', 'Fabrication · Outsource', 'In Transit'];
   const FORWARD_USERS = ['JIGAR', 'CHANDNI', 'ABHIJIT', 'ANKIT', 'PRATIK', 'SONU', 'AMOL', 'SHAHAJAD', 'ANIL', 'SANKET', 'PRINCE', 'UMESH', 'HARISH'];
   const userCanForward = (() => {
     const u = (user?.name || '').toUpperCase().trim();
@@ -33189,7 +33227,7 @@ function BOQImportPage({
           if (jobsHitBOQ) {
             if (!confirm('⚠️ Banking job_no "' + bsJobNoBOQ + '" already matches Job ' + jobsHitBOQ + ' in Non-Banking CRM. Proceed with banking sync for this row?')) continue;
           }
-          await sb.from('banking_sites').insert({
+          const __bsB = await sb.from('banking_sites').insert({
             id: siteId,
             project: bankProject,
             client: bm[0],
@@ -33211,6 +33249,7 @@ function BOQImportPage({
             work_category: 'Pending',
             created_at: new Date().toISOString()
           });
+          if (__bsB.error) alert('\u26a0\ufe0f Job ' + createdId + ' created, but its Banking CRM site row was NOT saved:\n' + __bsB.error.message);
         }
       }
       await persistTemplate();
@@ -33306,7 +33345,7 @@ function BOQImportPage({
             return;
           }
         }
-        await sb.from('banking_sites').insert({
+        const __bs1 = await sb.from('banking_sites').insert({
           id: siteId,
           project: bankProject,
           client: bm[0],
@@ -33328,6 +33367,7 @@ function BOQImportPage({
           work_category: 'Pending',
           created_at: new Date().toISOString()
         });
+        if (__bs1.error) alert('\u26a0\ufe0f Job ' + jid + ' created, but the Banking CRM site row was NOT saved:\n' + __bs1.error.message);
       }
       await persistTemplate();
       show(`✅ Created Job ${jid}`);
@@ -38004,7 +38044,11 @@ function instDefaultSeg(uname) {
 function instInSeg(r, seg) {
   if (seg === 'docs') return false;
   if (seg === 'poonam') return (r.coordinator || '').toUpperCase().includes('POONAM');
-  if (seg === 'priyanka') return (r.coordinator || '').toUpperCase().startsWith('PRIYANKA');
+  if (seg === 'priyanka') {
+    const ba = String(r.bank_assignee || (r._j && r._j.bank_assignee) || '').toUpperCase();
+    if (ba) return ba === 'PRIYANKA' || ba === 'HARSHALA';
+    return (r.coordinator || '').toUpperCase().startsWith('PRIYANKA') || (r.coordinator || '').toUpperCase().startsWith('HARSHALA');
+  }
   if (seg === 'ic') return r.status === 'IC Pending';
   return true;
 }
@@ -39292,6 +39336,18 @@ class ErpErrorBoundary extends React.Component {
         React.createElement("button", { onClick: goHome, style: { background: "#e3a008", color: "#060810", border: 0, borderRadius: 8, padding: "10px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer" } }, "Back to Dashboard")));
   }
 }
+// 29 Oct 2026 audit: per-page boundary. A crash shows inside the page area; sidebar and other pages keep working.
+class ErpPageBoundary extends ErpErrorBoundary {
+  render() {
+    if (!this.state.err) return React.createElement("div", { style: this.props.style }, this.props.children);
+    return React.createElement("div", { style: Object.assign({}, this.props.style, { display: "flex", alignItems: "center", justifyContent: "center" }) },
+      React.createElement("div", { style: { maxWidth: 420, textAlign: "center", color: "#e5e7eb" } },
+        React.createElement("div", { style: { fontSize: 32, marginBottom: 6 } }, "\u26a0\ufe0f"),
+        React.createElement("div", { style: { fontSize: 16, fontWeight: 700, marginBottom: 6 } }, "This page hit an error"),
+        React.createElement("div", { style: { fontSize: 13, opacity: 0.75, marginBottom: 14 } }, "Your data is safe and the error was reported. If your phone offered to translate the page, turn translation off."),
+        React.createElement("button", { onClick: () => this.setState({ err: null }), style: { background: "#e3a008", color: "#060810", border: 0, borderRadius: 8, padding: "10px 18px", fontWeight: 700, fontSize: 14, cursor: "pointer", minHeight: 44 } }, "Try again")));
+  }
+}
 function RootApp() {
   const [user, setUser] = useState(() => {
     try {
@@ -39405,6 +39461,7 @@ function RootApp() {
       }
       const [f, c, s, p, m, mac, ag, db, tm, mv2, ls] = res;
       setMastersError(mastersBad(res));
+      try { window.__erpBankCli = new Set((c.data || []).filter(x => x.client_class === 'B').map(x => x.id)); } catch (e) {}
       setMasterData({
         firms: f.data || [],
         clients: c.data || [],
@@ -40684,9 +40741,10 @@ function BankCRMPage({
       const fy = ['2526', '2627'];
       for (const f of fy) {
         const jid = jobNo.padStart(4, '0') + '-' + f;
-        await sb.from('jobs').update({
+        const __jp = await sb.from('jobs').update({
           po_number: value
         }).eq('id', jid);
+        if (__jp.error) show('\u26a0\ufe0f Site PO saved, but job ' + jid + ' PO NOT updated: ' + __jp.error.message, false);
       }
     }
     if (field === 'po_number' || field === 'vendor_po') {
@@ -44386,7 +44444,8 @@ function SalesCRMPage({
       return;
     }
     if (!confirm('Delete this activity?')) return;
-    await sb.from('sales_activities').delete().eq('id', id);
+    const __da = await sb.from('sales_activities').delete().eq('id', id);
+    if (__da.error) { show('\u26a0\ufe0f NOT deleted: ' + __da.error.message, false); return; }
     setActivities(p => p.filter(a => a.id !== id));
     show('Deleted');
   };
@@ -47113,11 +47172,11 @@ function ReportsPage({
       const {
         data,
         error
-      } = await sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note,is_quantified,task_type,target_count,actual_count,due_date').gte('task_date', startDate).order('task_date', {
+      } = await erpPageAll(() => sb.from('daily_tasks').select('id,user_name,task_text,task_date,status,source,added_by,done_at,created_at,linked_job_id,linked_site_id,stuck_note,is_quantified,task_type,target_count,actual_count,due_date').gte('task_date', startDate).order('task_date', {
         ascending: false
       }).order('created_at', {
         ascending: false
-      }).limit(2000);
+      }).order('id'));
       if (error) {
         console.error('Load team tasks error', error);
         return;
@@ -55155,7 +55214,7 @@ function PettyCashPage({
     if (!me) return;
     const [c, r, b, t] = await Promise.all([sb.from('petty_cash_config').select('*').eq('id', 1).maybeSingle(), sb.from('petty_cash_requests').select('*').order('created_at', {
       ascending: false
-    }).limit(500), sb.from('petty_cash_bills').select('*').order('uploaded_at'), sb.from('team_members').select('id,name')]);
+    }).limit(500), erpPageAll(() => sb.from('petty_cash_bills').select('*').order('uploaded_at').order('id')), sb.from('team_members').select('id,name')]);
     if (c.error) show('\u26a0\ufe0f Settings: ' + c.error.message, false);else setCfg(c.data);
     if (r.error) show('\u26a0\ufe0f Requests: ' + r.error.message, false);else setReqs(r.data || []);
     if (!b.error) setBills(b.data || []);
@@ -55166,7 +55225,7 @@ function PettyCashPage({
       });
       setNames(m);
     }
-    const pm = await sb.from('petty_cash_payments').select('request_id,amount,paid_at,mode,ref');
+    const pm = await erpPageAll(() => sb.from('petty_cash_payments').select('request_id,amount,paid_at,mode,ref').order('paid_at').order('request_id'));
     if (!pm.error) setPays(pm.data || []);
     const fs_ = await sb.rpc('erp_pc_float_status');
     if (!fs_.error) setFloats(fs_.data || []);
