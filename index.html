@@ -4480,7 +4480,7 @@ function MainApp({
       zIndex: 200,
       animation: "sr .3s"
     }
-  }, /^[\u2705\u2713\u26a0\u274c\u21ba\u2298]|^\ud83d/.test(String(toast.m || '')) ? '' : toast.ok ? "\u2713 " : "\u26a0 ", toast.m), React.createElement(MyTasksFloatingWidget, {
+  }, /^[\u2705\u2713\u26a0\u274c\u21ba\u2298\u2702\u2717]|^(\ud83d|\ud83e)/.test(String(toast.m || '')) ? '' : toast.ok ? "\u2713 " : "\u26a0 ", toast.m), React.createElement(MyTasksFloatingWidget, {
     tasks: myTasks,
     waiting: myWaiting,
     autoTasks: myAutoTasks,
@@ -38801,8 +38801,12 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   }, [sel]);
   const stopCheckout = () => { setCkId(null); setCkDate(null); setCkJob(null); setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setCrew([]); setSiteName(''); };
   const nowHM = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
-  const loadCks = () => sb.from('site_checkins').select('*').is('closed_at', null).order('created_at', { ascending: false }).limit(50)
+  const loadCks = () => sb.from('site_checkins').select('*').is('install_log_id', null).or('closed_at.is.null,closed_note.eq."checking out"').order('created_at', { ascending: false }).limit(50)
     .then(r => setCks(r.error ? [] : (r.data || [])));
+  // review fix 2 (28 Oct): a save interrupted mid-way stays visible; after 10 min it can be resumed or cancelled
+  const STUCK_MS = 10 * 60 * 1000;
+  const ckState = c => !c.closed_at ? 'open' : (Date.now() - new Date(c.closed_at).getTime() > STUCK_MS ? 'stuck' : 'saving');
+  const [filesFor, setFilesFor] = React.useState(null); // which check-in the selected photos belong to
   React.useEffect(() => { loadCks(); }, []);
   const checkIn = async () => {
     if (!sel) { show(T('Select a job'), false); return; }
@@ -38817,9 +38821,10 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
       job_id: sel === NOJOB ? null : sel, site_name: sel === NOJOB ? siteName.trim() : null, work_type: wt,
       crew: crew, batch_ids: multiBatch && selB.length ? selB : null, start_time: st, date: td(),
       note: report.trim() || null, created_by: user?.name || crew[0] || ''
-    });
+    }).select('id');
     setBusy(false);
-    if (r.error) { show('\u26a0\ufe0f ' + r.error.message, false); return; }
+    if (r.error) { show(r.error.code === '23505' ? 'Already checked in for this job \u2014 tap Check out on the On site now card' : '\u26a0\ufe0f ' + r.error.message, false); loadCks(); return; }
+    if (files.length) setFilesFor(r.data && r.data[0] ? r.data[0].id : null);
     show('\ud83d\udccd Checked in at ' + st + ' \u00b7 tap Check out when you leave' + (files.length ? ' (your ' + files.length + ' photo(s) stay selected)' : ''), true);
     setSel(''); setSelB([]); setStartT(''); setEndT(''); setReport(''); setCrew([]); setSiteName('');
     loadCks();
@@ -38831,6 +38836,8 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
     if (w === 'Recce/Survey' && sel && sel !== NOJOB) { const j = (jobs || []).find(x => x.id === sel); if (!j || SURVEY_CLOSED.includes(j.status)) { setSel(''); show('This job is past Recce \u2014 pick the job again or use No job yet', false); } }
   };
   const checkOut = c => {
+    if (files.length && filesFor !== c.id) { setFiles([]); setPnotes([]); show('Photos cleared \u2014 they were picked for a different visit. Add this visit\u2019s photos.', false); }
+    setFilesFor(c.id);
     setWt(c.work_type || 'Installation'); setSel(c.job_id || NOJOB); setSiteName(c.site_name || '');
     setCrew(c.crew || []); setSelB(c.batch_ids || []); setStartT(c.start_time || ''); setEndT(nowHM());
     setReport(c.note || ''); setCkJob(c.job_id || NOJOB); setCkId(c.id); setCkDate(c.date || null);
@@ -38839,8 +38846,11 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   };
   const cancelCk = async c => {
     if (!window.confirm('Cancel this check-in? (use only if it was a mistake)')) return;
-    const r = await sb.from('site_checkins').update({ closed_at: new Date().toISOString(), closed_note: 'cancelled by ' + (user?.name || '') }).eq('id', c.id);
+    const cut = new Date(Date.now() - STUCK_MS).toISOString();
+    const r = await sb.from('site_checkins').update({ closed_at: new Date().toISOString(), closed_note: 'cancelled by ' + (user?.name || '') }).eq('id', c.id).is('install_log_id', null)
+      .or('closed_at.is.null,and(closed_note.eq."checking out",closed_at.lt."' + cut + '")').select('id');
     if (r.error) { show('\u26a0\ufe0f ' + r.error.message, false); return; }
+    if (!r.data || !r.data.length) { show('This visit is being saved right now \u2014 cannot cancel', false); loadCks(); return; }
     if (ckId === c.id) { setCkId(null); setCkDate(null); }
     loadCks();
   };
@@ -38875,14 +38885,8 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
     if (!crew.length) { show((wt === 'Installation' ? TL('Installed by') : 'Done by') + ' ' + T('required'), false); return; }
     if (multiBatch && !selB.length) { show(TL('Select batch') + ' ' + T('required'), false); return; }
     setBusy(true);
-    let claimed = null; // review fix 28 Oct: claim the check-in first so two phones can't log the same visit
+    let claimed = null; // review fix 28 Oct: claim the check-in (after photo uploads) so two phones can't log the same visit
     try {
-      if (ckId) {
-        const cl = await sb.from('site_checkins').update({ closed_at: new Date().toISOString(), closed_note: 'checking out' }).eq('id', ckId).is('closed_at', null).select('id');
-        if (cl.error) throw cl.error;
-        if (!cl.data || !cl.data.length) { setCkId(null); setCkDate(null); setCkJob(null); loadCks(); throw new Error('This check-in is already closed (checked out on another phone?). Nothing saved \u2014 check the job before saving again.'); }
-        claimed = ckId;
-      }
       const urls = [];
       for (const f of files) {
         const path = 'install/' + (sel === NOJOB ? 'survey' : sel) + '/' + Date.now() + '_' + f.name.replace(/[^\w.\-]/g, '_');
@@ -38909,6 +38913,14 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         site_complete: wt === 'Installation' && !!markComplete,
         batch_ids: effBatches.length ? effBatches : null
       };
+      if (ckId) {
+        const cut = new Date(Date.now() - STUCK_MS).toISOString();
+        const cl = await sb.from('site_checkins').update({ closed_at: new Date().toISOString(), closed_note: 'checking out' }).eq('id', ckId).is('install_log_id', null)
+          .or('closed_at.is.null,and(closed_note.eq."checking out",closed_at.lt."' + cut + '")').select('id');
+        if (cl.error) throw cl.error;
+        if (!cl.data || !cl.data.length) { setCkId(null); setCkDate(null); setCkJob(null); loadCks(); throw new Error('This check-in is already closed or being saved on another phone. Nothing saved \u2014 check the job before saving again.'); }
+        claimed = ckId;
+      }
       const ins = await sb.from('install_logs').insert(row).select('id');
       if (ins.error) throw ins.error;
       if (claimed) {
@@ -38966,13 +38978,14 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
       cks.map(c => {
         const j = c.job_id ? (jobs || []).find(x => x.id === c.job_id) : null;
         const old = c.date && c.date !== td();
+        const stt = ckState(c);
         return React.createElement("div", { key: c.id, style: { display: "flex", gap: 6, alignItems: "center", padding: "6px 0", borderTop: "1px solid #1e293b", background: ckId === c.id ? "#3b82f612" : "transparent" } },
           React.createElement("div", { style: { flex: 1, minWidth: 0, fontSize: 12.5 } },
             React.createElement("div", { style: { fontWeight: 600 } }, (c.crew || []).map(x => String(x || '').split(' - ')[0]).join(', ') + ' \u00b7 ' + (c.work_type || '')),
             React.createElement("div", { style: { color: old ? "#f87171" : "#94a3b8", fontSize: 11.5 } },
-              (c.job_id ? c.job_id + (j ? ' \u00b7 ' + (j.client_name || '') : '') : (c.site_name || 'No job')) + ' \u00b7 since ' + c.start_time + (old ? ' (' + c.date + ' \u2014 not checked out)' : ''))),
-          React.createElement("button", { className: "b", disabled: busy, onClick: () => checkOut(c), style: { padding: "6px 10px", fontSize: 12.5, borderColor: "#10b981", color: "#10b981", fontWeight: 600 } }, ckId === c.id ? "Filling\u2026" : "Check out"),
-          React.createElement("button", { className: "b", disabled: busy, onClick: () => cancelCk(c), title: "Cancel check-in", style: { padding: "6px 8px", fontSize: 12 } }, "\u2715"));
+              (c.job_id ? c.job_id + (j ? ' \u00b7 ' + (j.client_name || '') : '') : (c.site_name || 'No job')) + ' \u00b7 since ' + c.start_time + (old ? ' (' + c.date + ' \u2014 not checked out)' : '') + (stt === 'saving' ? ' \u00b7 saving\u2026' : stt === 'stuck' ? ' \u00b7 \u26a0 save did not finish' : ''))),
+          React.createElement("button", { className: "b", disabled: busy || stt === 'saving', onClick: () => checkOut(c), style: { padding: "6px 10px", fontSize: 12.5, borderColor: "#10b981", color: "#10b981", fontWeight: 600 } }, ckId === c.id ? "Filling\u2026" : stt === 'stuck' ? "Resume" : "Check out"),
+          React.createElement("button", { className: "b", disabled: busy || stt === 'saving', onClick: () => cancelCk(c), title: "Cancel check-in", style: { padding: "6px 8px", fontSize: 12 } }, "\u2715"));
       })) : null,
     React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 } },
       ['Installation', 'Recce/Survey', 'Supervision', 'Rectification'].map(w => React.createElement("button", {
@@ -39036,7 +39049,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
         }, (wt === w ? '\u2713 ' : '') + (w === 'Recce/Survey' ? 'Recce' : w))))),
     F(TL('Photos'), React.createElement("input", {
       className: "in", type: "file", accept: "image/*", multiple: true,
-      onChange: e => { const a = Array.from(e.target.files || []); setFiles(a); setPnotes(a.map(() => ({ caption: '', w: '', h: '' }))); },
+      onChange: e => { const a = Array.from(e.target.files || []); setFiles(a); setFilesFor(ckId || null); setPnotes(a.map(() => ({ caption: '', w: '', h: '' }))); },
       style: { width: "100%", padding: 8, fontSize: 13 } })),
     files.length ? React.createElement("div", { style: { fontSize: 11, color: "#64748b", marginBottom: 10 } }, files.length + ' photo(s) selected') : null,
     wt === 'Recce/Survey' && files.length ? React.createElement("div", { style: { marginBottom: 12 } },
