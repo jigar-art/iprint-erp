@@ -8399,7 +8399,10 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       }
       {
         const _t = new Date(); const _ti = _t.getFullYear() + '-' + String(_t.getMonth() + 1).padStart(2, '0') + '-' + String(_t.getDate()).padStart(2, '0');
-        if (prf.expected_delivery < _ti) { show('"Material required by" cannot be in the past', false); return; }
+        const _ed = prf.expected_delivery.split('-').reverse().join('-');
+        if (prf.expected_delivery < _ti) { show('"Material required by" is ' + _ed + ' — that is in the past. Check the year (should be ' + _t.getFullYear() + ' or later).', false); return; }
+        const _mx = new Date(_t.getFullYear() + 1, _t.getMonth(), _t.getDate()); const _mxi = _mx.getFullYear() + '-' + String(_mx.getMonth() + 1).padStart(2, '0') + '-' + String(_mx.getDate()).padStart(2, '0');
+        if (prf.expected_delivery > _mxi) { show('"Material required by" is ' + _ed + ' — more than 1 year ahead. Check the year.', false); return; }
       }
       const missingUnit = prf.items.findIndex(x => x.product && !x.unit_mode);
       if (missingUnit >= 0) {
@@ -9571,6 +9574,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       className: "in",
       type: "date",
       value: prf.expected_delivery,
+      min: (() => { const _d = new Date(); return _d.getFullYear() + '-' + String(_d.getMonth() + 1).padStart(2, '0') + '-' + String(_d.getDate()).padStart(2, '0'); })(),
+      max: (() => { const _d = new Date(); return (_d.getFullYear() + 1) + '-' + String(_d.getMonth() + 1).padStart(2, '0') + '-' + String(_d.getDate()).padStart(2, '0'); })(),
       onChange: e => setPrf(p => ({
         ...p,
         expected_delivery: e.target.value
