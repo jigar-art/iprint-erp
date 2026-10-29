@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="google" content="notranslate">
+<meta name="erp-build" content="2026-10-29-A3">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>iPrint ERP</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e3a008'/><text x='5' y='23' font-size='18' font-weight='900' fill='%23060810'>iP</text></svg>">
@@ -576,6 +577,11 @@ function erpIsBankJob(j) {
   try { if (j.client_id && window.__erpBankCli && window.__erpBankCli.has(j.client_id)) return true; } catch (e) {}
   const u = String(j.client_name || '').toUpperCase();
   return ['DIEBOLD', 'CMS', 'OKI', 'NCR', 'NUVAMA', 'J M FINANCE', 'JM FINANCE', 'J.M. FINANCE', 'HITACHI', 'EDELWEISS', 'NIDO'].some(b => u.includes(b));
+}
+// 29 Oct 2026 (Jigar): placeholders like NA / - / pending are not a real PO number
+function erpRealPO(v) {
+  const t = String(v || '').trim().toLowerCase().replace(/[.\s]+/g, ' ').trim();
+  return t.length >= 3 && !['na', 'n a', 'n/a', 'nil', 'none', 'pending', 'po pending', 'awaited', 'tbd', 'to be received', 'duplicate'].includes(t) && !/^[-–—_.\/0\s]+$/.test(t);
 }
 const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
@@ -15153,7 +15159,7 @@ function NewJobPage({
       tat_plan_approved_at: tatOk ? new Date().toISOString() : null,
       tat_plan_reason: tatOk ? tatReason.trim() || null : null,
       // 29 Oct 2026 (Jigar): no PO -> PO Pending; with PO -> first planned stage (Recce / Design / Print / Fab). Retired "Active" no longer used.
-      status: isDraft ? "Quotation Sent" : !String(f.po || '').trim() ? "PO Pending" : ((tatRows || []).find(r => r.on && ['recce', 'design', 'printing', 'fabrication'].includes(r.k)) ? TAT_STAGES.find(t => t.k === (tatRows || []).find(r => r.on && ['recce', 'design', 'printing', 'fabrication'].includes(r.k)).k).bk : "Designing - In House"),
+      status: isDraft ? "Quotation Sent" : !(erpRealPO(f.po) || poUrl) ? "PO Pending" : ((tatRows || []).find(r => r.on && ['recce', 'design', 'printing', 'fabrication'].includes(r.k)) ? TAT_STAGES.find(t => t.k === (tatRows || []).find(r => r.on && ['recce', 'design', 'printing', 'fabrication'].includes(r.k)).k).bk : "Designing - In House"),
       po_file_url: poUrl ? [poUrl] : [],
       design_ref_urls: designUrls
     };
@@ -15474,9 +15480,10 @@ function NewJobPage({
     })),
     placeholder: "Required"
   })), React.createElement(F, {
-    l: "PO #"
+    l: "PO # (or 'Email approval')"
   }, React.createElement("input", {
     className: "in mn",
+    placeholder: "PO no. \u2014 or type Email approval + attach the email",
     value: f.po,
     onChange: e => sF(p => ({
       ...p,
@@ -15564,10 +15571,10 @@ function NewJobPage({
     })),
     placeholder: "Billing name (Required)"
   })), React.createElement(F, {
-    l: "\uD83D\uDCCE Upload PO"
+    l: "\uD83D\uDCCE Upload PO / client approval email"
   }, React.createElement("input", {
     type: "file",
-    accept: ".pdf,.jpg,.png,.jpeg",
+    accept: ".pdf,.jpg,.png,.jpeg,.eml,.msg",
     className: "in",
     style: {
       padding: 3
@@ -29269,7 +29276,7 @@ function MyPRsPage({
       fontSize: 11,
       color: '#64748b'
     }
-  }, scope === 'mine' ? "You haven't raised any PRs yet that match this filter." : scope === 'dept' ? `No PRs from your dept (${myDeptTag || '—'}) match this filter.` : 'No PRs match this filter.')), visible.length > 0 && React.createElement("div", {
+  }, scope === 'mine' ? "None of your PRs match this filter \u2014 tap All to see completed ones." : scope === 'dept' ? `No PRs from your dept (${myDeptTag || '—'}) match this filter.` : 'No PRs match this filter.')), visible.length > 0 && React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -58982,6 +58989,34 @@ function MonthlyRevenueCard({
   }))));
 }
 const __isHealth = new URLSearchParams(window.location.search).get('health') === '1';
+// 29 Oct 2026 audit: tell people with an old open tab that a new version is live
+(function erpVersionWatch() {
+  try {
+    const mine = (document.querySelector('meta[name="erp-build"]') || {}).content || '';
+    if (!mine || /[?&]health\b/.test(location.search)) return;
+    let shown = false, lastCheck = 0;
+    const check = async () => {
+      if (shown || Date.now() - lastCheck < 120000) return;
+      lastCheck = Date.now();
+      try {
+        const r = await fetch('/index.html?vchk=' + Date.now(), { cache: 'no-store', headers: { Range: 'bytes=0-3000' } });
+        const t = await r.text();
+        const m = /name="erp-build" content="([^"]+)"/.exec(t.slice(0, 6000));
+        if (!m || m[1] === mine) return;
+        shown = true;
+        const b = document.createElement('div');
+        b.setAttribute('translate', 'no');
+        b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;background:#e3a008;color:#060810;font:700 14px DM Sans,system-ui,sans-serif;padding:12px 18px;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.5);cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px;max-width:92vw';
+        b.textContent = '\ud83d\udd04 New version of the ERP is ready \u2014 tap to reload';
+        b.onclick = () => location.reload();
+        document.body.appendChild(b);
+      } catch (e) {}
+    };
+    setInterval(check, 10 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    setTimeout(check, 60000);
+  } catch (e) {}
+})();
 ReactDOM.createRoot(document.getElementById('root')).render(__isHealth ? React.createElement(HealthCheckPage, null) : React.createElement(ErpErrorBoundary, null, React.createElement(RootApp, null), React.createElement(ErpPinChangeGate, null)));
 </script>
 <script>
