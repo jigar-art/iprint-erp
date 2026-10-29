@@ -36448,6 +36448,9 @@ function CourierFab({ user }) {
     setMsg('');
     const pics = f.sent ? (f.docket ? [f.docket] : []) : photos.slice(0, n).filter(Boolean);
     if (f.sent && !f.sentOn) { setMsg('⚠️ Give the date it was sent'); return; }
+    // 29 Oct 2026 (Jigar, after Murli): explain a past promised date instead of the generic server error
+    if (!f.sent && !f.eta) { setMsg('⚠️ Give the delivery date the courier promised'); return; }
+    if (!f.sent && f.eta < new Date(Date.now() + 19800000).toISOString().slice(0, 10)) { setMsg('⚠️ Delivery date is before today - pick today or later. If it already went, tick "Already sent"'); return; }
     if (f.sent && !f.docket) { setMsg('⚠️ Upload the docket / courier bill photo'); return; }
     if (f.sent && String(f.docketNo || '').replace(/\s/g, '').length < 4) { setMsg('⚠️ Write the docket / LR number'); return; }
     if (f.mode === 'Running Bus' && f.busFrom.trim().length < 4) { setMsg('⚠️ Bus: write where the receiver collects it (bus office / stand)'); return; }
@@ -36560,7 +36563,7 @@ function CourierFab({ user }) {
     (basis === 'per_kg' && +f.rate > 300) || (calc != null && calc > 5000) ? React.createElement("div", { style: { fontSize: 12, color: '#fca5a5', fontWeight: 700 } }, '⚠️ ₹' + Math.round(calc || 0).toLocaleString('en-IN') + (basis === 'per_kg' ? ' (₹' + f.rate + ' per kg × ' + (f.kg || 0) + ' kg)' : '') + ' — is that right? ' + (basis === 'per_kg' ? 'Enter the rate PER KG, not the total.' : '')) : null,
     basis === 'per_roll' ? React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'Porter / Wefast to the station or airport: claim it in Petty cash and pick this 🚚 request there.') : null,
     React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, f.sent ? 'Delivered on / expected' : 'Delivery date the courier promised',
-      React.createElement("input", { className: 'in', type: 'date', value: f.eta, onChange: e => setF({ ...f, eta: e.target.value }), style: inp })),
+      React.createElement("input", { className: 'in', type: 'date', value: f.eta, min: f.sent ? (f.sentOn || undefined) : new Date(Date.now() + 19800000).toISOString().slice(0, 10), onChange: e => setF({ ...f, eta: e.target.value }), style: inp })),
     React.createElement("input", { className: 'in', value: f.note, onChange: e => setF({ ...f, note: e.target.value }), placeholder: 'Why this mode? (optional)', style: inp }),
     React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '11px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Please wait…' : 'Send for approval')) : null;
   const podResolve = async (p, ids, url) => {
