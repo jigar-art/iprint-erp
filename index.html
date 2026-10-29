@@ -36448,7 +36448,8 @@ function CourierFab({ user }) {
     if (f.mode === 'Running Bus' && f.busFrom.trim().length < 4) { setMsg('⚠️ Bus: write where the receiver collects it (bus office / stand)'); return; }
     if (f.mode === 'Running Bus' && !f.busDep) { setMsg('⚠️ Bus: give the departure date and time'); return; }
     if (f.mode === 'Running Bus' && isNaN(new Date(f.busDep).getTime())) { setMsg('⚠️ Bus: the departure date and time is not valid - pick it again'); return; }
-    if (basis === 'per_kg' && sum && !(+sum.sqft > 0) && !(+f.sqft > 0)) { setMsg('⚠️ This DC has no sizes - enter the total sqft being sent'); return; }
+    // 29 Oct 2026 (Jigar, after Manoj): DC has no sizes -> sqft OR weight; per-kg modes already need weight, so sqft is optional
+    if (basis === 'per_kg' && sum && !(+sum.sqft > 0) && !(+f.sqft > 0) && !(+f.kg > 0)) { setMsg('⚠️ This DC has no sizes - enter the weight (kg) or the total sqft being sent'); return; }
     const busNote = f.mode === 'Running Bus' ? 'Bus departs ' + new Date(f.busDep).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · collect from ' + f.busFrom.trim() : '';
     const onIdx = dcItems.map((x, i) => i).filter(i => tick[i]);
     if (dcItems.length && !onIdx.length) { setMsg('⚠️ Tick at least one item going in this booking'); return; }
@@ -36526,7 +36527,7 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'numeric', value: f.n, onChange: e => setF({ ...f, n: e.target.value }), placeholder: 'How many', style: { ...inp, width: 90 } }),
       CR_PKG.map(t => React.createElement("button", { key: t, type: 'button', disabled: basis === 'per_roll' && t !== 'roll', onClick: () => setF({ ...f, type: t }), style: { ...chip(type === t), opacity: basis === 'per_roll' && t !== 'roll' ? .35 : 1 } }, t))),
     basis === 'per_kg' || f.kg ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.kg, onChange: e => setF({ ...f, kg: e.target.value }), placeholder: 'Total weight (kg)' + (basis === 'per_kg' ? ' — required' : ''), style: inp }) : null,
-    basis === 'per_kg' && sum && !(+sum.sqft > 0) ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.sqft || '', onChange: e => setF({ ...f, sqft: e.target.value }), placeholder: 'Total size being sent (sqft) — DC has no sizes, required', style: inp }) : null,
+    basis === 'per_kg' && sum && !(+sum.sqft > 0) ? React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.sqft || '', onChange: e => setF({ ...f, sqft: e.target.value }), placeholder: 'Total size being sent (sqft) — optional, weight is enough', style: inp }) : null,
     // 21 Oct 2026 (Jigar): goods already sent / delivered before this request (old In Transit jobs)
     React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: f.sent ? '#fde68a' : '#cbd5e1', cursor: 'pointer', padding: '6px 8px', border: '1px solid ' + (f.sent ? '#a16207' : '#1f2937'), borderRadius: 8 } },
       React.createElement("input", { type: 'checkbox', checked: f.sent, onChange: e => setF({ ...f, sent: e.target.checked }) }),
