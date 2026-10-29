@@ -15152,7 +15152,8 @@ function NewJobPage({
       tat_plan_approved_by: tatOk ? user?.name || '' : null,
       tat_plan_approved_at: tatOk ? new Date().toISOString() : null,
       tat_plan_reason: tatOk ? tatReason.trim() || null : null,
-      status: isDraft ? "Quotation Sent" : "Active",
+      // 29 Oct 2026 (Jigar): no PO -> PO Pending; with PO -> first planned stage (Recce / Design / Print / Fab). Retired "Active" no longer used.
+      status: isDraft ? "Quotation Sent" : !String(f.po || '').trim() ? "PO Pending" : ((tatRows || []).find(r => r.on && ['recce', 'design', 'printing', 'fabrication'].includes(r.k)) ? TAT_STAGES.find(t => t.k === (tatRows || []).find(r => r.on && ['recce', 'design', 'printing', 'fabrication'].includes(r.k)).k).bk : "Designing - In House"),
       po_file_url: poUrl ? [poUrl] : [],
       design_ref_urls: designUrls
     };
