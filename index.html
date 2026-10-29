@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="google" content="notranslate">
-<meta name="erp-build" content="2026-10-29-A3">
+<meta name="erp-build" content="2026-10-29-A4">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>iPrint ERP</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23e3a008'/><text x='5' y='23' font-size='18' font-weight='900' fill='%23060810'>iP</text></svg>">
@@ -582,6 +582,36 @@ function erpIsBankJob(j) {
 function erpRealPO(v) {
   const t = String(v || '').trim().toLowerCase().replace(/[.\s]+/g, ' ').trim();
   return t.length >= 3 && !['na', 'n a', 'n/a', 'nil', 'none', 'pending', 'po pending', 'awaited', 'tbd', 'to be received', 'duplicate'].includes(t) && !/^[-–—_.\/0\s]+$/.test(t);
+}
+// 29 Oct 2026 (Jigar): PO / client-approval files on a job, as a list of links
+function erpPoFiles(j) {
+  let v = j && j.po_file_url;
+  if (!v) return [];
+  if (typeof v === 'string') { const t = v.trim(); if (t.startsWith('[')) { try { v = JSON.parse(t); } catch (e) { v = [t]; } } else v = [t]; }
+  return (Array.isArray(v) ? v : []).filter(u => typeof u === 'string' && u.trim().length > 8);
+}
+// 29 Oct 2026 (Jigar): reminder card — jobs past PO Pending with no PO / approval file attached (warn-only)
+const ERP_PO_PRE = ['Quotation Sent', 'PO Pending', 'Cancelled', 'No Bill', 'Billing Done', 'Cash Received', 'Draft', 'Active'];
+function PoMissingCard({ user, jobs, openJob }) {
+  const me = String(user && user.name || '').toUpperCase().split(' ')[0];
+  const isAll = me === 'JIGAR' || me === 'CHANDNI';
+  const [open, setOpen] = React.useState(false);
+  if (!isAll && !['RUCHITA', 'ANKITA', 'AMOL'].includes(me)) return null;
+  const miss = (jobs || []).filter(j => !ERP_PO_PRE.includes(j.status) && erpPoFiles(j).length === 0 && (isAll || String(j.made_by || '').toUpperCase().split(' ')[0] === me));
+  const recent = miss.filter(j => String(j.created_at || j.date || '') >= '2026-10-01').sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  if (!recent.length) return null;
+  const older = miss.length - recent.length;
+  return React.createElement("div", { className: "c", style: { padding: 10, border: "1px solid #e3a00855" } },
+    React.createElement("div", { onClick: () => setOpen(!open), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", minHeight: 32 } },
+      React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#e3a008" } }, "📎 ", recent.length, isAll ? " jobs" : " of your jobs", " started without a PO / approval file (since 1 Oct)"),
+      React.createElement("span", { style: { fontSize: 12, color: "#94a3b8" } }, open ? "▲" : "▼")),
+    React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", marginTop: 2 } }, "Billing needs it. Open the job → 📎 PO COPIES → upload the PO or the client's approval email.", older > 0 ? " (" + older + " older jobs not listed)" : ""),
+    open && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 3, maxHeight: 320, overflow: "auto" } },
+      recent.slice(0, 60).map(j => React.createElement("div", { key: j.id, onClick: () => openJob && openJob(j), style: { display: "flex", gap: 8, fontSize: 12, padding: "6px 4px", borderBottom: "1px solid #1a2030", cursor: "pointer", minHeight: 36, alignItems: "center" } },
+        React.createElement("span", { className: "mn", style: { color: "#3b82f6", minWidth: 86 } }, j.id),
+        React.createElement("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cbd5e1" } }, (j.client_name || '') + (j.project ? ' · ' + j.project : '')),
+        React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
+        isAll && React.createElement("span", { style: { color: "#64748b", fontSize: 10, minWidth: 60, textAlign: "right" } }, String(j.made_by || '').split(' ')[0])))));
 }
 const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
@@ -5206,7 +5236,7 @@ function DashPage({
       flexDirection: "column",
       gap: 8
     }
-  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
+  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
     className: "c",
     style: {
       padding: 10
@@ -7440,7 +7470,7 @@ function JobDetail({
       justifyContent: "center",
       padding: 6
     }
-  }, "\uD83D\uDCBE Save Changes"))), React.createElement("div", {
+  }, "\uD83D\uDCBE Save Changes"))), jobPos.length > 0 && React.createElement("div", {
     style: {
       background: "#060810",
       border: "1px solid #1a2030",
@@ -7466,7 +7496,7 @@ function JobDetail({
       fontWeight: 400,
       marginLeft: 6
     }
-  }, "\xB7 legacy: ", jf.po_number)), !showAddPo && React.createElement("button", {
+  }, "\xB7 legacy: ", jf.po_number)), false && React.createElement("button", {
     className: "b bs",
     onClick: () => setShowAddPo(true),
     style: {
@@ -32062,15 +32092,13 @@ function AccPage({
       style: {
         fontSize: 10
       }
-    }, j.po_number ? React.createElement("span", {
-      style: {
-        color: "#4ade80"
-      }
-    }, "\u2713") : React.createElement("span", {
-      style: {
-        color: "#f47067"
-      }
-    }, "\u26A0\uFE0F")), React.createElement("td", {
+    }, (() => {
+      const fl = erpPoFiles(j);
+      const ok = erpRealPO(j.po_number) || fl.length > 0;
+      return React.createElement("span", { style: { display: "inline-flex", gap: 4, alignItems: "center" } },
+        React.createElement("span", { style: { color: ok ? "#4ade80" : "#f47067" }, title: ok ? (j.po_number || 'Approval file attached') : 'No PO / approval on file' }, ok ? "\u2713" : "\u26A0\uFE0F"),
+        fl.slice(0, 3).map((u, i) => React.createElement("a", { key: i, href: smartOpenUrl(u), target: "_blank", rel: "noopener noreferrer", title: "Open PO / approval file", onClick: e => e.stopPropagation(), style: { fontSize: 15, textDecoration: "none", padding: "2px 3px" } }, "\uD83D\uDCC4")));
+    })()), React.createElement("td", {
       style: {
         minWidth: 170
       }
