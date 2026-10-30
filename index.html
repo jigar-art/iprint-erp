@@ -434,7 +434,9 @@ const uploadMultiple = async (files, folder = 'general') => {
   return urls;
 };
 const isOfficeFile = url => /\.(pptx?|docx?|xlsx?)(\?|#|$)/i.test(url || '');
-const smartOpenUrl = url => isOfficeFile(url) ? 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(url) : url;
+// 30 Oct 2026: Uploads is private, so Microsoft's viewer can't fetch it ("File not found"). Office files from Uploads
+// go through /api/file and download straight to PowerPoint/Word/Excel; only other public links use the viewer.
+const smartOpenUrl = url => typeof url === 'string' && url.indexOf(ERP_PUBLIC_UPLOADS) === 0 ? erpFileUrl(url) : isOfficeFile(url) ? 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(url) : url;
 const checkBankingSiteForJobId = async jobId => {
   if (!jobId) return null;
   const prefix = String(jobId).split('-')[0];
