@@ -4095,6 +4095,8 @@ function MainApp({
     clients: clients,
     jobs: filteredJobs,
     s: search
+  }), (pg === "acc" || pg === "disp") && React.createElement(PodCheckCard, {
+    user: user
   }), pg === "acc" && React.createElement(DocketSignTray, {
     user: user,
     show: show
@@ -24598,7 +24600,8 @@ function DispPage({
     if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
     setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), pod_url: url, signed_uploaded_at: new Date().toISOString() } }));
     setTatTick(t => t + 1);
-    show('\u2713 Signed DC uploaded');
+    show('\u2713 Signed DC uploaded - checking it\u2026');
+    erpPodProofCheck(l.id, l.job_id);
   };
   const addDocket = async (l, file) => {
     if (!file) return;
@@ -38565,6 +38568,84 @@ function CrewPicker({ team, value, onChange }) {
     }));
 }
 
+// 30 Oct 2026 (Jigar): AI checks every delivery proof at upload. Fail -> uploader re-uploads, or "upload anyway" with a reason -> Aparna's POD check.
+async function erpPodProofCheck(logId, label) {
+  const toast = (m, ok) => { try { if (window._showToast) window._showToast(m, ok); } catch (e) {} };
+  try {
+    const st = await sb.rpc('erp_pod_check_start', { p_dispatch: String(logId) });
+    if (st.error) { toast('⚠️ Proof check could not start: ' + st.error.message, false); return null; }
+    if (!st.data) return null;
+    toast('🔎 Checking the delivery proof' + (label ? ' for ' + label : '') + '…', true);
+    let r = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(z => setTimeout(z, 2000));
+      const x = await sb.rpc('erp_pod_check_status', { p_id: st.data });
+      r = x.data || null;
+      if (r && (r.status === 'done' || r.status === 'error')) break;
+    }
+    if (!r || r.status !== 'done') { toast('⚠️ Proof check is slow - see "POD check" later', false); return null; }
+    if (r.verdict === 'pass') { toast('✅ Delivery proof OK' + (label ? ' (' + label + ')' : '') + ' - ' + (r.reason || ''), true); return 'pass'; }
+    const anyway = window.confirm('⚠️ Delivery proof not accepted' + (label ? ' (' + label + ')' : '') + ':\n\n' + (r.reason || 'does not meet the rule') +
+      '\n\nNeeded: signed + stamped ERP DC with DC no. (courier: courier "Delivered" page with the same AWB / LR).\n\nOK = this proof is right, send it to Aparna with a reason\nCancel = I will upload the correct proof');
+    if (!anyway) { toast('↩ Upload the correct proof - billing waits for it', false); return 'fail'; }
+    const why = window.prompt('Why is this proof correct? (goes to Aparna)', '');
+    if (why === null || why.trim().length < 5) { toast('↩ No reason given - upload the correct proof', false); return 'fail'; }
+    const d = await sb.rpc('erp_pod_proof_decide', { p_dispatch: String(logId), p_action: 'flag', p_reason: why.trim() });
+    toast(d.error ? '⚠️ ' + d.error.message : '✓ Sent to Aparna for POD check', !d.error);
+    return 'flagged';
+  } catch (e) { toast('⚠️ Proof check failed: ' + (e.message || e), false); return null; }
+}
+function PodCheckCard({ user }) {
+  const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
+  const decider = ['APARNA', 'AMOL', 'JIGAR'].includes(me);
+  const fixer = ['MANOJ', 'MURLI', 'JIGAR'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const [open, setOpen] = React.useState(false);
+  const load = () => sb.rpc('erp_pod_proof_list').then(r => setRows(r.error ? [] : (r.data || [])), () => setRows([]));
+  React.useEffect(() => { if (decider || fixer) load(); }, []);
+  if (!(decider || fixer) || !rows || !rows.length) return null;
+  const nFlag = rows.filter(r => r.status === 'flagged').length;
+  const act = async (r, action) => {
+    let why = null;
+    if (action === 'return') { why = prompt('Send back to Manoj - what must he fix? (' + r.job_id + ')', r.ai_reason || ''); if (why === null) return; }
+    setBusy(true); const x = await sb.rpc('erp_pod_proof_decide', { p_dispatch: String(r.id), p_action: action, p_reason: why }); setBusy(false);
+    setMsg(x.error ? '⚠️ ' + x.error.message : '✓ ' + r.job_id + ': ' + x.data); load();
+  };
+  const reupload = async (r, file) => {
+    if (!file) return;
+    setBusy(true);
+    const url = await uploadFile(file, 'dispatch-signed-dc');
+    if (!url) { setBusy(false); setMsg('⚠️ Upload failed'); return; }
+    const u = await sb.from('dispatch_logs').update({ pod_url: url, signed_uploaded_at: new Date().toISOString() }).eq('id', r.id);
+    setBusy(false);
+    if (u.error) { setMsg('⚠️ ' + u.error.message); return; }
+    setMsg('✓ ' + r.job_id + ': new proof uploaded - checking…');
+    await erpPodProofCheck(r.id, r.job_id + (r.dc_no ? ' ' + r.dc_no : '')); load();
+  };
+  const col = s => s === 'flagged' ? '#fbbf24' : s === 'returned' ? '#f87171' : '#fca5a5';
+  const lbl = s => s === 'flagged' ? 'Aparna to check' : s === 'returned' ? 'sent back to Manoj' : 'AI: not accepted';
+  return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #a16207' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }, onClick: () => setOpen(!open) },
+      React.createElement("b", { style: { color: '#fbbf24', fontSize: 13.5 } }, '🔎 POD check - ' + rows.length + ' proof' + (rows.length > 1 ? 's' : '') + ' not accepted' + (nFlag ? ' · ' + nFlag + ' for Aparna' : '')),
+      React.createElement("span", { style: { color: '#94a3b8', fontSize: 12 } }, open ? '▾' : '▸')),
+    React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } }, 'Billing for these waits until the proof is accepted. Needed: signed + stamped ERP DC with DC no. (no stamp: receiver name + mobile) · courier: "Delivered" page with the same AWB · bus: signed DC or receiver photo with goods · Porter: signed DC or trip-completed drop photo.'),
+    msg ? React.createElement("div", { style: { fontSize: 12, marginTop: 6, color: msg[0] === '✓' ? '#4ade80' : '#f87171' } }, msg) : null,
+    open ? rows.map(r => React.createElement("div", { key: r.id, style: { padding: '8px 0', borderTop: '1px solid #1f2937', fontSize: 12, color: '#e2e8f0' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
+        React.createElement("span", null, React.createElement("b", null, r.job_id), ' · ', r.client || '', ' · ', r.mode || '-', r.dc_no ? ' · ' + r.dc_no : '', r.lr_no ? ' · LR ' + r.lr_no : '',
+          r.file ? React.createElement("a", { href: erpFileUrl(r.file), target: '_blank', rel: 'noreferrer', style: { color: '#93c5fd', marginLeft: 6 } }, 'see proof') : null),
+        React.createElement("span", { style: { color: col(r.status), whiteSpace: 'nowrap', fontSize: 11 } }, lbl(r.status))),
+      r.ai_reason ? React.createElement("div", { style: { color: '#fca5a5', fontSize: 11.5 } }, 'AI: ' + r.ai_reason) : null,
+      r.reason ? React.createElement("div", { style: { color: '#fde68a', fontSize: 11.5 } }, (r.by ? r.by.charAt(0) + r.by.slice(1).toLowerCase() : 'Uploader') + ' says: ' + r.reason) : null,
+      r.return_reason ? React.createElement("div", { style: { color: '#f87171', fontSize: 11.5 } }, 'Sent back: ' + r.return_reason) : null,
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 } },
+        decider ? React.createElement("button", { type: 'button', disabled: busy, onClick: () => act(r, 'accept'), style: { padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #22c55e', background: '#15803d' } }, '✓ Accept') : null,
+        decider && r.status !== 'returned' ? React.createElement("button", { type: 'button', disabled: busy, onClick: () => act(r, 'return'), style: { padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid #e0574f', background: '#7f1d1d' } }, '↩ Send back to Manoj') : null,
+        fixer ? React.createElement("label", { style: { padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#06210f', background: '#4ade80' } }, busy ? 'Please wait…' : '⬆ Upload correct proof',
+          React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, disabled: busy, onChange: e => reupload(r, e.target.files && e.target.files[0]) })) : null))) : null);
+}
 // ===== Delivery gate (2026-10-02) =====
 const ERP_DELIVERY_GATE_FROM = ['Active', 'Quotation Sent', 'PO Pending', 'Designing - In House', 'Designing - Outsource',
   'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit'];
@@ -38611,6 +38692,7 @@ function erpConfirmDeliveryBox(jobId, log) {
         const u = await sb.from('dispatch_logs').update({ delivered_at: at, received_by: who, pod_photo_url: url }).eq('id', log.id);
         if (u.error) throw u.error;
         close(true);
+        erpPodProofCheck(log.id, jobId);
       } catch (e) {
         btn.disabled = false; btn.textContent = 'Confirm delivered';
         err('Could not save: ' + (e.message || e));
