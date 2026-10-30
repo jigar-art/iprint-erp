@@ -4097,6 +4097,8 @@ function MainApp({
     s: search
   }), (pg === "acc" || pg === "disp") && React.createElement(PodCheckCard, {
     user: user
+  }), (pg === "acc" || pg === "disp") && React.createElement(CatchupDispatchCard, {
+    user: user
   }), pg === "acc" && React.createElement(DocketSignTray, {
     user: user,
     show: show
@@ -4227,6 +4229,9 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(RuleBlockBar, {
     user: user
+  }) : null, user ? React.createElement(CatchupDispatchCard, {
+    user: user,
+    listener: true
   }) : null, pg === "complaints" && React.createElement(ComplaintsPage, {
     user: user
   }), pg === "myscore" && React.createElement(RegisterCard, {
@@ -36739,6 +36744,7 @@ function RuleBlockBar({ user }) {
   const nmC = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const shown = String(b.msg || '').replace(/\s*Pending with: .*$/, '');
   const canSend = !!(b.owner && b.owner !== me);
+  const cuJob = ['MANOJ', 'MURLI', 'APARNA', 'JIGAR'].includes(me) && /make the ERP deliver|dispatch is not logged|delivery not confirmed|not delivered on an ERP DC|log the dispatch/i.test(String(b.msg || '')) ? (String(b.msg).match(/\b(\d{3,6}-\d{4})\b/) || [])[1] : null;
   const sendOwner = async () => {
     if (!b.id) { setB({ ...b, sent: 'Could not log this - tell ' + nmC(b.owner) + ' directly' }); return; }
     const note = prompt('Send this to ' + nmC(b.owner) + ' as a task.\n\n' + shown + '\n\nAdd a note (optional):', '');
@@ -36760,6 +36766,7 @@ function RuleBlockBar({ user }) {
     React.createElement("div", { style: { marginTop: 4, color: '#fee2e2' } }, shown),
     b.owner ? React.createElement("div", { style: { marginTop: 6, padding: '6px 8px', borderRadius: 8, background: '#3b1a1a', color: '#fde68a', fontSize: 12.5, fontWeight: 700 } },
       b.owner === me ? '\ud83d\udc49 This is pending with you (' + (b.step || '') + ')' : '\ud83d\udc64 Pending with: ' + nmC(b.owner) + ' (' + (b.step || '') + ')' + (b.esc ? ' \u00b7 escalation: ' + nmC(b.esc) : '')) : null,
+    cuJob ? React.createElement("button", { type: 'button', onClick: () => { try { window.dispatchEvent(new CustomEvent('erp-catchup', { detail: { job: cuJob } })); } catch (e) {} setB(null); }, style: { marginTop: 8, padding: '7px 14px', borderRadius: 8, border: '1px solid #22c55e', background: '#15803d', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' } }, '\u26a1 Already delivered? Catch up ' + cuJob) : null,
     b.sent ? React.createElement("div", { style: { marginTop: 6, color: /^\u2713/.test(b.sent) ? '#86efac' : '#fca5a5' } }, b.sent)
       : canSend ? React.createElement("div", { style: { display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' } },
         React.createElement("button", { type: 'button', disabled: busy, onClick: sendOwner, style: { padding: '7px 14px', borderRadius: 8, border: '1px solid #f59e0b', background: '#b45309', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' } }, busy ? 'Sending\u2026' : 'Send to ' + nmC(b.owner)),
@@ -38569,10 +38576,10 @@ function CrewPicker({ team, value, onChange }) {
 }
 
 // 30 Oct 2026 (Jigar): AI checks every delivery proof at upload. Fail -> uploader re-uploads, or "upload anyway" with a reason -> Aparna's POD check.
-async function erpPodProofCheck(logId, label) {
+async function erpPodProofCheck(logId, label, existingCheckId) {
   const toast = (m, ok) => { try { if (window._showToast) window._showToast(m, ok); } catch (e) {} };
   try {
-    const st = await sb.rpc('erp_pod_check_start', { p_dispatch: String(logId) });
+    const st = existingCheckId ? { data: existingCheckId } : await sb.rpc('erp_pod_check_start', { p_dispatch: String(logId) });
     if (st.error) { toast('⚠️ Proof check could not start: ' + st.error.message, false); return null; }
     if (!st.data) return null;
     toast('🔎 Checking the delivery proof' + (label ? ' for ' + label : '') + '…', true);
@@ -38594,6 +38601,119 @@ async function erpPodProofCheck(logId, label) {
     toast(d.error ? '⚠️ ' + d.error.message : '✓ Sent to Aparna for POD check', !d.error);
     return 'flagged';
   } catch (e) { toast('⚠️ Proof check failed: ' + (e.message || e), false); return null; }
+}
+// 30 Oct 2026 (Jigar): work done but PO came late - one screen logs the dispatch, confirms delivery, attaches the proof and moves the job
+const ERP_CU_MODES = ['Own vehicle', 'Client / vendor pickup', 'Air Courier', 'Surface Courier', 'Running Bus', 'Borzo / Rapido', 'Train', 'Air Cargo'];
+function CatchupDispatchModal({ jobId, user, onClose }) {
+  const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
+  const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  const [info, setInfo] = React.useState(null);
+  const [f, setF] = React.useState({ dc_id: '', mode: '', sent_on: '', delivered_on: today, received_by: '', receiver_mobile: '', target_status: 'Delivered',
+    pod_url: '', courier_name: '', lr_no: '', delivery_boy: '', vehicle: '', pincode: '', pkg_count: '1', pkg_type: 'box', weight_kg: '', rate: '', docket_photo_urls: [], bus_departs: '', collect_from: '' });
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  React.useEffect(() => { sb.rpc('erp_catchup_info', { p_job: jobId }).then(r => {
+    const d = r.data || {}; setInfo(d);
+    const open = (d.dcs || []).filter(x => !x.delivered);
+    if (open.length) setF(p => ({ ...p, dc_id: open[0].id, sent_on: open[0].dc_date || '', pincode: open[0].pincode || '' }));
+    if ((d.files || []).length === 1) setF(p => ({ ...p, pod_url: d.files[0] }));
+  }); }, [jobId]);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const inp = { fontSize: 13, padding: '7px 9px', width: '100%' };
+  const lab = t => React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', margin: '8px 0 3px' } }, t);
+  if (!info) return null;
+  const openDcs = (info.dcs || []).filter(x => !x.delivered);
+  const courier = f.mode && !['Own vehicle', 'Client / vendor pickup'].includes(f.mode);
+  const approved = (info.courier || []).find(c => c.mode === f.mode && c.status === 'approved' && (!c.dc_id || c.dc_id === f.dc_id));
+  const pending = (info.courier || []).find(c => c.mode === f.mode && c.status === 'pending' && (!c.dc_id || c.dc_id === f.dc_id));
+  const needReq = courier && !approved && !pending;
+  const upload = async (file, k, multi) => {
+    if (!file) return; setBusy(true); const url = await uploadFile(file, k === 'pod_url' ? 'dispatch-signed-dc' : 'courier-docket'); setBusy(false);
+    if (!url) { setMsg('⚠️ Upload failed'); return; }
+    if (multi) set(k, [...(f[k] || []), url]); else set(k, url);
+  };
+  const save = async () => {
+    setMsg(''); setBusy(true);
+    const r = await sb.rpc('erp_dispatch_catchup', { p: { ...f, job_id: jobId } });
+    setBusy(false);
+    if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    const d = r.data || {};
+    setMsg((d.done ? '✓ ' : '⏳ ') + (d.message || ''));
+    if (d.done && d.dispatch_id) { erpPodProofCheck(d.dispatch_id, jobId, d.proof_check); setTimeout(onClose, 2500); }
+  };
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 1250, background: 'rgba(3,6,12,.85)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }, onClick: e => { if (e.target === e.currentTarget) onClose(); } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 540, maxHeight: '92vh', overflowY: 'auto', background: '#0f172a', borderTop: '2px solid #22c55e', borderRadius: '16px 16px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom))', color: '#e2e8f0' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 16, fontWeight: 800, color: '#86efac' } }, '⚡ Catch-up dispatch — ' + jobId),
+        React.createElement("button", { type: 'button', onClick: onClose, style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
+      React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', marginTop: 2 } }, (info.job && info.job.client || '') + ' · now ' + (info.job && info.job.status || '') + '. Work already went out — record it once here: dispatch + delivery + proof, and the job moves on.' + (info.job && !info.job.po_file ? ' "Client PO awaited" will be ticked.' : '')),
+      openDcs.length === 0 ? React.createElement("div", { style: { marginTop: 10, padding: 8, borderRadius: 8, background: '#3b1a1a', color: '#fde68a', fontSize: 12.5 } }, 'No open ERP DC on this job. Make the ERP DC first (job → DC button), then open catch-up again.') :
+      React.createElement(React.Fragment, null,
+        lab('ERP DC'), React.createElement("select", { className: 'in', value: f.dc_id, onChange: e => { const d = openDcs.find(x => x.id === e.target.value) || {}; setF(p => ({ ...p, dc_id: e.target.value, sent_on: d.dc_date || p.sent_on, pincode: d.pincode || p.pincode })); }, style: inp },
+          openDcs.map(d => React.createElement("option", { key: d.id, value: d.id }, (d.dc_no || '').replace(/^.*\//, '') + ' · ' + (d.dc_date || '') + ' · ' + (d.to_name || '') + (d.logged ? ' (dispatch logged, not delivered)' : '')))),
+        lab('How did it go?'), React.createElement("div", { style: { display: 'flex', gap: 5, flexWrap: 'wrap' } }, ERP_CU_MODES.map(m => React.createElement("button", { key: m, type: 'button', onClick: () => set('mode', m),
+          style: { padding: '5px 9px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: '1px solid ' + (f.mode === m ? '#22c55e' : '#334155'), background: f.mode === m ? '#22c55e' : 'transparent', color: f.mode === m ? '#06210f' : '#e2e8f0', fontWeight: 700 } }, m))),
+        React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
+          React.createElement("div", null, lab('Sent on'), React.createElement("input", { className: 'in', type: 'date', max: today, value: f.sent_on, onChange: e => set('sent_on', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Delivered on'), React.createElement("input", { className: 'in', type: 'date', max: today, value: f.delivered_on, onChange: e => set('delivered_on', e.target.value), style: inp })),
+          React.createElement("div", null, lab(f.mode === 'Client / vendor pickup' ? 'Collected by (name)' : 'Received by (name)'), React.createElement("input", { className: 'in', value: f.received_by, onChange: e => set('received_by', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Receiver mobile'), React.createElement("input", { className: 'in', inputMode: 'numeric', value: f.receiver_mobile, onChange: e => set('receiver_mobile', e.target.value), style: inp }))),
+        f.mode === 'Own vehicle' ? React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
+          React.createElement("div", null, lab('Delivery boy'), React.createElement("input", { className: 'in', value: f.delivery_boy, onChange: e => set('delivery_boy', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Vehicle no.'), React.createElement("input", { className: 'in', value: f.vehicle, onChange: e => set('vehicle', e.target.value), style: inp }))) : null,
+        courier ? React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
+          React.createElement("div", null, lab(f.mode === 'Running Bus' ? 'Bus operator / bus no.' : f.mode === 'Borzo / Rapido' ? 'App (Porter / Borzo / Rapido)' : 'Courier company'), React.createElement("input", { className: 'in', value: f.courier_name, onChange: e => set('courier_name', e.target.value), style: inp })),
+          React.createElement("div", null, lab(f.mode === 'Borzo / Rapido' ? 'Booking / order ID' : 'AWB / LR no.'), React.createElement("input", { className: 'in', value: f.lr_no, onChange: e => set('lr_no', e.target.value), style: inp }))) : null,
+        courier ? React.createElement("div", { style: { marginTop: 8, padding: 8, borderRadius: 8, fontSize: 12, background: approved ? '#0f2a1a' : '#2a210f', color: approved ? '#86efac' : '#fde68a' } },
+          approved ? '✓ Approved 🚚 #' + approved.id + ' will be used.' : pending ? '⏳ 🚚 #' + pending.id + ' is waiting for approval — catch-up can finish after it is approved.'
+            : me === 'APARNA' ? 'No 🚚 request for this ' + f.mode + ' dispatch — Manoj must raise it. Use "Send to Manoj" on the red bar if you are blocked.'
+            : 'No 🚚 request on record — it will be raised as "already sent" (auto-approved up to ₹1,000 with the docket, else Jigar; counts as raised after dispatch).') : null,
+        needReq && me !== 'APARNA' ? React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 } },
+          React.createElement("div", null, lab('Pincode'), React.createElement("input", { className: 'in', inputMode: 'numeric', value: f.pincode, onChange: e => set('pincode', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Packages'), React.createElement("input", { className: 'in', inputMode: 'numeric', value: f.pkg_count, onChange: e => set('pkg_count', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Type'), React.createElement("select", { className: 'in', value: f.pkg_type, onChange: e => set('pkg_type', e.target.value), style: inp }, ['box', 'roll', 'bundle', 'sheet', 'crate'].map(t => React.createElement("option", { key: t, value: t }, t)))),
+          React.createElement("div", null, lab('Weight (kg)'), React.createElement("input", { className: 'in', inputMode: 'decimal', value: f.weight_kg, onChange: e => set('weight_kg', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Rate ₹'), React.createElement("input", { className: 'in', inputMode: 'decimal', value: f.rate, onChange: e => set('rate', e.target.value), style: inp })),
+          React.createElement("div", null, lab('Docket / bill photo'), React.createElement("label", { style: { ...inp, display: 'block', cursor: 'pointer', color: f.docket_photo_urls.length ? '#86efac' : '#93c5fd', border: '1px dashed #334155', borderRadius: 8 } }, f.docket_photo_urls.length ? '✓ ' + f.docket_photo_urls.length + ' added' : '+ add',
+            React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: e => upload(e.target.files && e.target.files[0], 'docket_photo_urls', true) }))),
+          f.mode === 'Running Bus' ? React.createElement("div", { style: { gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
+            React.createElement("div", null, lab('Bus departed'), React.createElement("input", { className: 'in', type: 'datetime-local', value: f.bus_departs, onChange: e => set('bus_departs', e.target.value), style: inp })),
+            React.createElement("div", null, lab('Collect from (bus office / stand)'), React.createElement("input", { className: 'in', value: f.collect_from, onChange: e => set('collect_from', e.target.value), style: inp }))) : null) : null,
+        lab('Delivery proof (signed + stamped DC with DC no. / courier "Delivered" page / receiver photo)'),
+        (info.files || []).length ? React.createElement("div", { style: { display: 'grid', gap: 4 } }, info.files.map((u, i) => React.createElement("label", { key: i, style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 } },
+          React.createElement("input", { type: 'radio', checked: f.pod_url === u, onChange: () => set('pod_url', u) }),
+          React.createElement("a", { href: erpFileUrl(u), target: '_blank', rel: 'noreferrer', style: { color: '#93c5fd' } }, 'Uploaded file ' + (i + 1)), ' already on the job'))) : null,
+        React.createElement("label", { style: { display: 'inline-block', marginTop: 4, fontSize: 12, cursor: 'pointer', color: '#93c5fd' } }, f.pod_url && !(info.files || []).includes(f.pod_url) ? '✓ new proof uploaded' : '+ upload a new proof',
+          React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: e => upload(e.target.files && e.target.files[0], 'pod_url', false) })),
+        lab('Job moves to'), React.createElement("div", { style: { display: 'flex', gap: 5, flexWrap: 'wrap' } }, ['Delivered', 'Installation WIP', 'Billing Pending'].map(t => React.createElement("button", { key: t, type: 'button', onClick: () => set('target_status', t),
+          style: { padding: '5px 10px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: '1px solid ' + (f.target_status === t ? '#a78bfa' : '#334155'), background: f.target_status === t ? '#a78bfa' : 'transparent', color: f.target_status === t ? '#1e1b4b' : '#e2e8f0', fontWeight: 700 } }, t))),
+        msg ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 10, color: msg[0] === '✓' ? '#4ade80' : msg[0] === '⏳' ? '#fde68a' : '#f87171' } }, msg) : null,
+        React.createElement("button", { type: 'button', disabled: busy || !f.mode, onClick: save, style: { marginTop: 12, width: '100%', padding: '11px 0', borderRadius: 10, border: 'none', background: f.mode ? '#22c55e' : '#334155', color: '#06210f', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, busy ? 'Please wait…' : 'Save dispatch + delivery'))));
+}
+function CatchupDispatchCard({ user, listener }) {
+  const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
+  const allowed = ['MANOJ', 'MURLI', 'APARNA', 'JIGAR'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [job, setJob] = React.useState(null);
+  const load = () => sb.rpc('erp_catchup_list').then(r => setRows(r.error ? [] : (r.data || [])), () => setRows([]));
+  React.useEffect(() => { if (allowed && !listener) load(); }, []);
+  React.useEffect(() => {
+    if (!listener) return undefined;
+    const h = e => { if (allowed && e.detail && e.detail.job) setJob(e.detail.job); };
+    window.addEventListener('erp-catchup', h); return () => window.removeEventListener('erp-catchup', h);
+  }, []);
+  if (!allowed) return null;
+  return React.createElement(React.Fragment, null,
+    !listener && rows && rows.length ? React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #15803d' } },
+      React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }, onClick: () => setOpen(!open) },
+        React.createElement("b", { style: { color: '#86efac', fontSize: 13.5 } }, '⚡ Work done, still PO Pending — ' + rows.length + ' job' + (rows.length > 1 ? 's' : '') + ' to catch up'),
+        React.createElement("span", { style: { color: '#94a3b8', fontSize: 12 } }, open ? '▾' : '▸')),
+      React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } }, 'These jobs have a DC but no delivery on record. One tap records the dispatch + delivery + proof and moves the job to billing.'),
+      open ? rows.map(r => React.createElement("div", { key: r.id, style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: '6px 0', borderTop: '1px solid #1f2937', fontSize: 12.5 } },
+        React.createElement("span", null, React.createElement("b", null, r.id), ' · ', r.client || '', ' · ', r.erp_dcs ? r.erp_dcs + ' ERP DC' : 'no ERP DC yet', r.dc_file ? ' · DC file uploaded' : ''),
+        React.createElement("button", { type: 'button', onClick: () => setJob(r.id), style: { padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#06210f', background: '#4ade80', border: 'none', whiteSpace: 'nowrap' } }, '⚡ Catch up'))) : null) : null,
+    job ? React.createElement(CatchupDispatchModal, { jobId: job, user, onClose: () => { setJob(null); load(); } }) : null);
 }
 function PodCheckCard({ user }) {
   const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
