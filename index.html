@@ -47714,13 +47714,29 @@ function ReportsPage({
     const invoicesAdded = (siteInvoices || []).filter(i => inPeriod(i.created_at));
     const invoiceTotal = invoicesAdded.reduce((s, i) => s + (Number(i.invoice_amount) || 0), 0);
     const nbInvoices = [];
+    // 30 Oct 2026: one batch can carry several invoice nos. (e.g. NCR GSB + Lollypop) — count each once per job
+    const billKeys = t => {
+      const u = String(t || '').toUpperCase();
+      const first = (u.match(/([JVD])\s*-\s*\d/) || [])[1] || 'J';
+      const ks = new Set();
+      for (const m of u.matchAll(/(?:([JVD])\s*-\s*)?(\d{1,6})\s*\/\s*\d{2}\s*-\s*\d{2}/g)) ks.add((m[1] || first) + '-' + Number(m[2]));
+      for (const m of u.matchAll(/(?:^|[^A-Z])([JVD])\s*-\s*(\d{1,6})(?!\d)/g)) ks.add(m[1] + '-' + Number(m[2]));
+      return ks.size ? [...ks] : [u.trim()];
+    };
+    const seenInv = new Set();
     (jobs || []).forEach(j => {
       (j.batches || []).forEach(b => {
         if (!b.bill_no || !String(b.bill_no).trim()) return;
         if (!b.invoice_date || !inPeriod(b.invoice_date)) return;
-        nbInvoices.push({
-          ...b,
-          _attrib: b.billed_by || b.created_by || null
+        billKeys(b.bill_no).forEach(k => {
+          const sk = j.id + '|' + k;
+          if (seenInv.has(sk)) return;
+          seenInv.add(sk);
+          nbInvoices.push({
+            ...b,
+            _inv_key: k,
+            _attrib: b.billed_by || b.created_by || null
+          });
         });
       });
     });
