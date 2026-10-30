@@ -6734,6 +6734,7 @@ function JobDetail({
           <div class="fr-row">Received the above mentioned Goods in good order and condition.</div>
           <div class="fr-row"><b>Receiver's Name:</b> ________________</div>
           <div class="fr-row"><b>Receiver's Signature with Seal:</b> ________________</div>
+          <div class="dc-recv-dc">DC No: ${dcNo}</div>
         </div>
       </div>
       <div class="dc-cheque">Cheque should be drawn under <strong>${firm.name || ''}</strong></div>
@@ -6756,7 +6757,7 @@ function JobDetail({
       <table class="dc-tbl"><thead><tr><th style="width:5%">Sr. No</th><th style="width:38%">Description</th><th style="width:22%">Media</th><th style="width:8%">Size In Inch<br>W</th><th style="width:8%">H</th><th style="width:7%">Qty</th><th style="width:8%">Sq.ft</th></tr></thead>
       <tbody>${dcItems.map(x => `<tr><td>${x.sr}</td><td class="desc rv-desc">${dcThumbHTML(x.img_url)}<span>${dcEsc(x.description)}</span></td><td class="mat">${dcEsc((x.media || '').split('\n')[0])}</td><td>${inW(x)}</td><td>${inH(x)}</td><td>${x.qty}</td><td>${x.sqft || ''}</td></tr>`).join('')}
       <tr class="tot"><td></td><td>TOTAL</td><td></td><td></td><td></td><td>${totQty}</td><td>${totSqft}</td></tr></tbody></table>
-      <div class="rv-foot"><div>CHECKED BY / APPROVAL BY<br>( FOR RIVET )<br><br>__________________</div><div>DATE INSTALLATION<br><br><br>__________________</div><div>NAME WITH DATE , SIGNATURE &amp; STAMP<br><br><br>__________________</div></div>
+      <div class="rv-foot"><div>CHECKED BY / APPROVAL BY<br>( FOR RIVET )<br><br>__________________</div><div>DATE INSTALLATION<br><br><br>__________________</div><div>NAME WITH DATE , SIGNATURE &amp; STAMP<br><br><br>__________________<br><span class="dc-recv-dc">DC No: ${dcNo}</span></div></div>
       <div class="rv-sup">SITE SUPERVISOR : __________________</div>
       <div class="dc-num">iPrint ref: ${dcNo}</div>
       </div></div>`;
@@ -6775,7 +6776,7 @@ function JobDetail({
       <div class="ws-recv">Please receive the above mentioned Goods in good order &amp; condition</div>
       <div class="ws-cin"><b>CIN NO.:</b> ______________________</div>
       <div class="dc-foot"><div class="dc-foot-l"><div class="fl-row"><b>Prepared by:</b> ${dcEsc(dcForm.prepared_by)}</div><div class="fl-row"><b>Delivered by :</b> ${dcEsc(dcForm.delivered_by)}</div></div>
-      <div class="dc-foot-r"><div class="fr-row"><b>Receivers name:</b> ________________</div><div class="fr-row"><b>Receivers Signature with company seal :</b> ________________</div></div></div>
+      <div class="dc-foot-r"><div class="fr-row"><b>Receivers name:</b> ________________</div><div class="fr-row"><b>Receivers Signature with company seal :</b> ________________</div><div class="dc-recv-dc">DC No: ${dcNo}</div></div></div>
       <div class="dc-num">iPrint ref: ${dcNo}</div>
       </div></div>`;
     const njlCopyHTML = copyLabel => `<div class="dc-copy"><div class="dc-box dc-njl">
@@ -6787,7 +6788,7 @@ function JobDetail({
       <table class="dc-tbl"><thead><tr><th style="width:20%">TYPE</th><th style="width:20%">IMAGE/ LOCATION</th><th style="width:24%">Media</th><th style="width:9%">Size in INCH<br>W</th><th style="width:9%">H</th><th style="width:8%">QTY</th><th style="width:10%">SQ.FT</th></tr></thead>
       <tbody>${dcItems.map(x => `<tr><td class="desc">${dcEsc(x.description)}</td><td class="img">${dcThumbHTML(x.img_url)}</td><td class="mat">${dcEsc((x.media || '').split('\n')[0])}</td><td>${inW(x)}</td><td>${inH(x)}</td><td>${x.qty}</td><td>${x.sqft || ''}</td></tr>`).join('')}
       <tr class="tot"><td>TOTAL</td><td></td><td></td><td></td><td></td><td>${totQty}</td><td>${totSqft}</td></tr></tbody></table>
-      <div class="njl-sign">Authorised Sign</div>
+      <div class="njl-sign">Authorised Sign <span class="dc-recv-dc">DC No: ${dcNo}</span></div>
       <div class="dc-num">iPrint ref: ${dcNo}</div>
       </div></div>`;
     const copyHTML = dcTplKey === 'rivet' ? rivetCopyHTML : dcTplKey === 'westudio' ? westudioCopyHTML : dcTplKey === 'njl' ? njlCopyHTML : stdCopyHTML;
@@ -6828,6 +6829,7 @@ function JobDetail({
       .fl-row,.fr-row{padding:3px 0;border-bottom:1px dashed #999}
       .dc-cheque{background:#e0e0e0;padding:4px;text-align:center;font-size:10.5px;border-top:1px solid #222}
       .dc-num{text-align:right;font-size:10px;padding:2px 6px;color:#555}
+      .dc-recv-dc{display:inline-block;margin-top:5px;padding:2px 7px;border:1.5px solid #111;font-size:13px;font-weight:800;color:#111;letter-spacing:.3px}
       .dc-tbl td.img{width:22mm;height:18mm;padding:1mm}
       .dc-thumb{max-width:20mm;max-height:16mm;object-fit:contain;display:block;margin:0 auto}
       .dc-tbl tr.tot td{font-weight:700;background:#f7f7f7}
