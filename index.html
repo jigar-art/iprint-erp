@@ -8151,6 +8151,7 @@ function JobDetail({
         if (!files.length) return;
         const newUrls = await uploadMultiple(files, sec.folder);
         if (newUrls.length) appendJobFiles(j.id, sec.field, newUrls);
+        if (newUrls.length && sec.field === 'dc_file_url') sb.rpc('erp_pod_no_dc_check', { p_job: String(j.id) }).then(r => { if (r && r.data && window._showToast) window._showToast('\u26a0\ufe0f ' + r.data, false); }, () => {});
       }
     }));
   })), (() => {
@@ -11979,6 +11980,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               dc_urls: merged
             } : x));
             show('📄 ' + urls.length + ' DC(s) uploaded!');
+            sb.rpc('erp_pod_no_dc_check', { p_job: String(b.job_id || '') }).then(r => { if (r && r.data && window._showToast) window._showToast('\u26a0\ufe0f ' + r.data, false); }, () => {});
           } else show('⚠️ DC save failed — ' + (window._lastSaveError || 'please retry'), false);
         }
       }
@@ -36720,13 +36722,25 @@ function RuleBlockBar({ user }) {
   const [b, setB] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
-    const log = (msg, action, source) => sb.from('erp_rule_blocks').insert({ message: msg, action: action || null, page: (() => { try { return localStorage.getItem('erp_pg'); } catch (e) { return null; } })(), source }).select('id').single().then(r => r.data ? r.data.id : null, () => null);
-    const onDb = async e => { const d = e.detail || {}; if (!d.msg) return; const id = await log(d.msg, d.action, 'db'); setB({ id, msg: d.msg, sent: '' }); };
+    const log = (msg, action, source) => sb.from('erp_rule_blocks').insert({ message: msg, action: action || null, page: (() => { try { return localStorage.getItem('erp_pg'); } catch (e) { return null; } })(), source }).select('id, owner_key, owner_step, escalate_key').single().then(r => r.data || null, () => null);
+    const onDb = async e => { const d = e.detail || {}; if (!d.msg) return; const row = await log(d.msg, d.action, 'db'); setB({ id: row ? row.id : null, owner: row ? row.owner_key : null, step: row ? row.owner_step : null, esc: row ? row.escalate_key : null, msg: d.msg, sent: '' }); };
     const onClient = e => { const d = e.detail || {}; if (d.msg && !/^\u2713|^\u2705/.test(d.msg)) log(d.msg, null, 'client'); };
     window.addEventListener('erp-rule-block', onDb); window.addEventListener('erp-client-block', onClient);
     return () => { window.removeEventListener('erp-rule-block', onDb); window.removeEventListener('erp-client-block', onClient); };
   }, []);
   if (!b) return null;
+  // 30 Oct 2026 (Jigar): name who the work is pending with; the blocked user sends it to them (Ask Jigar only for a real exception)
+  const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
+  const nmC = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
+  const shown = String(b.msg || '').replace(/\s*Pending with: .*$/, '');
+  const canSend = !!(b.owner && b.owner !== me);
+  const sendOwner = async () => {
+    if (!b.id) { setB({ ...b, sent: 'Could not log this - tell ' + nmC(b.owner) + ' directly' }); return; }
+    const note = prompt('Send this to ' + nmC(b.owner) + ' as a task.\n\n' + shown + '\n\nAdd a note (optional):', '');
+    if (note === null) return;
+    setBusy(true); const r = await sb.rpc('erp_rule_send_owner', { p_id: b.id, p_note: note }); setBusy(false);
+    setB({ ...b, sent: r.error ? '\u26a0\ufe0f ' + r.error.message : '\u2713 ' + String(r.data || 'sent').replace(/^./, c => c.toUpperCase()) + ' - it is in their tasks' });
+  };
   const ask = async () => {
     if (!b.id) { setB({ ...b, sent: 'Could not log this - send Jigar a screenshot' }); return; }
     const why = prompt('This goes to Jigar as a task.\n\nBlocked: ' + b.msg + '\n\nWhy should it go through? (job, what happened)', '');
@@ -36738,8 +36752,13 @@ function RuleBlockBar({ user }) {
     React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
       React.createElement("b", null, '\u26d4 The ERP stopped this'),
       React.createElement("button", { type: 'button', onClick: () => setB(null), style: { background: 'none', border: 'none', color: '#fca5a5', fontSize: 18, cursor: 'pointer', lineHeight: 1 } }, '\u2715')),
-    React.createElement("div", { style: { marginTop: 4, color: '#fee2e2' } }, b.msg),
+    React.createElement("div", { style: { marginTop: 4, color: '#fee2e2' } }, shown),
+    b.owner ? React.createElement("div", { style: { marginTop: 6, padding: '6px 8px', borderRadius: 8, background: '#3b1a1a', color: '#fde68a', fontSize: 12.5, fontWeight: 700 } },
+      b.owner === me ? '\ud83d\udc49 This is pending with you (' + (b.step || '') + ')' : '\ud83d\udc64 Pending with: ' + nmC(b.owner) + ' (' + (b.step || '') + ')' + (b.esc ? ' \u00b7 escalation: ' + nmC(b.esc) : '')) : null,
     b.sent ? React.createElement("div", { style: { marginTop: 6, color: /^\u2713/.test(b.sent) ? '#86efac' : '#fca5a5' } }, b.sent)
+      : canSend ? React.createElement("div", { style: { display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' } },
+        React.createElement("button", { type: 'button', disabled: busy, onClick: sendOwner, style: { padding: '7px 14px', borderRadius: 8, border: '1px solid #f59e0b', background: '#b45309', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' } }, busy ? 'Sending\u2026' : 'Send to ' + nmC(b.owner)),
+        React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { background: 'none', border: 'none', color: '#fca5a5', fontSize: 11.5, textDecoration: 'underline', cursor: 'pointer', padding: 0 } }, 'Real exception? Ask Jigar'))
       : React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' } },
         React.createElement("span", { style: { fontSize: 12, color: '#fca5a5' } }, 'Fix it as the message says - or, if it is genuinely right:'),
         React.createElement("button", { type: 'button', disabled: busy, onClick: ask, style: { padding: '6px 12px', borderRadius: 8, border: '1px solid #f47067', background: '#7f1d1d', color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' } }, busy ? 'Sending\u2026' : 'Ask Jigar for an exception')));
