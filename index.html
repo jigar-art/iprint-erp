@@ -24458,6 +24458,26 @@ function AccountsDocsMissing({ jobs }) {
         })))));
 }
 
+// 31 Oct 2026 (Jigar): the ERP reads kg / \u20b9 / AWB from the docket photo; a mismatch is sent back to Manoj with the reason
+function erpDocketStatusLine(l, fixNumbers, setUpd, show) {
+  const st = l.docket_status;
+  if (!st) return null;
+  let me = ''; try { me = String(JSON.parse(localStorage.getItem('erp_user') || '{}').name || '').toUpperCase().split(' ')[0]; } catch (e) {}
+  const box = (color, txt, extra) => React.createElement("div", { style: { color, marginTop: 2, fontSize: 10, lineHeight: 1.35, maxWidth: 260, whiteSpace: 'normal' } }, txt, extra || null);
+  if (st === 'checking') return box('#93c5fd', '\u23f3 ERP is reading the docket\u2026 (refresh in a minute)');
+  if (st === 'pass') return box('#4ade80', '\u2713 ' + (+l.actual_weight > 0 ? 'kg + \u20b9 match' : '\u20b9 matches') + ' the docket photo');
+  if (st === 'accepted') return box('#86efac', '\u2713 Docket accepted' + (l.docket_decided_by ? ' by ' + l.docket_decided_by : ''));
+  const btn = (label, onClick, color) => React.createElement("button", { type: 'button', className: 'b bs', onClick, style: { fontSize: 9, padding: '2px 7px', marginTop: 3, marginRight: 4, color: color || '#fbbf24' } }, label);
+  const accept = ['JIGAR', 'AMOL'].includes(me) ? btn('\u2713 Accept', async () => {
+    const note = prompt('Why is this docket OK? (e.g. weight is on the courier bill)'); if (note === null) return;
+    const r = await sb.rpc('erp_docket_decide', { p_dispatch: l.id, p_note: note });
+    if (r.error) { show('\u26a0\ufe0f ' + r.error.message, false); return; }
+    setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), docket_status: 'accepted', docket_decided_by: me } })); show('\u2713 Docket accepted'); }, '#86efac') : null;
+  return box(st === 'returned' ? '#fca5a5' : '#fbbf24', (st === 'returned' ? '\u26d4 Sent back: ' : '\u26a0\ufe0f ') + (l.docket_reason || 'docket does not match'),
+    React.createElement("div", null, btn('\u270f\ufe0f Fix kg / \u20b9', () => fixNumbers(l, null)),
+      React.createElement("label", { className: 'b bs', style: { fontSize: 9, padding: '2px 7px', marginTop: 3, marginRight: 4, cursor: 'pointer', display: 'inline-block', color: '#93c5fd' } }, '\ud83e\uddfe Upload right docket',
+        React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: e => fixNumbers(l, e.target.files && e.target.files[0]) })), accept));
+}
 function DispPage({
   logs,
   setDLogs,
@@ -24621,19 +24641,19 @@ function DispPage({
     erpPodProofCheck(l.id, l.job_id);
   };
   const addDocket = async (l, file) => {
-    if (!file) return;
+    if (!file && !l.docket_url) return;
     const amt = prompt('Actual \u20b9 the courier charged' + (l.courier_request_id ? ' for \ud83d\ude9a #' + l.courier_request_id : '') + ':', l.actual_cost || '');
     if (amt === null) return;
     if (!(+amt > 0)) { show('\u26a0\ufe0f Enter the \u20b9 amount', false); return; }
     const mc = (modes || []).find(m => m.mode === l.dispatch_mode);
     let kg = l.actual_weight || null;
     if (mc && mc.rate_basis === 'per_kg') { const k = prompt('Weight charged on the docket (kg):', kg || ''); if (k === null) return; if (!(+k > 0)) { show('\u26a0\ufe0f Enter the weight', false); return; } kg = +k; if ((+amt / kg < 20 || kg >= 100) && !confirm('\u20b9' + Math.round(+amt) + ' for ' + kg + ' kg = \u20b9' + (+amt / kg).toFixed(1) + ' per kg. Is ' + kg + ' the WEIGHT in kg (not the rate)? OK = yes, Cancel = fix it')) return; }
-    const url = await uploadFile(file, 'courier-docket');
+    const url = file ? await uploadFile(file, 'courier-docket') : l.docket_url;
     if (!url) { show('\u26a0\ufe0f Upload failed', false); return; }
     const { error } = await sb.from('dispatch_logs').update({ actual_cost: +amt, actual_weight: kg, docket_url: url }).eq('id', l.id);
     if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
-    setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), actual_cost: +amt, actual_weight: kg, docket_url: url } }));
-    show('\u2713 Docket + \u20b9' + Math.round(+amt) + ' saved');
+    setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), actual_cost: +amt, actual_weight: kg, docket_url: url, docket_status: 'checking', docket_reason: null } }));
+    show('\u2713 Docket + \u20b9' + Math.round(+amt) + ' saved \u2014 the ERP now checks kg / \u20b9 against the docket photo');
   };
   const [agLocal, setAgLocal] = useState(agencies || []);
   useEffect(() => {
@@ -25120,7 +25140,7 @@ function DispPage({
         carrier ? React.createElement("div", { style: { color: "#94a3b8" } }, carrier) : null,
         (() => { const mc = (modes || []).find(m => m.mode === l.dispatch_mode); if (!mc || !mc.rate_basis || mc.rate_basis === 'none') return null;
           return +l.actual_cost > 0 && l.docket_url
-            ? React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + (+l.actual_weight > 0 ? ' \u00b7 ' + l.actual_weight + ' kg = \u20b9' + Math.round(l.actual_cost / l.actual_weight) + '/kg' : '') + ' \u2713 docket')
+            ? React.createElement(React.Fragment, null, erpDocketStatusLine(l, addDocket, setUpd, show), React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + (+l.actual_weight > 0 ? ' \u00b7 ' + l.actual_weight + ' kg = \u20b9' + Math.round(l.actual_cost / l.actual_weight) + '/kg' : '') + (['returned', 'error'].includes(l.docket_status) ? ' \u00b7 docket' : ' \u2713 docket')))
             : React.createElement("label", { className: "b bs", style: { fontSize: 9, padding: "2px 8px", cursor: "pointer", marginTop: 3, display: 'inline-block', color: '#fbbf24' } }, '\ud83e\uddfe Add docket + \u20b9',
                 React.createElement("input", { type: "file", accept: "image/*,application/pdf", style: { display: "none" }, onChange: e => addDocket(l, e.target.files && e.target.files[0]) })); })()),
       React.createElement("td", { className: "mn" }, l.challan_no || '\u2014'),
