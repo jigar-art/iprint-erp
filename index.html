@@ -24467,6 +24467,12 @@ function erpDocketStatusLine(l, fixNumbers, setUpd, show) {
   if (st === 'checking') return box('#93c5fd', '\u23f3 ERP is reading the docket\u2026 (refresh in a minute)');
   if (st === 'pass') return box('#4ade80', '\u2713 ' + (+l.actual_weight > 0 ? 'kg + \u20b9 match' : '\u20b9 matches') + ' the docket photo');
   if (st === 'accepted') return box('#86efac', '\u2713 Docket accepted' + (l.docket_decided_by ? ' by ' + l.docket_decided_by : ''));
+  if (st === 'awaited') {
+    const days = l.docket_awaited_since ? Math.floor((Date.now() - new Date(l.docket_awaited_since).getTime()) / 864e5) : 0;
+    return box(days >= 7 ? '#fca5a5' : '#fbbf24', '\ud83d\udd52 Courier kg + \u20b9 awaited' + (days ? ' (' + days + ' day' + (days > 1 ? 's' : '') + ')' : '') + ' \u2014 add the courier\u2019s detail sheet / bill when it comes' + (days >= 7 ? '. Overdue.' : ' (3-5 working days).'),
+      React.createElement("div", null, React.createElement("label", { className: 'b bs', style: { fontSize: 9, padding: '2px 7px', marginTop: 3, marginRight: 4, cursor: 'pointer', display: 'inline-block', color: '#93c5fd' } }, '\ud83e\uddfe Add courier details',
+        React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: e => fixNumbers(l, e.target.files && e.target.files[0]) }))));
+  }
   const btn = (label, onClick, color) => React.createElement("button", { type: 'button', className: 'b bs', onClick, style: { fontSize: 9, padding: '2px 7px', marginTop: 3, marginRight: 4, color: color || '#fbbf24' } }, label);
   const accept = ['JIGAR', 'AMOL'].includes(me) ? btn('\u2713 Accept', async () => {
     const note = prompt('Why is this docket OK? (e.g. weight is on the courier bill)'); if (note === null) return;
@@ -24648,6 +24654,7 @@ function DispPage({
     const mc = (modes || []).find(m => m.mode === l.dispatch_mode);
     let kg = l.actual_weight || null;
     if (mc && mc.rate_basis === 'per_kg') { const k = prompt('Weight charged on the docket (kg):', kg || ''); if (k === null) return; if (!(+k > 0)) { show('\u26a0\ufe0f Enter the weight', false); return; } kg = +k; if ((+amt / kg < 20 || kg >= 100) && !confirm('\u20b9' + Math.round(+amt) + ' for ' + kg + ' kg = \u20b9' + (+amt / kg).toFixed(1) + ' per kg. Is ' + kg + ' the WEIGHT in kg (not the rate)? OK = yes, Cancel = fix it')) return; }
+    if (!file && +amt === +l.actual_cost && kg === (l.actual_weight || null)) { show('Nothing changed - correct the kg / \u20b9 or upload the right docket', false); return; }
     const url = file ? await uploadFile(file, 'courier-docket') : l.docket_url;
     if (!url) { show('\u26a0\ufe0f Upload failed', false); return; }
     const { error } = await sb.from('dispatch_logs').update({ actual_cost: +amt, actual_weight: kg, docket_url: url }).eq('id', l.id);
@@ -25140,7 +25147,7 @@ function DispPage({
         carrier ? React.createElement("div", { style: { color: "#94a3b8" } }, carrier) : null,
         (() => { const mc = (modes || []).find(m => m.mode === l.dispatch_mode); if (!mc || !mc.rate_basis || mc.rate_basis === 'none') return null;
           return +l.actual_cost > 0 && l.docket_url
-            ? React.createElement(React.Fragment, null, erpDocketStatusLine(l, addDocket, setUpd, show), React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + (+l.actual_weight > 0 ? ' \u00b7 ' + l.actual_weight + ' kg = \u20b9' + Math.round(l.actual_cost / l.actual_weight) + '/kg' : '') + (['returned', 'error'].includes(l.docket_status) ? ' \u00b7 docket' : ' \u2713 docket')))
+            ? React.createElement(React.Fragment, null, erpDocketStatusLine(l, addDocket, setUpd, show), React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + (+l.actual_weight > 0 ? ' \u00b7 ' + l.actual_weight + ' kg = \u20b9' + Math.round(l.actual_cost / l.actual_weight) + '/kg' : '') + (['returned', 'error', 'awaited'].includes(l.docket_status) ? ' \u00b7 tracking / docket' : ' \u2713 docket')))
             : React.createElement("label", { className: "b bs", style: { fontSize: 9, padding: "2px 8px", cursor: "pointer", marginTop: 3, display: 'inline-block', color: '#fbbf24' } }, '\ud83e\uddfe Add docket + \u20b9',
                 React.createElement("input", { type: "file", accept: "image/*,application/pdf", style: { display: "none" }, onChange: e => addDocket(l, e.target.files && e.target.files[0]) })); })()),
       React.createElement("td", { className: "mn" }, l.challan_no || '\u2014'),
