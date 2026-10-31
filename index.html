@@ -24627,7 +24627,7 @@ function DispPage({
     if (!(+amt > 0)) { show('\u26a0\ufe0f Enter the \u20b9 amount', false); return; }
     const mc = (modes || []).find(m => m.mode === l.dispatch_mode);
     let kg = l.actual_weight || null;
-    if (mc && mc.rate_basis === 'per_kg') { const k = prompt('Weight charged on the docket (kg):', kg || ''); if (k === null) return; if (!(+k > 0)) { show('\u26a0\ufe0f Enter the weight', false); return; } kg = +k; }
+    if (mc && mc.rate_basis === 'per_kg') { const k = prompt('Weight charged on the docket (kg):', kg || ''); if (k === null) return; if (!(+k > 0)) { show('\u26a0\ufe0f Enter the weight', false); return; } kg = +k; if ((+amt / kg < 20 || kg >= 100) && !confirm('\u20b9' + Math.round(+amt) + ' for ' + kg + ' kg = \u20b9' + (+amt / kg).toFixed(1) + ' per kg. Is ' + kg + ' the WEIGHT in kg (not the rate)? OK = yes, Cancel = fix it')) return; }
     const url = await uploadFile(file, 'courier-docket');
     if (!url) { show('\u26a0\ufe0f Upload failed', false); return; }
     const { error } = await sb.from('dispatch_logs').update({ actual_cost: +amt, actual_weight: kg, docket_url: url }).eq('id', l.id);
@@ -24699,6 +24699,7 @@ function DispPage({
     const paidMode = modeCfg && modeCfg.rate_basis && modeCfg.rate_basis !== 'none';
     // 21 Oct 2026 (Jigar): docket / bill can come after delivery - add later from the row (🧾); needed before billing
     if (paidMode && +f.actual_cost > 0 && modeCfg.rate_basis === 'per_kg' && !(+f.actual_weight > 0)) { alert("Enter the weight charged on the docket (kg)"); return; }
+    if (paidMode && modeCfg.rate_basis === 'per_kg' && +f.actual_cost > 0 && +f.actual_weight > 0 && (+f.actual_cost / +f.actual_weight < 20 || +f.actual_weight >= 100) && !confirm('\u20b9' + Math.round(+f.actual_cost) + ' for ' + f.actual_weight + ' kg = \u20b9' + (+f.actual_cost / +f.actual_weight).toFixed(1) + ' per kg. Is ' + f.actual_weight + ' the WEIGHT in kg (not the rate)? OK = yes, Cancel = fix it')) return;
     if (f.dispatch_type.includes("Install") && !String(f.installer || '').trim()) { alert("Delivery + Install needs the installer name"); return; }
     if (isCourier) {
       if (!String(f.vendor_name || '').trim()) {
@@ -25119,7 +25120,7 @@ function DispPage({
         carrier ? React.createElement("div", { style: { color: "#94a3b8" } }, carrier) : null,
         (() => { const mc = (modes || []).find(m => m.mode === l.dispatch_mode); if (!mc || !mc.rate_basis || mc.rate_basis === 'none') return null;
           return +l.actual_cost > 0 && l.docket_url
-            ? React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + ' \u2713 docket')
+            ? React.createElement("div", { style: { color: "#4ade80", marginTop: 2 } }, '\ud83d\ude9a ' + (l.courier_request_id ? '#' + l.courier_request_id + ' \u00b7 ' : '') + '\u20b9' + Math.round(+l.actual_cost) + (+l.actual_weight > 0 ? ' \u00b7 ' + l.actual_weight + ' kg = \u20b9' + Math.round(l.actual_cost / l.actual_weight) + '/kg' : '') + ' \u2713 docket')
             : React.createElement("label", { className: "b bs", style: { fontSize: 9, padding: "2px 8px", cursor: "pointer", marginTop: 3, display: 'inline-block', color: '#fbbf24' } }, '\ud83e\uddfe Add docket + \u20b9',
                 React.createElement("input", { type: "file", accept: "image/*,application/pdf", style: { display: "none" }, onChange: e => addDocket(l, e.target.files && e.target.files[0]) })); })()),
       React.createElement("td", { className: "mn" }, l.challan_no || '\u2014'),
@@ -36530,7 +36531,7 @@ function CourierFab({ user }) {
   // 25 Oct 2026 (Jigar): shared PODs that Manoj / Murli must sort out
   const [pods, setPods] = React.useState([]);
   const [podTick, setPodTick] = React.useState({});
-  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '', sent: false, sentOn: '', docket: '', docketNo: '' });
+  const blank = () => ({ job: '', jobId: '', dc: '', dest: '', name: '', phone: '', pin: '', addr: '', vendor: '', inst: '', mode: '', courier: '', n: '', type: '', kg: '', rate: '', extras: '', eta: '', note: '', busFrom: '', busDep: '', sent: false, sentOn: '', docket: '', docketNo: '', fast: false });
   const [f, setF] = React.useState(blank);
   const [dcs, setDcs] = React.useState(null);
   const [sum, setSum] = React.useState(null);
@@ -36604,7 +36605,7 @@ function CourierFab({ user }) {
     const itemIds = dcItems.length && (onIdx.length < dcItems.length || tickedIds.length === onIdx.length) ? tickedIds : null;
     const p = { dc_id: f.dc, dest_type: f.dest, consignee_name: f.name, consignee_phone: f.phone, dest_pincode: f.pin, dest_address: f.addr, vendor_name: f.vendor || null,
       install_date: f.dest === 'site_installer' ? f.inst || null : null, mode: f.mode, courier_name: f.courier, pkg_count: n, pkg_type: type, weight_kg: f.kg || null,
-      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, docket_no: f.sent ? String(f.docketNo || '').trim() : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds,
+      rate: f.rate || null, extras: f.extras || null, pkg_photo_urls: pics, fast_track: ['Air Courier', 'Surface Courier'].includes(f.mode) && !!f.fast, already_sent: !!f.sent, sent_on: f.sent ? f.sentOn : null, docket_no: f.sent ? String(f.docketNo || '').trim() : null, eta_courier: f.eta, note: [busNote, f.note].filter(Boolean).join(' · '), item_ids: itemIds,
       bus_departs: f.mode === 'Running Bus' && f.busDep ? new Date(f.busDep).toISOString() : null, collect_from: f.mode === 'Running Bus' ? f.busFrom.trim() : null, sqft: f.sqft || null };
     if (f.mode === 'Running Bus') p.dest_address = 'Collect from: ' + f.busFrom.trim();
     setBusy(true);
@@ -36664,7 +36665,11 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', inputMode: 'numeric', value: f.pin, onChange: e => setF({ ...f, pin: e.target.value }), placeholder: 'Pincode', style: { ...inp, width: 100 } })),
     f.dest === 'warehouse' ? React.createElement("input", { className: 'in', value: f.addr, onChange: e => setF({ ...f, addr: e.target.value }), placeholder: 'Warehouse / place address', style: inp }) : null,
     lab('3 · Mode and packing'),
-    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, modes.map(m => React.createElement("button", { key: m.mode, type: 'button', onClick: () => setF({ ...f, mode: m.mode, type: m.rate_basis === 'per_roll' ? 'roll' : f.type }), style: chip(f.mode === m.mode) }, m.mode))),
+    React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, modes.map(m => React.createElement("button", { key: m.mode, type: 'button', onClick: () => setF({ ...f, mode: m.mode, fast: false, type: m.rate_basis === 'per_roll' ? 'roll' : f.type }), style: chip(f.mode === m.mode) }, m.mode))),
+    ['Air Courier', 'Surface Courier'].includes(f.mode) ? React.createElement("div", { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+      React.createElement("button", { type: 'button', onClick: () => setF({ ...f, fast: false }), style: chip(!f.fast) }, 'Normal ' + (f.mode === 'Air Courier' ? 'Air' : 'Surface')),
+      React.createElement("button", { type: 'button', onClick: () => setF({ ...f, fast: true }), style: chip(!!f.fast) }, '\u26a1 Fast track'),
+      f.mode === 'Air Courier' ? React.createElement("span", { style: { fontSize: 11, color: '#94a3b8', alignSelf: 'center' } }, 'Normal \u2248 \u20b9120-130/kg \u00b7 Fast \u2248 \u20b9250-275/kg') : null) : null,
     React.createElement("input", { className: 'in', value: f.courier, onChange: e => setF({ ...f, courier: e.target.value }), placeholder: f.mode === 'Running Bus' ? 'Bus operator / bus no.' : 'Courier / transporter name', style: inp }),
     // 21 Oct 2026 (Jigar): bus parcels are collected from the bus office at the destination - where + when
     f.mode === 'Running Bus' ? React.createElement("input", { className: 'in', value: f.busFrom, onChange: e => setF({ ...f, busFrom: e.target.value }), placeholder: 'Collect from: bus office / stand at destination (name + area)', style: inp }) : null,
@@ -36700,6 +36705,7 @@ function CourierFab({ user }) {
       React.createElement("input", { className: 'in', type: 'number', inputMode: 'decimal', value: f.extras, onChange: e => setF({ ...f, extras: e.target.value }), placeholder: '+ extras ₹', style: { ...inp, width: 100 } }),
       React.createElement("span", { style: { fontSize: 12.5, color: '#e2e8f0', fontWeight: 800 } }, calc != null ? '= ₹' + Math.round(calc) : basis === 'per_roll' ? 'rate later' : '')) : React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'Pick the mode first'),
     (basis === 'per_kg' && +f.rate > 300) || (calc != null && calc > 5000) ? React.createElement("div", { style: { fontSize: 12, color: '#fca5a5', fontWeight: 700 } }, '⚠️ ₹' + Math.round(calc || 0).toLocaleString('en-IN') + (basis === 'per_kg' ? ' (₹' + f.rate + ' per kg × ' + (f.kg || 0) + ' kg)' : '') + ' — is that right? ' + (basis === 'per_kg' ? 'Enter the rate PER KG, not the total.' : '')) : null,
+    basis === 'per_kg' && +f.rate > 0 && +f.rate < 20 ? React.createElement("div", { style: { fontSize: 12, color: '#fca5a5', fontWeight: 700 } }, '\u26a0\ufe0f \u20b9' + f.rate + ' per kg is too low - is that the weight? Rate goes here, weight above.') : null,
     basis === 'per_roll' ? React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8' } }, 'Porter / Wefast to the station or airport: claim it in Petty cash and pick this 🚚 request there.') : null,
     React.createElement("label", { style: { fontSize: 12, color: '#cbd5e1', display: 'flex', gap: 6, alignItems: 'center' } }, f.sent ? 'Delivered on / expected' : 'Delivery date the courier promised',
       React.createElement("input", { className: 'in', type: 'date', value: f.eta, min: f.sent ? (f.sentOn || undefined) : new Date(Date.now() + 19800000).toISOString().slice(0, 10), onChange: e => setF({ ...f, eta: e.target.value }), style: inp })),
@@ -36714,7 +36720,7 @@ function CourierFab({ user }) {
     me === 'JIGAR' ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const x = await sb.rpc('erp_review_clear', { p_kind: 'courier', p_id: String(r.id) }); setMsg(x.error ? '\u26a0\ufe0f ' + x.error.message : '\u2713 #' + r.id + ' ' + x.data); load(); }, style: { ...chip(false), marginLeft: 8 } }, '\u2713 Reviewed') : null) : null;
   const card_ = r => React.createElement("div", { key: r.id, style: { padding: '9px 0', borderTop: '1px solid #1f2937', fontSize: 12.5, color: '#e2e8f0' } },
     React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
-      React.createElement("span", null, React.createElement("b", null, '#' + r.id + ' · ' + r.job_id), ' · ', r.client_name || '', ' · ', r.mode, r.courier_name ? ' (' + r.courier_name + ')' : ''),
+      React.createElement("span", null, React.createElement("b", null, '#' + r.id + ' · ' + r.job_id), ' · ', r.client_name || '', ' · ', r.mode, r.fast_track ? ' \u26a1 Fast track' : '', r.courier_name ? ' (' + r.courier_name + ')' : ''),
       React.createElement("span", { style: { fontSize: 11, color: r.status === 'approved' ? '#4ade80' : r.status === 'rejected' ? '#f87171' : '#fbbf24', whiteSpace: 'nowrap' } }, st(r))),
     r.v2 ? React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', marginTop: 2 } },
       [r.pkg_count + ' ' + r.pkg_type + 's', r.weight_kg ? r.weight_kg + ' kg' : null, r.dc_no ? 'DC ' + r.dc_no : null, destTxt(r)].filter(Boolean).join(' · '),
@@ -36733,8 +36739,10 @@ function CourierFab({ user }) {
       React.createElement("span", { style: { position: 'absolute', bottom: 0, right: 2, fontSize: 10, fontWeight: 800, color: '#fff', textShadow: '0 0 3px #000' } }, (i + 1) + '/' + r.pkg_count)))) : null,
     r.v2 && r.status === 'pending' && (String(r.requested_by || '').toUpperCase() === me || ['JIGAR', 'AMOL'].includes(me)) ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => {
         const rt = prompt('Correct rate for #' + r.id + ' (' + (CR_BASIS[r.rate_basis] || '₹') + '):', r.rate || ''); if (rt === null) return;
+        if (r.rate_basis === 'per_kg' && +rt > 0 && +rt < 20 && !confirm('\u20b9' + rt + ' per kg looks like a weight. Save anyway?')) return;
         let kg = r.weight_kg; if (r.rate_basis === 'per_kg') { const k = prompt('Weight (kg):', kg || ''); if (k === null) return; kg = k; }
-        setBusy(true); const x = await sb.rpc('erp_courier_edit', { p_id: r.id, p: { rate: rt, weight_kg: kg } }); setBusy(false);
+        const ft = ['Air Courier', 'Surface Courier'].includes(r.mode) ? confirm('Is #' + r.id + ' FAST TRACK? (now: ' + (r.fast_track ? 'Fast track' : 'Normal') + ')\nOK = Fast track, Cancel = Normal') : false;
+        setBusy(true); const x = await sb.rpc('erp_courier_edit', { p_id: r.id, p: { rate: rt, weight_kg: kg, fast_track: ft } }); setBusy(false);
         setMsg(x.error ? '⚠️ ' + x.error.message : '✓ #' + r.id + ' ' + x.data); load(); },
       style: { marginTop: 6, padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#fde68a', border: '1px solid #a16207', background: 'transparent' } }, '✏️ Correct rate / weight') : null,
     r.can_cancel ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => { const why = prompt('Cancel 🚚 #' + r.id + ' (approved, not dispatched). Why? e.g. courier refused the parcel, mode changed'); if (why === null) return;
@@ -38735,6 +38743,7 @@ function CatchupDispatchModal({ jobId, user, onClose, podUrl }) {
           React.createElement("div", null, lab('Type'), React.createElement("select", { className: 'in', value: f.pkg_type, onChange: e => set('pkg_type', e.target.value), style: inp }, ['box', 'roll', 'bundle', 'sheet', 'crate'].map(t => React.createElement("option", { key: t, value: t }, t)))),
           React.createElement("div", null, lab('Weight (kg)'), React.createElement("input", { className: 'in', inputMode: 'decimal', value: f.weight_kg, onChange: e => set('weight_kg', e.target.value), style: inp })),
           React.createElement("div", null, lab('Rate ₹'), React.createElement("input", { className: 'in', inputMode: 'decimal', value: f.rate, onChange: e => set('rate', e.target.value), style: inp })),
+          ['Air Courier', 'Surface Courier'].includes(f.mode) ? React.createElement("label", { style: { gridColumn: '1 / -1', fontSize: 12.5, display: 'flex', gap: 6, alignItems: 'center', color: '#e2e8f0' } }, React.createElement("input", { type: 'checkbox', checked: !!f.fast_track, onChange: e => set('fast_track', e.target.checked) }), '\u26a1 Fast track (not normal ' + (f.mode === 'Air Courier' ? 'Air' : 'Surface') + ')') : null,
           React.createElement("div", null, lab('Docket / bill photo'), React.createElement("label", { style: { ...inp, display: 'block', cursor: 'pointer', color: f.docket_photo_urls.length ? '#86efac' : '#93c5fd', border: '1px dashed #334155', borderRadius: 8 } }, f.docket_photo_urls.length ? '✓ ' + f.docket_photo_urls.length + ' added' : '+ add',
             React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: e => upload(e.target.files && e.target.files[0], 'docket_photo_urls', true) }))),
           f.mode === 'Running Bus' ? React.createElement("div", { style: { gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
