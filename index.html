@@ -4226,6 +4226,8 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(TaskAlertsGate, {
     user: user
+  }) : null, user ? React.createElement(CourierBriefGate, {
+    user: user
   }) : null, user ? React.createElement(DocketSignPopup, {
     user: user,
     onOpen: () => setPg('acc')
@@ -37019,6 +37021,88 @@ function V5ChangeGate({ user }) {
         React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
         'I have read and understood my score card and tasks'),
       React.createElement("button", { type: 'button', disabled: !ok || busy, onClick: done, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: ok ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: ok ? 'pointer' : 'default' } }, '✓ Continue')));
+}
+// 31 Oct 2026 (Jigar): show the courier Fast Track + docket photo check changes once to Amol, Murli, Manoj, Aparna.
+// Recorded in point_brief_responses (brief_version 2026-10-31-courier). Reopen from the + menu until 15 Nov. Jigar: + menu preview only.
+const CB_WHO = ['AMOL', 'MURLI', 'MANOJ', 'APARNA'];
+function CourierBriefGate({ user }) {
+  const V = '2026-10-31-courier';
+  const me = pbKey(user);
+  const inRole = CB_WHO.includes(me);
+  const until = new Date() < new Date('2026-11-15T00:00:00+05:30');
+  const [st, setSt] = React.useState('loading');
+  const [seen, setSeen] = React.useState(false);
+  const [ok, setOk] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (!user || !until || !(inRole || me === 'JIGAR')) { setSt('off'); return; }
+    if (!inRole) { setSt('hidden'); return; }
+    let done = false; try { done = sessionStorage.getItem('cb31_done') === '1'; } catch (e) {}
+    sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => {
+      if (r.error || (r.data || []).length) { setSeen(true); setSt('hidden'); return; }
+      setSt(done ? 'hidden' : 'show');
+    });
+  }, [me]);
+  if (st === 'off' || st === 'loading') return null;
+  if (st === 'hidden') return React.createElement(QuickSlot, { k: 'courierbrief', order: 10, label: 'Courier changes', icon: 'news', onClick: () => { setOk(false); setSt('show'); } });
+  const close = async () => {
+    if (!seen && inRole) {
+      setBusy(true);
+      const r = await sb.from('point_brief_responses').insert({ person_name: user.name, brief_version: V, response: 'accepted', comment: null, lang: 'en' });
+      setBusy(false);
+      if (!r.error) setSeen(true);
+    }
+    try { sessionStorage.setItem('cb31_done', '1'); } catch (e) {}
+    setSt('hidden');
+  };
+  const li = { fontSize: 13.5, color: '#e2e8f0', lineHeight: 1.5, margin: '5px 0' };
+  const card = { background: '#0d1320', border: '1px solid #1f2937', borderRadius: 12, padding: 12, marginTop: 12 };
+  const h = { fontSize: 12.5, fontWeight: 800, color: '#e3a008', marginBottom: 6, letterSpacing: .3, textTransform: 'uppercase' };
+  const shot = { background: '#05080f', border: '1px dashed #334155', borderRadius: 10, padding: 10, margin: '8px 0', pointerEvents: 'none' };
+  const cap = { fontSize: 11, color: '#64748b', marginBottom: 6 };
+  const chip = on => ({ padding: '6px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, border: '1px solid ' + (on ? '#e3a008' : '#334155'), background: on ? '#e3a008' : 'transparent', color: on ? '#111' : '#e2e8f0' });
+  const row = (title, sub, l) => React.createElement("div", { style: { padding: '6px 0', borderTop: '1px solid #1f2937', fontSize: 12 } },
+    React.createElement("b", { style: { color: '#e2e8f0' } }, title), React.createElement("div", { style: { color: '#94a3b8' } }, sub),
+    erpDocketStatusLine(l, () => {}, () => {}, () => {}));
+  const yours = {
+    MANOJ: ['Raising a 🚚 by Air / Surface Courier: tap Normal or ⚡ Fast track.', 'At booking upload the tracking page as now - the row shows "kg + ₹ awaited".', 'When the courier sends the details (3-5 working days): Dispatch page → "🧾 Add courier details" on that row, type the kg and ₹ exactly as on it.', 'Job 12001 is sent back - the tracking page is for a different docket. Upload the right one.'],
+    MURLI: ['Raising a 🚚 by Air / Surface Courier: tap Normal or ⚡ Fast track.', 'Any dispatch you log with a docket is checked the same way - add the courier details when they come.'],
+    AMOL: ['🚚 cards now show "⚡ Fast track" - its rate is compared only with other Fast track bookings.', 'Dispatch rows sent back by the ERP: you (and Jigar) can tap "✓ Accept" with a reason when the docket is OK.'],
+    APARNA: ['Dispatch rows show the docket status. "⛔ Sent back" or "🕒 awaited" means the courier cost is not yet proven - ask Manoj before treating the cost as final.']
+  }[me] || ['Preview - this is what Amol, Murli, Manoj and Aparna see once.'];
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99994, background: 'rgba(3,6,12,.96)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 640, margin: '0 auto' } },
+      React.createElement("div", { style: { fontSize: 19, fontWeight: 900, color: '#e3a008' } }, '🚚 Courier changes — 31 Oct'),
+      React.createElement("div", { style: { fontSize: 12.5, color: '#94a3b8', marginTop: 2 } }, 'Two minutes. Three changes.'),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, '1 · Fast track is its own option'),
+        React.createElement("div", { style: li }, 'Fast track costs about double normal Air, so the ERP now keeps them apart. Pick it when you book Fast track.'),
+        React.createElement("div", { style: shot }, React.createElement("div", { style: cap }, 'On the 🚚 courier form'),
+          React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, React.createElement("span", { style: chip(true) }, 'Air Courier'), React.createElement("span", { style: chip(false) }, 'Surface Courier')),
+          React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' } }, React.createElement("span", { style: chip(false) }, 'Normal Air'), React.createElement("span", { style: chip(true) }, '⚡ Fast track'),
+            React.createElement("span", { style: { fontSize: 11, color: '#94a3b8' } }, 'Normal ≈ ₹120-130/kg · Fast ≈ ₹250-275/kg'))),
+        React.createElement("div", { style: li }, 'Wrong choice? "✏️ Correct rate / weight" on the 🚚 card now also asks Fast track or Normal.')),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, '2 · Weight goes in the weight box'),
+        React.createElement("div", { style: li }, 'Some dockets had the rate (₹275) typed as the weight (275 kg). The ERP now asks before saving:'),
+        React.createElement("div", { style: shot }, React.createElement("div", { style: { fontSize: 12.5, color: '#fde68a' } }, '₹1,650 for 275 kg = ₹6.0 per kg. Is 275 the WEIGHT in kg (not the rate)?'),
+          React.createElement("div", { style: { fontSize: 12, color: '#fca5a5', fontWeight: 700, marginTop: 6 } }, '⚠️ ₹8 per kg is too low - is that the weight? Rate goes here, weight above.'))),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, '3 · The ERP checks kg + ₹ from the docket photo'),
+        React.createElement("div", { style: li }, 'Tracking page at booking is fine. When the courier details come (3-5 working days), add them on the Dispatch row. The ERP reads kg, ₹ and docket no. from the photo and compares with what was typed.'),
+        React.createElement("div", { style: shot }, React.createElement("div", { style: cap }, 'Dispatch page - what each row can show'),
+          row('Surface Courier', 'Shree Anjani · 26435200341725', { id: 'p1', docket_status: 'awaited', docket_awaited_since: new Date(Date.now() - 2 * 864e5).toISOString() }),
+          row('Air Courier', 'Shree Maruti · 26120748333', { id: 'p2', docket_status: 'returned', docket_reason: 'Docket shows 6 kg, typed 8 kg' }),
+          row('Air Courier', 'Shree Anjani · 1568079458', { id: 'p3', docket_status: 'pass', actual_weight: 8 })),
+        React.createElement("div", { style: li }, '• No details in 7 days → task "Courier details overdue".'),
+        React.createElement("div", { style: li }, '• kg / ₹ different from the photo, or a different docket no. → "⛔ Sent back" + task. Fix kg / ₹ or upload the right document; the task closes by itself when it passes.')),
+      React.createElement("div", { style: { ...card, border: '1px solid #a16207', background: '#1c1608' } },
+        React.createElement("div", { style: h }, 'Your part'),
+        yours.map((x, k) => React.createElement("div", { key: k, style: li }, '• ' + x))),
+      React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
+        'I have read this'),
+      React.createElement("button", { type: 'button', disabled: (!ok && inRole && !seen) || busy, onClick: close, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: (ok || seen || !inRole) ? '#22c55e' : '#334155', color: '#06210f', fontWeight: 900, fontSize: 15, cursor: 'pointer' } }, busy ? 'Saving…' : 'Got it')));
 }
 // 19 Oct 2026 (Jigar): "What's new" - once per person after login: 45 s video + 6 swipe cards (own points card first).
 // Recorded in point_brief_responses (brief_version 2026-10-19-whatsnew). Reopen from the + menu until 2 Nov.
