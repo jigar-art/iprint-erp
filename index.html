@@ -2900,23 +2900,7 @@ function MainApp({
         }
       }
     }
-    const WEIGHMENT_EXEMPT_INTRANSIT = ['HARISH'];
-    const fabHandover = newStatus === 'In Transit' && WEIGHMENT_EXEMPT_INTRANSIT.some(t => _uname === t || _uname.startsWith(t + ' '));
-    if ((newStatus === 'In Transit' || newStatus === 'Delivered') && !fabHandover) {
-      const {
-        data: wRows,
-        error: wErr
-      } = await sb.from('weighment_logs').select('id').eq('job_no', jobId).limit(1);
-      if (wErr) {
-        show('⚠️ Could not verify weighment log — try again. (' + wErr.message + ')', false);
-        return;
-      }
-      if (!wRows || wRows.length === 0) {
-        show('🔒 Cannot mark "' + jobId + '" ' + newStatus + ' — no weighment/courier entry yet. Log it under Dispatch → 📦 Courier / Weighment first (Local own-delivery counts).', false);
-        console.warn('updateJobStatus blocked (Weighment gate): job', jobId, 'has no weighment_logs row');
-        return;
-      }
-    }
+    // 31 Oct 2026 (Jigar): weighment gate retired - dispatch log + 🚚 courier request already record weight / packages / receiver (1 weighment entry in 30 days, gate bypassed 247 of 250 moves)
     const now = new Date();
     const timeStr = now.toLocaleDateString('en-IN', {
       day: '2-digit',
