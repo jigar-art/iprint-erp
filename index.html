@@ -28705,6 +28705,26 @@ function PRSiteCloseBox({
 }) {
   const [form, setForm] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
+  // 31 Oct 2026 (Jigar, C3): emailed vendor bills already captured for this vendor / PO / job - tap one to fill the bill no.
+  const [mailBills, setMailBills] = React.useState([]);
+  const formOpen = !!form;
+  React.useEffect(() => {
+    if (!formOpen) return;
+    let dead = false;
+    const jobNo = String(pr.job_id || '').split('-')[0];
+    const base = () => sb.from('vendor_bills').select('id,supplier,bill_no,subject,received_at,file_url,status').neq('status', 'not_bill').order('received_at', { ascending: false }).limit(8);
+    const qs = [];
+    if (pr.vendor_name) qs.push(base().eq('supplier', pr.vendor_name));
+    if (pr.po_no) qs.push(base().ilike('subject', '%' + pr.po_no + '%'));
+    if (/^\d{4,6}$/.test(jobNo)) qs.push(base().ilike('subject', '%' + jobNo + '%'));
+    Promise.all(qs).then(rs => {
+      if (dead) return;
+      const seen = {}, out = [];
+      rs.forEach(r => (r.data || []).forEach(b => { if (!seen[b.id]) { seen[b.id] = 1; out.push(b); } }));
+      setMailBills(out.slice(0, 8));
+    });
+    return () => { dead = true; };
+  }, [formOpen, pr.id]);
   const uname = (user?.name || '').toUpperCase();
   const canAct = (pr.created_by || '').toUpperCase() === uname || uname === 'JIGAR' || uname === 'SHREYA';
   if (!PR_OPEN_PO.includes(pr.status) || !canAct) return null;
@@ -28781,7 +28801,7 @@ function PRSiteCloseBox({
       grn_id: 'SITE' + Date.now(),
       partial_delivery: false,
       items,
-      received_notes: ['Site / service PO closed by PR raiser', 'Bill: ' + billNo, form.note || ''].filter(Boolean).join(' | '),
+      received_notes: ['Site / service PO closed by PR raiser', 'Bill: ' + billNo, form.vbId ? 'Emailed bill VB#' + form.vbId : '', form.note || ''].filter(Boolean).join(' | '),
       last_status_change_at: new Date().toISOString()
     });
     setBusy(false);
@@ -28830,7 +28850,8 @@ function PRSiteCloseBox({
       bill_no: '',
       date: td(),
       file: null,
-      note: ''
+      note: '',
+      vbId: null
     })
   }, "✅ Work done - enter vendor bill"), pr.deliver_to === 'site' && React.createElement("button", {
     className: "b bs",
@@ -28844,7 +28865,16 @@ function PRSiteCloseBox({
       gap: 6,
       alignItems: 'end'
     }
-  }, React.createElement("label", {
+  }, mailBills.length ? React.createElement("div", {
+    style: { gridColumn: '1 / -1', fontSize: 8, color: '#64748b' }
+  }, "📧 Bills already emailed by the vendor - tap to use:", mailBills.map(b => React.createElement("button", {
+    key: b.id,
+    type: "button",
+    className: "b bs",
+    title: b.subject || '',
+    style: { ...btn, margin: '3px 4px 0 0', border: form.vbId === b.id ? '1px solid #22c55e' : undefined },
+    onClick: () => setForm(f => ({ ...f, bill_no: b.bill_no || f.bill_no, vbId: b.id }))
+  }, (b.bill_no || 'no bill no.') + ' · ' + String(b.received_at || '').slice(0, 10) + ' · ' + String(b.subject || '').slice(0, 40) + (b.status === 'booked' ? ' (booked)' : '')))) : null, React.createElement("label", {
     style: {
       fontSize: 7,
       color: '#64748b'
@@ -28854,7 +28884,8 @@ function PRSiteCloseBox({
     value: form.bill_no,
     onChange: e => setForm(f => ({
       ...f,
-      bill_no: e.target.value
+      bill_no: e.target.value,
+      vbId: null
     })),
     style: {
       fontSize: 9,
@@ -36357,8 +36388,10 @@ function ProofFab({ user }) {
   }, [q, job, open]);
   const loadHave = j => {
     setHave(null);
-    Promise.all([sb.from('job_photos').select('kind').eq('job_id', j.id), sb.from('material_usage').select('material,qty,unit').eq('job_id', j.id)]).then(([a, b]) => {
-      const c = {}; (a.data || []).forEach(x => { c[x.kind] = (c[x.kind] || 0) + 1; }); setHave({ c, m: b.data || [] });
+    // 31 Oct 2026 (Jigar, C11): material already in the Print log counts - no second entry needed
+    Promise.all([sb.from('job_photos').select('kind').eq('job_id', j.id), sb.from('material_usage').select('material,qty,unit').eq('job_id', j.id),
+      sb.from('print_logs').select('material,qty_used,unit,date').eq('job_id', j.id).gt('qty_used', 0).not('material', 'is', null).order('date', { ascending: false }).limit(10)]).then(([a, b, pl]) => {
+      const c = {}; (a.data || []).forEach(x => { c[x.kind] = (c[x.kind] || 0) + 1; }); setHave({ c, m: b.data || [], pl: (pl.data || []).filter(x => String(x.material || '').trim()) });
     });
   };
   React.useEffect(() => { if (open && !mats.length) sb.from('materials_master_v2').select('name').eq('active', true).order('name').then(r => setMats((r.data || []).map(x => x.name))); }, [open]);
@@ -36377,6 +36410,7 @@ function ProofFab({ user }) {
     if (!kind) { setMsg('⚠️ Pick what you are uploading'); return; }
     setBusy(true);
     if (kind === 'material') {
+      if (have && have.pl && have.pl.length && !window.confirm('Material for this job is already in the Print log (' + have.pl.map(x => x.material + ' ' + x.qty_used + ' ' + (x.unit || '')).join(', ') + ').\n\nAdd a separate entry anyway? (Only for material NOT in the print log, e.g. fabrication stock.)')) { setBusy(false); return; }
       const r = await sb.rpc('erp_material_use_add', { p_job: job.id, p_material: mat.material, p_qty: Number(mat.qty), p_unit: mat.unit });
       setBusy(false);
       if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
@@ -36411,10 +36445,13 @@ function ProofFab({ user }) {
         hits.map(h => React.createElement("div", { key: h.id, onClick: () => { setJob(h); setQ(''); loadHave(h); }, style: { padding: '9px 10px', borderBottom: '1px solid #1f2937', fontSize: 13, color: '#e2e8f0', cursor: 'pointer' } },
           React.createElement("b", null, h.id), ' · ', h.client_name || '', React.createElement("span", { style: { color: '#64748b' } }, ' · ' + (h.status || ''))))),
       have ? React.createElement("div", { style: { fontSize: 11.5, color: '#cbd5e1', marginTop: 6 } }, 'Already uploaded: ' +
-        KS.filter(k => k[2]).map(k => k[1].replace(/^\S+ /, '') + ' ' + (have.c[k[0]] || 0) + '/' + k[2]).join(' · ') + (isDes ? '' : ' · Material entries ' + have.m.length)) : null,
+        KS.filter(k => k[2]).map(k => k[1].replace(/^\S+ /, '') + ' ' + (have.c[k[0]] || 0) + '/' + k[2]).join(' · ') + (isDes ? '' : ' · Material entries ' + have.m.length + (have.pl && have.pl.length ? ' + ' + have.pl.length + ' in Print log' : ''))) : null,
       lbl('What are you uploading?'),
       React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, KS.map(k => React.createElement("button", { key: k[0], type: 'button', onClick: () => { setKind(k[0]); setFiles([]); }, style: chip(kind === k[0]) }, k[1]))),
       kind === 'material' ? React.createElement("div", { style: { display: 'grid', gap: 8, marginTop: 10 } },
+        have && have.pl && have.pl.length ? React.createElement("div", { style: { fontSize: 12.5, color: '#86efac', border: '1px solid #22c55e55', borderRadius: 10, padding: '8px 10px' } },
+          '✓ Already logged in the Print log: ' + have.pl.map(x => x.material + ' ' + x.qty_used + ' ' + (x.unit || '')).join(' · ') + ' - this counts as material used.',
+          React.createElement("button", { type: 'button', onClick: () => { setKind(''); setMsg('✓ Material already logged in the Print log - nothing more to enter'); }, style: { ...chip(true), display: 'block', marginTop: 6 } }, '✓ Already logged - skip')) : null,
         React.createElement("input", { className: 'in', list: 'v5mats', value: mat.material, onChange: e => setMat({ ...mat, material: e.target.value }), placeholder: 'Material (e.g. Star flex, Vinyl, ACP)', style: { fontSize: 14, padding: '9px 11px' } }),
         React.createElement("datalist", { id: 'v5mats' }, mats.map(x => React.createElement("option", { key: x, value: x }))),
         React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
@@ -40563,6 +40600,25 @@ function BankCRMPage({
     v: 'Other',
     l: 'Other'
   }];
+  // 31 Oct 2026 (Jigar, C6): category suggested from the site data. Manual hold / cancel / billing categories are never touched.
+  const BC_STALE = ['', 'Pending', 'Photo Pending', 'Work/PO Pending'];
+  const bcSuggest = site => {
+    const cat = site.billing_category || '';
+    if (!BC_STALE.includes(cat)) return null;
+    const done = ['Completed', 'Done', 'DONE'].includes(site.installation_status || '');
+    const proof = site.photo_status === 'Received' || site.dc_status === 'Received';
+    const hasPo = !!String(site.po_number || '').trim();
+    let sug = null;
+    if (done && proof) sug = 'Completed';
+    else if (cat === 'Work/PO Pending' && hasPo) sug = done ? 'Photo Pending' : 'Pending';
+    return sug && sug !== cat ? sug : null;
+  };
+  const applyAllSuggested = async list => {
+    const todo = list.map(x => [x, bcSuggest(x)]).filter(p => p[1]);
+    if (!todo.length) { show('No suggested categories to apply'); return; }
+    if (!window.confirm('Apply the suggested billing category to ' + todo.length + ' site(s) in this view?\n\nOnly Pending / Photo Pending / Work-PO Pending / blank rows change. Hold, cancelled, duplicate and Given for Billing stay as they are.')) return;
+    for (const [x, c] of todo) await setBillingCat(x, c);
+  };
   const setBillingCat = async (site, newCat) => {
     const oldCat = site.billing_category || '';
     if (oldCat === newCat) return;
@@ -43221,7 +43277,18 @@ function BankCRMPage({
       })();
       setGroupModal(null);
     }
-  }), dupIds.size > 0 && React.createElement("div", {
+  }), (() => {
+    const nSug = filtered.filter(x => bcSuggest(x)).length;
+    if (!nSug) return null;
+    const isJ = (user?.name || '').toUpperCase().split(' ')[0] === 'JIGAR';
+    return React.createElement("div", {
+      style: { margin: '0 0 6px', padding: '5px 12px', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 7, fontSize: 11, color: '#86efac', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }
+    }, React.createElement("span", { style: { flex: 1 } }, '\uD83C\uDFF7\uFE0F ' + nSug + ' site(s) in this view have an out-of-date billing category - tap the green \u2192 next to the category to apply the suggestion'), isJ ? React.createElement("button", {
+      className: "b bs",
+      onClick: () => applyAllSuggested(filtered),
+      style: { fontSize: 9, padding: '2px 6px' }
+    }, 'Apply all ' + nSug) : null);
+  })(), dupIds.size > 0 && React.createElement("div", {
     style: {
       margin: '0 0 6px',
       padding: '6px 12px',
@@ -43643,7 +43710,12 @@ function BankCRMPage({
     }, BILLING_CAT_OPTIONS.map(o => React.createElement("option", {
       key: o.v,
       value: o.v
-    }, o.l))) : React.createElement("span", {
+    }, o.l))) : null, s.billing_category !== 'Invoiced' && bcSuggest(s) ? React.createElement("button", {
+      className: "b bs",
+      onClick: () => setBillingCat(s, bcSuggest(s)),
+      title: 'Suggested from the site data (install / photo / DC / PO no.) - tap to apply',
+      style: { fontSize: 7, padding: '0 4px', marginLeft: 2, color: '#4ade80' }
+    }, '\u2192 ' + bcSuggest(s)) : null, s.billing_category === 'Invoiced' ? React.createElement("span", {
       className: "bd",
       title: s.billing_category === 'Invoiced' ? 'Locked \u2014 invoice on record' : '',
       style: {
@@ -43651,7 +43723,7 @@ function BankCRMPage({
         color: billingColor,
         fontSize: 8
       }
-    }, s.billing_category || 'Pending'), siteDkEl(s)), React.createElement("td", null, React.createElement("select", {
+    }, s.billing_category || 'Pending') : null, siteDkEl(s)), React.createElement("td", null, React.createElement("select", {
       className: "in",
       value: s.work_category || '',
       onChange: e => updateSite(s.id, 'work_category', e.target.value),
@@ -55566,7 +55638,7 @@ function PettyCashPage({
   useEffect(() => {
     if (!crNeeded || crTrip !== 'pickup' || !jobNums.length) { setPoOpts(null); return; }
     let dead = false;
-    sb.from('purchase_requests').select('po_no,vendor_name,status,job_id').not('po_no', 'is', null).is('po_cancelled_at', null)
+    sb.from('purchase_requests').select('po_no,pr_no,vendor_name,status,job_id').not('po_no', 'is', null).is('po_cancelled_at', null)
       .or(jobNums.map(n => 'job_id.like.' + n + '-*').join(',')).order('po_generated_at', { ascending: false }).limit(40)
       .then(r => { if (dead) return; const seen = {}; setPoOpts((r.data || []).filter(x => { if (seen[x.po_no]) return false; seen[x.po_no] = 1; return true; })); });
     return () => { dead = true; };
@@ -56058,6 +56130,14 @@ function PettyCashPage({
         return;
       }
     }
+    // 31 Oct 2026 (Jigar, C4): a typed PR number (JXT/PR/26-27/1036) is saved as the PO raised on it (JXT/PO/26-27/968)
+    let pickupPoVal = crNeeded && crTrip === 'pickup' ? (form.pickupPo && form.pickupPo !== '__other' ? form.pickupPo : String(form.pickupPoTyped || '').replace(/\s+/g, '').toUpperCase()) || null : null;
+    if (pickupPoVal && /\/PR\//.test(pickupPoVal)) {
+      const pr = await sb.from('purchase_requests').select('po_no').ilike('pr_no', pickupPoVal).not('po_no', 'is', null).is('po_cancelled_at', null).order('po_generated_at', { ascending: false }).limit(1);
+      const hit = pr.data && pr.data[0] && pr.data[0].po_no;
+      if (!hit) { setBusy(false); show(pickupPoVal + ' is a PR number and no PO has been raised on it yet - type the PO number', false); return; }
+      pickupPoVal = hit;
+    }
     const {
       data,
       error
@@ -56071,7 +56151,7 @@ function PettyCashPage({
       meal_kind: form.category === MEAL_CAT && form.meal ? form.meal : null,
       mealctx: form.category === MEAL_CAT && form.mealCtx ? form.mealCtx : null,
       courier_request_id: crNeeded && crTrip === 'delivery' && form.courier ? Number(form.courier) : null,
-      pickup_po: crNeeded && crTrip === 'pickup' && (form.pickupPo && form.pickupPo !== '__other' ? form.pickupPo : String(form.pickupPoTyped || '').trim().toUpperCase()) ? (form.pickupPo && form.pickupPo !== '__other' ? form.pickupPo : String(form.pickupPoTyped || '').trim().toUpperCase()) : null,
+      pickup_po: pickupPoVal,
       site_run: !!(crNeeded && crTrip === 'siterun'),
       errand_run: !!(crNeeded && crTrip === 'errand'),
       errand_from: crNeeded && crTrip === 'errand' ? (form.errFrom || '').trim() : null,
@@ -57070,10 +57150,10 @@ function PettyCashPage({
     : crTrip === 'pickup' ? React.createElement("div", null,
         poOpts && poOpts.length ? React.createElement("select", { value: form.pickupPo || '', onChange: e => setF('pickupPo', e.target.value), style: inp },
           React.createElement("option", { value: '' }, '-- pick the PO being collected --'),
-          poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))),
+          poOpts.map(o => React.createElement("option", { key: o.po_no, value: o.po_no }, o.po_no + (o.pr_no ? ' (' + o.pr_no + ')' : '') + ' \u00b7 ' + (o.vendor_name || '') + ' \u00b7 ' + (o.status || ''))),
           React.createElement("option", { value: '__other' }, 'PO of another job / stock order \u2026'))
         : React.createElement("div", { style: { fontSize: 12, color: poOpts === null ? '#94a3b8' : '#fbbf24', marginBottom: 6 } }, poOpts === null ? 'Checking\u2026' : 'No PO on this job. Material ordered on another job\'s PO? Type that PO number below - your lead checks it. Nothing ordered yet? Ask Murli / Amol to raise the PO.'),
-        poOpts && (!poOpts.length || form.pickupPo === '__other') ? React.createElement("input", { value: form.pickupPoTyped || '', onChange: e => setF('pickupPoTyped', e.target.value), placeholder: 'PO number, e.g. JXT/PO/26-27/644', style: { ...inp, marginTop: 6 } }) : null)
+        poOpts && (!poOpts.length || form.pickupPo === '__other') ? React.createElement("input", { value: form.pickupPoTyped || '', onChange: e => setF('pickupPoTyped', e.target.value), placeholder: 'PO number (or PR number), e.g. JXT/PO/26-27/644', style: { ...inp, marginTop: 6 } }) : null)
     : (crOpts && crOpts.length ? React.createElement("select", { value: form.courier || '', onChange: e => setF('courier', e.target.value), style: inp },
         React.createElement("option", { value: '' }, '-- pick the \ud83d\ude9a request --'),
         crOpts.map(o => React.createElement("option", { key: o.id, value: String(o.id) }, o.label)))
