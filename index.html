@@ -182,6 +182,25 @@ let _erpRefreshP = null;
 let _erpLastRefreshAt = 0;
 const _erpNow = () => Date.now() + Math.max(0, +window.__erpClockSkewMs || 0);
 const _erpExpired = () => { try { window.dispatchEvent(new Event('erp-session-expired')); } catch (e) {} };
+// 31 Oct 2026: background polls skip (instead of firing refused requests) when the login token is gone or expired;
+// one refresh attempt first. The login flow itself is unchanged - an expired token still raises erp-session-expired.
+let _erpPollRefreshAt = 0;
+async function erpPollOk() {
+  let t = null;
+  try { t = localStorage.getItem('erp_jwt') || null; } catch (e) { return true; }
+  if (!t) return false;
+  if (jwtExpMs(t) - _erpNow() > 60 * 1000) return true;
+  if (Date.now() - _erpPollRefreshAt > 60 * 1000) {
+    _erpPollRefreshAt = Date.now();
+    try {
+      const r = await erpLoginRequest({ refresh: t });
+      if (r && r.ok && r.token) { try { localStorage.setItem('erp_jwt', r.token); } catch (e) {} return true; }
+    } catch (e) {}
+  }
+  _erpExpired();
+  return false;
+}
+const erpPoll = fn => async () => { if (await erpPollOk()) return fn(); };
 async function ensureSession() {
   let t = null;
   try { t = localStorage.getItem('erp_jwt') || null; } catch (e) { return null; }
@@ -351,6 +370,9 @@ const erpFileSha = async file => {
     return Array.from(new Uint8Array(h)).map(x => x.toString(16).padStart(2, '0')).join('');
   } catch (e) { return null; }
 };
+// 31 Oct 2026: the reason the last upload was refused (size / type / duplicate / storage) - shown instead of a generic "failed"
+window._erpLastUploadErr = null;
+const erpUploadFailReason = () => String(window._erpLastUploadErr || 'upload failed');
 const erpFileGate = async (file, bucket, folder, ref) => {
   const sha = await erpFileSha(file);
   if (!sha) return { sha: null, action: 'ok' };
@@ -364,18 +386,21 @@ const erpFileGate = async (file, bucket, folder, ref) => {
 const erpFileRegister = (sha, bucket, path) => { if (sha && path) sb.rpc('erp_file_register', { p_sha: sha, p_bucket: bucket, p_path: path }).then(() => {}, () => {}); };
 const uploadFile = async (file, folder = 'general') => {
   if (!file) return null;
+  window._erpLastUploadErr = null;
   if (file.size > UPLOAD_MAX_BYTES) {
+    window._erpLastUploadErr = (file.name || 'File') + ' is ' + (file.size / 1048576).toFixed(1) + ' MB (max 40 MB)';
     if (window._showToast) window._showToast('\u26a0\ufe0f ' + (file.name || 'File') + ' is ' + (file.size / 1048576).toFixed(1) + ' MB \u2014 max 40 MB', false);
     return null;
   }
   const gateFolder = String(folder || '').split('/')[0];
   // 27 Oct 2026 (Jigar): heavy PDFs on courier/dispatch uploads are refused - send a screenshot (JPEG) instead
   if (ERP_GATED_FOLDERS.includes(gateFolder) && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) && file.size > 2 * 1048576) {
+    window._erpLastUploadErr = 'PDF is ' + (file.size / 1048576).toFixed(1) + ' MB (max 2 MB) - upload a screenshot (JPEG) instead';
     if (window._showToast) window._showToast('\u26a0\ufe0f Can\u2019t upload this PDF \u2014 it is ' + (file.size / 1048576).toFixed(1) + ' MB (max 2 MB). Take a screenshot of it and upload the JPEG / image instead.', false);
     return null;
   }
   const gate = ERP_GATED_FOLDERS.includes(gateFolder) ? await erpFileGate(file, 'Uploads', gateFolder) : null;
-  if (gate && gate.action === 'block') return null;
+  if (gate && gate.action === 'block') { window._erpLastUploadErr = gate.msg || 'this file was refused (already used elsewhere)'; return null; }
   if (gate && gate.action === 'reuse' && gate.path) {
     if (window._showToast) window._showToast('\u2713 ' + gate.msg, true);
     return sb.storage.from('Uploads').getPublicUrl(gate.path).data.publicUrl;
@@ -413,6 +438,7 @@ const uploadFile = async (file, folder = 'general') => {
   }
   console.error('Upload error:', lastErr);
   const reason = lastErr && (lastErr.message || lastErr.error) || 'network error';
+  window._erpLastUploadErr = reason + ' - check signal and retry';
   if (window._showToast) window._showToast('\u26a0\ufe0f Upload failed: ' + reason + ' \u2014 check signal and retry', false);
   return null;
 };
@@ -420,17 +446,19 @@ const uploadMultiple = async (files, folder = 'general') => {
   const list = [...(files || [])];
   const urls = [];
   let failed = 0;
+  const why = [];
   _upOverlay.push();
   try {
     for (let i = 0; i < list.length; i++) {
       _upOverlay.setLabel('Uploading ' + (i + 1) + ' of ' + list.length + '\u2026\nKeep this page open');
       const url = await uploadFile(list[i], folder);
-      if (url) urls.push(url);else failed++;
+      if (url) urls.push(url);else { failed++; const w = erpUploadFailReason(); if (!why.includes(w)) why.push(w); }
     }
   } finally {
     _upOverlay.pop();
   }
-  if (failed && window._showToast) window._showToast('\u26a0\ufe0f ' + failed + ' of ' + list.length + ' file(s) failed to upload', false);
+  window._erpLastUploadErr = why.length ? why.join('; ') : null;
+  if (failed && window._showToast) window._showToast('\u26a0\ufe0f ' + failed + ' of ' + list.length + ' file(s) not uploaded: ' + why.join('; '), false);
   return urls;
 };
 const isOfficeFile = url => /\.(pptx?|docx?|xlsx?)(\?|#|$)/i.test(url || '');
@@ -2171,7 +2199,7 @@ function MainApp({
     };
     fetchTasks();
     // 2026-10-28: skip the 60 s poll while the tab is in the background
-    const tid = setInterval(() => { if (document.visibilityState !== 'hidden') fetchTasks(); }, 60000);
+    const tid = setInterval(erpPoll(() => { if (document.visibilityState !== 'hidden') fetchTasks(); }), 60000);
     return () => {
       cancelled = true;
       clearInterval(tid);
@@ -2184,7 +2212,7 @@ function MainApp({
     let off = false;
     const f = () => sb.rpc('erp_my_waiting_v1').then(r => { if (!off && !r.error) setMyWaiting(r.data || []); });
     f(); window._refreshWaiting = f;
-    const tid = setInterval(f, 600000);
+    const tid = setInterval(erpPoll(f), 600000);
     return () => { off = true; clearInterval(tid); };
   }, [user?.name]);
   window._refreshMyTasks = async () => {
@@ -3386,7 +3414,7 @@ function MainApp({
       setLeavePending(data.filter(r => r.status === 'Pending L1' && r.l1_approver_id === me || r.status === 'Pending L2' && r.l2_approver_id === me || r.status === 'Pending L3' && r.l3_approver_id === me).length);
     };
     loadLeavePending();
-    const tmr = setInterval(loadLeavePending, 120000);
+    const tmr = setInterval(erpPoll(loadLeavePending), 120000);
     return () => {
       dead = true;
       clearInterval(tmr);
@@ -3410,7 +3438,7 @@ function MainApp({
       setPettyPending(adj + r.data.filter(x => x.status === 'pending_l1' && x.l1_approver_id === me || x.status === 'pending_l2' && x.l2_approver_id === me || x.status === 'pending_l3' && x.l3_approver_id === me || c.data && c.data.l3_person_id === me && /^pending_l/.test(x.status) || cashier && x.status === 'approved').length);
     };
     loadPettyPending();
-    const tmr = setInterval(loadPettyPending, 120000);
+    const tmr = setInterval(erpPoll(loadPettyPending), 120000);
     return () => {
       dead = true;
       clearInterval(tmr);
@@ -3445,7 +3473,7 @@ function MainApp({
       if (!dead) loadQuotes();
     };
     run();
-    const tmr = setInterval(run, 120000);
+    const tmr = setInterval(erpPoll(run), 120000);
     return () => {
       dead = true;
       clearInterval(tmr);
@@ -3488,7 +3516,7 @@ function MainApp({
     const run = () => { if (dead || document.visibilityState === 'hidden') return; last = Date.now(); loadInstDelay(); };
     const onVis = () => { if (document.visibilityState === 'visible' && Date.now() - last > 300000) run(); };
     run();
-    const tmr = setInterval(run, 300000);
+    const tmr = setInterval(erpPoll(run), 300000);
     document.addEventListener('visibilitychange', onVis);
     return () => { dead = true; clearInterval(tmr); document.removeEventListener('visibilitychange', onVis); };
   }, [loadInstDelay]);
@@ -4857,7 +4885,7 @@ function ComplaintAlertCard({ user, sp }) {
   React.useEffect(() => {
     if (!boss) return;
     const load = () => sb.rpc('erp_complaints_list', { p_days: 60 }).then(r => setRows(r.error ? [] : (r.data || [])));
-    load(); const iv = setInterval(load, 300000); return () => clearInterval(iv);
+    load(); const iv = setInterval(erpPoll(load), 300000); return () => clearInterval(iv);
   }, [boss]);
   if (!boss || !rows) return null;
   const now = Date.now();
@@ -24584,7 +24612,7 @@ function DispPage({
   const uploadSigned = async (l, file) => {
     if (!file) return;
     const url = await uploadFile(file, 'dispatch-signed-dc');
-    if (!url) { show('\u26a0\ufe0f Upload failed', false); return; }
+    if (!url) { show('\u26a0\ufe0f Signed DC not uploaded: ' + erpUploadFailReason(), false); return; }
     const { error } = await sb.from('dispatch_logs').update({ pod_url: url }).eq('id', l.id);
     if (error) { show('\u26a0\ufe0f ' + error.message, false); return; }
     setUpd(p => ({ ...p, [l.id]: { ...(p[l.id] || {}), pod_url: url, signed_uploaded_at: new Date().toISOString() } }));
@@ -36514,7 +36542,7 @@ function CourierFab({ user }) {
   const [msg, setMsg] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const load = () => { sb.rpc('erp_pod_review_list').then(r => setPods(r.error ? [] : (r.data || []))); return sb.rpc('erp_courier_inbox_v2').then(r => setRows(r.error ? [] : (r.data || []))); };
-  React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 300000); return () => clearInterval(t); }, []);
+  React.useEffect(() => { sb.from('score_roles').select('person_key,card').is('valid_to', null).then(r => setRoles(r.data || [])); load(); const t = setInterval(erpPoll(() => { if (document.visibilityState === 'visible') load(); }), 300000); return () => clearInterval(t); }, []);
   React.useEffect(() => { if (open && !modes.length) sb.from('dispatch_mode_config').select('mode,rate_basis,required_fields').eq('active', true).order('sort').then(r => setModes((r.data || []).filter(x => x.rate_basis && x.rate_basis !== 'none'))); }, [open]);
   const findJob = async () => {
     let jobId = f.job.trim(); if (!jobId) return;
@@ -36737,7 +36765,7 @@ function CourierFab({ user }) {
               React.createElement("button", { type: 'button', disabled: busy, style: chip(false), onClick: () => podResolve(p, its.map(x => x.key), null) }, 'POD covers all items on this DC'),
               React.createElement("button", { type: 'button', disabled: busy, style: chip(false), onClick: () => podResolve(p, Object.keys(tk).filter(k => tk[k]), null) }, 'Ticked items only'),
               React.createElement("label", { style: { ...chip(false), cursor: 'pointer' } }, 'Upload this job\'s own POD',
-                React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; setBusy(true); const url = await uploadFile(fl, 'delivery'); setBusy(false); if (url) podResolve(p, null, url); } }))));
+                React.createElement("input", { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' }, onChange: async e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; setBusy(true); const url = await uploadFile(fl, 'delivery'); setBusy(false); if (url) podResolve(p, null, url); else if (window._showToast) window._showToast('\u26a0\ufe0f POD not uploaded: ' + erpUploadFailReason(), false); e.target.value = ''; } }))));
         })) : null,
       React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', fontWeight: 700, margin: '12px 0 4px' } }, 'LAST 14 DAYS'),
       rows.length === 0 ? React.createElement("div", { style: { fontSize: 12, color: '#64748b' } }, 'No requests yet.') : rows.map(card_),
@@ -37005,7 +37033,7 @@ function DocketSignPopup({ user, onOpen }) {
   React.useEffect(() => {
     if (!inRole) return;
     load();
-    const t = setInterval(load, 10 * 60 * 1000);
+    const t = setInterval(erpPoll(load), 10 * 60 * 1000);
     return () => clearInterval(t);
   }, [me]);
   if (!inRole || !open || !rows.length) return null;
@@ -37047,7 +37075,7 @@ function TaskAlertsGate({ user }) {
   React.useEffect(() => {
     if (!user) return;
     load();
-    const t = setInterval(load, 30 * 60 * 1000);
+    const t = setInterval(erpPoll(load), 30 * 60 * 1000);
     return () => clearInterval(t);
   }, [user && user.name]);
   if (!user || !open || !rows.length) return null;
@@ -38662,7 +38690,7 @@ function CatchupDispatchModal({ jobId, user, onClose, podUrl }) {
   const needReq = courier && !approved && !pending;
   const upload = async (file, k, multi) => {
     if (!file) return; setBusy(true); const url = await uploadFile(file, k === 'pod_url' ? 'dispatch-signed-dc' : 'courier-docket'); setBusy(false);
-    if (!url) { setMsg('⚠️ Upload failed'); return; }
+    if (!url) { setMsg('⚠️ ' + (k === 'pod_url' ? 'Proof' : 'Docket') + ' not uploaded: ' + erpUploadFailReason()); return; }
     if (multi) set(k, [...(f[k] || []), url]); else set(k, url);
   };
   const save = async () => {
@@ -38771,7 +38799,7 @@ function PodCheckCard({ user }) {
     if (!file) return;
     setBusy(true);
     const url = await uploadFile(file, 'dispatch-signed-dc');
-    if (!url) { setBusy(false); setMsg('⚠️ Upload failed'); return; }
+    if (!url) { setBusy(false); setMsg('⚠️ Proof not uploaded: ' + erpUploadFailReason()); return; }
     const u = await sb.from('dispatch_logs').update({ pod_url: url, signed_uploaded_at: new Date().toISOString() }).eq('id', r.id);
     setBusy(false);
     if (u.error) { setMsg('⚠️ ' + u.error.message); return; }
@@ -54956,7 +54984,7 @@ function QuotesPage({
     const onVis = () => {
       if (document.visibilityState === 'visible') tick();
     };
-    const iv = setInterval(tick, 60000);
+    const iv = setInterval(erpPoll(tick), 60000);
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', tick);
     return () => {
@@ -55453,7 +55481,7 @@ async function pcUploadBill(file, me, reqId, maxDim) {
     return null;
   }
   const gate = await erpFileGate(file, 'petty-cash-bills', 'pc-bill', reqId);
-  if (gate.action === 'block') return null;
+  if (gate.action === 'block') { if (window._showToast) window._showToast('\u26a0\ufe0f Bill not uploaded: ' + (gate.msg || 'this file was refused'), false); return null; }
   _upOverlay.push();
   try {
     const toSend = maxDim ? await pcShrink(file, maxDim) : await compressImage(file);
@@ -55835,6 +55863,13 @@ function PettyCashPage({
   const attachBills = async (reqId, files, amount, stage, kindFor) => {
     let ok = 0;
     const ids = [];
+    attachBills.lastIds = ids;
+    // 31 Oct 2026: re-check what the DB rule (petty_cash_bills_insert) checks, so the user sees a plain reason instead of an RLS error
+    const cur = await sb.from('petty_cash_requests').select('status,requester_id').eq('id', reqId).maybeSingle();
+    if (cur.data) {
+      if (['settled', 'rejected', 'cancelled'].includes(cur.data.status)) { show('\u26a0\ufe0f This request is already ' + (cur.data.status === 'settled' ? 'closed (settled)' : cur.data.status) + ' \u2014 bills can\u2019t be added', false); load(); return 0; }
+      if (cur.data.requester_id !== me && !isCashier) { show('\u26a0\ufe0f Only the requester or the cashier can add bills to this request', false); return 0; }
+    }
     for (const f of files) {
       const path = await pcUploadBill(f, me, reqId, stage === 'quote' || stage === 'final' ? 1200 : null);
       if (!path) continue;
@@ -55847,7 +55882,7 @@ function PettyCashPage({
         stage: stage || 'bill',
         amount: files.length === 1 && amount && kindFor === 'advance' ? parseFloat(amount) : null
       }).select('id').single();
-      if (error) show('\u26a0\ufe0f Bill not saved: ' + error.message, false);else {
+      if (error) show('\u26a0\ufe0f Bill not saved: ' + (/row-level security/i.test(error.message || '') ? 'this request is closed or you are not its requester / cashier' : error.message), false);else {
         ok++;
         ids.push(data.id);
       }
@@ -56220,16 +56255,20 @@ function PettyCashPage({
       p_remark: why.trim()
     }, r.req_no + ' rejected');
   };
+  // 31 Oct 2026: same bills the close rule (erp_pc_settle) asks about - not quotes, not duplicates
+  const pcNoAmt = r => billsOf(r.id).filter(b => b.amount == null && b.stage !== 'quote' && !(b.ai && b.ai.dup));
   const enterBillAmounts = async r => {
-    const missing = billsOf(r.id).filter(b => b.amount == null);
+    const all = billsOf(r.id);
+    const missing = pcNoAmt(r);
+    if (!missing.length) { show('Every bill on ' + r.req_no + ' already has its amount'); return; }
     for (let k = 0; k < missing.length; k++) {
       const b = missing[k];
-      const v = prompt('Amount on bill ' + (k + 1) + ' of ' + missing.length + ' for ' + r.req_no + ' (uploaded ' + new Date(b.uploaded_at).toLocaleString('en-IN', {
+      const v = prompt('Amount on bill ' + (k + 1) + ' of ' + missing.length + ' for ' + r.req_no + ' ("Bill ' + (all.indexOf(b) + 1) + ' - AMOUNT MISSING" on the Bills page; uploaded ' + new Date(b.uploaded_at).toLocaleString('en-IN', {
         day: '2-digit',
         month: 'short',
         hour: 'numeric',
         minute: '2-digit'
-      }) + '). Tap "Bills" first if you need to look at it.');
+      }) + '). Tap "Bills" first if you need to look at it. Enter 0 if it is a copy of another bill or a payment screenshot.');
       if (v === null) break;
       const amt = parseFloat(v);
       if (isNaN(amt) || amt < 0) {
@@ -56315,6 +56354,7 @@ function PettyCashPage({
     }, r.req_no + ' closed at ' + pcRupee(paidOf(r)));
   };
   const settle = r => {
+    if (r.kind === 'advance' && pcNoAmt(r).length && confirm(pcNoAmt(r).length + ' bill(s) on ' + r.req_no + ' have no amount yet - the advance can\u2019t be closed with spending until they do.\n\nOK = enter the amounts now (tap "Bills" first if you need to read them)\nCancel = continue closing')) { enterBillAmounts(r); return; }
     if (r.kind === 'booking') {
       let fare = r.final_fare;
       if (fare == null) {
@@ -56355,7 +56395,9 @@ function PettyCashPage({
       return;
     }
     const w = window.open('', '_blank');
+    let bn = 0;
     for (const b of bs) {
+      bn++;
       const {
         data,
         error
@@ -56368,7 +56410,9 @@ function PettyCashPage({
         w.location = data.signedUrl;
         return;
       }
-      if (w) w.document.write('<p style="font-family:sans-serif">' + (b.amount ? pcRupee(b.amount) : 'Bill') + '</p><img src="' + data.signedUrl + '" style="max-width:100%;margin-bottom:16px"/>');
+      // 31 Oct 2026: number every bill, flag the ones without an amount, and show PDFs (an <img> can't)
+      const isPdf = /\.pdf$/i.test(b.file_path || '');
+      if (w) w.document.write('<p style="font-family:sans-serif"><b>Bill ' + bn + '</b> - ' + (b.amount != null ? pcRupee(b.amount) : b.stage === 'quote' ? 'quote' : '<span style="color:#c00">AMOUNT MISSING</span>') + '</p>' + (isPdf ? '<p style="font-family:sans-serif"><a href="' + data.signedUrl + '" target="_blank">Open PDF</a></p><iframe src="' + data.signedUrl + '" style="width:100%;height:80vh;border:1px solid #ccc;margin-bottom:16px"></iframe>' : '<img src="' + data.signedUrl + '" style="max-width:100%;margin-bottom:16px"/>'));
     }
   };
   const uploadMore = async (r, files) => {
@@ -56844,10 +56888,10 @@ function PettyCashPage({
         resubmit(r, e.target.files);
         e.target.value = '';
       }
-    })) : null, canAdd && r.kind === 'advance' && bs.some(b => b.amount == null) ? /*#__PURE__*/React.createElement("button", {
+    })) : null, canAdd && r.kind === 'advance' && pcNoAmt(r).length ? /*#__PURE__*/React.createElement("button", {
       style: btn('#f47067', '#1a0505'),
       onClick: () => enterBillAmounts(r)
-    }, "Enter bill amounts") : null, canAdd ? /*#__PURE__*/React.createElement("button", {
+    }, "Bill amounts - " + pcNoAmt(r).length + " missing") : null, canAdd ? /*#__PURE__*/React.createElement("button", {
       style: r.kind === 'booking' && r.status === 'paid' && r.final_fare == null ? btn('#a78bfa', '#1a1033') : ghost,
       onClick: () => {
         setAddFor(addFor === r.id ? null : r.id);
