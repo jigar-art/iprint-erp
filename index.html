@@ -8160,7 +8160,7 @@ function JobDetail({
         if (!files.length) return;
         const newUrls = await uploadMultiple(files, sec.folder);
         if (newUrls.length) appendJobFiles(j.id, sec.field, newUrls);
-        if (newUrls.length && sec.field === 'dc_file_url') sb.rpc('erp_pod_no_dc_check', { p_job: String(j.id) }).then(r => { if (r && r.data && window._showToast) window._showToast('\u26a0\ufe0f ' + r.data, false); }, () => {});
+        if (newUrls.length && sec.field === 'dc_file_url') erpOfferCatchup(j.id, newUrls[newUrls.length - 1]).then(opened => { if (!opened) sb.rpc('erp_pod_no_dc_check', { p_job: String(j.id) }).then(r => { if (r && r.data && window._showToast) window._showToast('\u26a0\ufe0f ' + r.data, false); }, () => {}); });
       }
     }));
   })), (() => {
@@ -32208,7 +32208,7 @@ function AccPage({
           const files = [...e.target.files];
           if (files.length) {
             const newUrls = await uploadMultiple(files, 'accounts-dc');
-            if (newUrls.length && appendJobFiles) appendJobFiles(j.id, 'dc_file_url', newUrls);
+            if (newUrls.length && appendJobFiles) { appendJobFiles(j.id, 'dc_file_url', newUrls); erpOfferCatchup(j.id, newUrls[newUrls.length - 1]); }
           }
         }
       }));
@@ -38603,8 +38603,19 @@ async function erpPodProofCheck(logId, label, existingCheckId) {
   } catch (e) { toast('⚠️ Proof check failed: ' + (e.message || e), false); return null; }
 }
 // 30 Oct 2026 (Jigar): work done but PO came late - one screen logs the dispatch, confirms delivery, attaches the proof and moves the job
+// 31 Oct 2026 (Jigar, after Manoj: "every job entry after delivery 2 times same process"): a DC / POD uploaded on the job card
+// opens the catch-up box with that same file already attached - pick mode, date, receiver once; no second upload.
+function erpOfferCatchup(jobId, url) {
+  return sb.rpc('erp_catchup_info', { p_job: String(jobId) }).then(r => {
+    const d = r && r.data;
+    if (!d || !(d.dcs || []).some(x => !x.delivered)) return false;
+    const det = { job: String(jobId), pod: url || '', handled: false };
+    try { window.dispatchEvent(new CustomEvent('erp-catchup', { detail: det })); } catch (e) { return false; }
+    return det.handled;
+  }, () => false);
+}
 const ERP_CU_MODES = ['Own vehicle', 'Client / vendor pickup', 'Air Courier', 'Surface Courier', 'Running Bus', 'Borzo / Rapido', 'Train', 'Air Cargo'];
-function CatchupDispatchModal({ jobId, user, onClose }) {
+function CatchupDispatchModal({ jobId, user, onClose, podUrl }) {
   const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
   const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
   const [info, setInfo] = React.useState(null);
@@ -38616,7 +38627,8 @@ function CatchupDispatchModal({ jobId, user, onClose }) {
     const d = r.data || {}; setInfo(d);
     const open = (d.dcs || []).filter(x => !x.delivered);
     if (open.length) setF(p => ({ ...p, dc_id: open[0].id, sent_on: open[0].dc_date || '', pincode: open[0].pincode || '' }));
-    if ((d.files || []).length === 1) setF(p => ({ ...p, pod_url: d.files[0] }));
+    if (podUrl) setF(p => ({ ...p, pod_url: podUrl }));
+    else if ((d.files || []).length === 1) setF(p => ({ ...p, pod_url: d.files[0] }));
   }); }, [jobId]);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const inp = { fontSize: 13, padding: '7px 9px', width: '100%' };
@@ -38696,24 +38708,25 @@ function CatchupDispatchCard({ user, listener }) {
   const [rows, setRows] = React.useState(null);
   const [open, setOpen] = React.useState(false);
   const [job, setJob] = React.useState(null);
+  const [pod, setPod] = React.useState('');
   const load = () => sb.rpc('erp_catchup_list').then(r => setRows(r.error ? [] : (r.data || [])), () => setRows([]));
   React.useEffect(() => { if (allowed && !listener) load(); }, []);
   React.useEffect(() => {
     if (!listener) return undefined;
-    const h = e => { if (allowed && e.detail && e.detail.job) setJob(e.detail.job); };
+    const h = e => { if (allowed && e.detail && e.detail.job) { e.detail.handled = true; setPod(e.detail.pod || ''); setJob(e.detail.job); } };
     window.addEventListener('erp-catchup', h); return () => window.removeEventListener('erp-catchup', h);
   }, []);
   if (!allowed) return null;
   return React.createElement(React.Fragment, null,
     !listener && rows && rows.length ? React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 10, border: '1px solid #15803d' } },
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }, onClick: () => setOpen(!open) },
-        React.createElement("b", { style: { color: '#86efac', fontSize: 13.5 } }, '⚡ Work done, still PO Pending — ' + rows.length + ' job' + (rows.length > 1 ? 's' : '') + ' to catch up'),
+        React.createElement("b", { style: { color: '#86efac', fontSize: 13.5 } }, '⚡ Delivered, dispatch not logged — ' + rows.length + ' job' + (rows.length > 1 ? 's' : '') + ' to catch up'),
         React.createElement("span", { style: { color: '#94a3b8', fontSize: 12 } }, open ? '▾' : '▸')),
-      React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } }, 'These jobs have a DC but no delivery on record. One tap records the dispatch + delivery + proof and moves the job to billing.'),
+      React.createElement("div", { style: { fontSize: 11, color: '#94a3b8', marginTop: 2 } }, 'These jobs have a DC (and often the signed DC / POD already on the job) but no delivery on record. One tap records dispatch + delivery using the file already uploaded — no second upload.'),
       open ? rows.map(r => React.createElement("div", { key: r.id, style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: '6px 0', borderTop: '1px solid #1f2937', fontSize: 12.5 } },
         React.createElement("span", null, React.createElement("b", null, r.id), ' · ', r.client || '', ' · ', r.erp_dcs ? r.erp_dcs + ' ERP DC' : 'no ERP DC yet', r.dc_file ? ' · DC file uploaded' : ''),
         React.createElement("button", { type: 'button', onClick: () => setJob(r.id), style: { padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', color: '#06210f', background: '#4ade80', border: 'none', whiteSpace: 'nowrap' } }, '⚡ Catch up'))) : null) : null,
-    job ? React.createElement(CatchupDispatchModal, { jobId: job, user, onClose: () => { setJob(null); load(); } }) : null);
+    job ? React.createElement(CatchupDispatchModal, { jobId: job, user, podUrl: pod, onClose: () => { setJob(null); setPod(''); load(); } }) : null);
 }
 function PodCheckCard({ user }) {
   const me = String((user && user.name) || '').trim().split(/\s+/)[0].toUpperCase();
