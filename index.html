@@ -11924,6 +11924,13 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
               photo_urls: merged
             } : x));
             show('📸 ' + urls.length + ' photo(s) uploaded!');
+            // 2 Nov 2026 (Jigar, after Murli's 12653-2627): batch photos did not count as DC packing proof - ask and count them
+            const pk = String(window.prompt('Are these PACKING photos for the DC?\n\n1 = Pre-packing\n2 = Post-packing\n\nLeave blank if they are other photos.', '') || '').trim();
+            const kd = pk === '1' ? 'pre_pack' : pk === '2' ? 'post_pack' : null;
+            if (kd && b.job_id) {
+              const pr = await sb.rpc('erp_photo_add', { p_job: b.job_id, p_kind: kd, p_urls: urls });
+              show(pr.error ? '⚠️ Not counted as packing proof: ' + pr.error.message : '📦 Counted as ' + (kd === 'pre_pack' ? 'pre-packing' : 'post-packing') + ' proof for the DC', !pr.error);
+            }
           } else show('⚠️ Photo save failed — please retry', false);
         }
       }
@@ -36830,6 +36837,20 @@ function RuleBlockBar({ user }) {
   const nmC = k => k ? k.charAt(0) + k.slice(1).toLowerCase() : '';
   const shown = String(b.msg || '').replace(/\s*Pending with: .*$/, '');
   const canSend = !!(b.owner && b.owner !== me);
+  // 2 Nov 2026 (Jigar): packing-proof block - upload the missing photos right here, into the right slot
+  const packJob = /pre-packing photo|post-packing photo/i.test(String(b.msg || '')) ? (String(b.msg).match(/\b(\d{3,6}-\d{4})\b/) || [])[1] : null;
+  const packNeed = packJob ? [['pre_pack', 'pre-packing'], ['post_pack', 'post-packing']].filter(k => new RegExp(k[1] + ' photo', 'i').test(String(b.msg))) : [];
+  const packAllDone = packNeed.length > 0 && packNeed.every(k => b['done_' + k[0]]);
+  const packUp = async (kind, fl) => {
+    if (!fl || !fl.length) return;
+    setBusy(true);
+    const urls = [];
+    for (const f of fl) { const u = await uploadFile(f, 'job-proof'); if (u) urls.push(u); }
+    if (!urls.length) { setBusy(false); setB(x => ({ ...x, packMsg: '\u26a0\ufe0f Upload failed - try again' })); return; }
+    const r = await sb.rpc('erp_photo_add', { p_job: packJob, p_kind: kind, p_urls: urls });
+    setBusy(false);
+    setB(x => ({ ...x, packMsg: r.error ? '\u26a0\ufe0f ' + r.error.message : '\u2713 ' + (kind === 'pre_pack' ? 'Pre-packing' : 'Post-packing') + ' photo saved', ['done_' + kind]: !r.error || x['done_' + kind] }));
+  };
   const cuJob = ['MANOJ', 'MURLI', 'APARNA', 'JIGAR'].includes(me) && /make the ERP deliver|dispatch is not logged|delivery not confirmed|not delivered on an ERP DC|log the dispatch/i.test(String(b.msg || '')) ? (String(b.msg).match(/\b(\d{3,6}-\d{4})\b/) || [])[1] : null;
   const sendOwner = async () => {
     if (!b.id) { setB({ ...b, sent: 'Could not log this - tell ' + nmC(b.owner) + ' directly' }); return; }
@@ -36852,6 +36873,14 @@ function RuleBlockBar({ user }) {
     React.createElement("div", { style: { marginTop: 4, color: '#fee2e2' } }, shown),
     b.owner ? React.createElement("div", { style: { marginTop: 6, padding: '6px 8px', borderRadius: 8, background: '#3b1a1a', color: '#fde68a', fontSize: 12.5, fontWeight: 700 } },
       b.owner === me ? '\ud83d\udc49 This is pending with you (' + (b.step || '') + ')' : '\ud83d\udc64 Pending with: ' + nmC(b.owner) + ' (' + (b.step || '') + ')' + (b.esc ? ' \u00b7 escalation: ' + nmC(b.esc) : '')) : null,
+    packJob ? React.createElement("div", { style: { marginTop: 8, padding: '8px', border: '1px solid #22c55e', borderRadius: 8, background: '#0f2a1a' } },
+      React.createElement("div", { style: { fontSize: 12.5, color: '#bbf7d0', fontWeight: 700, marginBottom: 6 } }, '\ud83d\udce6 Upload the packing photos for ' + packJob + ' here'),
+      React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, packNeed.map(k => b['done_' + k[0]]
+        ? React.createElement("span", { key: k[0], style: { padding: '7px 12px', borderRadius: 8, background: '#14532d', color: '#86efac', fontWeight: 700, fontSize: 12.5 } }, '\u2713 ' + k[1])
+        : React.createElement("label", { key: k[0], style: { padding: '7px 12px', borderRadius: 8, border: '1px solid #22c55e', background: busy ? '#334155' : '#15803d', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' } }, busy ? 'Uploading\u2026' : '\ud83d\udce6 Upload ' + k[1] + ' photo',
+          React.createElement("input", { type: 'file', accept: 'image/*', multiple: true, capture: 'environment', disabled: busy, style: { display: 'none' }, onChange: e => packUp(k[0], [...(e.target.files || [])]) })))),
+      b.packMsg ? React.createElement("div", { style: { marginTop: 6, fontSize: 12, color: /^\u2713/.test(b.packMsg) ? '#86efac' : '#fca5a5' } }, b.packMsg) : null,
+      packAllDone ? React.createElement("div", { style: { marginTop: 6, fontSize: 12.5, color: '#86efac', fontWeight: 800 } }, '\u2713 Packing proof complete - close this and click Save & Print on the DC again') : null) : null,
     cuJob ? React.createElement("button", { type: 'button', onClick: () => { try { window.dispatchEvent(new CustomEvent('erp-catchup', { detail: { job: cuJob } })); } catch (e) {} setB(null); }, style: { marginTop: 8, padding: '7px 14px', borderRadius: 8, border: '1px solid #22c55e', background: '#15803d', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' } }, '\u26a1 Already delivered? Catch up ' + cuJob) : null,
     b.sent ? React.createElement("div", { style: { marginTop: 6, color: /^\u2713/.test(b.sent) ? '#86efac' : '#fca5a5' } }, b.sent)
       : canSend ? React.createElement("div", { style: { display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' } },
