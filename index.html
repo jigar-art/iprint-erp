@@ -643,6 +643,30 @@ function PoMissingCard({ user, jobs, openJob }) {
         React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
         isAll && React.createElement("span", { style: { color: "#64748b", fontSize: 10, minWidth: 60, textAlign: "right" } }, String(j.made_by || '').split(' ')[0])))));
 }
+// 3 Nov 2026 (Jigar): dispatched jobs waiting only on the client PO sit here, out of Aparna's Billing Pending count and TAT.
+// Status never moves back; the tick clears itself when a PO / approval file is uploaded in PO COPIES (DB trigger).
+const ERP_PO_WAIT_ST = ['Delivered', 'Billing Pending'];
+function PoAwaitedCard({ user, jobs, openJob }) {
+  const me = String(user && user.name || '').toUpperCase().split(' ')[0];
+  const [open, setOpen] = React.useState(false);
+  if (!['JIGAR', 'CHANDNI', 'AMOL', 'APARNA', 'RUCHITA', 'ANKITA'].includes(me)) return null;
+  const now = Date.now();
+  const age = j => { const t = Date.parse(j.po_awaited_at || j.updated_at || ''); return isNaN(t) ? null : Math.max(0, Math.floor((now - t) / 86400000)); };
+  const list = (jobs || []).filter(j => j.po_awaited && !ERP_PO_PRE.includes(j.status)).map(j => ({ j: j, d: age(j) })).sort((a, b) => (b.d || 0) - (a.d || 0));
+  if (!list.length) return null;
+  const old = list.filter(x => (x.d || 0) >= 7).length;
+  return React.createElement("div", { className: "c", style: { padding: 10, border: "1px solid #f59e0b55" } },
+    React.createElement("div", { onClick: () => setOpen(!open), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", minHeight: 32 } },
+      React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#f59e0b" } }, "\u23f3 ", list.length, " jobs awaiting client PO", old ? " \u00b7 " + old + " over 7 days" : ""),
+      React.createElement("span", { style: { fontSize: 12, color: "#94a3b8" } }, open ? "\u25b2" : "\u25bc")),
+    React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", marginTop: 2 } }, "Not counted in Billing Pending or its TAT. Upload the PO / approval email in \ud83d\udcce PO COPIES \u2014 the tick clears itself and billing starts."),
+    open && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 3, maxHeight: 320, overflow: "auto" } },
+      list.slice(0, 80).map(({ j, d }) => React.createElement("div", { key: j.id, onClick: () => openJob && openJob(j), style: { display: "flex", gap: 8, fontSize: 12, padding: "6px 4px", borderBottom: "1px solid #1a2030", cursor: "pointer", minHeight: 36, alignItems: "center" } },
+        React.createElement("span", { className: "mn", style: { color: "#3b82f6", minWidth: 86 } }, j.id),
+        React.createElement("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cbd5e1" } }, (j.client_name || '') + (j.project ? ' \u00b7 ' + j.project : '')),
+        React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
+        React.createElement("span", { style: { color: (d || 0) >= 7 ? "#ef4444" : "#94a3b8", fontSize: 11, minWidth: 44, textAlign: "right" } }, d == null ? "" : d + "d")))));
+}
 const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
   if (!status) return null;
@@ -5106,7 +5130,7 @@ function DashPage({
     fab: jl.filter(j => ['Fabrication · In-House', 'Fabrication · Outsource'].includes(j.status)).length,
     install: jl.filter(j => j.status === 'Installation WIP').length,
     delivered: jl.filter(j => j.status === 'Delivered').length,
-    billPend: jl.filter(j => ['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending'].includes(j.status)).length,
+    billPend: jl.filter(j => ['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending'].includes(j.status) && !(j.po_awaited && ERP_PO_WAIT_ST.includes(j.status))).length,
     billed: jl.filter(j => ['Billing Done', 'Cash Received'].includes(j.status)).length
   });
   const bk = bStats(bankJobs);
@@ -5259,7 +5283,7 @@ function DashPage({
       flexDirection: "column",
       gap: 8
     }
-  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
+  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAwaitedCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
     className: "c",
     style: {
       padding: 10
