@@ -643,9 +643,9 @@ function PoMissingCard({ user, jobs, openJob }) {
         React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
         isAll && React.createElement("span", { style: { color: "#64748b", fontSize: 10, minWidth: 60, textAlign: "right" } }, String(j.made_by || '').split(' ')[0])))));
 }
-// 3 Nov 2026 (Jigar): dispatched jobs waiting only on the client PO sit here, out of Aparna's Billing Pending count and TAT.
+// 3 Nov 2026 (Jigar): dispatched jobs waiting only on the client PO sit here, out of Aparna's and Prachi's billing counts and TAT.
 // Status never moves back; the tick clears itself when a PO / approval file is uploaded in PO COPIES (DB trigger).
-const ERP_PO_WAIT_ST = ['Delivered', 'Billing Pending'];
+const ERP_PO_WAIT_ST = ['Delivered', 'Billing Pending', 'Given for Billing'];
 function PoAwaitedCard({ user, jobs, openJob }) {
   const me = String(user && user.name || '').toUpperCase().split(' ')[0];
   const [open, setOpen] = React.useState(false);
@@ -659,7 +659,7 @@ function PoAwaitedCard({ user, jobs, openJob }) {
     React.createElement("div", { onClick: () => setOpen(!open), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", minHeight: 32 } },
       React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#f59e0b" } }, "\u23f3 ", list.length, " jobs awaiting client PO", old ? " \u00b7 " + old + " over 7 days" : ""),
       React.createElement("span", { style: { fontSize: 12, color: "#94a3b8" } }, open ? "\u25b2" : "\u25bc")),
-    React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", marginTop: 2 } }, "Not counted in Billing Pending or its TAT. Upload the PO / approval email in \ud83d\udcce PO COPIES \u2014 the tick clears itself and billing starts."),
+    React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", marginTop: 2 } }, "Not counted in billing counts or TAT (Aparna / Prachi). Upload the PO / approval email in \ud83d\udcce PO COPIES \u2014 the tick clears itself and billing starts."),
     open && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 3, maxHeight: 320, overflow: "auto" } },
       list.slice(0, 80).map(({ j, d }) => React.createElement("div", { key: j.id, onClick: () => openJob && openJob(j), style: { display: "flex", gap: 8, fontSize: 12, padding: "6px 4px", borderBottom: "1px solid #1a2030", cursor: "pointer", minHeight: 36, alignItems: "center" } },
         React.createElement("span", { className: "mn", style: { color: "#3b82f6", minWidth: 86 } }, j.id),
