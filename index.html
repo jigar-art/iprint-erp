@@ -620,6 +620,19 @@ function erpPoFiles(j) {
   if (typeof v === 'string') { const t = v.trim(); if (t.startsWith('[')) { try { v = JSON.parse(t); } catch (e) { v = [t]; } } else v = [t]; }
   return (Array.isArray(v) ? v : []).filter(u => typeof u === 'string' && u.trim().length > 8);
 }
+// 4 Nov 2026 (Jigar): ERP reads PO no. / date / amount from the uploaded PO (server-side AI, read-client-po); staff confirm
+function erpReadClientPo(jobId, url, onResult) {
+  sb.rpc('erp_po_read_start', { p_job: String(jobId), p_url: url }).then(({ data: id, error }) => {
+    if (error || !id) return;
+    let n = 0;
+    const tick = () => sb.rpc('erp_po_read_status', { p_id: id }).then(({ data }) => {
+      if (data && data.status === 'done' && data.result) { try { onResult(data.result); } catch (e) {} return; }
+      if (data && data.status === 'error') { if (window._showToast) window._showToast('Could not read the PO \u2014 please type the figures', false); return; }
+      if (++n < 30) setTimeout(tick, 3000);
+    }, () => {});
+    setTimeout(tick, 4000);
+  }, () => {});
+}
 // 29 Oct 2026 (Jigar): reminder card — jobs past PO Pending with no PO / approval file attached (warn-only)
 const ERP_PO_PRE = ['Quotation Sent', 'PO Pending', 'Cancelled', 'No Bill', 'Billing Done', 'Cash Received', 'Draft', 'Active'];
 function PoMissingCard({ user, jobs, openJob }) {
@@ -6635,7 +6648,7 @@ function JobDetail({
     const {
       data,
       error
-    } = await sb.from('job_pos').update(updates).eq('id', id).select().single();
+    } = await sb.from('job_pos').update({ ...updates, source: 'manual' }).eq('id', id).select().single();
     if (error) {
       show('⚠️ Update failed: ' + error.message, false);
       return;
@@ -7884,7 +7897,7 @@ function JobDetail({
         color: "#e3a008",
         fontWeight: 600
       }
-    }, "\u20B9", (+po.po_amount).toLocaleString('en-IN')), po.po_file_url ? React.createElement("a", {
+    }, "\u20B9", (+po.po_amount).toLocaleString('en-IN'), po.amount_incl_gst === false ? " +GST" : "", po.source === 'ai' ? " \uD83E\uDD16" : po.source === 'ai_review' ? " \uD83E\uDD16 check \u270F\uFE0F" : ""), po.po_file_url ? React.createElement("a", {
       href: smartOpenUrl(po.po_file_url),
       target: "_blank",
       rel: "noopener noreferrer",
@@ -8030,7 +8043,9 @@ function JobDetail({
       fontSize: 9,
       padding: "2px 10px"
     }
-  }, "Add"), React.createElement("button", {
+  }, "Add"), newPo.ai_note ? React.createElement("span", {
+    style: { fontSize: 9, color: "#a78bfa", flexBasis: "100%" }
+  }, newPo.ai_note) : null, React.createElement("button", {
     className: "b bs",
     onClick: () => {
       setShowAddPo(false);
@@ -8410,7 +8425,14 @@ function JobDetail({
           const _pn = String(j.po_number || '').trim();
           setNewPo({ po_number: /^no data$/i.test(_pn) ? '' : _pn, po_date: '', po_amount: '', po_file_url: newUrls[newUrls.length - 1] });
           setShowAddPo(true);
-          show('\uD83D\uDCCB Now enter PO no., date and amount in CLIENT POs');
+          show('\uD83E\uDD16 Reading the PO\u2026 check the figures in CLIENT POs, then Add');
+          erpReadClientPo(j.id, newUrls[newUrls.length - 1], r => setNewPo(p => p.po_file_url !== newUrls[newUrls.length - 1] ? p : ({
+            ...p,
+            po_number: r.po_number || p.po_number,
+            po_date: /^\d{4}-\d{2}-\d{2}$/.test(r.po_date || '') ? r.po_date : p.po_date,
+            po_amount: +r.total_amount > 0 ? String(r.total_amount) : p.po_amount,
+            ai_note: (r.confidence === 'high' ? '\uD83E\uDD16 Filled from the PO \u2014 please check' : '\uD83E\uDD16 Read with ' + r.confidence + ' confidence \u2014 check carefully') + (r.issued_to ? ' \u00b7 addressed to ' + r.issued_to : '') + (+r.amount_before_gst > 0 ? ' \u00b7 before GST \u20B9' + (+r.amount_before_gst).toLocaleString('en-IN') : '')
+          })));
           setTimeout(() => { const el = document.getElementById('job-client-pos'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300);
         }
         if (newUrls.length && sec.field === 'dc_file_url') erpOfferCatchup(j.id, newUrls[newUrls.length - 1]).then(opened => { if (!opened) sb.rpc('erp_pod_no_dc_check', { p_job: String(j.id) }).then(r => { if (r && r.data && window._showToast) window._showToast('\u26a0\ufe0f ' + r.data, false); }, () => {}); });
