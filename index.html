@@ -656,6 +656,46 @@ function PoMissingCard({ user, jobs, openJob }) {
         React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
         isAll && React.createElement("span", { style: { color: "#64748b", fontSize: 10, minWidth: 60, textAlign: "right" } }, String(j.made_by || '').split(' ')[0])))));
 }
+// 4 Nov 2026 (Jigar): PO amounts (AI-read or typed by others) are approved by Ruchita or Ankita; edit + save by them also approves
+function erpMeKey(user) { return String(user && user.name || '').toUpperCase().split(' - ')[0].split('(')[0].trim().split(' ')[0]; }
+function erpIsPoApprover(user) { return ['RUCHITA', 'ANKITA', 'JIGAR'].includes(erpMeKey(user)); }
+function PoApproveCard({ user, jobs, openJob }) {
+  const me = erpMeKey(user);
+  const ok = erpIsPoApprover(user);
+  const [rows, setRows] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(null);
+  const load = React.useCallback(() => { sb.rpc('erp_po_amounts_to_approve').then(r => { if (r && !r.error) setRows(r.data || []); }, () => {}); }, []);
+  React.useEffect(() => { if (ok) load(); }, [ok, load]);
+  if (!ok || !rows || !rows.length) return null;
+  const list = rows.slice().sort((a, b) => ((b.made_by === me) - (a.made_by === me)) || String(b.created_at).localeCompare(String(a.created_at)));
+  const mine = rows.filter(r => r.made_by === me).length;
+  const inr = v => '\u20B9' + Math.round(+v || 0).toLocaleString('en-IN');
+  const approve = async r => {
+    setBusy(r.id);
+    const { error } = await sb.rpc('erp_po_amount_approve', { p_id: r.id });
+    setBusy(null);
+    if (error) { if (window._showToast) window._showToast('\u26A0\uFE0F ' + error.message, false); return; }
+    setRows(p => p.filter(x => x.id !== r.id));
+  };
+  return React.createElement("div", { className: "c", style: { padding: 10, border: "1px solid #4ade8055" } },
+    React.createElement("div", { onClick: () => setOpen(!open), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", minHeight: 32 } },
+      React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#4ade80" } }, "\u2705 ", rows.length, " PO amounts to approve", mine ? " \u00b7 " + mine + " on your jobs" : ""),
+      React.createElement("span", { style: { fontSize: 12, color: "#94a3b8" } }, open ? "\u25b2" : "\u25bc")),
+    React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", marginTop: 2 } }, "Check the amount against the PO (\uD83D\uDCCE). Correct? \u2713 Approve. Wrong? Open the job \u2192 CLIENT POs \u2192 \u270F\uFE0F edit and save (that approves it). \uD83E\uDD16 = read by the ERP from the PO."),
+    open && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 3, maxHeight: 420, overflow: "auto" } },
+      list.slice(0, 120).map(r => {
+        const gap = +r.job_value > 0 && +r.po_amount > 0 && r.incl_gst !== false ? (+r.job_value - +r.po_amount) / +r.po_amount : null;
+        const far = gap != null && Math.abs(gap) > 0.02;
+        return React.createElement("div", { key: r.id, style: { display: "flex", gap: 8, fontSize: 12, padding: "6px 4px", borderBottom: "1px solid #1a2030", minHeight: 40, alignItems: "center", flexWrap: "wrap" } },
+          React.createElement("span", { className: "mn", onClick: () => { const j = (jobs || []).find(x => x.id === r.job_id); if (j && openJob) openJob(j); }, style: { color: "#3b82f6", minWidth: 86, cursor: "pointer" } }, r.job_id),
+          React.createElement("span", { style: { flex: 1, minWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cbd5e1" } }, (r.client || '') + (r.project ? ' \u00b7 ' + r.project : '')),
+          React.createElement("span", { className: "mn", style: { color: "#94a3b8", fontSize: 11 } }, r.po_number),
+          React.createElement("span", { className: "mn", style: { color: "#e3a008", fontWeight: 700 } }, inr(r.po_amount), r.incl_gst === false ? " +GST" : "", r.source !== 'manual' ? " \uD83E\uDD16" : ""),
+          React.createElement("span", { style: { fontSize: 10, color: far ? "#ef4444" : "#64748b", minWidth: 110 } }, "job ", inr(r.job_value), gap != null ? " (" + (gap > 0 ? "+" : "") + Math.round(gap * 100) + "%)" : ""),
+          React.createElement("button", { className: "b bs", disabled: busy === r.id, onClick: () => approve(r), style: { fontSize: 11, padding: "4px 10px", borderColor: "#4ade80", color: "#4ade80", minHeight: 30 } }, busy === r.id ? "\u2026" : "\u2713 Approve"));
+      })));
+}
 // 4 Nov 2026 (Jigar): daily list — open jobs with a PO file uploaded but no PO no. / date / amount recorded (CLIENT POs)
 function PoAmountMissingCard({ user, jobs, openJob }) {
   const me = String(user && user.name || '').toUpperCase().split(' ')[0];
@@ -5342,7 +5382,7 @@ function DashPage({
       flexDirection: "column",
       gap: 8
     }
-  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAwaitedCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAmountMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
+  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAwaitedCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAmountMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoApproveCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
     className: "c",
     style: {
       padding: 10
@@ -7897,7 +7937,20 @@ function JobDetail({
         color: "#e3a008",
         fontWeight: 600
       }
-    }, "\u20B9", (+po.po_amount).toLocaleString('en-IN'), po.amount_incl_gst === false ? " +GST" : "", po.source === 'ai' ? " \uD83E\uDD16" : po.source === 'ai_review' ? " \uD83E\uDD16 check \u270F\uFE0F" : ""), po.po_file_url ? React.createElement("a", {
+    }, "\u20B9", (+po.po_amount).toLocaleString('en-IN'), po.amount_incl_gst === false ? " +GST" : "", po.source === 'ai' || po.source === 'ai_review' ? " \uD83E\uDD16" : ""), po.po_amount ? (po.approved_by ? React.createElement("span", {
+      style: { fontSize: 8, color: "#4ade80", fontWeight: 600 }
+    }, "\u2713 ", po.approved_by) : React.createElement("span", {
+      style: { display: "inline-flex", gap: 4, alignItems: "center" }
+    }, React.createElement("span", { style: { fontSize: 8, color: "#f59e0b", fontWeight: 600 } }, "\u23F3 approval pending"), erpIsPoApprover(user) && React.createElement("button", {
+      className: "b bs",
+      style: { fontSize: 8, padding: "1px 6px", borderColor: "#4ade80", color: "#4ade80" },
+      onClick: async () => {
+        const { data, error } = await sb.rpc('erp_po_amount_approve', { p_id: po.id });
+        if (error) { show('\u26A0\uFE0F ' + error.message, false); return; }
+        setJobPos(p => p.map(x => x.id === po.id ? { ...x, approved_by: erpMeKey(user), approved_at: new Date().toISOString() } : x));
+        show('\u2705 ' + (data || 'Approved'));
+      }
+    }, "\u2713 Approve"))) : null, po.po_file_url ? React.createElement("a", {
       href: smartOpenUrl(po.po_file_url),
       target: "_blank",
       rel: "noopener noreferrer",
