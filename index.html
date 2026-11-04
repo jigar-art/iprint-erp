@@ -6280,6 +6280,126 @@ function _psWatermarkHtml(name) {
   const line = 'INTERNAL — NOT FOR VENDORS · ' + stamp;
   return '<style>.ps-wm{position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden}.ps-wm div{position:absolute;left:-20%;width:140%;transform:rotate(-30deg);font:700 22px Arial,sans-serif;color:rgba(200,30,30,.13);white-space:nowrap;text-align:center}.ps-foot{position:fixed;bottom:0;left:0;right:0;font:700 9px Arial,sans-serif;color:#b91c1c;text-align:center;background:#fff;padding:2px 0;border-top:1px solid #b91c1c}body{padding-bottom:24px!important}@media print{.ps-wm div{color:rgba(200,30,30,.16)}}</style><div class="ps-wm">' + [8, 30, 52, 74, 96].map(t => '<div style="top:' + t + '%">' + line + '</div>').join('') + '</div><div class="ps-foot">INTERNAL DOCUMENT — contains client and PO details. Do NOT send to vendors (use Vendor Job Card). Printed by ' + stamp + '</div>';
 }
+function VendorIssuePicker({
+  jobId,
+  value,
+  onChange
+}) {
+  const [pos, setPos] = React.useState(null);
+  const [vends, setVends] = React.useState([]);
+  const [q, setQ] = React.useState('');
+  React.useEffect(() => {
+    let live = true;
+    sb.from('purchase_requests').select('id,po_no,vendor_name,status').eq('job_id', jobId).not('po_no', 'is', null).neq('status', 'Cancelled').order('created_at', {
+      ascending: false
+    }).then(({
+      data
+    }) => {
+      if (live) setPos(data || []);
+    });
+    sb.from('vendors').select('id,name').eq('active', true).order('name').then(({
+      data
+    }) => {
+      if (live) setVends(data || []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [jobId]);
+  const chip = (on, label, onClick, key) => React.createElement("button", {
+    key,
+    className: "b bs",
+    onClick,
+    style: {
+      fontSize: 10,
+      padding: "4px 8px",
+      border: `1px solid ${on ? '#16a34a' : '#1a2030'}`,
+      background: on ? '#052e16' : 'transparent',
+      color: on ? '#4ade80' : '#cbd5e1'
+    }
+  }, label);
+  const ql = q.trim().toLowerCase();
+  const matches = ql ? vends.filter(v => (v.name || '').toLowerCase().includes(ql)).slice(0, 20) : [];
+  return React.createElement("div", {
+    style: {
+      marginBottom: 10,
+      padding: 8,
+      background: "#0a0f1a",
+      borderRadius: 6,
+      border: `1px solid ${value ? '#16a34a' : '#7f1d1d'}`
+    }
+  }, React.createElement("p", {
+    style: {
+      fontSize: 9,
+      color: "#64748b",
+      fontWeight: 600,
+      marginBottom: 4,
+      textTransform: "uppercase",
+      letterSpacing: ".05em"
+    }
+  }, "Issue to (required)"), value && React.createElement("p", {
+    style: {
+      fontSize: 11,
+      color: "#4ade80",
+      marginBottom: 6
+    }
+  }, "✓ ", value.vendor, " · PO: ", value.po_no || 'Pending', " ", React.createElement("span", {
+    style: {
+      cursor: "pointer",
+      color: "#94a3b8"
+    },
+    onClick: () => onChange(null)
+  }, "✕ change")), pos === null ? React.createElement("p", {
+    style: {
+      fontSize: 10,
+      color: "#64748b"
+    }
+  }, "Loading POs…") : pos.length > 0 && React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      flexWrap: "wrap",
+      marginBottom: 6
+    }
+  }, pos.map(p => chip(value && value.po_no === p.po_no, p.po_no + ' · ' + (p.vendor_name || ''), () => onChange({
+    vendor: p.vendor_name || '',
+    po_no: p.po_no
+  }), p.id))), React.createElement("p", {
+    style: {
+      fontSize: 9,
+      color: "#64748b",
+      margin: "4px 0"
+    }
+  }, pos && pos.length ? "No PO for this vendor yet? Search vendor:" : "No PO on this job yet — search vendor:"), React.createElement("input", {
+    value: q,
+    onChange: e => setQ(e.target.value),
+    placeholder: "Type vendor name…",
+    style: {
+      width: "100%",
+      maxWidth: 320,
+      fontSize: 11,
+      padding: "4px 6px",
+      marginBottom: 4
+    }
+  }), matches.length > 0 && React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      flexWrap: "wrap"
+    }
+  }, matches.map(v => chip(value && !value.po_no && value.vendor === v.name, v.name, () => {
+    onChange({
+      vendor: v.name,
+      po_no: null
+    });
+    setQ('');
+  }, v.id))), ql && matches.length === 0 && React.createElement("p", {
+    style: {
+      fontSize: 10,
+      color: "#f87171"
+    }
+  }, "No active vendor matches — add the vendor in the vendor master first."));
+}
 function JobDetail({
   j,
   firms,
@@ -6321,6 +6441,7 @@ function JobDetail({
   const [addingToBatch, setAddingToBatch] = useState(null);
   const [copyBatch, setCopyBatch] = useState(null);
   const [pdfMode, setPdfMode] = useState(null);
+  const [vjcIssue, setVjcIssue] = useState(null);
   const [pdfBatches, setPdfBatches] = useState({});
   const [pdfPreset, setPdfPreset] = useState('internal');
   const [pdfCols, setPdfCols] = useState({
@@ -12896,6 +13017,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
     title: "Safe copy for vendors — no client name, PO, billing, GST or rates",
     onClick: () => {
       setPdfMode('vendor');
+      setVjcIssue(null);
       const sel = {};
       (j.batches || []).forEach(b => {
         if ((b.items || []).length > 0) sel[b.id] = true;
@@ -13013,7 +13135,11 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       fontSize: 9,
       padding: "2px 6px"
     }
-  }, "\u2715")), pdfMode === 'estimate' && (() => {
+  }, "\u2715")), pdfMode === 'vendor' && React.createElement(VendorIssuePicker, {
+    jobId: j.id,
+    value: vjcIssue,
+    onChange: setVjcIssue
+  }), pdfMode === 'estimate' && (() => {
     const PRESETS = [{
       k: 'internal',
       n: '🔧 Internal',
@@ -13522,10 +13648,14 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           show('✅ Excel exported' + (skipped > 0 ? ' (' + skipped + ' image(s) skipped — fetch failed)' : ''));
         })();
       } else if (pdfMode === 'vendor') {
+        if (!vjcIssue || !vjcIssue.vendor) {
+          alert('Pick the PO or vendor this card is issued to (top of this panel).');
+          return;
+        }
         const E = _psEsc;
         const vTotQty = selItems.reduce((s, it) => s + (+it.qty || 0), 0);
         const vTotSqft = Math.round(selItems.reduce((s, it) => s + (+it.sqft || 0), 0) * 100) / 100;
-        const vHtml = `<html><head><title>Vendor Job Card ${E(j.id)}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px 20px 30px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.box{border:1px solid #999;border-radius:4px;padding:6px 8px;margin-bottom:10px;font-size:11px}.box b{display:block;font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}.foot{position:fixed;bottom:0;left:0;right:0;font-size:8px;color:#555;text-align:center;background:#fff;border-top:1px solid #ccc;padding:2px 0}@media print{body{padding:10px 10px 26px}}</style></head><body>` + `<div class="hdr"><div><h1>VENDOR JOB CARD</h1><p style="font-size:10px;color:#666">Issued by ${E(fm.short_name || fm.name || '')}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${E(j.id)}</p><p style="font-size:10px">Date: ${E(td())}</p></div></div>` + `<div class="box"><b>Vendor</b>&nbsp;</div>` + (j.delivery_address ? `<div class="box"><b>Delivery / Site address (incl. site contact)</b>${E(j.delivery_address).replace(/\n/g, '<br/>')}</div>` : '') + selBatches.map((b, bi) => {
+        const vHtml = `<html><head><title>Vendor Job Card ${E(j.id)}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px 20px 30px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.box{border:1px solid #999;border-radius:4px;padding:6px 8px;margin-bottom:10px;font-size:11px}.box b{display:block;font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}.foot{position:fixed;bottom:0;left:0;right:0;font-size:8px;color:#555;text-align:center;background:#fff;border-top:1px solid #ccc;padding:2px 0}@media print{body{padding:10px 10px 26px}}</style></head><body>` + `<div class="hdr"><div><h1>VENDOR JOB CARD</h1><p style="font-size:10px;color:#666">Issued by ${E(fm.short_name || fm.name || '')}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${E(j.id)}</p><p style="font-size:10px">Date: ${E(td())}</p></div></div>` + `<div class="box" style="display:flex;gap:30px"><div><b>Issued to (Vendor)</b>${E(vjcIssue.vendor)}</div><div><b>Our PO No</b>${E(vjcIssue.po_no || 'Pending')}</div></div>` + (j.delivery_address ? `<div class="box"><b>Delivery / Site address (incl. site contact)</b>${E(j.delivery_address).replace(/\n/g, '<br/>')}</div>` : '') + selBatches.map((b, bi) => {
           const bItems = b.items || [];
           if (!bItems.length) return '';
           const hasImg = bItems.some(it => it.img_url);
