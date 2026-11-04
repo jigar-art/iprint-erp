@@ -6256,6 +6256,30 @@ function DcTemplateFields({ dcForm, setDcForm }) {
         React.createElement('input', { className: 'in', value: dcForm[k] || '', onChange: set(k), style: { fontSize: 10 } })))) : null);
 }
 /*DC_HELPERS_END*/
+function _psEsc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[c]);
+}
+function _psStamp(name) {
+  return _psEsc((name || 'Unknown user').toString().toUpperCase()) + ' · ' + _psEsc(new Date().toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }));
+}
+function _psWatermarkHtml(name) {
+  const stamp = _psStamp(name);
+  const line = 'INTERNAL — NOT FOR VENDORS · ' + stamp;
+  return '<style>.ps-wm{position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden}.ps-wm div{position:absolute;left:-20%;width:140%;transform:rotate(-30deg);font:700 22px Arial,sans-serif;color:rgba(200,30,30,.13);white-space:nowrap;text-align:center}.ps-foot{position:fixed;bottom:0;left:0;right:0;font:700 9px Arial,sans-serif;color:#b91c1c;text-align:center;background:#fff;padding:2px 0;border-top:1px solid #b91c1c}body{padding-bottom:24px!important}@media print{.ps-wm div{color:rgba(200,30,30,.16)}}</style><div class="ps-wm">' + [8, 30, 52, 74, 96].map(t => '<div style="top:' + t + '%">' + line + '</div>').join('') + '</div><div class="ps-foot">INTERNAL DOCUMENT — contains client and PO details. Do NOT send to vendors (use Vendor Job Card). Printed by ' + stamp + '</div>';
+}
 function JobDetail({
   j,
   firms,
@@ -12867,7 +12891,22 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
     style: {
       gap: 4
     }
-  }, "\uD83D\uDCCB Production Sheet"), canSeeRates && React.createElement("button", {
+  }, "\uD83D\uDCCB Production Sheet"), React.createElement("button", {
+    className: "b",
+    title: "Safe copy for vendors — no client name, PO, billing, GST or rates",
+    onClick: () => {
+      setPdfMode('vendor');
+      const sel = {};
+      (j.batches || []).forEach(b => {
+        if ((b.items || []).length > 0) sel[b.id] = true;
+      });
+      setPdfBatches(sel);
+    },
+    style: {
+      gap: 4,
+      border: "1px solid #16a34a"
+    }
+  }, "\uD83C\uDFED Vendor Job Card"), canSeeRates && React.createElement("button", {
     className: "b",
     onClick: () => {
       setPdfMode('excel');
@@ -12967,7 +13006,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       fontWeight: 700,
       color: "#e3a008"
     }
-  }, pdfMode === 'estimate' ? '📄 Estimate PDF' : pdfMode === 'production' ? '📋 Production Sheet' : '📊 Excel Export', " \u2014 Select Batches"), React.createElement("button", {
+  }, pdfMode === 'estimate' ? '📄 Estimate PDF' : pdfMode === 'production' ? '📋 Production Sheet (internal)' : pdfMode === 'vendor' ? '🏭 Vendor Job Card' : '📊 Excel Export', " \u2014 Select Batches"), React.createElement("button", {
     className: "b bs",
     onClick: () => setPdfMode(null),
     style: {
@@ -13482,10 +13521,51 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
           const skipped = allUrls.filter(u => !imgCache[u]).length;
           show('✅ Excel exported' + (skipped > 0 ? ' (' + skipped + ' image(s) skipped — fetch failed)' : ''));
         })();
+      } else if (pdfMode === 'vendor') {
+        const E = _psEsc;
+        const vTotQty = selItems.reduce((s, it) => s + (+it.qty || 0), 0);
+        const vTotSqft = Math.round(selItems.reduce((s, it) => s + (+it.sqft || 0), 0) * 100) / 100;
+        const vHtml = `<html><head><title>Vendor Job Card ${E(j.id)}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px 20px 30px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.box{border:1px solid #999;border-radius:4px;padding:6px 8px;margin-bottom:10px;font-size:11px}.box b{display:block;font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}.foot{position:fixed;bottom:0;left:0;right:0;font-size:8px;color:#555;text-align:center;background:#fff;border-top:1px solid #ccc;padding:2px 0}@media print{body{padding:10px 10px 26px}}</style></head><body>` + `<div class="hdr"><div><h1>VENDOR JOB CARD</h1><p style="font-size:10px;color:#666">Issued by ${E(fm.short_name || fm.name || '')}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${E(j.id)}</p><p style="font-size:10px">Date: ${E(td())}</p></div></div>` + `<div class="box"><b>Vendor</b>&nbsp;</div>` + (j.delivery_address ? `<div class="box"><b>Delivery / Site address (incl. site contact)</b>${E(j.delivery_address).replace(/\n/g, '<br/>')}</div>` : '') + selBatches.map((b, bi) => {
+          const bItems = b.items || [];
+          if (!bItems.length) return '';
+          const hasImg = bItems.some(it => it.img_url);
+          return `<div class="batch-hdr">Batch ${bi + 1} · ${E(b.date || '')}</div>` + `<table><thead><tr><th>#</th><th>Description</th>${hasImg ? '<th>Artwork</th>' : ''}<th>Material</th><th>Size (W×H)</th><th>Unit</th><th>Qty</th><th>${E(resolveUomHeader(bItems))}</th></tr></thead><tbody>` + bItems.map((it, ii) => `<tr><td>${ii + 1}</td><td style="font-weight:600">${E(it.internal_name || '')}</td>${hasImg ? '<td>' + (it.img_url ? '<img src="' + E(it.img_url) + '"/>' : '—') + '</td>' : ''}<td style="font-size:9px;color:#555">${E((it.media || '').slice(0, 80))}</td><td class="r">${it.width && it.height ? E(it.width + '×' + it.height + (it.size_unit ? ' ' + it.size_unit : '')) : '—'}</td><td>${E(getUomLabel(it.rate_mode).header)}</td><td class="r" style="font-weight:700">${E(it.qty)}</td><td class="r">${it.sqft > 0 ? E(it.sqft + getUomLabel(it.rate_mode).suffix) : '—'}</td></tr>`).join('') + `</tbody></table>`;
+        }).join('') + `<table style="margin-top:8px"><tr class="total"><td style="text-align:right"><b>GRAND TOTAL</b></td><td class="r" style="width:80px"><b>Qty ${vTotQty}</b></td><td class="r" style="width:110px"><b>${vTotSqft}</b></td></tr></table>` + (() => {
+          const allImgs = selItems.filter(it => it.img_url);
+          const designRefs = Array.isArray(j.design_ref_urls) ? j.design_ref_urls : [];
+          return allImgs.length > 0 || designRefs.length > 0 ? '<div class="refs"><h3 style="font-size:12px;margin-bottom:8px;border-bottom:1px solid #999;padding-bottom:4px">Artwork / Design References</h3><div style="display:flex;flex-wrap:wrap;gap:10px">' + allImgs.map((it, i) => '<div style="text-align:center"><img src="' + E(it.img_url) + '"/><p style="font-size:9px;font-weight:600;margin-top:2px">' + E(it.internal_name || 'Item ' + (i + 1)) + '</p></div>').join('') + designRefs.map((u, i) => '<div style="text-align:center"><img src="' + E(u) + '" style="max-width:250px"/><p style="font-size:9px">Ref ' + (i + 1) + '</p></div>').join('') + '</div></div>' : '';
+        })() + `<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:30px;font-size:10px;color:#666"><div style="border-top:1px solid #999;padding-top:4px">Issued By</div><div style="border-top:1px solid #999;padding-top:4px">Received By (Vendor)</div></div><div class="foot">Confidential — for production of job ${E(j.id)} only. Not to be shared further. Ref: ${_psStamp(user?.name)}</div></body></html>`;
+        const w = window.open('', '_blank');
+        w.document.write(vHtml);
+        w.document.close();
+        (function () {
+          const imgs = w.document.images;
+          let done = false;
+          const doPrint = () => {
+            if (done) return;
+            done = true;
+            w.print();
+          };
+          if (imgs.length === 0) {
+            doPrint();
+            return;
+          }
+          let n = 0;
+          const go = () => {
+            if (++n >= imgs.length) doPrint();
+          };
+          Array.from(imgs).forEach(im => {
+            if (im.complete) go();else {
+              im.onload = go;
+              im.onerror = go;
+            }
+          });
+          setTimeout(doPrint, 8000);
+        })();
       } else {
         const totQty = selItems.reduce((s, it) => s + (+it.qty || 0), 0);
         const totSqft = Math.round(selItems.reduce((s, it) => s + (+it.sqft || 0), 0) * 100) / 100;
-        const psHtml = `<html><head><title>Production Sheet ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}@media print{body{padding:10px}}</style></head><body>` + `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${fm.short_name || ''} · ${fm.address || ''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${j.id}</p><p style="font-size:10px">Date: ${td()}</p></div></div>` + `<div class="meta"><b>Client:</b><span>${j.client_name || ''}</span><b>Project:</b><span>${j.project || ''}</span><b>PO No:</b><span>${j.po_number || 'Pending'}</span><b>Delivery:</b><span>${j.delivery_address || ''}</span>${j.billing_address ? '<b>Billing Addr:</b><span>' + j.billing_address + '</span>' : ''}<b>Firm:</b><span>${fm.name || ''}</span><b>Made By:</b><span>${j.made_by || ''}</span><b>Lead Source:</b><span>${j.lead_source || '—'}</span><b>Status:</b><span>${j.status || ''}</span></div>` + selBatches.map((b, bi) => {
+        const psHtml = `<html><head><title>Production Sheet ${j.id}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.batch-hdr{background:#333;color:#fff;padding:4px 8px;font-size:10px;font-weight:700;margin-top:12px}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}@media print{body{padding:10px}}</style></head><body>` + _psWatermarkHtml(user?.name) + `<div class="hdr"><div><h1>PRODUCTION SHEET — INTERNAL</h1><p style="font-size:10px;color:#666">${fm.short_name || ''} · ${fm.address || ''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${j.id}</p><p style="font-size:10px">Date: ${td()}</p></div></div>` + `<div class="meta"><b>Client:</b><span>${j.client_name || ''}</span><b>Project:</b><span>${j.project || ''}</span><b>PO No:</b><span>${j.po_number || 'Pending'}</span><b>Delivery:</b><span>${j.delivery_address || ''}</span>${j.billing_address ? '<b>Billing Addr:</b><span>' + j.billing_address + '</span>' : ''}<b>Firm:</b><span>${fm.name || ''}</span><b>Made By:</b><span>${j.made_by || ''}</span><b>Lead Source:</b><span>${j.lead_source || '—'}</span><b>Status:</b><span>${j.status || ''}</span></div>` + selBatches.map((b, bi) => {
           const bItems = b.items || [];
           if (!bItems.length) return '';
           const hasImg = bItems.some(it => it.img_url);
@@ -13528,7 +13608,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
     style: {
       fontSize: 11
     }
-  }, "\uD83D\uDDA8\uFE0F Export ", pdfMode === 'estimate' ? 'Estimate' : pdfMode === 'production' ? 'Production Sheet' : 'Excel'))), dcMode && (() => {
+  }, "\uD83D\uDDA8\uFE0F Export ", pdfMode === 'estimate' ? 'Estimate' : pdfMode === 'production' ? 'Production Sheet' : pdfMode === 'vendor' ? 'Vendor Job Card' : 'Excel'))), dcMode && (() => {
     const batch = (j.batches || []).find(b => b.id === dcMode);
     if (!batch) return null;
     const firm = firms.find(f => f.code === (j.firm || 'JXT')) || {};
@@ -16250,7 +16330,7 @@ function NewJobPage({
       const firmData = firms.find(x => x.code === fm) || {};
       const totQty = its.reduce((a, x) => a + (+x.qty || 0), 0);
       const totSqft = Math.round(its.reduce((a, x) => a + (+x.sqft || 0), 0) * 100) / 100;
-      const psHtml = `<html><head><title>Production Sheet ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}@media print{body{padding:10px}}</style></head><body>` + `<div class="hdr"><div><h1>PRODUCTION SHEET</h1><p style="font-size:10px;color:#666">${firmData.short_name || ''} · ${firmData.address || ''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div>` + `<div class="meta"><b>Client:</b><span>${f.cn || ''}</span><b>Project:</b><span>${f.pr || ''}</span><b>PO No:</b><span>${f.po || 'Pending'}</span><b>Delivery:</b><span>${f.da || ''}</span>${f.ba ? '<b>Billing Addr:</b><span>' + f.ba + '</span>' : ''}<b>Firm:</b><span>${firmData.name || ''}</span><b>Made By:</b><span>${f.mb || ''}</span><b>Lead Source:</b><span>${f.ls || '—'}</span></div>` + (() => {
+      const psHtml = `<html><head><title>Production Sheet ${jid}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:20px;color:#222;font-size:11px}h1{font-size:16px;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:4px 6px;font-size:10px;text-align:left}th{background:#e8e8e8;font-weight:600}td.r{text-align:right;font-family:monospace}td img{max-width:70px;max-height:70px;border-radius:3px;border:1px solid #ccc}.hdr{display:flex;justify-content:space-between;margin-bottom:12px;border-bottom:2px solid #333;padding-bottom:8px}.meta{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;margin-bottom:12px}.meta b{color:#333}.total{background:#f0f0f0;font-weight:700}.refs{margin-top:16px}.refs img{max-width:250px;max-height:250px;border:1px solid #ccc;border-radius:4px;margin:6px}@media print{body{padding:10px}}</style></head><body>` + _psWatermarkHtml(user?.name) + `<div class="hdr"><div><h1>PRODUCTION SHEET — INTERNAL</h1><p style="font-size:10px;color:#666">${firmData.short_name || ''} · ${firmData.address || ''}</p></div><div style="text-align:right"><p style="font-size:18px;font-weight:900;color:#c87d08">${jid}</p><p style="font-size:10px">Date: ${f.rd}</p></div></div>` + `<div class="meta"><b>Client:</b><span>${f.cn || ''}</span><b>Project:</b><span>${f.pr || ''}</span><b>PO No:</b><span>${f.po || 'Pending'}</span><b>Delivery:</b><span>${f.da || ''}</span>${f.ba ? '<b>Billing Addr:</b><span>' + f.ba + '</span>' : ''}<b>Firm:</b><span>${firmData.name || ''}</span><b>Made By:</b><span>${f.mb || ''}</span><b>Lead Source:</b><span>${f.ls || '—'}</span></div>` + (() => {
         const hasImg = its.some(it => it.imgUrl);
         return `<table><thead><tr><th>#</th><th>Description</th>${hasImg ? '<th>Image</th>' : ''}<th>Material / Media Make</th><th>Size (W×H ${su})</th><th>Qty</th><th>SqFt</th><th>Machine</th></tr></thead><tbody>` + its.map((it, i) => `<tr><td>${i + 1}</td><td style="font-weight:600">${it.int || ''}</td>${hasImg ? '<td>' + (it.imgUrl ? '<img src="' + it.imgUrl + '"/>' : '—') + '</td>' : ''}<td style="font-size:9px;color:#555">${it.m || ''}</td><td class="r">${it.w && it.h ? it.w + '×' + it.h : '—'}</td><td class="r" style="font-weight:700">${it.qty}</td><td class="r">${it.sqft ? it.sqft.toFixed(2) : '—'}</td><td>${it.mach || 'In-house'}</td></tr>`).join('') + `<tr class="total"><td colspan="${hasImg ? 5 : 4}" style="text-align:right"><b>TOTAL</b></td><td class="r"><b>${totQty}</b></td><td class="r"><b>${totSqft}</b></td><td></td></tr></tbody></table>`;
       })() + (() => {
