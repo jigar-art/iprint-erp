@@ -39752,6 +39752,7 @@ function DocketSignTray({ user, show }) {
   const [sel, setSel] = React.useState({});
   const [busy, setBusy] = React.useState(false);
   const [open, setOpen] = React.useState(true);
+  const [q, setQ] = React.useState('');
   const u = (user?.name || '').toUpperCase();
   const isSigner = ['JIGAR', 'AMOL'].some(t => u === t || u.startsWith(t + ' '));
   const load = () => {
@@ -39783,8 +39784,20 @@ function DocketSignTray({ user, show }) {
     show && show(sign ? '\u270D ' + r.data + ' docket(s) signed' : '\u21A9 ' + r.data + ' docket(s) returned');
     load();
   };
+  // 4 Nov 2026: search by job # and/or client. Numbers = job # (prefix, any of them); words = client/batch/ATM/city (all must match).
+  const toks = q.toLowerCase().split(/[\s,]+/).filter(Boolean);
+  const nums = toks.filter(t => /^\d+(-\d*)?$/.test(t)), words = toks.filter(t => !/^\d+(-\d*)?$/.test(t));
+  const shown = !toks.length ? rows : rows.filter(r => {
+    const jn = String(r.job_id || '').toLowerCase();
+    if (nums.length && !nums.some(t => jn.startsWith(t))) return false;
+    const hay = [r.client_name, r.bank, r.batch_note, r.atm_id, r.site_id, r.city, r.batch_date].map(x => String(x || '').toLowerCase()).join(' | ');
+    return words.every(t => hay.includes(t));
+  });
+  const shownIds = new Set(shown.map(r => r.id));
+  const hiddenTicked = ids.filter(i => !shownIds.has(i)).length;
+  const tickShown = () => setSel(p => { const o = { ...p }; shown.forEach(r => { o[r.id] = true; }); return o; });
   const byClient = {};
-  rows.forEach(r => { const k = r.client_name || r.bank || '\u2014'; (byClient[k] = byClient[k] || []).push(r); });
+  shown.forEach(r => { const k = r.client_name || r.bank || '\u2014'; (byClient[k] = byClient[k] || []).push(r); });
   const box = { background: 'var(--card, #0f172a)', border: '1px solid #a855f7', borderRadius: 10, padding: 12, margin: '0 0 12px' };
   const summary = cnt ? ' \u00b7 sent today ' + cnt.sentToday + ' \u00b7 last 7 days ' + cnt.sent7 + ' \u00b7 signed today ' + cnt.signedToday + (cnt.returned7 ? ' \u00b7 returned 7d ' + cnt.returned7 : '') : '';
   return React.createElement("div", { style: box },
@@ -39792,7 +39805,12 @@ function DocketSignTray({ user, show }) {
       React.createElement("b", { style: { fontSize: 13 } }, "\u270D Dockets to sign"),
       React.createElement("span", { style: { fontSize: 12, opacity: .8 } }, rows.length + " waiting" + summary),
       React.createElement("span", { style: { marginLeft: 'auto', fontSize: 12 } }, open ? "\u25b2" : "\u25bc")),
-    open && rows.length > 0 && React.createElement("div", { style: { marginTop: 8, maxHeight: 360, overflowY: 'auto' } },
+    open && rows.length > 0 && React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' } },
+      React.createElement("input", { value: q, onChange: e => setQ(e.target.value), onKeyDown: e => { if (e.key === 'Enter' && toks.length) { e.preventDefault(); tickShown(); } }, placeholder: "\uD83D\uDD0D Job # / client \u2014 e.g. 12385 12442 or ncr sbi (Enter = tick shown)", style: { flex: 1, minWidth: 220, padding: '6px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #a855f7', background: 'transparent', color: 'inherit' } }),
+      q && React.createElement("button", { className: "btn", onClick: () => setQ('') }, "\u2715 Clear"),
+      toks.length > 0 && React.createElement("span", { style: { fontSize: 12, opacity: .8 } }, shown.length + " of " + rows.length + " shown" + (hiddenTicked ? " \u00b7 " + hiddenTicked + " ticked not shown" : ""))),
+    open && rows.length > 0 && shown.length === 0 && React.createElement("div", { style: { fontSize: 12, opacity: .7, marginTop: 8 } }, "No docket matches \u201C" + q + "\u201D"),
+    open && shown.length > 0 && React.createElement("div", { style: { marginTop: 8, maxHeight: 360, overflowY: 'auto' } },
       Object.keys(byClient).map(c => React.createElement("div", { key: c, style: { padding: '6px 0', borderTop: '1px solid #1e293b' } },
         React.createElement("div", { style: { fontSize: 12, fontWeight: 700, marginBottom: 2 } }, c + " (" + byClient[c].length + ")"),
         byClient[c].map(r => React.createElement("label", { key: r.id, style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '2px 0' } },
@@ -39800,7 +39818,8 @@ function DocketSignTray({ user, show }) {
           React.createElement("span", { style: { flex: 1 } }, r.unit === 'site' ? ('Job ' + (r.job_id || '?') + ' \u00b7 ATM ' + (r.atm_id || r.site_id) + (r.city ? ' \u00b7 ' + r.city : '')) : (r.job_id + ' \u00b7 ' + (r.batch_note || 'Batch') + (r.batch_date ? ' \u00b7 ' + r.batch_date : ''))),
           React.createElement("span", { style: { opacity: .7, fontSize: 11, color: r.hours_waiting > 24 ? '#ef4444' : undefined } }, Math.round(r.hours_waiting || 0) + "h \u00b7 " + String(r.sent_by || '?').split(' - ')[0])))))),
     open && rows.length > 0 && React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
-      React.createElement("button", { className: "btn", onClick: () => setSel(Object.fromEntries(rows.map(r => [r.id, true]))) }, "Select all"),
+      React.createElement("button", { className: "btn", onClick: tickShown }, toks.length ? "Tick " + shown.length + " shown" : "Select all"),
+      ids.length > 0 && React.createElement("button", { className: "btn", onClick: () => setSel({}) }, "Untick all"),
       React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => act(true), style: { background: '#15803d', color: '#fff' } }, "\u270D Signed (" + ids.length + ")"),
       React.createElement("button", { className: "btn", disabled: busy || !ids.length, onClick: () => act(false) }, "\u21A9 Return to Aparna")));
 }
