@@ -643,6 +643,34 @@ function PoMissingCard({ user, jobs, openJob }) {
         React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
         isAll && React.createElement("span", { style: { color: "#64748b", fontSize: 10, minWidth: 60, textAlign: "right" } }, String(j.made_by || '').split(' ')[0])))));
 }
+// 4 Nov 2026 (Jigar): daily list — open jobs with a PO file uploaded but no PO no. / date / amount recorded (CLIENT POs)
+function PoAmountMissingCard({ user, jobs, openJob }) {
+  const me = String(user && user.name || '').toUpperCase().split(' ')[0];
+  const isAll = me === 'JIGAR' || me === 'CHANDNI';
+  const [ids, setIds] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const allowed = isAll || ['RUCHITA', 'ANKITA', 'AMOL'].includes(me);
+  React.useEffect(() => {
+    if (!allowed) return;
+    let alive = true;
+    sb.rpc('erp_po_amount_missing').then(r => { if (alive && r && !r.error) setIds(new Set(r.data || [])); }, () => {});
+    return () => { alive = false; };
+  }, [allowed]);
+  if (!allowed || !ids || !ids.size) return null;
+  const list = (jobs || []).filter(j => ids.has(j.id) && (isAll || String(j.made_by || '').toUpperCase().split(' ')[0] === me)).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  if (!list.length) return null;
+  return React.createElement("div", { className: "c", style: { padding: 10, border: "1px solid #3b82f655" } },
+    React.createElement("div", { onClick: () => setOpen(!open), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", minHeight: 32 } },
+      React.createElement("span", { style: { fontSize: 13, fontWeight: 700, color: "#3b82f6" } }, "\uD83D\uDCCB ", list.length, isAll ? " jobs" : " of your jobs", " have a PO file but no PO amount recorded"),
+      React.createElement("span", { style: { fontSize: 12, color: "#94a3b8" } }, open ? "\u25b2" : "\u25bc")),
+    React.createElement("div", { style: { fontSize: 11, color: "#94a3b8", marginTop: 2 } }, "Open the job \u2192 CLIENT POs \u2192 + Add PO \u2192 enter PO no., date and amount (incl. GST)."),
+    open && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 3, maxHeight: 320, overflow: "auto" } },
+      list.slice(0, 80).map(j => React.createElement("div", { key: j.id, onClick: () => openJob && openJob(j), style: { display: "flex", gap: 8, fontSize: 12, padding: "6px 4px", borderBottom: "1px solid #1a2030", cursor: "pointer", minHeight: 36, alignItems: "center" } },
+        React.createElement("span", { className: "mn", style: { color: "#3b82f6", minWidth: 86 } }, j.id),
+        React.createElement("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cbd5e1" } }, (j.client_name || '') + (j.project ? ' \u00b7 ' + j.project : '')),
+        React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
+        isAll && React.createElement("span", { style: { color: "#64748b", fontSize: 10, minWidth: 60, textAlign: "right" } }, String(j.made_by || '').split(' ')[0])))));
+}
 // 3 Nov 2026 (Jigar): dispatched jobs waiting only on the client PO sit here, out of Aparna's and Prachi's billing counts and TAT.
 // Status never moves back; the tick clears itself when a PO / approval file is uploaded in PO COPIES (DB trigger).
 const ERP_PO_WAIT_ST = ['Delivered', 'Billing Pending', 'Given for Billing'];
@@ -5301,7 +5329,7 @@ function DashPage({
       flexDirection: "column",
       gap: 8
     }
-  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAwaitedCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
+  }, React.createElement(ComplaintAlertCard, { user: user, sp: sp }), React.createElement(PoMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAwaitedCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(PoAmountMissingCard, { user: user, jobs: fullJobs || jobs, openJob: openJob }), React.createElement(VendorBillsCard, { user: user }), React.createElement(DutyVerifyCard, { user: user }), !isDashViewOnly && React.createElement("div", {
     className: "c",
     style: {
       padding: 10
@@ -6561,7 +6589,16 @@ function JobDetail({
   }, [j.id]);
   const addJobPo = async () => {
     if (!newPo.po_number.trim()) {
-      show('PO Number required', false);
+      show('PO Number required (write EMAIL APPROVAL if no PO)', false);
+      return;
+    }
+    // 4 Nov 2026 (Jigar): PO amount must be stored with every PO
+    if (!newPo.po_date) {
+      show('PO Date required', false);
+      return;
+    }
+    if (!(+newPo.po_amount > 0)) {
+      show('PO Amount (incl. GST) required', false);
       return;
     }
     const rec = {
@@ -6581,6 +6618,10 @@ function JobDetail({
       return;
     }
     setJobPos(p => [...p, data]);
+    try {
+      const _pf = Array.isArray(j.po_file_url) ? j.po_file_url : j.po_file_url ? [j.po_file_url] : [];
+      if (rec.po_file_url && !_pf.includes(rec.po_file_url)) appendJobFiles(j.id, 'po_file_url', [rec.po_file_url]);
+    } catch (_e) {}
     setNewPo({
       po_number: '',
       po_date: '',
@@ -7682,7 +7723,8 @@ function JobDetail({
       justifyContent: "center",
       padding: 6
     }
-  }, "\uD83D\uDCBE Save Changes"))), jobPos.length > 0 && React.createElement("div", {
+  }, "\uD83D\uDCBE Save Changes"))), (jobPos.length > 0 || showAddPo || (Array.isArray(j.po_file_url) ? j.po_file_url.length > 0 : !!j.po_file_url)) && React.createElement("div", {
+    id: "job-client-pos",
     style: {
       background: "#060810",
       border: "1px solid #1a2030",
@@ -7708,7 +7750,7 @@ function JobDetail({
       fontWeight: 400,
       marginLeft: 6
     }
-  }, "\xB7 legacy: ", jf.po_number)), false && React.createElement("button", {
+  }, "\xB7 legacy: ", jf.po_number)), !showAddPo && React.createElement("button", {
     className: "b bs",
     onClick: () => setShowAddPo(true),
     style: {
@@ -7727,7 +7769,7 @@ function JobDetail({
       fontSize: 9,
       color: "#475569"
     }
-  }, "No client POs added yet. ", jf.po_number ? 'Legacy PO# is shown above.' : 'Click + Add PO to record one.'), jobPos.length > 0 && React.createElement("div", {
+  }, React.createElement("span", { style: { color: "#f59e0b", fontWeight: 600 } }, "\u26A0\uFE0F PO file uploaded but PO no. / date / amount not recorded \u2014 click + Add PO."), jf.po_number ? ' Legacy PO#: ' + jf.po_number : ''), jobPos.length > 0 && React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
@@ -7948,9 +7990,9 @@ function JobDetail({
       ...p,
       po_amount: e.target.value
     })),
-    placeholder: "Amount",
+    placeholder: "PO Amount \u20B9 incl GST *",
     style: {
-      width: 90,
+      width: 130,
       fontSize: 9,
       padding: "2px 4px"
     }
@@ -8364,6 +8406,13 @@ function JobDetail({
         if (!files.length) return;
         const newUrls = await uploadMultiple(files, sec.folder);
         if (newUrls.length) appendJobFiles(j.id, sec.field, newUrls);
+        if (newUrls.length && sec.field === 'po_file_url') {
+          const _pn = String(j.po_number || '').trim();
+          setNewPo({ po_number: /^no data$/i.test(_pn) ? '' : _pn, po_date: '', po_amount: '', po_file_url: newUrls[newUrls.length - 1] });
+          setShowAddPo(true);
+          show('\uD83D\uDCCB Now enter PO no., date and amount in CLIENT POs');
+          setTimeout(() => { const el = document.getElementById('job-client-pos'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300);
+        }
         if (newUrls.length && sec.field === 'dc_file_url') erpOfferCatchup(j.id, newUrls[newUrls.length - 1]).then(opened => { if (!opened) sb.rpc('erp_pod_no_dc_check', { p_job: String(j.id) }).then(r => { if (r && r.data && window._showToast) window._showToast('\u26a0\ufe0f ' + r.data, false); }, () => {}); });
       }
     }));
