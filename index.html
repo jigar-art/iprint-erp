@@ -8018,6 +8018,9 @@ function JobDetail({
     }))) : null;
   })(), React.createElement(JobSitePhotos, {
     job: j
+  }), React.createElement(JobCategory, {
+    job: j,
+    user: user
   }), React.createElement(JobCredit, {
     job: j,
     user: user
@@ -36258,6 +36261,54 @@ function JobSitePhotos({ job }) {
               cap ? React.createElement("div", { style: { fontSize: 10, color: '#94a3b8', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, cap) : null);
           })));
     }));
+}
+// ── Change job category after entry (Ruchita ask, 4 Nov 2026). DB guard erp_job_class_guard: only Jigar/Amol/Ruchita/Ankita, reason required, logged in job_class_log ──
+const JOB_CLS_LABEL = { A: 'A · Design trade', B: 'B · Banking & finance', C: 'C · Projects in parts', D: 'D · Small prepaid' };
+function JobCategory({ job, user }) {
+  const me = pbKey(user);
+  const can = ['JIGAR', 'AMOL', 'RUCHITA', 'ANKITA'].includes(me);
+  const [cls, setCls] = React.useState(job && job.job_class || null);
+  const [cliCls, setCliCls] = React.useState(null);
+  const [edit, setEdit] = React.useState(false);
+  const [pick, setPick] = React.useState('');
+  const [why, setWhy] = React.useState('');
+  const [err, setErr] = React.useState('');
+  const [ok, setOk] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    setCls(job && job.job_class || null); setEdit(false); setErr(''); setOk(''); setWhy(''); setCliCls(null);
+    if (job && job.client_id) sb.from('clients').select('client_class').eq('id', job.client_id).maybeSingle().then(r => setCliCls(r.data && r.data.client_class || null));
+  }, [job && job.id]);
+  if (!job) return null;
+  const shown = cls || cliCls || 'A';
+  const mismatch = cliCls === 'B' && shown !== 'B';
+  const save = async () => {
+    if (!pick || pick === shown) { setErr('Pick a different category.'); return; }
+    if (!why.trim()) { setErr('Type a reason for the change.'); return; }
+    setBusy(true); setErr('');
+    const r = await sb.from('jobs').update({ job_class: pick, job_class_reason: why.trim() }).eq('id', job.id).select('id, job_class');
+    setBusy(false);
+    if (r.error) { setErr(r.error.message); return; }
+    if (!r.data || !r.data.length) { setErr('Not saved — you may not have access to edit this job. Ask Amol.'); return; }
+    job.job_class = pick; job.job_class_reason = why.trim(); setCls(pick); setEdit(false); setWhy(''); setOk('Category changed to ' + pick + '.');
+  };
+  const btn = (bg, bd) => ({ padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff', border: '1px solid ' + bd, background: bg });
+  return React.createElement("div", { className: "cd", style: { padding: 10, marginTop: 8, display: 'grid', gap: 6, border: mismatch ? '1px solid #e0574f' : undefined } },
+    React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: '#e3a008' } }, "📂 Category"),
+      React.createElement("span", { style: { padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, background: '#e3a008', color: '#111' } }, JOB_CLS_LABEL[shown] || shown),
+      !cls ? React.createElement("span", { style: { fontSize: 10.5, color: '#64748b' } }, '(from client)') : null,
+      can && !edit ? React.createElement("button", { type: 'button', onClick: () => { setEdit(true); setPick(mismatch ? 'B' : ''); setErr(''); setOk(''); }, style: btn('#1f2937', '#334155') }, "✏️ Change") : null),
+    mismatch ? React.createElement("div", { style: { fontSize: 11, color: '#f87171' } }, 'This is a banking client — category should be B.') : null,
+    edit ? React.createElement("div", { style: { display: 'grid', gap: 6 } },
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        ['A', 'B', 'C', 'D'].map(k => React.createElement("button", { key: k, type: 'button', disabled: busy, onClick: () => setPick(k), style: { padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (pick === k ? '#e3a008' : '#334155'), background: pick === k ? '#e3a008' : 'transparent', color: pick === k ? '#111' : (k === shown ? '#64748b' : '#cbd5e1') } }, JOB_CLS_LABEL[k] + (k === shown ? ' (now)' : '')))),
+      React.createElement("input", { value: why, onChange: e => setWhy(e.target.value), placeholder: 'Reason (required) e.g. Banking client – entered wrong at New Job', style: { padding: '6px 8px', borderRadius: 6, border: '1px solid #334155', background: '#0b1220', color: '#e2e8f0', fontSize: 12 } }),
+      React.createElement("div", { style: { display: 'flex', gap: 6 } },
+        React.createElement("button", { type: 'button', disabled: busy, onClick: save, style: btn('#16a34a', '#16a34a') }, busy ? 'Saving…' : 'Save'),
+        React.createElement("button", { type: 'button', disabled: busy, onClick: () => { setEdit(false); setErr(''); }, style: btn('#1f2937', '#334155') }, 'Cancel'))) : null,
+    ok ? React.createElement("div", { style: { fontSize: 11.5, color: '#4ade80' } }, ok) : null,
+    err ? React.createElement("div", { style: { fontSize: 11.5, color: '#f87171' } }, err) : null);
 }
 function JobCredit({ job, user }) {
   const me = pbKey(user);
