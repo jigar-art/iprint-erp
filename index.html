@@ -2811,13 +2811,31 @@ function MainApp({
       billed_by: billedBy
     }) : b));
     show("Invoice# saved: " + billNo);
-    const {
+    let {
       error
     } = await sb.from('batches').update({
       bill_no: billNo,
       status: 'Done',
       billed_by: billedBy
     }).eq('id', batchId);
+    // 4 Nov 2026 (Jigar): Reliance is billed direct on site qty x fixed rates - batch has no item rates, so Accounts types the invoice amount
+    if (error && /Invoice amount needed/i.test(error.message || '')) {
+      const raw = prompt('Reliance batch has no item rates.\n\nInvoice ' + billNo + ' - enter the invoice amount (Rs, before GST):');
+      const amt = Number(String(raw || '').replace(/[^0-9.]/g, ''));
+      if (raw !== null && amt > 0) {
+        ({ error } = await sb.from('batches').update({
+          bill_no: billNo,
+          status: 'Done',
+          billed_by: billedBy,
+          invoice_amount: amt
+        }).eq('id', batchId));
+        if (!error) setBatches(p => p.map(b => b.id === batchId ? { ...b, invoice_amount: amt } : b));
+      } else if (raw !== null) {
+        error = { message: 'Invoice amount must be more than 0 - invoice# not saved.' };
+      } else {
+        error = { message: 'Invoice# not saved - the invoice amount is needed for this Reliance batch.' };
+      }
+    }
     if (error) {
       // 18 Oct 2026: the database refused it - put the batch back as it was so the screen doesn't show a bill no. that was never saved
       setBatches(p => p.map(b => b.id === batchId ? (_prevBatch || { ...b, bill_no: '', billed_by: '' }) : b));
@@ -10717,7 +10735,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
   }, b.bill_no ? React.createElement(React.Fragment, null, (() => {
     const hist = Array.isArray(b.bill_no_history) ? b.bill_no_history : [];
     const histTip = hist.length > 0 ? `\n\nEdits: ${hist.length}\n` + hist.slice(-3).map(h => `• ${(h.at || '').slice(0, 16).replace('T', ' ')} — ${h.by || '?'}: ${h.old_no || '(empty)'} → ${h.new_no}`).join('\n') : '';
-    const tip = (canEditInv ? 'Click to edit · ' : '') + 'Invoice ' + b.bill_no + (b.invoice_date ? ' · ' + b.invoice_date : '') + (b.billed_by ? ' · by ' + b.billed_by : '') + histTip;
+    const tip = (canEditInv ? 'Click to edit · ' : '') + 'Invoice ' + b.bill_no + (b.invoice_date ? ' · ' + b.invoice_date : '') + (+b.invoice_amount > 0 ? ' · ₹' + (+b.invoice_amount).toLocaleString('en-IN') + ' (typed)' : '') + (b.billed_by ? ' · by ' + b.billed_by : '') + histTip;
     return React.createElement("span", {
       className: "mn bd",
       title: tip,
@@ -10806,7 +10824,7 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       fontSize: 8,
       padding: "2px 6px"
     },
-    onClick: () => {
+    onClick: async () => {
       const noInp = document.querySelector('[data-batch-inv-no="' + b.id + '"]');
       const dtInp = document.querySelector('[data-batch-inv-date="' + b.id + '"]');
       const v = noInp?.value?.trim();
@@ -10821,7 +10839,8 @@ Accepted ${acceptedItems.length} of ${quoteReview.items.length} items — pre-fi
       }
       const okDate = validInvDate(d, show);
       if (!okDate) return;
-      saveBill(b.id, v);
+      const _okBill = await saveBill(b.id, v);
+      if (_okBill === false) return;
       updateBatchField(b.id, 'invoice_date', okDate);
       if (noInp) noInp.value = '';
       if (dtInp) dtInp.value = '';
@@ -31965,7 +31984,7 @@ function AccPage({
       return React.createElement(React.Fragment, {
         key: b.id
       }, React.createElement("span", {
-        title: (editable ? 'Click to edit · ' : '') + 'Invoice ' + b.bill_no + (b.invoice_date ? ' · ' + b.invoice_date : ' · no date') + (b.billed_by ? ' · by ' + b.billed_by : '') + histTip,
+        title: (editable ? 'Click to edit · ' : '') + 'Invoice ' + b.bill_no + (b.invoice_date ? ' · ' + b.invoice_date : ' · no date') + (+b.invoice_amount > 0 ? ' · ₹' + (+b.invoice_amount).toLocaleString('en-IN') + ' (typed)' : '') + (b.billed_by ? ' · by ' + b.billed_by : '') + histTip,
         onClick: editable ? () => setEditBatchInv({
           batch: b,
           newNo: b.bill_no,
