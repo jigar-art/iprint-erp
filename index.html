@@ -31806,6 +31806,15 @@ function AccPage({
       if (emptyBatch) targets = [emptyBatch];
     }
     if (targets.length) {
+      // 4 Nov 2026 (Jigar): one invoice for several batches - check every batch first, save none if any is blocked
+      if (targets.length > 1) {
+        const _pc = await sb.rpc('erp_batch_bill_precheck', { p_ids: targets.map(b => b.id), p_bill: inv });
+        const _blk = (_pc.data || []).filter(r => !/Invoice amount needed/i.test(r.msg || ''));
+        if (!_pc.error && _blk.length) {
+          alert('Invoice ' + inv + ' NOT saved on any batch - ' + _blk.length + ' of ' + targets.length + ' batches are blocked:\n\n' + _blk.map(r => '\u2022 ' + r.msg).join('\n\n') + '\n\nFix these first (or pick only the batches that are ready), then save again.');
+          return;
+        }
+      }
       for (const tb of targets) {
         const _okSave = await saveBill(tb.id, inv);
         if (_okSave === false) return;
