@@ -224,6 +224,8 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   global: {
     fetch: async (...a) => {
       const r = await fetch(...a);
+      // 6 Nov 2026: after an approval / pay-out / POD decision, show "done but late" at once
+      try { if (r.ok && /\/rpc\/(erp_pc_(action|mark_paid|settle|cancel|resubmit)|erp_courier_(decide|cancel)|erp_pod_proof_decide|erp_docket_(sign|decide|return))(\?|$)/.test(String(a[0] && a[0].url || a[0] || ''))) setTimeout(() => window.dispatchEvent(new CustomEvent('erp-ot-acted')), 1200); } catch (e) {}
       // 26 Oct 2026 (Jigar): no dead ends - every rule refusal is logged and can be sent to Jigar
       if (r.status >= 400 && r.status < 500 && r.status !== 401) {
         try {
@@ -4385,6 +4387,11 @@ function MainApp({
   }) : null, user ? React.createElement(TaskAlertsGate, {
     user: user
   }) : null, user ? React.createElement(CourierBriefGate, {
+    user: user
+  }) : null, user ? React.createElement(OnTimeGate, {
+    user: user,
+    setPg: setPg
+  }) : null, user ? React.createElement(OnTimeBriefGate, {
     user: user
   }) : null, user ? React.createElement(ApprovalsWaitingGate, {
     user: user,
@@ -37531,6 +37538,143 @@ function V5ChangeGate({ user }) {
         React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
         'I have read and understood my score card and tasks'),
       React.createElement("button", { type: 'button', disabled: !ok || busy, onClick: done, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: ok ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: ok ? 'pointer' : 'default' } }, '✓ Continue')));
+}
+// 6 Nov 2026 (Jigar): "On time" for every hand-off - spec claude/iPrint_ERP_spec_2026-11-06_on_time_handoffs.md
+// Everyone: "Waiting with you" box with countdowns (erp_ot_waiting), red "Done - but X late" notice (erp_ot_my_late), month on-time %.
+// Jigar: "Who is holding work" board (erp_ot_board) with "Don't charge". Points count from 12 Nov (action_sla_config.score_from).
+const erpOtFmt = ms => { const m = Math.max(0, Math.round(Math.abs(ms) / 60000)); if (m < 60) return m + ' min'; const h = Math.floor(m / 60), r = m % 60; return h < 48 ? h + ' h' + (r ? ' ' + r + ' m' : '') : Math.round(h / 24) + ' days'; };
+const erpOtLateTxt = mins => { const m = Number(mins || 0); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' m' : ''); };
+function OnTimeGate({ user, setPg }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState([]);
+  const [month, setMonth] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const [late, setLate] = React.useState([]);
+  const [board, setBoard] = React.useState(null);
+  const [now, setNow] = React.useState(Date.now());
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const load = async () => {
+    const [w, m] = await Promise.all([sb.rpc('erp_ot_waiting'), sb.rpc('erp_ot_my_month')]);
+    if (!w.error) {
+      const list = (w.data || []).sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+      setRows(list);
+      const hot = list.filter(r => r.counts || new Date(r.due_at).getTime() < Date.now());
+      const sig = hot.map(r => r.src + r.ref).sort().join(',');
+      if (hot.length && me !== 'JIGAR' && (sig !== lsGet('ot_sig') || Date.now() > Number(lsGet('ot_snooze') || 0))) setOpen(true);
+    }
+    if (!m.error && m.data && m.data[0]) setMonth(m.data[0]);
+  };
+  const checkLate = async () => {
+    const r = await sb.rpc('erp_ot_my_late');
+    if (!r.error && (r.data || []).length) setLate(r.data);
+    load();
+  };
+  React.useEffect(() => {
+    if (!me) return undefined;
+    load(); checkLate();
+    const t1 = setInterval(erpPoll(checkLate), 120000);
+    const t2 = setInterval(() => setNow(Date.now()), 30000);
+    const on = () => checkLate();
+    window.addEventListener('erp-ot-acted', on);
+    return () => { clearInterval(t1); clearInterval(t2); window.removeEventListener('erp-ot-acted', on); };
+  }, [me]);
+  if (!me) return null;
+  const later = () => { lsSet('ot_sig', rows.filter(r => r.counts || new Date(r.due_at).getTime() < Date.now()).map(r => r.src + r.ref).sort().join(',')); lsSet('ot_snooze', String(Date.now() + 30 * 60000)); setOpen(false); };
+  const go = r => { later(); if (r.page === 'courier') { try { erpQuick.items.courier.run(); } catch (e) {} } else if (r.page && setPg) setPg(r.page); };
+  const nLate = rows.filter(r => new Date(r.due_at).getTime() < now).length;
+  const slots = [React.createElement(QuickSlot, { key: 'q1', k: 'ontime', order: 1, label: 'Waiting with me' + (rows.length ? ' (' + rows.length + ')' : ''), icon: 'news', badge: nLate || rows.filter(r => r.counts).length, onClick: () => { load(); setOpen(true); } })];
+  const loadBoard = async () => { const b = await sb.rpc('erp_ot_board', { p_days: 7 }); if (!b.error) setBoard(b.data || { people: [], late: [] }); };
+  if (me === 'JIGAR') slots.push(React.createElement(QuickSlot, { key: 'q2', k: 'otboard', order: 3, label: 'Who is holding work', icon: 'news', onClick: loadBoard }));
+  const sheet = (children, onClose, border, z) => React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: z || 99992, background: 'rgba(3,6,12,.88)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 'max(14px, env(safe-area-inset-top)) 12px 20px' }, onClick: e => { if (e.target === e.currentTarget) onClose(); } },
+    React.createElement("div", { style: { width: '100%', maxWidth: 640, background: '#0f172a', border: '1px solid #1f2937', borderTop: '3px solid ' + border, borderRadius: 14, padding: 14, color: '#e2e8f0' } }, children));
+  const closeBtn = onClose => React.createElement("button", { type: 'button', onClick: onClose, style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕');
+  const okBtn = (t, onClick) => React.createElement("button", { type: 'button', onClick, style: { marginTop: 12, width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#06210f', fontWeight: 800, cursor: 'pointer' } }, t);
+  const pctTxt = month && month.n ? month.ontime + ' / ' + month.n + ' on time (' + month.pct + '%)' : null;
+  // 1. red notice: done, but late
+  if (late.length) {
+    const scoredAny = late.some(x => x.scored);
+    return React.createElement(React.Fragment, null, slots, sheet([
+      React.createElement("div", { key: 'h', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 900, color: '#fca5a5' } }, '⏰ Done — but late'), closeBtn(() => setLate([]))),
+      late.map(x => React.createElement("div", { key: x.id, style: { borderTop: '1px solid #3f1d1d', marginTop: 8, paddingTop: 8, fontSize: 13 } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } }, React.createElement("b", null, x.process), React.createElement("b", { style: { color: '#f87171' } }, erpOtLateTxt(x.late_min) + ' late')),
+        React.createElement("div", { style: { color: '#cbd5e1' } }, x.ref_label || ''),
+        React.createElement("div", { style: { color: '#94a3b8', fontSize: 12 } }, 'Reached you ' + new Date(x.reached_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) + (x.outcome === 'missed' ? ' · someone else had to do it' : ' · you acted ' + new Date(x.acted_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }))))),
+      React.createElement("div", { key: 's', style: { fontSize: 12.5, color: '#fde68a', marginTop: 10 } }, scoredAny ? 'This lowers your "On time" score on My Score.' : late.some(x => x.counts) ? 'From 12 Nov this lowers your "On time" score on My Score.' : 'Shown for your awareness.'),
+      pctTxt ? React.createElement("div", { key: 'p', style: { fontSize: 12.5, color: '#94a3b8', marginTop: 4 } }, 'This month: ' + pctTxt) : null,
+      React.createElement("div", { key: 'q', style: { fontSize: 11.5, color: '#64748b', marginTop: 4 } }, 'Clock: 30 min for approvals (8 am–10 pm), 2 working hours for pay-out, 1 working day for POD check. Sundays, holidays and approved leave are not counted. Wrong? Tap Raise query on My Score.'),
+      okBtn('OK, understood', () => setLate([]))], () => setLate([]), '#ef4444', 99994));
+  }
+  // 2. Jigar board
+  if (board) {
+    const ppl = board.people || [], lt = board.late || [];
+    const excuse = async id => { const why = prompt('Why should this not count? (e.g. I skipped the lead on purpose)'); if (why === null) return; const r = await sb.rpc('erp_ot_excuse', { p_id: id, p_reason: why }); if (r.error) { alert(r.error.message); return; } loadBoard(); };
+    const td = { padding: '6px 4px', borderTop: '1px solid #1f2937', fontSize: 12.5 };
+    return React.createElement(React.Fragment, null, slots, sheet([
+      React.createElement("div", { key: 'h', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 900, color: '#fde68a' } }, 'Who is holding work — last 7 days'), closeBtn(() => setBoard(null))),
+      React.createElement("table", { key: 't', style: { width: '100%', borderCollapse: 'collapse', marginTop: 6 } },
+        React.createElement("tbody", null,
+          React.createElement("tr", null, ['Person', 'Work', 'On time', 'Waiting now'].map(h => React.createElement("th", { key: h, style: { ...td, color: '#94a3b8', textAlign: 'left', fontSize: 11.5 } }, h))),
+          ppl.map(x => React.createElement("tr", { key: x.person_key, style: x.person_key === 'JIGAR' ? { background: '#111827' } : null },
+            React.createElement("td", { style: td }, x.person_key + (x.counted ? '' : ' (no points)')),
+            React.createElement("td", { style: { ...td, color: '#94a3b8' } }, x.work),
+            React.createElement("td", { style: { ...td, fontWeight: 800, color: x.pct == null ? '#64748b' : x.pct >= 80 ? '#4ade80' : x.pct >= 50 ? '#fbbf24' : '#f87171' } }, x.pct == null ? '—' : x.pct + '% (' + x.ontime + '/' + x.n + ')'),
+            React.createElement("td", { style: { ...td, color: x.waiting_late ? '#f87171' : '#e2e8f0' } }, x.waiting + (x.waiting_late ? ' (' + x.waiting_late + ' late)' : '')))))),
+      React.createElement("div", { key: 'l', style: { fontSize: 13, fontWeight: 800, color: '#fca5a5', marginTop: 12 } }, 'Late ones (counted)'),
+      lt.length ? lt.map(x => React.createElement("div", { key: x.id, style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', borderTop: '1px solid #1f2937', padding: '6px 0', fontSize: 12.5 } },
+        React.createElement("span", null, React.createElement("b", null, x.person_key), ' · ' + x.process + ' · ' + (x.ref_label || '') + ' · ', React.createElement("span", { style: { color: x.outcome === 'excused' ? '#86efac' : '#f87171' } }, x.outcome === 'excused' ? 'not charged' : erpOtLateTxt(x.late_min) + ' late' + (x.outcome === 'missed' ? ' (done by ' + (x.acted_by || '?') + ')' : ''))),
+        x.outcome === 'excused' ? null : React.createElement("button", { type: 'button', onClick: () => excuse(x.id), style: { fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid #334155', background: 'transparent', color: '#93c5fd', cursor: 'pointer', whiteSpace: 'nowrap' } }, "Don't charge"))) : React.createElement("div", { style: { fontSize: 12.5, color: '#64748b' } }, 'None'),
+      React.createElement("div", { key: 'n', style: { fontSize: 11.5, color: '#64748b', marginTop: 8 } }, 'Your own row is shown only to you. Points count from 12 Nov.')], () => setBoard(null), '#e3a008', 99994));
+  }
+  // 3. waiting with me
+  if (!open || !rows.length) return React.createElement(React.Fragment, null, slots);
+  return React.createElement(React.Fragment, null, slots, sheet([
+    React.createElement("div", { key: 'h', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 900, color: '#fde68a' } }, '⏳ ' + rows.length + ' waiting with you'), closeBtn(later)),
+    pctTxt ? React.createElement("div", { key: 'p', style: { fontSize: 12.5, color: '#94a3b8' } }, 'This month: ' + pctTxt) : null,
+    rows.map(r => { const left = new Date(r.due_at).getTime() - now; return React.createElement("div", { key: r.src + r.ref, onClick: () => go(r), style: { display: 'flex', justifyContent: 'space-between', gap: 8, borderTop: '1px solid #1f2937', padding: '8px 0', cursor: 'pointer', fontSize: 13 } },
+      React.createElement("span", null, React.createElement("b", null, r.src), r.counts ? null : React.createElement("span", { style: { fontSize: 10.5, color: '#64748b' } }, ' (no extra points)'), React.createElement("div", { style: { color: '#94a3b8', fontSize: 12 } }, r.label)),
+      React.createElement("b", { style: { whiteSpace: 'nowrap', color: left < 0 ? '#f87171' : left < 15 * 60000 ? '#fbbf24' : '#86efac' } }, left < 0 ? 'late ' + erpOtFmt(left) : erpOtFmt(left) + ' left')); }),
+    React.createElement("div", { key: 'n', style: { fontSize: 11.5, color: '#64748b', marginTop: 8 } }, 'Tap a line to open it. Approvals: 30 min · pay-out: 2 working hours · POD check: 1 working day. Late ones lower your "On time" score from 12 Nov.'),
+    okBtn('Later', later)], later, '#f59e0b'));
+}
+// Once per person: what changes and from when
+function OnTimeBriefGate({ user }) {
+  const V = '2026-11-06-ontime';
+  const me = pbKey(user);
+  const [st, setSt] = React.useState('loading');
+  const [ok, setOk] = React.useState(false);
+  React.useEffect(() => {
+    if (!user || !me || me === 'JIGAR') { setSt('off'); return; }
+    let done = false; try { done = sessionStorage.getItem('ot_brief') === '1'; } catch (e) {}
+    if (done) { setSt('off'); return; }
+    sb.from('point_brief_responses').select('id').eq('person_name', user.name).eq('brief_version', V).limit(1).then(r => setSt(r.error || (r.data || []).length ? 'off' : 'show'));
+  }, [me]);
+  if (st !== 'show') return null;
+  const counted = ['AMOL', 'MURLI', 'POONAM', 'HARISH', 'PRATIK', 'PRIYANKA', 'SHREYA', 'VIDYA', 'APARNA'].includes(me);
+  const done = async () => {
+    await sb.from('point_brief_responses').insert({ person_name: user.name, brief_version: V, response: 'accepted', comment: null, lang: 'en' });
+    try { sessionStorage.setItem('ot_brief', '1'); } catch (e) {}
+    setSt('off');
+  };
+  const li = { fontSize: 13.5, color: '#e2e8f0', lineHeight: 1.5, margin: '6px 0' };
+  const card = { background: '#0d1320', border: '1px solid #1f2937', borderRadius: 12, padding: 12, marginTop: 12 };
+  const h = { fontSize: 12.5, fontWeight: 800, color: '#e3a008', marginBottom: 6, textTransform: 'uppercase' };
+  return React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99996, background: 'rgba(3,6,12,.96)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px 16px' } },
+    React.createElement("div", { style: { maxWidth: 620, margin: '0 auto' } },
+      React.createElement("div", { style: { fontSize: 19, fontWeight: 900, color: '#e3a008' } }, '⏱ On time — from 12 Nov'),
+      React.createElement("div", { style: card },
+        React.createElement("div", { style: h }, 'What is new'),
+        ['"Waiting with me" (+ menu) shows everything waiting with you, with a countdown.', 'If you finish something after its limit, you see "Done — but X late".', 'The clock runs 8 am–10 pm for approvals. Sundays, holidays and your approved leave are not counted.'].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))),
+      counted ? React.createElement("div", { style: { ...card, border: '1px solid #a16207', background: '#1c1608' } },
+        React.createElement("div", { style: h }, 'Your score'),
+        [me === 'SHREYA' || me === 'VIDYA' ? 'Pay out approved petty cash within 2 working hours.' : me === 'APARNA' ? 'Decide a POD the ERP could not pass within 1 working day.' : 'Approve or reject petty cash and 🚚 courier requests within 30 minutes of reaching you.',
+         'A new "On time" line on My Score = 10 points × your on-time %. More than 24 h late counts double.', 'Counts from Thu 12 Nov. Until then you only see the notices.', 'If someone else has to act because you were 30+ min late, it counts as late for you.'].map((x, i) => React.createElement("div", { key: i, style: li }, '• ' + x))) : null,
+      React.createElement("label", { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 14, fontSize: 14, color: '#e2e8f0', cursor: 'pointer' } },
+        React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }), 'I have read this'),
+      React.createElement("button", { type: 'button', disabled: !ok, onClick: done, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: '#06210f', fontWeight: 900, fontSize: 15, cursor: 'pointer' } }, 'Got it')));
 }
 // 6 Nov 2026 (Jigar: "I never got any notification for approval - I should get a button to approve"):
 // Jigar sees petty-cash requests waiting with him, and any waiting with a lead for 24 h+, with Approve / Reject on each.
