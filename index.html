@@ -1621,6 +1621,25 @@ async function erpRecurringProofNeeded(ids) {
   a.data.forEach(t => { const pr = pm.get(t.source_duty_id) || 'note'; if (pr !== 'none') out.push({ id: t.id, text: t.task_text, proof: pr }); });
   return out;
 }
+// 6 Nov 2026 (Jigar): system reminders of one kind (emoji-led text, 3 or more) fold into one tappable line
+function erpGroupRows(rows, openG, setOpenG, sel, setSel, render) {
+  const keyOf = t => { const x = String(t.task_text || ''); if (/^[A-Za-z0-9]/.test(x)) return null; return x.split(' ').slice(0, 2).join(' '); };
+  const groups = {}; rows.forEach(t => { const k = keyOf(t); if (k) (groups[k] = groups[k] || []).push(t); });
+  const out = []; const seen = {};
+  rows.forEach(t => {
+    const k = keyOf(t);
+    if (!k || groups[k].length < 3) { out.push(render(t)); return; }
+    if (seen[k]) return; seen[k] = 1;
+    const g = groups[k]; const on = !!openG[k]; const allSel = g.every(x => sel[x.id]);
+    out.push(React.createElement("div", { key: 'g' + k, style: { background: '#141a2b', borderLeft: '2px solid #d85a30', padding: '6px 8px', marginBottom: 2 } },
+      React.createElement("div", { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+        React.createElement("input", { type: 'checkbox', checked: allSel, title: 'Tick all ' + g.length, onChange: e => { const v = e.target.checked; setSel(p => { const n = { ...p }; g.forEach(x => { n[x.id] = v; }); return n; }); } }),
+        React.createElement("span", { style: { flex: 1, fontSize: 11.5, color: '#e2e8f0', fontWeight: 700, cursor: 'pointer' }, onClick: () => setOpenG(p => ({ ...p, [k]: !on })) },
+          (on ? '\u25be ' : '\u25b8 ') + k + ' \u2026 \u00b7 ' + g.length + ' items' + (on ? '' : ' (tap to open)')))));
+    if (on) g.forEach(x => out.push(render(x)));
+  });
+  return out;
+}
 async function erpTaskAct(ids, kind, note, onProofDone) {
   ids = (ids || []).filter(Boolean); if (!ids.length) return { n: 0 };
   if (kind === 'done') {
@@ -1639,12 +1658,16 @@ async function erpTaskAct(ids, kind, note, onProofDone) {
     const tomLbl = new Date(tom + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
     let src = [], have = [];
     for (const c of chunks) {
-      const a = await sb.from('daily_tasks').select('id,user_name,task_text,carry_count,linked_job_id,linked_site_id,linked_complaint_id,due_date').in('id', c);
+      const a = await sb.from('daily_tasks').select('id,user_name,task_text,carry_count,linked_job_id,linked_site_id,linked_complaint_id,due_date,source_task_id').in('id', c);
       if (a.error) return { error: a.error.message }; src = src.concat(a.data || []);
-      const b = await sb.from('daily_tasks').select('source_task_id').in('source_task_id', c).eq('task_date', tom).neq('status', 'cancelled');
+    }
+    // 6 Nov 2026 (Jigar): copies point at the root task (same as the 00:30 server carry)
+    const roots = src.map(t => t.source_task_id || t.id);
+    for (let i = 0; i < roots.length; i += 100) {
+      const b = await sb.from('daily_tasks').select('source_task_id').in('source_task_id', roots.slice(i, i + 100)).eq('task_date', tom).neq('status', 'cancelled');
       if (!b.error) have = have.concat((b.data || []).map(x => x.source_task_id));
     }
-    const rows = src.filter(t => !have.includes(t.id)).map(t => ({ user_name: t.user_name, task_text: t.task_text, task_date: tom, status: 'pending', source: 'carried', source_task_id: t.id,
+    const rows = src.filter(t => !have.includes(t.source_task_id || t.id)).map(t => ({ user_name: t.user_name, task_text: t.task_text, task_date: tom, status: 'pending', source: 'carried', source_task_id: t.source_task_id || t.id,
       carry_count: (t.carry_count || 0) + 1, linked_job_id: t.linked_job_id || null, linked_site_id: t.linked_site_id || null, linked_complaint_id: t.linked_complaint_id || null, due_date: t.due_date || null, added_by: t.user_name }));
     for (let i = 0; i < rows.length; i += 200) { const r = await sb.from('daily_tasks').insert(rows.slice(i, i + 200)); if (r.error) return { error: r.error.message }; }
     for (const c of chunks) { const r = await sb.from('daily_tasks').update({ status: 'stuck', stuck_note: '→ Moved to ' + tomLbl, updated_at: now }).in('id', c); if (r.error) return { error: r.error.message }; }
@@ -1902,6 +1925,7 @@ function MyTasksFloatingWidget({
   // 6 Nov 2026 (Jigar): badge also counts open duties and ticks waiting for your check
   const [dutyN, setDutyN] = useState(0);
   const [checkN, setCheckN] = useState(0);
+  const [openG, setOpenG] = useState({});
   React.useEffect(() => { const f = () => { sb.rpc('erp_my_duties_today', { p_more: true }).then(r => setDutyN(r.error ? 0 : (r.data || []).filter(d => !d.done).length)); sb.rpc('erp_duty_verify_queue').then(r => setCheckN(r.error ? 0 : (r.data || []).length)); }; f(); const t = setInterval(f, 300000); return () => clearInterval(t); }, [open]);
   if (!open) return React.createElement(QuickSlot, { k: 'tasks', order: 4, label: 'My tasks', icon: 'tasks', badge: badgeCount + dutyN + checkN, onClick: () => setOpen(true) });
   const selIds = pending.filter(t => sel[t.id]).map(t => t.id);
@@ -2016,7 +2040,7 @@ function MyTasksFloatingWidget({
     React.createElement("input", { className: 'in', autoFocus: true, value: whyTxt, onChange: e => setWhyTxt(e.target.value), placeholder: 'Why not done? (for ' + selIds.length + ' tasks)', style: { flex: 1, fontSize: 12, padding: '5px 8px' } }),
     React.createElement("button", { type: 'button', disabled: busy, onClick: () => run(selIds, 'stuck', whyTxt), style: tb('#f87171', true) }, 'Save')) : null,
   msg ? React.createElement("div", { style: { fontSize: 11.5, margin: '0 0 6px', color: msg[0] === '\u2713' ? '#4ade80' : '#fca5a5' } }, msg) : null,
-  pending.map(t => React.createElement("div", {
+  erpGroupRows(pending, openG, setOpenG, sel, setSel, t => React.createElement("div", {
     key: 'p' + t.id,
     style: {
       background: '#0f1422',
@@ -2298,7 +2322,7 @@ function MainApp({
       try {
         const [taskRes, invRes] = await Promise.all([sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,linked_complaint_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
           ascending: true
-        }).limit(200), sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,added_by,created_at').eq('added_by', uname).gte('created_at', todayISO).order('created_at', {
+        }).limit(500), sb.from('site_invoices').select('id,site_id,invoice_no,invoice_amount,added_by,created_at').eq('added_by', uname).gte('created_at', todayISO).order('created_at', {
           ascending: false
         }).limit(50)]);
         if (!cancelled) {
@@ -2339,7 +2363,7 @@ function MainApp({
         data
       } = await sb.from('daily_tasks').select('id,task_text,task_date,status,source,linked_job_id,linked_site_id,linked_complaint_id,stuck_note,done_at,created_at,due_date').eq('user_name', uname).eq('task_date', todayISO).order('created_at', {
         ascending: true
-      }).limit(200);
+      }).limit(500);
       setMyTasks((data || []).filter(t => !erpIsMirrorTask(t)));
     } catch (e) {}
   };
@@ -38285,7 +38309,7 @@ function DayPlanCard({ user }) {
   const [msg, setMsg] = React.useState('');
   const load = async () => {
     const [a, b, c] = await Promise.all([
-      sb.from('daily_tasks').select('id,task_text,status,stuck_note,linked_job_id,carry_count,source').eq('user_name', uname).eq('task_date', todayISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
+      sb.from('daily_tasks').select('id,task_text,status,stuck_note,linked_job_id,carry_count,source,source_task_id,due_date,linked_site_id,linked_complaint_id').eq('user_name', uname).eq('task_date', todayISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
       sb.from('daily_tasks').select('id,task_text,status,linked_job_id,source_task_id,carry_count').eq('user_name', uname).eq('task_date', tomISO).neq('status', 'cancelled').order('created_at', { ascending: true }).limit(300),
       sb.rpc('erp_my_at_risk')]);
     setToday((a.data || []).filter(t => !erpIsMirrorTask(t))); setTom((b.data || []).filter(t => !erpIsMirrorTask(t))); setRisk(c.error ? [] : (c.data || []));
@@ -38297,7 +38321,7 @@ function DayPlanCard({ user }) {
   const notDone = today.filter(t => t.status === 'stuck');
   const carried = new Set(tom.map(t => t.source_task_id).filter(Boolean));
   const tomTexts = new Set(tom.map(t => (t.task_text || '').trim().toLowerCase()));
-  const carryOpts = today.filter(t => t.status !== 'done' && !carried.has(t.id));
+  const carryOpts = today.filter(t => t.status !== 'done' && !carried.has(t.source_task_id || t.id) && !carried.has(t.id));
   const riskOpts = risk.filter(r => r.kind === 'stage' || r.kind === 'bank_image' || r.kind === 'bank_pod').slice(0, 30)
     .map(r => ({ key: 'r' + r.kind + r.ref, text: 'Finish ' + r.ref + ' — ' + (r.kind === 'stage' ? r.stage : r.kind === 'bank_pod' ? 'upload POD' : 'upload installed image') + (r.client_name ? ' (' + r.client_name + ')' : ''), job: r.ref, late: new Date(r.due_at).getTime() < Date.now() }))
     .filter(o => !tomTexts.has(o.text.toLowerCase()));
@@ -38311,7 +38335,8 @@ function DayPlanCard({ user }) {
   };
   const save = async () => {
     const rows = [];
-    carryOpts.forEach(t => { if (pick['c' + t.id]) rows.push({ user_name: uname, task_text: t.task_text, task_date: tomISO, status: 'pending', source: 'carried', source_task_id: t.id, carry_count: (t.carry_count || 0) + 1, linked_job_id: t.linked_job_id || null, added_by: uname }); });
+    carryOpts.forEach(t => { if (pick['c' + t.id]) rows.push({ user_name: uname, task_text: t.task_text, task_date: tomISO, status: 'pending', source: 'carried', source_task_id: t.source_task_id || t.id, carry_count: (t.carry_count || 0) + 1, linked_job_id: t.linked_job_id || null, linked_site_id: t.linked_site_id || null, linked_complaint_id: t.linked_complaint_id || null, due_date: t.due_date || null, added_by: uname }); });
+    const movedIds = carryOpts.filter(t => pick['c' + t.id] && t.status === 'pending').map(t => t.id);
     riskOpts.forEach(o => { if (pick[o.key]) rows.push({ user_name: uname, task_text: o.text, task_date: tomISO, status: 'pending', source: 'user', linked_job_id: o.job, added_by: uname }); });
     txt.split('\n').map(x => x.trim()).filter(Boolean).forEach(x => rows.push({ user_name: uname, task_text: x, task_date: tomISO, status: 'pending', source: 'user', added_by: uname }));
     if (!rows.length) { setMsg('Tick or type at least one line'); return; }
@@ -38319,6 +38344,7 @@ function DayPlanCard({ user }) {
     const r = await sb.from('daily_tasks').insert(rows);
     setBusy(false);
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
+    if (movedIds.length) await sb.from('daily_tasks').update({ status: 'stuck', stuck_note: '→ Moved to ' + tomLbl }).in('id', movedIds);
     setPick({}); setTxt(''); setMsg('✓ ' + rows.length + ' line(s) planned for ' + tomLbl); load();
   };
   const drop = async t => { const r = await sb.from('daily_tasks').update({ status: 'cancelled', cancelled_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', t.id); if (!r.error) load(); };
@@ -48243,6 +48269,8 @@ function ReportsPage({
     if (loading) return;
     if (!uname || uname === 'UNKNOWN') return;
     if (!todayISO) return;
+    // 6 Nov 2026 (Jigar): browser carry-forward switched off — it brought back done/old tasks; the 00:30 server job carries.
+    if (true) return;
     let cancelled = false;
     (async () => {
       try {
