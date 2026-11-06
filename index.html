@@ -1608,7 +1608,10 @@ function Login({
 }
 // 18 Oct 2026 (Jigar): staff went back to Excel because tasks had no visible tick. Shared actions for the 📋 panel:
 // done / not done (reason) / move to tomorrow / drop, for one task or many at once.
-function erpTomorrowISO() { const d = new Date(); d.setDate(d.getDate() + 1); if (d.getDay() === 0) d.setDate(d.getDate() + 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// 6 Nov 2026 (Jigar): next WORKING day — skips Sundays and holidays (holidays table)
+var erpHol = new Set(); var erpHolP = null;
+function erpLoadHol() { if (!erpHolP) erpHolP = sb.from('holidays').select('d').then(r => { (r.data || []).forEach(x => erpHol.add(x.d)); }).catch(() => {}); return erpHolP; }
+function erpTomorrowISO() { const f = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); const d = new Date(); for (let i = 0; i < 20; i++) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && !erpHol.has(f(d))) break; } return f(d); }
 // 22 Oct 2026 (Jigar): recurring duties need proof on tick (note or file, set per duty in Reports → Duties).
 // The DB trigger erp_recurring_proof_guard enforces it; the app opens RecurringProofModal to collect it.
 async function erpRecurringProofNeeded(ids) {
@@ -1654,6 +1657,7 @@ async function erpTaskAct(ids, kind, note, onProofDone) {
   const now = new Date().toISOString();
   const chunks = []; for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
   if (kind === 'tomorrow') {
+    await erpLoadHol();
     const tom = erpTomorrowISO();
     const tomLbl = new Date(tom + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
     let src = [], have = [];
@@ -38295,7 +38299,9 @@ function DayPlanCard({ user }) {
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const now = new Date();
   const todayISO = iso(now);
-  const nx = new Date(now); nx.setDate(nx.getDate() + 1); if (nx.getDay() === 0) nx.setDate(nx.getDate() + 1);
+  const [holN, setHolN] = React.useState(0);
+  React.useEffect(() => { erpLoadHol().then(() => setHolN(erpHol.size)); }, []);
+  const nx = new Date(erpTomorrowISO() + 'T00:00:00');
   const tomISO = iso(nx);
   const tomLbl = nx.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
   const [today, setToday] = React.useState(null);
@@ -38351,7 +38357,9 @@ function DayPlanCard({ user }) {
   const B = (c, on) => ({ padding: '3px 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 800, cursor: 'pointer', color: '#fff', border: '1px solid ' + c, background: on ? c : c + '22' });
   const row = { display: 'flex', gap: 8, alignItems: 'center', padding: '6px 2px', borderTop: '1px solid #1f2937', fontSize: 12 };
   const closeLate = h >= 19 && open.length > 0;
-  const planLate = h >= 21 && tom.length === 0;
+  // 6 Nov 2026 (Jigar): only lines typed/picked for the next working day count — carried copies do not
+  const tomNew = tom.filter(t => !t.source_task_id);
+  const planLate = h >= 21 && tomNew.length === 0;
   return React.createElement("div", { className: "cd", style: { padding: 12, marginBottom: 12, border: (closeLate || planLate) ? '1px solid #e0574f' : undefined } },
     React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e3a008' } }, "🗓 My day — close today by 7 pm, plan " + tomLbl + " by 9 pm"),
     React.createElement("div", { style: { fontSize: 11.5, color: '#94a3b8', margin: '2px 0 8px' } }, "Each missed close-out or missed plan costs 1 point. Mark every line Done, or Not done with the reason."),
@@ -38367,7 +38375,7 @@ function DayPlanCard({ user }) {
         React.createElement("input", { className: 'in', autoFocus: true, value: why[t.id] || '', onChange: e => setWhy(p => ({ ...p, [t.id]: e.target.value })), placeholder: 'Why not done? (required)', style: { flex: 1 } }),
         React.createElement("button", { type: 'button', onClick: () => close(t, 'stuck'), style: B('#e0574f', true) }, 'Save')) : null)),
     // B. Plan tomorrow
-    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: planLate ? '#f87171' : '#e2e8f0', marginTop: 12 } }, '2 · Plan ' + tomLbl + ' (' + tom.length + ' planned)' + (planLate ? ' — past 9 pm' : '')),
+    React.createElement("div", { style: { fontSize: 12.5, fontWeight: 800, color: planLate ? '#f87171' : '#e2e8f0', marginTop: 12 } }, '2 · Plan ' + tomLbl + ' (' + tomNew.length + ' new' + (tom.length > tomNew.length ? ', ' + (tom.length - tomNew.length) + ' carried' : '') + ') — add at least one new line; carried lines do not count' + (planLate ? ' — past 9 pm' : '')),
     tom.map(t => React.createElement("div", { key: t.id, style: row },
       React.createElement("span", { style: { flex: 1, color: '#cbd5e1' } }, '• ' + t.task_text + (t.carry_count ? ' · carried ×' + t.carry_count : '')),
       React.createElement("button", { type: 'button', onClick: () => drop(t), style: B('#334155') }, 'Remove'))),
