@@ -1819,13 +1819,16 @@ function DutyTasksStrip() {
   const [names, setNames] = React.useState('');
   const fileRef = React.useRef(null);
   const pendingCode = React.useRef(null);
-  const load = () => { sb.rpc('erp_my_duties_today').then(r => setRows(r.error ? [] : (r.data || []))); };
+  // 6 Nov 2026 (Jigar): p_more adds filing items + the last missed period (late tick until 7 pm next working day)
+  const rk = d => d.code + '|' + d.period_key;
+  const load = () => { sb.rpc('erp_my_duties_today', { p_more: true }).then(r => setRows(r.error ? [] : (r.data || []))); };
   React.useEffect(() => { load(); }, []);
   if (!rows || !rows.length) return null;
-  const freqLbl = { daily: 'today', weekly: 'this week (Sat)', tuesday: 'this week (Tue)', monthly: 'this month', fortnightly: 'this fortnight' };
+  const freqLbl = { daily: 'today', weekly: 'this week (Sat)', tuesday: 'this week (Tue)', monthly: 'this month', fortnightly: 'this fortnight', calendar: 'filing' };
+  const when = d => { const dd = new Date(d.due_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }); if (!d.done && new Date(d.due_at) < new Date()) return '⏰ missed (due ' + dd + ') — tick now, counts as late'; if (d.freq === 'calendar') return 'filing due ' + dd; return freqLbl[d.freq] || d.freq; };
   const mark = async (d, proof, txt) => {
-    setBusy(d.code); setMsg('');
-    const r = await sb.rpc('erp_duty_mark2', { p_code: d.code, p_note: txt || null, p_proof: proof || null, p_period: null, p_count: d.count_label ? Number(cnt) : null, p_items: d.count_label ? names : null });
+    setBusy(rk(d)); setMsg('');
+    const r = await sb.rpc('erp_duty_mark2', { p_code: d.code, p_note: txt || null, p_proof: proof || null, p_period: d.period_key || null, p_count: d.count_label ? Number(cnt) : null, p_items: d.count_label ? names : null });
     setBusy('');
     if (r.error) { setMsg('⚠️ ' + r.error.message); return; }
     setMsg('✓ ' + d.label + ' — ' + (r.data === 'late' ? 'marked (late)' : 'done on time'));
@@ -1833,16 +1836,16 @@ function DutyTasksStrip() {
   };
   const tap = d => {
     setMsg('');
-    if (d.count_label) { setNoteFor(d.code); setCnt(''); setNames(''); return; }
-    if (d.proof === 'file') { pendingCode.current = d.code; if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } return; }
-    if (d.proof === 'note') { setNoteFor(d.code); setNote(''); return; }
+    if (d.count_label) { setNoteFor(rk(d)); setCnt(''); setNames(''); return; }
+    if (d.proof === 'file') { pendingCode.current = rk(d); if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } return; }
+    if (d.proof === 'note') { setNoteFor(rk(d)); setNote(''); return; }
     mark(d, null, null);
   };
   const onFile = async e => {
     const f = e.target.files && e.target.files[0];
-    const d = rows.find(x => x.code === pendingCode.current);
+    const d = rows.find(x => rk(x) === pendingCode.current);
     if (!f || !d) return;
-    setBusy(d.code); setMsg('Uploading…');
+    setBusy(rk(d)); setMsg('Uploading…');
     const url = await uploadFile(f, 'duty-proof');
     if (!url) { setBusy(''); setMsg('⚠️ Upload failed — try again'); return; }
     mark(d, url, null);
@@ -1856,23 +1859,23 @@ function DutyTasksStrip() {
       React.createElement("b", { style: { fontSize: 12.5, color: '#c4b5fd' } }, "📋 Duties" + (pending.length ? ' — ' + pending.length + ' to do' : ' — all done')),
       React.createElement("span", { style: { fontSize: 10.5, color: '#94a3b8' } }, "count in My Score")),
     msg ? React.createElement("div", { style: { fontSize: 11.5, margin: '2px 0 4px', color: msg[0] === '✓' ? '#4ade80' : msg[0] === 'U' ? '#cbd5e1' : '#fca5a5' } }, msg) : null,
-    pending.map(d => React.createElement("div", { key: d.code, style: { padding: '5px 0', borderTop: '1px solid #2a2350' } },
+    pending.map(d => React.createElement("div", { key: rk(d), style: { padding: '5px 0', borderTop: '1px solid #2a2350' } },
       React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' } },
         React.createElement("div", { style: { fontSize: 12.5, color: '#e2e8f0', lineHeight: 1.3 } }, d.label,
           React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8' } },
-            (freqLbl[d.freq] || d.freq) + ' · ' + d.points + ' pts' + (d.count_label ? ' · count + names' : '') + (d.proof === 'file' ? ' · 📎 file/photo needed' : d.proof === 'note' ? ' · note needed' : '') + (d.shared ? ' · team duty' : ''))),
+            when(d) + ' · ' + d.points + ' pts' + (d.count_label ? ' · count + names' : '') + (d.proof === 'file' ? ' · 📎 file/photo needed' : d.proof === 'note' ? ' · note needed' : '') + (d.shared ? ' · team duty' : ''))),
         React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => tap(d), style: btn('#a78bfa') },
-          busy === d.code ? '…' : d.proof === 'file' ? '📎 Done' : '✓ Done')),
-      noteFor === d.code && d.count_label ? (() => {
+          busy === rk(d) ? '…' : d.proof === 'file' ? '📎 Done' : '✓ Done')),
+      noteFor === rk(d) && d.count_label ? (() => {
         const n = dutyNameCount(names), want = Number(cnt) || 0, mn = d.count_min || 1, okc = want >= mn && n === want;
         return React.createElement("div", { style: { display: 'grid', gap: 5, marginTop: 5 } },
           React.createElement("input", { className: 'in', type: 'number', min: 1, inputMode: 'numeric', value: cnt, onChange: e => setCnt(e.target.value.replace(/[^0-9]/g, '')), placeholder: d.count_label + (mn > 1 ? ' (min ' + mn + ')' : '') + ' — how many? *', style: { fontSize: 12 } }),
           React.createElement("textarea", { className: 'in', rows: 3, value: names, onChange: e => setNames(e.target.value), placeholder: 'Names — one per line or comma-separated *', style: { fontSize: 12, resize: 'vertical' } }),
           React.createElement("div", { style: { fontSize: 11, color: okc ? '#4ade80' : '#fca5a5' } }, n + ' name' + (n === 1 ? '' : 's') + ' listed' + (want ? ' · ' + want + ' entered' : '') + (okc ? ' ✓' : want && want < mn ? ' — minimum ' + mn : want && n !== want ? ' — must match' : '')),
           React.createElement("div", { style: { display: 'flex', gap: 5 } },
-            React.createElement("button", { type: 'button', disabled: !!busy || !okc, onClick: () => { if (d.proof === 'file') { pendingCode.current = d.code; if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } } else mark(d, null, note.trim() || null); }, style: { ...btn('#4ade80'), opacity: okc ? 1 : 0.5 } }, d.proof === 'file' ? '📎 Attach proof & done' : 'Save'),
+            React.createElement("button", { type: 'button', disabled: !!busy || !okc, onClick: () => { if (d.proof === 'file') { pendingCode.current = rk(d); if (fileRef.current) { fileRef.current.value = ''; fileRef.current.click(); } } else mark(d, null, note.trim() || null); }, style: { ...btn('#4ade80'), opacity: okc ? 1 : 0.5 } }, d.proof === 'file' ? '📎 Attach proof & done' : 'Save'),
             React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => { setNoteFor(null); setCnt(''); setNames(''); }, style: btn('#94a3b8') }, 'Cancel')));
-      })() : noteFor === d.code ? React.createElement("div", { style: { display: 'flex', gap: 5, marginTop: 5 } },
+      })() : noteFor === rk(d) ? React.createElement("div", { style: { display: 'flex', gap: 5, marginTop: 5 } },
         React.createElement("input", { className: 'in', value: note, onChange: e => setNote(e.target.value), placeholder: 'What was done (one line)', style: { flex: 1, fontSize: 12 } }),
         React.createElement("button", { type: 'button', disabled: !!busy || !note.trim(), onClick: () => mark(d, null, note.trim()), style: btn('#4ade80') }, 'Save')) : null)),
     done.length ? React.createElement("div", { style: { fontSize: 11, color: '#86efac', marginTop: 4 } },
@@ -1896,7 +1899,11 @@ function MyTasksFloatingWidget({
   const done = (tasks || []).filter(t => t.status === 'done');
   const auto = autoTasks || [];
   const badgeCount = pending.length + stuck.length;
-  if (!open) return React.createElement(QuickSlot, { k: 'tasks', order: 4, label: 'My tasks', icon: 'tasks', badge: badgeCount, onClick: () => setOpen(true) });
+  // 6 Nov 2026 (Jigar): badge also counts open duties and ticks waiting for your check
+  const [dutyN, setDutyN] = useState(0);
+  const [checkN, setCheckN] = useState(0);
+  React.useEffect(() => { const f = () => { sb.rpc('erp_my_duties_today', { p_more: true }).then(r => setDutyN(r.error ? 0 : (r.data || []).filter(d => !d.done).length)); sb.rpc('erp_duty_verify_queue').then(r => setCheckN(r.error ? 0 : (r.data || []).length)); }; f(); const t = setInterval(f, 300000); return () => clearInterval(t); }, [open]);
+  if (!open) return React.createElement(QuickSlot, { k: 'tasks', order: 4, label: 'My tasks', icon: 'tasks', badge: badgeCount + dutyN + checkN, onClick: () => setOpen(true) });
   const selIds = pending.filter(t => sel[t.id]).map(t => t.id);
   const run = async (ids, kind, note) => {
     if (!ids.length) { setMsg('Tick at least one task'); return; }
@@ -1967,7 +1974,7 @@ function MyTasksFloatingWidget({
       overflowY: 'auto',
       padding: '8px 10px'
     }
-  }, React.createElement(WaitingOnYouCard, { rows: waiting || [], compact: true, onMore: () => { setOpen(false); onOpen?.(); } }), React.createElement(DutyTasksStrip, null), badgeCount === 0 && done.length === 0 && auto.length === 0 && React.createElement("div", {
+  }, React.createElement(WaitingOnYouCard, { rows: waiting || [], compact: true, onMore: () => { setOpen(false); onOpen?.(); } }), React.createElement(DutyTasksStrip, null), React.createElement(DutyVerifyCard, { user: null }), badgeCount === 0 && done.length === 0 && auto.length === 0 && React.createElement("div", {
     style: {
       textAlign: 'center',
       padding: '24px 8px',
@@ -4391,7 +4398,7 @@ function MainApp({
     user: user
   }), pg === "myscore" && React.createElement(ScoreCardV5, {
     user: user
-  }), pg === "myscore" && React.createElement(DutyChecksCard, {
+  }), pg === "myscore" && React.createElement(DutyVerifyCard, {
     user: user
   }), pg === "myscore" && React.createElement(ScoreQueriesCard, {
     user: user
@@ -5141,8 +5148,8 @@ function VendorBillsCard({ user }) {
 function DutyVerifyCard({ user }) {
   const me = pbKey(user);
   const [rows, setRows] = React.useState(null);
-  const [open, setOpen] = React.useState(false);
-  const ok = ['SAMRUDDHI', 'AMOL', 'JIGAR'].includes(me);
+  const [open, setOpen] = React.useState(true);
+  const ok = true; // 6 Nov 2026: server decides who may check (named checker, team lead, Jigar)
   const toast = (m, good = true) => { try { window._showToast && window._showToast(m, good); } catch (e) {} };
   const load = () => sb.rpc('erp_duty_verify_queue').then(r => setRows(r.error ? [] : r.data || []));
   React.useEffect(() => { if (ok) load(); }, [ok]);
