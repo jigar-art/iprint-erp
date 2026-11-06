@@ -634,7 +634,7 @@ function erpReadClientPo(jobId, url, onResult) {
   }, () => {});
 }
 // 29 Oct 2026 (Jigar): reminder card — jobs past PO Pending with no PO / approval file attached (warn-only)
-const ERP_PO_PRE = ['Quotation Sent', 'PO Pending', 'Cancelled', 'No Bill', 'Billing Done', 'Cash Received', 'Draft', 'Active'];
+const ERP_PO_PRE = ['Quotation Sent', 'PO Pending', 'Cancelled', 'No Bill', 'Billing Done', 'Payment Received', 'Draft', 'Active'];
 function PoMissingCard({ user, jobs, openJob }) {
   const me = String(user && user.name || '').toUpperCase().split(' ')[0];
   const isAll = me === 'JIGAR' || me === 'CHANDNI';
@@ -748,7 +748,7 @@ function PoAwaitedCard({ user, jobs, openJob }) {
         React.createElement("span", { style: { color: "#94a3b8", fontSize: 11 } }, j.status),
         React.createElement("span", { style: { color: (d || 0) >= 7 ? "#ef4444" : "#94a3b8", fontSize: 11, minWidth: 44, textAlign: "right" } }, d == null ? "" : d + "d")))));
 }
-const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received', 'No Bill', 'Cancelled'];
+const ALL_ST_NEW = ['Quotation Sent', 'PO Pending', 'Recee', 'Designing - In House', 'Designing - Outsource', 'Printing · In-House', 'Printing · Outsource', 'Fabrication · In-House', 'Fabrication · Outsource', 'In Transit', 'Delivered', 'Installation WIP', 'Rectification', 'Billing Pending', 'Given for Billing', 'Payment Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Payment Received', 'No Bill', 'Cancelled'];
 const STATUS_TO_LEADING = status => {
   if (!status) return null;
   const s = String(status).trim();
@@ -762,7 +762,7 @@ const STATUS_TO_LEADING = status => {
   if (s === 'Delivered') return 'delivered';
   if (s === 'Installation WIP') return 'installation';
   if (s === 'Rectification') return 'rectification';
-  if (['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received'].includes(s)) return null;
+  if (['Billing Pending', 'Given for Billing', 'Payment Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Payment Received'].includes(s)) return null;
   if (s === 'Designing' || s === 'Active') return 'design';
   if (s === 'Printing') return 'printIn';
   if (s === 'Fabrication') return 'fabIn';
@@ -851,7 +851,7 @@ const STATUS_CARDS = [{
 }, {
   key: 'accounts',
   label: 'ACCOUNTS',
-  statuses: ['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Cash Received'],
+  statuses: ['Billing Pending', 'Given for Billing', 'Payment Pending', 'IC Pending', 'DC Pending', 'Billing Done', 'Payment Received'],
   color: '#06b6d4',
   isLeading: false
 }, {
@@ -2985,7 +2985,7 @@ function MainApp({
     // 2026-10-14 (Jigar): moving a job BACK to an earlier stage needs a reason, logged against the person
     let _backDone = false;
     if (dbRow && dbRow.status && newStatus && dbRow.status !== newStatus && dbRow.status !== 'Recee' && newStatus !== 'Rectification' && newStatus !== 'Cancelled' && newStatus !== 'No Bill') {
-      const rk = st => { const R = { 'Draft': 0, 'Active': 0, 'Quotation Sent': 1, 'PO Pending': 2, 'Designing - In House': 3, 'Designing - Outsource': 3, 'Printing · In-House': 4, 'Printing · Outsource': 4, 'Fabrication · In-House': 5, 'Fabrication · Outsource': 5, 'Recee': 2.5, 'DC Pending': 6, 'In Transit': 6, 'Delivered': 6.5, 'Installation WIP': 7, 'IC Pending': 8, 'Billing Pending': 9, 'Given for Billing': 9, 'Cash Pending': 10, 'Billing Done': 11, 'Cash Received': 12 }; return R[st]; };
+      const rk = st => { const R = { 'Draft': 0, 'Active': 0, 'Quotation Sent': 1, 'PO Pending': 2, 'Designing - In House': 3, 'Designing - Outsource': 3, 'Printing · In-House': 4, 'Printing · Outsource': 4, 'Fabrication · In-House': 5, 'Fabrication · Outsource': 5, 'Recee': 2.5, 'DC Pending': 6, 'In Transit': 6, 'Delivered': 6.5, 'Installation WIP': 7, 'IC Pending': 8, 'Billing Pending': 9, 'Given for Billing': 9, 'Payment Pending': 10, 'Billing Done': 11, 'Payment Received': 12 }; return R[st]; };
       const a = rk(dbRow.status), b = rk(newStatus);
       if (a != null && b != null && b < a) {
         const why = prompt('↩ Moving this job BACK\n\n' + dbRow.status + '  →  ' + newStatus + '\n\nWhy? (required — recorded against your name)');
@@ -3120,11 +3120,11 @@ function MainApp({
       'Rectification': [1, 1, 1, 1, 1, 1, 1, 0],
       'Billing Pending': [1, 1, 1, 1, 1, 1, 1, 0],
       'Given for Billing': [1, 1, 1, 1, 1, 1, 1, 0],
-      'Cash Pending': [1, 1, 1, 1, 1, 1, 1, 0],
+      'Payment Pending': [1, 1, 1, 1, 1, 1, 1, 0],
       'IC Pending': [1, 1, 1, 1, 1, 1, 1, 0],
       'DC Pending': [1, 1, 1, 1, 1, 1, 1, 0],
       'Billing Done': [1, 1, 1, 1, 1, 1, 1, 1],
-      'Cash Received': [1, 1, 1, 1, 1, 1, 1, 1],
+      'Payment Received': [1, 1, 1, 1, 1, 1, 1, 1],
       'No Bill': [1, 1, 1, 1, 1, 1, 1, 1],
       'Cancelled': [1, 1, 1, 1, 1, 1, 1, 1]
     };
@@ -3533,7 +3533,7 @@ function MainApp({
     const scm = sts => filteredJobs.filter(j => sts.includes(j.status)).length;
     return {
       jobs: filteredJobs.length,
-      active: filteredJobs.filter(j => !['Billing Done', 'Cancelled', 'No Bill', 'Cash Received'].includes(j.status)).length,
+      active: filteredJobs.filter(j => !['Billing Done', 'Cancelled', 'No Bill', 'Payment Received'].includes(j.status)).length,
       draft: sc('Draft'),
       quotation_sent: sc('Quotation Sent'),
       po_pending: sc('PO Pending'),
@@ -3550,9 +3550,9 @@ function MainApp({
       fab: scm(['Fabrication · In-House', 'Fabrication · Outsource']),
       install: sc('Installation WIP'),
       delivered: sc('Delivered'),
-      billPend: scm(['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending']),
-      billed: scm(['Billing Done', 'Cash Received']),
-      poPend: filteredJobs.filter(j => !j.po_number && !['Billing Done', 'Cancelled', 'No Bill', 'Cash Received', 'Draft'].includes(j.status)).length,
+      billPend: scm(['Billing Pending', 'Given for Billing', 'Payment Pending', 'IC Pending', 'DC Pending']),
+      billed: scm(['Billing Done', 'Payment Received']),
+      poPend: filteredJobs.filter(j => !j.po_number && !['Billing Done', 'Cancelled', 'No Bill', 'Payment Received', 'Draft'].includes(j.status)).length,
       grn: grnData.length,
       os: osLogs.length,
       disp: dLogs.length
@@ -4932,11 +4932,11 @@ function StatusTip({
     installation_wip: 'Installation WIP',
     billing_pending: 'Billing Pending',
     given_for_billing: 'Given for Billing',
-    cash_pending: 'Cash Pending',
+    cash_pending: 'Payment Pending',
     ic_pending: 'IC Pending',
     dc_pending: 'DC Pending',
     billing_done: 'Billing Done',
-    cash_received: 'Cash Received',
+    cash_received: 'Payment Received',
     no_bill: 'No Bill',
     cancelled: 'Cancelled',
     active: 'Active',
@@ -5248,7 +5248,7 @@ function DashPage({
   };
   const bankJobs = jobs.filter(j => erpIsBankJob(j));
   const nonBankJobs = jobs.filter(j => !erpIsBankJob(j));
-  const activeStatuses = ['Billing Done', 'Cancelled', 'No Bill', 'Cash Received'];
+  const activeStatuses = ['Billing Done', 'Cancelled', 'No Bill', 'Payment Received'];
   const bStats = jl => ({
     total: jl.length,
     active: jl.filter(j => !activeStatuses.includes(j.status)).length,
@@ -5267,8 +5267,8 @@ function DashPage({
     fab: jl.filter(j => ['Fabrication · In-House', 'Fabrication · Outsource'].includes(j.status)).length,
     install: jl.filter(j => j.status === 'Installation WIP').length,
     delivered: jl.filter(j => j.status === 'Delivered').length,
-    billPend: jl.filter(j => ['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending'].includes(j.status) && !(j.po_awaited && ERP_PO_WAIT_ST.includes(j.status))).length,
-    billed: jl.filter(j => ['Billing Done', 'Cash Received'].includes(j.status)).length
+    billPend: jl.filter(j => ['Billing Pending', 'Given for Billing', 'Payment Pending', 'IC Pending', 'DC Pending'].includes(j.status) && !(j.po_awaited && ERP_PO_WAIT_ST.includes(j.status))).length,
+    billed: jl.filter(j => ['Billing Done', 'Payment Received'].includes(j.status)).length
   });
   const bk = bStats(bankJobs);
   const nb = bStats(nonBankJobs);
@@ -5376,7 +5376,7 @@ function DashPage({
       statusDeltas[key] = count;
     });
     statusDeltas.jobs = recentCount;
-    statusDeltas.poPend = recent.filter(j => !j.po_number && !['Billing Done', 'Cancelled', 'No Bill', 'Cash Received', 'Draft'].includes(j.status)).length;
+    statusDeltas.poPend = recent.filter(j => !j.po_number && !['Billing Done', 'Cancelled', 'No Bill', 'Payment Received', 'Draft'].includes(j.status)).length;
     return statusDeltas;
   }, [cmpDays, jobs]);
   const results = useMemo(() => {
@@ -5401,11 +5401,11 @@ function DashPage({
     'Rectification': '#ec4899',
     'Billing Pending': '#06b6d4',
     'Given for Billing': '#06b6d4',
-    'Cash Pending': '#e3a008',
+    'Payment Pending': '#e3a008',
     'IC Pending': '#f59e0b',
     'DC Pending': '#f59e0b',
     'Billing Done': '#4ade80',
-    'Cash Received': '#4ade80',
+    'Payment Received': '#4ade80',
     'No Bill': '#64748b',
     'Cancelled': '#64748b'
   };
@@ -6175,11 +6175,11 @@ function JobsPage({
       'Rectification': '#ec4899',
       'Billing Pending': '#06b6d4',
       'Given for Billing': '#06b6d4',
-      'Cash Pending': '#e3a008',
+      'Payment Pending': '#e3a008',
       'IC Pending': '#f59e0b',
       'DC Pending': '#f59e0b',
       'Billing Done': '#4ade80',
-      'Cash Received': '#4ade80',
+      'Payment Received': '#4ade80',
       'No Bill': '#64748b',
       'Cancelled': '#64748b'
     };
@@ -7700,11 +7700,11 @@ function JobDetail({
         'Rectification': '#ec4899',
         'Billing Pending': '#06b6d4',
         'Given for Billing': '#06b6d4',
-        'Cash Pending': '#e3a008',
+        'Payment Pending': '#e3a008',
         'IC Pending': '#f59e0b',
         'DC Pending': '#f59e0b',
         'Billing Done': '#4ade80',
-        'Cash Received': '#4ade80',
+        'Payment Received': '#4ade80',
         'No Bill': '#64748b',
         'Cancelled': '#64748b'
       }[j.status] || '#64748b') + '20',
@@ -7725,11 +7725,11 @@ function JobDetail({
         'Rectification': '#ec4899',
         'Billing Pending': '#06b6d4',
         'Given for Billing': '#06b6d4',
-        'Cash Pending': '#e3a008',
+        'Payment Pending': '#e3a008',
         'IC Pending': '#f59e0b',
         'DC Pending': '#f59e0b',
         'Billing Done': '#4ade80',
-        'Cash Received': '#4ade80',
+        'Payment Received': '#4ade80',
         'No Bill': '#64748b',
         'Cancelled': '#64748b'
       }[j.status] || '#64748b',
@@ -8235,7 +8235,7 @@ function JobDetail({
       e: '✅'
     }, {
       k: 'cash_received',
-      l: 'Cash Received',
+      l: 'Payment Received',
       c: '#4ade80',
       e: '💰'
     }, {
@@ -17186,11 +17186,11 @@ function DeptPage({
     'Rectification': '#ec4899',
     'Billing Pending': '#06b6d4',
     'Given for Billing': '#06b6d4',
-    'Cash Pending': '#e3a008',
+    'Payment Pending': '#e3a008',
     'IC Pending': '#f59e0b',
     'DC Pending': '#f59e0b',
     'Billing Done': '#4ade80',
-    'Cash Received': '#4ade80',
+    'Payment Received': '#4ade80',
     'No Bill': '#64748b',
     'Cancelled': '#64748b'
   };
@@ -24854,7 +24854,7 @@ function AccountsDocsMissing({ jobs }) {
   React.useEffect(() => {
     let dead = false;
     sb.from('v_banking_docs').select('job_id,client_name,project,status,delivered_at,pod_ok,image_needed,image_ok,image_owner')
-      .in('status', ['Given for Billing', 'Cash Pending']).then(r => {
+      .in('status', ['Given for Billing', 'Payment Pending']).then(r => {
         if (dead) return;
         const d = (r.data || []).filter(x => !x.pod_ok || (x.image_needed && !x.image_ok));
         d.sort((a, b) => new Date(a.delivered_at || 0) - new Date(b.delivered_at || 0));
@@ -32039,7 +32039,7 @@ function AccPage({
     id: 'pending',
     l: 'All Pending',
     c: '#f59e0b',
-    statuses: ['Billing Pending', 'Given for Billing', 'Cash Pending', 'IC Pending', 'DC Pending']
+    statuses: ['Billing Pending', 'Given for Billing', 'Payment Pending', 'IC Pending', 'DC Pending']
   }, {
     id: 'given',
     l: 'Given for Billing',
@@ -32049,7 +32049,7 @@ function AccPage({
     id: 'done',
     l: 'Billing Completed',
     c: '#4ade80',
-    statuses: ['Billing Done', 'Cash Received', 'No Bill']
+    statuses: ['Billing Done', 'Payment Received', 'No Bill']
   }];
   const cur = tabs.find(t => t.id === tab);
   const openJob = j => sm && sm({
@@ -32137,11 +32137,11 @@ function AccPage({
   const sc = {
     'Billing Pending': '#f59e0b',
     'Given for Billing': '#06b6d4',
-    'Cash Pending': '#e3a008',
+    'Payment Pending': '#e3a008',
     'IC Pending': '#f47067',
     'DC Pending': '#f59e0b',
     'Billing Done': '#4ade80',
-    'Cash Received': '#4ade80',
+    'Payment Received': '#4ade80',
     'No Bill': '#64748b'
   };
   const addInvoice = async j => {
@@ -38984,7 +38984,7 @@ function InstallDelayPage({ user, jobs, rows, docs, reload, sm }) {
                 React.createElement("div", { style: { fontSize: 10, color: "#64748b" } },
                   (d.pod_ok ? '' : 'POD \u2192 MANOJ') + (!d.pod_ok && d.image_needed && !d.image_ok ? ' \u00b7 ' : '') + (d.image_needed && !d.image_ok ? 'Image \u2192 ' + ((d.image_owner || '').startsWith('PRIYANKA') ? 'PRIYANKA (Harshala helps)' : (d.image_owner || 'POONAM')) : '') +
                   (d.delivered_at ? ' \u00b7 delivered ' + new Date(d.delivered_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '') +
-                  (['IC Pending', 'DC Pending', 'Billing Pending', 'Given for Billing', 'Cash Pending'].includes(d.status) ? ' \u00b7 already in billing \u2014 late, upload now'
+                  (['IC Pending', 'DC Pending', 'Billing Pending', 'Given for Billing', 'Payment Pending'].includes(d.status) ? ' \u00b7 already in billing \u2014 late, upload now'
                     : (!d.pod_ok && d.pod_backlog) || (d.image_needed && !d.image_ok && d.image_backlog) ? ' \u00b7 backlog \u2014 can still bill' : ' \u00b7 blocks billing until uploaded'))
               )))
     : list.length === 0
@@ -39412,6 +39412,16 @@ function CatchupDispatchModal({ jobId, user, onClose, podUrl }) {
       React.createElement(React.Fragment, null,
         lab('ERP DC'), React.createElement("select", { className: 'in', value: f.dc_id, onChange: e => { const d = openDcs.find(x => x.id === e.target.value) || {}; setF(p => ({ ...p, dc_id: e.target.value, sent_on: d.dc_date || p.sent_on, pincode: d.pincode || p.pincode })); }, style: inp },
           openDcs.map(d => React.createElement("option", { key: d.id, value: d.id }, (d.dc_no || '').replace(/^.*\//, '') + ' · ' + (d.dc_date || '') + ' · ' + (d.to_name || '') + (d.logged ? ' (dispatch logged, not delivered)' : '')))),
+        ['MANOJ', 'MURLI', 'JIGAR', 'AMOL'].includes(me) && f.dc_id && !(openDcs.find(x => x.id === f.dc_id) || {}).logged ? React.createElement("button", { type: 'button', disabled: busy, onClick: async () => {
+          const dsel = openDcs.find(x => x.id === f.dc_id) || {};
+          const why = window.prompt('Void ' + (dsel.dc_no || 'this DC') + '? It was never sent. Write why (wrong qty, remade, not going):', '');
+          if (!why || why.trim().length < 5) { if (why !== null) setMsg('\u26a0\ufe0f Write a reason (at least 5 letters) to void the DC'); return; }
+          setBusy(true); const r = await sb.rpc('erp_dc_void', { p_dc: f.dc_id, p_reason: why.trim() }); setBusy(false);
+          if (r.error) { setMsg('\u26a0\ufe0f ' + r.error.message); return; }
+          setMsg('\u2713 ' + ((r.data && r.data.message) || 'DC voided'));
+          const r2 = await sb.rpc('erp_catchup_info', { p_job: jobId }); const d2 = r2.data || {}; setInfo(d2);
+          const open2 = (d2.dcs || []).filter(x => !x.delivered); setF(p => ({ ...p, dc_id: open2.length ? open2[0].id : '' }));
+        }, style: { marginTop: 6, padding: '4px 10px', borderRadius: 8, fontSize: 12, cursor: 'pointer', border: '1px solid #7f1d1d', background: 'transparent', color: '#fca5a5' } }, '\u2716 Void this DC (never sent / wrong / remade)') : null,
         lab('How did it go?'), React.createElement("div", { style: { display: 'flex', gap: 5, flexWrap: 'wrap' } }, ERP_CU_MODES.map(m => React.createElement("button", { key: m, type: 'button', onClick: () => set('mode', m),
           style: { padding: '5px 9px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: '1px solid ' + (f.mode === m ? '#22c55e' : '#334155'), background: f.mode === m ? '#22c55e' : 'transparent', color: f.mode === m ? '#06210f' : '#e2e8f0', fontWeight: 700 } }, m))),
         React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 } },
@@ -39933,7 +39943,7 @@ function InstallPage({ jobs, team, user, show, updateJobStatus, setBatches }) {
   };
 
   const WT_ST = { 'Installation': ['Installation WIP', 'In Transit', 'IC Pending', 'DC Pending'], 'Supervision': ['Installation WIP', 'In Transit'], 'Rectification': ['Rectification'] };
-  const SURVEY_CLOSED = ['Cancelled', 'Cash Received', 'Billing Done', 'Billing Pending', 'Given for Billing', 'No Bill', 'Delivered', 'IC Pending', 'DC Pending', 'Cash Pending'];
+  const SURVEY_CLOSED = ['Cancelled', 'Payment Received', 'Billing Done', 'Billing Pending', 'Given for Billing', 'No Bill', 'Delivered', 'IC Pending', 'DC Pending', 'Payment Pending'];
   // 3 Oct 2026: Supervision / Rectification can be logged on any active job found by search (site work often continues after billing starts)
   const jqx = (jq || '').trim().toLowerCase();
   const anyStageWT = wt !== 'Recce/Survey'; // 9 Oct 2026: also Installation (site work continues on billed / last-year jobs)
@@ -42516,9 +42526,9 @@ function BankCRMPage({
       return BANKING_CLIENTS.some(b => u.includes(b));
     };
     const bJobs = jobs.filter(j => isBk(j.client_name));
-    const erpActive = bJobs.filter(j => !['Billing Done', 'Cash Received', 'No Bill', 'Cancelled'].includes(j.status));
-    const erpBilled = bJobs.filter(j => ['Billing Done', 'Cash Received'].includes(j.status));
-    const erpBillPend = bJobs.filter(j => ['Billing Pending', 'Given for Billing', 'Cash Pending', 'Proforma Invoice', 'IC Pending'].includes(j.status));
+    const erpActive = bJobs.filter(j => !['Billing Done', 'Payment Received', 'No Bill', 'Cancelled'].includes(j.status));
+    const erpBilled = bJobs.filter(j => ['Billing Done', 'Payment Received'].includes(j.status));
+    const erpBillPend = bJobs.filter(j => ['Billing Pending', 'Given for Billing', 'Payment Pending', 'Proforma Invoice', 'IC Pending'].includes(j.status));
     return React.createElement("div", {
       className: "c",
       style: {
@@ -48499,7 +48509,7 @@ function ReportsPage({
   const stallData = React.useMemo(() => {
     const prPending = (prs || []).filter(p => p.status === 'Pending Approval' && ageHours(p.created_at) >= thresholds.pr_hours).sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     const billingPending = (billingReqs || []).filter(b => b.status === 'Pending Approval' && ageHours(b.created_at) >= thresholds.billing_hours);
-    const TERMINAL = new Set(['Billing Done', 'Cash Received', 'No Bill', 'Cancelled', 'Delivered']);
+    const TERMINAL = new Set(['Billing Done', 'Payment Received', 'No Bill', 'Cancelled', 'Delivered']);
     const jobsStuck = (jobs || []).filter(j => {
       if (TERMINAL.has(j.status)) return false;
       const lastTouch = j.updated_at || j.created_at;
@@ -48598,7 +48608,7 @@ function ReportsPage({
     const myPendingPRs = (prs || []).filter(p => matchUser(p.created_by) && p.status === 'Pending Approval');
     const myStuckJobs = (jobs || []).filter(j => {
       if (!matchUser(j.made_by)) return false;
-      const TERMINAL = new Set(['Billing Done', 'Cash Received', 'No Bill', 'Cancelled', 'Delivered']);
+      const TERMINAL = new Set(['Billing Done', 'Payment Received', 'No Bill', 'Cancelled', 'Delivered']);
       if (TERMINAL.has(j.status)) return false;
       const lastTouch = j.updated_at || j.created_at;
       return lastTouch && ageDays(lastTouch) >= thresholds.job_days;
@@ -52884,7 +52894,7 @@ function ClientPortal({
         id: 'accounts',
         name: 'Accounts & Billing',
         icon: '🧾',
-        st: ['Billing Pending', 'Given for Billing', 'Billing Done', 'Cash Received', 'Cash Pending', 'IC Pending', 'DC Pending'],
+        st: ['Billing Pending', 'Given for Billing', 'Billing Done', 'Payment Received', 'Payment Pending', 'IC Pending', 'DC Pending'],
         seeAll: false
       }]
     }
@@ -52975,11 +52985,11 @@ function ClientPortal({
     'Rectification': '#ec4899',
     'Billing Pending': '#06b6d4',
     'Given for Billing': '#06b6d4',
-    'Cash Pending': '#e3a008',
+    'Payment Pending': '#e3a008',
     'IC Pending': '#f59e0b',
     'DC Pending': '#f59e0b',
     'Billing Done': '#4ade80',
-    'Cash Received': '#4ade80',
+    'Payment Received': '#4ade80',
     'No Bill': '#64748b',
     'Cancelled': '#64748b'
   };
@@ -53027,11 +53037,11 @@ function ClientPortal({
     'Installation WIP': 4,
     'Billing Pending': 5,
     'Given for Billing': 5,
-    'Cash Pending': 5,
+    'Payment Pending': 5,
     'IC Pending': 5,
     'DC Pending': 5,
     'Billing Done': 6,
-    'Cash Received': 6
+    'Payment Received': 6
   })[st] ?? -1;
   const deptTabs = dept?.seeAll ? [{
     id: 'all',
@@ -56370,7 +56380,7 @@ function PettyCashPage({
     });
   }, [isCashier, isAdmin, reqs]);
   const jobNums = form.jobs.split(/[\s,/&]+/).map(x => x.trim().split('-')[0]).filter(x => /^\d+$/.test(x));
-  const closedSt = cfg && cfg.job_closed_statuses || ['Billing Done', 'Cancelled', 'Cash Pending', 'Cash Received'];
+  const closedSt = cfg && cfg.job_closed_statuses || ['Billing Done', 'Cancelled', 'Payment Pending', 'Payment Received'];
   // 21 Oct 2026 (Jigar): courier / transport claims must name the 🚚 request (first mile to station / airport, or the delivery itself)
   const CR_CATS = ['Courier - Porter', 'Courier - Wefast', 'Transport / Cargo'];
   const crNeeded = CR_CATS.includes(form.category);
