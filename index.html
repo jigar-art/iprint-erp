@@ -4386,6 +4386,9 @@ function MainApp({
     user: user
   }) : null, user ? React.createElement(CourierBriefGate, {
     user: user
+  }) : null, user ? React.createElement(ApprovalsWaitingGate, {
+    user: user,
+    onOpen: () => setPg('petty')
   }) : null, user ? React.createElement(DocketSignPopup, {
     user: user,
     onOpen: () => setPg('acc')
@@ -37522,6 +37525,77 @@ function V5ChangeGate({ user }) {
         React.createElement("input", { type: 'checkbox', checked: ok, onChange: e => setOk(e.target.checked), style: { width: 20, height: 20 } }),
         'I have read and understood my score card and tasks'),
       React.createElement("button", { type: 'button', disabled: !ok || busy, onClick: done, style: { width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none', background: ok ? '#22c55e' : '#334155', color: ok ? '#06210f' : '#94a3b8', fontSize: 15, fontWeight: 800, cursor: ok ? 'pointer' : 'default' } }, '✓ Continue')));
+}
+// 6 Nov 2026 (Jigar: "I never got any notification for approval - I should get a button to approve"):
+// Jigar sees petty-cash requests waiting with him, and any waiting with a lead for 24 h+, with Approve / Reject on each.
+// Pops up when there is something new; + menu "Approvals (n)" any time. WhatsApp escalation at 24 h is in erp_pc_wa_wait_nudges.
+function ApprovalsWaitingGate({ user, onOpen }) {
+  const me = pbKey(user);
+  const myId = user && user.id;
+  const [rows, setRows] = React.useState([]);
+  const [names, setNames] = React.useState({});
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState('');
+  const [msg, setMsg] = React.useState({});
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const startOf = r => new Date(r.status === 'pending_l1' ? r.created_at : r.status === 'pending_l2' ? (r.l1_decided_at || r.created_at) : (r.l2_decided_at || r.l1_decided_at || r.created_at)).getTime();
+  const withId = r => r.status === 'pending_l1' ? r.l1_approver_id : r.status === 'pending_l2' ? r.l2_approver_id : r.l3_approver_id;
+  const load = async () => {
+    const q = await sb.from('petty_cash_requests').select('id,req_no,kind,amount,purpose,category,status,requester_id,l1_approver_id,l2_approver_id,l3_approver_id,created_at,l1_decided_at,l2_decided_at,job_ids')
+      .in('status', ['pending_l1', 'pending_l2', 'pending_l3']).order('created_at', { ascending: true });
+    if (q.error) return;
+    const now = Date.now();
+    const list = (q.data || []).map(r => ({ ...r, hrs: Math.floor((now - startOf(r)) / 36e5), mine: withId(r) === myId }))
+      .filter(r => r.mine || r.hrs >= 24);
+    setRows(list);
+    const ids = [...new Set(list.flatMap(r => [r.requester_id, withId(r)]).filter(Boolean))];
+    if (ids.length) { const t = await sb.from('team_members').select('id,name').in('id', ids); if (!t.error) { const m = {}; (t.data || []).forEach(x => { m[x.id] = String(x.name || '').split(' - ')[0]; }); setNames(m); } }
+    const sig = list.map(r => r.id + r.status).sort().join(',');
+    const snooze = Number(lsGet('apw_snooze') || 0);
+    if (list.length && (sig !== lsGet('apw_sig') || now > snooze)) setOpen(true);
+  };
+  React.useEffect(() => {
+    if (me !== 'JIGAR') return undefined;
+    load();
+    const t = setInterval(erpPoll(load), 300000);
+    return () => clearInterval(t);
+  }, [me]);
+  if (me !== 'JIGAR') return null;
+  const later = () => { lsSet('apw_sig', rows.map(r => r.id + r.status).sort().join(',')); lsSet('apw_snooze', String(Date.now() + 3 * 36e5)); setOpen(false); };
+  const act = async (r, action) => {
+    let remark = null;
+    if (action === 'Rejected') { remark = prompt('Reason for rejecting ' + r.req_no + ':'); if (remark === null) return; if (remark.trim().length < 3) { setMsg(m => ({ ...m, [r.id]: '⚠️ Write a reason' })); return; } }
+    setBusy(r.id);
+    const x = await sb.rpc('erp_pc_action', { p_id: r.id, p_action: action, p_remark: remark });
+    setBusy('');
+    if (x.error) { setMsg(m => ({ ...m, [r.id]: '⚠️ ' + x.error.message })); return; }
+    setMsg(m => ({ ...m, [r.id]: '✓ ' + (action === 'Approved' ? 'Approved' : 'Rejected') }));
+    setTimeout(load, 800);
+  };
+  const quick = React.createElement(QuickSlot, { k: 'approvals', order: 2, label: 'Approvals' + (rows.length ? ' (' + rows.length + ')' : ''), icon: 'news', badge: rows.length, onClick: () => { load(); setOpen(true); } });
+  if (!open || !rows.length) return quick;
+  const rupee = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+  const btn = (bg, fg) => ({ padding: '7px 14px', borderRadius: 8, border: 'none', background: bg, color: fg, fontWeight: 800, fontSize: 13, cursor: 'pointer' });
+  return React.createElement(React.Fragment, null, quick,
+    React.createElement("div", { style: { position: 'fixed', inset: 0, zIndex: 99993, background: 'rgba(3,6,12,.88)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 'max(14px, env(safe-area-inset-top)) 12px 20px' }, onClick: e => { if (e.target === e.currentTarget) later(); } },
+      React.createElement("div", { style: { width: '100%', maxWidth: 620, background: '#0f172a', border: '1px solid #1f2937', borderTop: '3px solid #e3a008', borderRadius: 14, padding: 14, color: '#e2e8f0' } },
+        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+          React.createElement("div", { style: { fontSize: 17, fontWeight: 900, color: '#fde68a' } }, '⏳ ' + rows.length + ' approval' + (rows.length > 1 ? 's' : '') + ' waiting'),
+          React.createElement("button", { type: 'button', onClick: later, style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: 22, cursor: 'pointer' } }, '✕')),
+        React.createElement("div", { style: { fontSize: 12, color: '#94a3b8', marginTop: 2 } }, 'Waiting with you, or with a lead for 24 h+. Approving here skips the lead.'),
+        rows.map(r => React.createElement("div", { key: r.id, style: { borderTop: '1px solid #1f2937', marginTop: 10, paddingTop: 10 } },
+          React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
+            React.createElement("b", { style: { fontSize: 14.5 } }, rupee(r.amount) + ' ' + (r.kind === 'reimbursement' ? 'claim' : r.kind) + ' · ' + (names[r.requester_id] || '')),
+            React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: r.mine ? '#86efac' : '#fca5a5' } }, r.mine ? 'with you' : 'with ' + (names[withId(r)] || 'lead') + ' · ' + r.hrs + ' h')),
+          React.createElement("div", { style: { fontSize: 13, color: '#cbd5e1', marginTop: 2 } }, r.purpose || ''),
+          React.createElement("div", { style: { fontSize: 11.5, color: '#64748b', marginTop: 2 } }, r.req_no + (r.job_ids && r.job_ids.length ? ' · Job ' + r.job_ids.join(', ') : '') + (r.category ? ' · ' + r.category : '')),
+          React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' } },
+            React.createElement("button", { type: 'button', disabled: busy === r.id, onClick: () => act(r, 'Approved'), style: btn('#22c55e', '#06210f') }, busy === r.id ? '…' : '✓ Approve'),
+            React.createElement("button", { type: 'button', disabled: busy === r.id, onClick: () => act(r, 'Rejected'), style: btn('#ef4444', '#fff') }, 'Reject'),
+            React.createElement("a", { onClick: () => { later(); onOpen && onOpen(); }, style: { fontSize: 12.5, color: '#93c5fd', cursor: 'pointer' } }, 'See bills in Petty Cash →')),
+          msg[r.id] ? React.createElement("div", { style: { fontSize: 12.5, marginTop: 6, color: msg[r.id][0] === '✓' ? '#4ade80' : '#fca5a5' } }, msg[r.id]) : null)),
+        React.createElement("button", { type: 'button', onClick: later, style: { marginTop: 14, width: '100%', padding: '10px 0', borderRadius: 10, border: '1px solid #334155', background: 'transparent', color: '#e2e8f0', fontWeight: 700, cursor: 'pointer' } }, 'Later'))));
 }
 // 31 Oct 2026 (Jigar): show the courier Fast Track + docket photo check changes once to Amol, Murli, Manoj, Aparna.
 // Recorded in point_brief_responses (brief_version 2026-10-31-courier). Reopen from the + menu until 15 Nov. Jigar: + menu preview only.
