@@ -2789,6 +2789,7 @@ function MainApp({
       setGrnData(p => [data, ...p]);
       show("GRN saved!");
     } else show("Error: " + error.message, false);
+    return !error;
   }, [show]);
   const updateGRN = useCallback(async (id, fields) => {
     const {
@@ -3337,6 +3338,12 @@ function MainApp({
   const addNewMaterialV2 = useCallback(async (name, unit) => {
     const cleanName = String(name || '').trim();
     if (!cleanName) return null;
+    // 5 Nov 2026 review: '3M IJ 1220' vs '3MIJ1220', '3M-4157' vs '3m 4157' - a second master splits the stock in two
+    {
+      const _nk = s => String(s || '').toLowerCase().replace(/[^a-z0-9.]/g, ''); // keep '.' so 2.5mm and 25mm stay different
+      const _hit = (masterData.materialsV2 || []).find(m => m.active && _nk(m.name) === _nk(cleanName));
+      if (_hit) { show('"' + _hit.name + '" already exists - pick it from the list instead of adding a new material', false); return null; }
+    }
     if (!['roll', 'sheet', 'nos'].includes(unit)) {
       show("Pick a unit (roll, sheet or nos) before adding the material.", false);
       return null;
@@ -3356,7 +3363,7 @@ function MainApp({
     }
     show("Material added to master!");
     return data;
-  }, [show]);
+  }, [show, masterData]); // 5 Nov 2026 review: reads masterData for the duplicate-name check
   const addNewSupplier = useCallback(async name => {
     const id = 'SUP' + uid();
     const {
@@ -3451,16 +3458,22 @@ function MainApp({
   }, [show, masterData]);
   const stock = useMemo(() => {
     const s = {};
+    // 5 Nov 2026 review: the legacy qty view (Dashboard low stock) ignored Void rows / opening & count start - same rules as Material Balance now
+    const _cutL = erpStockCutoffs(grnData);
     grnData.forEach(g => {
+      if (!erpGrnCounts(g, _cutL)) return;
       s[g.material] = (s[g.material] || 0) + (+g.qty || 0);
     });
     pLogs.forEach(l => {
+      if (!erpLogCounts(l, _cutL)) return;
       s[l.material] = (s[l.material] || 0) - (+l.qty_used || 0);
     });
     fLogs.forEach(l => {
+      if (!erpLogCounts(l, _cutL)) return;
       s[l.material] = (s[l.material] || 0) - (+l.qty_used || 0);
     });
     osLogs.filter(l => !l.returned).forEach(l => {
+      if (!erpLogCounts(l, _cutL)) return;
       s[l.material] = (s[l.material] || 0) - (+l.qty_sent || 0);
     });
     return s;
@@ -3469,6 +3482,7 @@ function MainApp({
     const norm = s => (s || '').toLowerCase().trim();
     const masters = masterData.materialsV2 || [];
     const out = {};
+    const _cut = erpStockCutoffs(grnData);
     const unitByName = {};
     masters.filter(m => m.active).forEach(m => {
       const k = norm(m.name);
@@ -3481,25 +3495,25 @@ function MainApp({
     });
     grnData.forEach(g => {
       const k = norm(g.material);
-      if (!out[k]) return;
+      if (!out[k] || !erpGrnCounts(g, _cut)) return;
       const u = out[k].unit;
       out[k].balance += u === 'roll' ? +g.sqft || 0 : +g.qty || 0;
     });
     pLogs.forEach(l => {
       const k = norm(l.material);
-      if (!out[k]) return;
+      if (!out[k] || !erpLogCounts(l, _cut)) return;
       const u = out[k].unit;
-      const used = u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0;
+      const used = erpPrintUsed(l, u); // 5 Nov 2026 review: shared helper
       out[k].balance -= used;
     });
     fLogs.forEach(l => {
       const k = norm(l.material);
-      if (!out[k]) return;
+      if (!out[k] || !erpLogCounts(l, _cut)) return;
       out[k].balance -= +l.qty_used || 0;
     });
     osLogs.filter(l => !l.returned).forEach(l => {
       const k = norm(l.material);
-      if (!out[k]) return;
+      if (!out[k] || !erpLogCounts(l, _cut)) return;
       out[k].balance -= +l.qty_sent || 0;
     });
     return out;
@@ -3950,7 +3964,7 @@ function MainApp({
     type: 'button', className: 'ng', 'aria-expanded': !navShut.includes(g.k),
     onClick: () => setNavShut(p => { const nx = p.includes(g.k) ? p.filter(x => x !== g.k) : p.concat(g.k); try { localStorage.setItem('erp_nav_shut', JSON.stringify(nx)); } catch (e) {} return nx; })
   }, React.createElement("span", null, g.l), React.createElement("span", { 'aria-hidden': 'true', style: { fontSize: 10 } }, navShut.includes(g.k) ? '\u25B8' : '\u25BE')) : null, g.items.map(n => {
-    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status) && !prIsSiteClose(p)).length : n.id === 'myprs' ? (() => {
+    const pendOs = n.id === 'instdelay' ? instDelayCount : n.id === 'quotes' ? quotePending : n.id === 'leave' ? leavePending : n.id === 'petty' ? pettyPending : n.id === 'mytasks' ? myTaskPendingCount : n.id === 'appr' ? (prs || []).filter(p => p.status === 'Pending Approval').length : n.id === 'grn2' ? (prs || []).filter(p => ['PO Sent', 'PO Generated'].includes(p.status) && !prIsSiteClose(p)).length + (prs || []).filter(p => p.status === 'Pending Approval' && ['Material', 'Mixed'].includes(p.request_type || 'Material') && p.deliver_to !== 'site' && erpPrUnmapped(p.items) > 0).length : n.id === 'myprs' ? (() => {
       try {
         const uname = (user.name || '').toUpperCase();
         const lvKey = 'myprs_last_viewed_' + uname;
@@ -4195,7 +4209,8 @@ function MainApp({
     addNewMaterial: addNewMaterial,
     addNewMaterialV2: addNewMaterialV2,
     addNewSupplier: addNewSupplier,
-    search: search
+    search: search,
+    user: user // 5 Nov 2026 review: needed to limit edit / delete of stock entries
   }), pg === "print" && React.createElement(PrintPage, {
     logs: pLogs,
     fLogs: fLogs,
@@ -4262,7 +4277,8 @@ function MainApp({
     pl: pLogs,
     fl: fLogs,
     ol: osLogs,
-    materialsV2: masterData.materialsV2 || []
+    materialsV2: masterData.materialsV2 || [],
+    user: user
   }), pg === "cli" && React.createElement(CliPage, {
     clients: clients,
     jobs: filteredJobs,
@@ -4354,7 +4370,8 @@ function MainApp({
     setPrs: setPrs,
     jobs: fullJobs,
     user: user,
-    show: show
+    show: show,
+    grnAll: grnData // 5 Nov 2026 review: for the opening / count date check on receive
   }), pg === "reports" && React.createElement(ReportsPage, {
     user: user,
     jobs: fullJobs,
@@ -4402,6 +4419,8 @@ function MainApp({
   }) : null, user ? React.createElement(TasksNoteGate, {
     user: user
   }) : null, user ? React.createElement(CommitGate, {
+    user: user
+  }) : null, user ? React.createElement(GrnDupGate, {
     user: user
   }) : null, user ? React.createElement(CallLogFab, {
     user: user
@@ -17793,8 +17812,15 @@ function GRNPage({
   addNewMaterial,
   addNewMaterialV2,
   addNewSupplier,
-  search
+  search,
+  user
 }) {
+  // 5 Nov 2026 review: anyone could edit / hard-delete any GRN (incl. Opening, Count, Void and PO-receive rows) with no backup.
+  // Now: Opening / Count / Void rows are locked; PO-receive rows and deletes are Jigar / Murli / Amol only. Database-side guard: review_migrations/03.
+  const _gk = pbKey(user);
+  const grnLocked = g => !!g && ['Opening', 'Count', 'Void'].includes(g.inward_type);
+  const grnCanChange = g => !!g && !grnLocked(g) && (g.inward_type !== 'PR' || ['JIGAR', 'MURLI', 'AMOL'].includes(_gk));
+  const grnCanDelete = g => !!g && !grnLocked(g) && ['JIGAR', 'MURLI', 'AMOL'].includes(_gk);
   const [sf, ssf] = useState(false);
   const [sortKey, setSortKey] = React.useState(null);
   const [sortDir, setSortDir] = React.useState('asc');
@@ -17900,6 +17926,7 @@ function GRNPage({
     invoice_no: "",
     job_id: "",
     inward_type: "Stock",
+    no_po_reason: "",
     received_by: team[0]?.name || "",
     qc: "OK"
   });
@@ -17908,7 +17935,13 @@ function GRNPage({
   const [newSup, setNewSup] = useState("");
   const [showNewMat, setShowNewMat] = useState(false);
   const [showNewSup, setShowNewSup] = useState(false);
+  const _addBusy = React.useRef(false); // 5 Nov 2026 review: a double tap during the checks saved the GRN twice
   const add = async () => {
+    if (_addBusy.current) return;
+    _addBusy.current = true;
+    try { await addInner(); } finally { _addBusy.current = false; }
+  };
+  const addInner = async () => {
     const mu = masterUnitOf(f.material);
     if (!mu) {
       alert("Pick a material from the master list before saving.");
@@ -17918,12 +17951,30 @@ function GRNPage({
       alert("SqFt is required.\n\n\"" + f.material + "\" is a roll material \u2014 stock is counted in ft\u00b2. Without SqFt this entry adds ZERO stock.");
       return;
     }
+    // 5 Nov 2026 review: wrong date / wrong sqft / no invoice were letting wrong stock in silently
+    {
+      const _t = new Date(); const _today = _t.getFullYear() + '-' + String(_t.getMonth() + 1).padStart(2, '0') + '-' + String(_t.getDate()).padStart(2, '0');
+      if (!f.date || f.date > _today) { alert('Inward date cannot be in the future.'); return; }
+      const _c = erpStockCutoffs(grn)[String(f.material || '').toLowerCase().trim()];
+      if (_c && f.date < _c.d && !confirm('\u26a0\ufe0f ' + f.material + ' stock starts from its ' + (_c.t === 'Count' ? 'monthly count' : 'opening stock') + ' on ' + _c.d + '.\n\nAn inward dated ' + f.date + ' is already inside that figure and will NOT change stock.\n\nSave anyway (record only)?')) return;
+      if (mu === 'roll') {
+        const _num = s => { const m = String(s || '').match(/[0-9]+(?:\.[0-9]+)?/); return m ? +m[0] : 0; };
+        const _w = _num(f.size), _l = _num(f.length), _q = +f.qty || 0;
+        if (_w >= 0.3 && _w <= 3.5 && _l >= 5 && _l <= 200 && _q > 0) {
+          const _exp = Math.round(_w * _l * _q * 10.7639);
+          if (Math.abs(+f.sqft - _exp) > 0.15 * _exp && !confirm('\u26a0\ufe0f SqFt check: ' + _q + ' roll(s) x ' + _w + ' m x ' + _l + ' m = about ' + _exp + ' sqft, but you entered ' + (+f.sqft) + ' sqft.\n\nSqFt is the TOTAL for all rolls on this entry. Save ' + (+f.sqft) + ' sqft anyway?')) return;
+        }
+      }
+      if (!String(f.invoice_no || '').trim() && !confirm('\u26a0\ufe0f No invoice / challan no. - the double-entry check cannot match this delivery.\n\nSave without it?')) return;
+    }
+    if (!(await erpGrnPrecheck([{ supplier: f.supplier, invoice_no: f.invoice_no, material: f.material, inward_type: f.inward_type, no_po_reason: f.no_po_reason }]))) return;
     setSaving(true);
     const photoUrl = await uploadFile(photoFile, 'grn-photos');
     const poUrl = await uploadFile(poFile, 'grn-po');
-    await addGRN({
+    const _ok = await addGRN({
       id: "G" + uid(),
       ...f,
+      no_po_reason: f.no_po_reason || null,
       unit: mu,
       qty: +f.qty,
       rate: +f.rate,
@@ -17931,6 +17982,7 @@ function GRNPage({
       photo_url: photoUrl,
       po_file_url: poUrl
     });
+    if (!_ok) { setSaving(false); return; }
     sF(p => ({
       ...p,
       qty: 1,
@@ -18167,6 +18219,24 @@ function GRNPage({
       inward_type: e.target.value
     }))
   }, React.createElement("option", null, "Stock"), React.createElement("option", null, "Job"))), React.createElement(F, {
+    l: "No-PO reason"
+  }, React.createElement("select", {
+    className: "in",
+    value: f.no_po_reason,
+    title: "Manual inward is only for material bought without a PO. Material on a PO is received under Receive Material.",
+    onChange: e => sF(p => ({
+      ...p,
+      no_po_reason: e.target.value
+    })),
+    style: {
+      borderColor: f.no_po_reason ? undefined : '#f59e0b'
+    }
+  }, React.createElement("option", {
+    value: ""
+  }, "- bought without PO? pick reason -"), GRN_NO_PO_REASONS.map(x => React.createElement("option", {
+    key: x,
+    value: x
+  }, x)))), React.createElement(F, {
     l: "By"
   }, React.createElement("select", {
     className: "in",
@@ -18365,12 +18435,15 @@ function GRNPage({
       display: "flex",
       gap: 4
     }
-  }, !editGrn && React.createElement("button", {
+  }, !editGrn && grnCanChange(selGrn) && React.createElement("button", {
     className: "b bp bs",
     onClick: () => setEditGrn({
       ...selGrn
     })
-  }, "\u270F\uFE0F Edit"), !editGrn && React.createElement("button", {
+  }, "\u270F\uFE0F Edit"), !editGrn && grnLocked(selGrn) && React.createElement("span", {
+    style: { fontSize: 10, color: "#94a3b8", alignSelf: "center" },
+    title: "Opening / Count / Void entries are the start of stock - change them through a monthly count (Murli) approved by Jigar"
+  }, "\uD83D\uDD12 locked"), !editGrn && grnCanDelete(selGrn) && React.createElement("button", {
     className: "b bs",
     style: {
       color: "#f47067",
@@ -18576,6 +18649,10 @@ function GRNPage({
       } = editGrn;
       if (mu) fields.unit = mu;
       const saved = mu ? { ...editGrn, unit: mu } : editGrn;
+      // 5 Nov 2026 review: an edit must not turn a row into Opening/Count/Void or move it past the rules - re-run the double-entry check
+      if (STOCK_RESET_TYPES.includes(fields.inward_type) || fields.inward_type === 'Void') { alert('Opening / Count / Void cannot be set by editing.'); return; }
+      const _was = (grn || []).find(g => g.id === id) || {};
+      if ((String(_was.supplier || '') !== String(fields.supplier || '') || String(_was.invoice_no || '') !== String(fields.invoice_no || '') || String(_was.material || '') !== String(fields.material || '')) && !(await erpGrnPrecheck([{ id: id, supplier: fields.supplier, invoice_no: fields.invoice_no, material: fields.material, inward_type: fields.inward_type, no_po_reason: fields.no_po_reason }]))) return;
       await updateGRN(id, fields);
       setSelGrn(saved);
       setEditGrn(null);
@@ -18782,22 +18859,23 @@ function PrintPage({
     unitByName[normMat(m.name)] = m.unit || 'roll';
   });
   const grnByMat = {};
+  const _cut = erpStockCutoffs(grn);
   (grn || []).forEach(g => {
     const k = normMat(g.material);
-    if (!k) return;
+    if (!k || !erpGrnCounts(g, _cut)) return;
     const u = unitByName[k] || 'roll';
     grnByMat[k] = (grnByMat[k] || 0) + (u === 'roll' ? +g.sqft || 0 : +g.qty || 0);
   });
   const usedByMat = {};
   (logs || []).forEach(l => {
     const k = normMat(l.material);
-    if (!k) return;
+    if (!k || !erpLogCounts(l, _cut)) return;
     const u = unitByName[k] || 'roll';
-    usedByMat[k] = (usedByMat[k] || 0) + (u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0);
+    usedByMat[k] = (usedByMat[k] || 0) + erpPrintUsed(l, u); // 5 Nov 2026 review: shared helper
   });
   (fLogs || []).forEach(l => {
     const k = normMat(l.material);
-    if (!k) return;
+    if (!k || !erpLogCounts(l, _cut)) return;
     usedByMat[k] = (usedByMat[k] || 0) + (+l.qty_used || 0);
   });
   const balanceFor = mat => {
@@ -19259,6 +19337,26 @@ function PrintPage({
       }
       totalRows += mats.length;
     }
+    // 5 Nov 2026 review: a usage log dated before the material's opening / monthly count is ignored by the balance - say so instead of losing it silently
+    {
+      const _c0 = erpStockCutoffs(grn);
+      const _old = [...new Set(Object.values(f.selectedItems || {}).flatMap(it => (it.materials || []).map(r => r.material)).filter(m => m && _c0[String(m).toLowerCase().trim()] && f.date < _c0[String(m).toLowerCase().trim()].d))];
+      if (_old.length && !confirm('\u26a0\ufe0f ' + _old.join(', ') + ': stock was reset by a count / opening AFTER ' + f.date + '.\n\nThis log will be kept for the job but will NOT reduce stock (the count already includes it). Save?')) return;
+    }
+    // 5 Nov 2026 review: the Print form only takes sqft, but sheet / nos materials are stocked in sheets / nos -
+    // 3mm Sunboard lost 16,806 'sheets' this way. Ask for the count once per row and store it in qty_used.
+    const _pcs = {};
+    for (const id of itemIds) {
+      for (const r of ((f.selectedItems[id] || {}).materials || [])) {
+        if (!r.material || r.outsourced) continue;
+        const u = unitByName[String(r.material).toLowerCase().trim()];
+        if (!u || u === 'roll') continue;
+        const a = prompt(r.material + ' is counted in ' + u + ' (not sqft).\n\nHow many ' + u + ' were used for ' + (+r.print_sqft || 0) + ' sqft?', '');
+        if (a === null) return;
+        if (!(+a > 0)) { show(r.material + ': enter the number of ' + u + ' used', false); return; }
+        _pcs[id + '|' + r.material] = +a;
+      }
+    }
     if (!confirm(`Save ${totalRows} print log row${totalRows > 1 ? 's' : ''} across ${itemIds.length} item${itemIds.length > 1 ? 's' : ''} on machine "${f.machine}"?`)) return;
     setSaving(true);
     const baseId = 'PL' + Date.now();
@@ -19312,8 +19410,8 @@ function PrintPage({
           material: r.material,
           print_sqft: +r.print_sqft || 0,
           actual_sqft: +r.actual_sqft || 0,
-          qty_used: +r.print_sqft || 0,
-          unit: 'sqft',
+          qty_used: _pcs[id + '|' + r.material] != null ? _pcs[id + '|' + r.material] : +r.print_sqft || 0, // 5 Nov 2026 review: sheets / nos for non-roll materials
+          unit: _pcs[id + '|' + r.material] != null ? unitByName[String(r.material).toLowerCase().trim()] : 'sqft',
           start_time: f.start_time || '',
           end_time: f.end_time || '',
           notes: f.notes || '',
@@ -22068,23 +22166,24 @@ function FabPage({
     unitByName[normMat(m.name)] = m.unit || 'roll';
   });
   const inwardByMat = {};
+  const _cut = erpStockCutoffs(grn);
   (grn || []).forEach(g => {
     const k = normMat(g.material);
-    if (!k || !unitByName[k]) return;
+    if (!k || !unitByName[k] || !erpGrnCounts(g, _cut)) return;
     const u = unitByName[k];
     inwardByMat[k] = (inwardByMat[k] || 0) + (u === 'roll' ? +g.sqft || 0 : +g.qty || 0);
   });
   const usedByMat = {};
   (logs || []).forEach(l => {
     const k = normMat(l.material);
-    if (!k || !unitByName[k]) return;
+    if (!k || !unitByName[k] || !erpLogCounts(l, _cut)) return;
     usedByMat[k] = (usedByMat[k] || 0) + (+l.qty_used || 0);
   });
   (pLogs || []).forEach(l => {
     const k = normMat(l.material);
-    if (!k || !unitByName[k]) return;
+    if (!k || !unitByName[k] || !erpLogCounts(l, _cut)) return;
     const u = unitByName[k];
-    usedByMat[k] = (usedByMat[k] || 0) + (u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0);
+    usedByMat[k] = (usedByMat[k] || 0) + erpPrintUsed(l, u); // 5 Nov 2026 review: shared helper
   });
   const balanceFor = mat => {
     if (!mat) return {
@@ -22428,6 +22527,12 @@ function FabPage({
     }
     if (f.process === 'Outsource' && !(f.outsource_name || '').trim()) { show('Vendor / Machine name required for Outsource', false); return; }
     if (f.process !== 'Outsource' && !(f.crew || []).length) { show('Tap who did the work (Done by)', false); return; }
+    // 5 Nov 2026 review: a usage log dated before the material's opening / monthly count is ignored by the balance - say so instead of losing it silently
+    {
+      const _c0 = erpStockCutoffs(grn);
+      const _old = [...new Set(Object.values(f.selectedItems || {}).flatMap(it => (it.materials || []).map(r => r.material)).filter(m => m && _c0[String(m).toLowerCase().trim()] && f.date < _c0[String(m).toLowerCase().trim()].d))];
+      if (_old.length && !confirm('\u26a0\ufe0f ' + _old.join(', ') + ': stock was reset by a count / opening AFTER ' + f.date + '.\n\nThis log will be kept for the job but will NOT reduce stock (the count already includes it). Save?')) return;
+    }
     if (!confirm(`Save ${totalRows} fab log row${totalRows > 1 ? 's' : ''} across ${itemIds.length} item${itemIds.length > 1 ? 's' : ''} for process "${f.process}"?`)) return;
     setSaving(true);
     const baseId = 'FL' + Date.now();
@@ -26167,13 +26272,70 @@ function BankingComponentsView({
     }
   }, "No dispatch rows for this program.")))))));
 }
+// 5 Nov 2026 (Jigar): every material's stock starts from its latest monthly count, else its opening stock;
+// GRNs and usage logs before that start are already inside the count. Void GRNs never count.
+const STOCK_RESET_TYPES = ['Opening', 'Count'];
+const GRN_NO_PO_REASONS = ['Cash / urgent buy', 'Client-supplied', 'Return from site', 'Sample / free'];
+// 5 Nov 2026 (Jigar): stock rules - warn-only until the block date, then the database refuses (and the Ask Jigar bar shows)
+async function erpGrnPrecheck(rows) {
+  try {
+    const r = await sb.rpc('erp_grn_precheck', { p_rows: rows });
+    // 5 Nov 2026 review: if the check itself fails, ask instead of silently saving (a PO receive could be marked received and then refused by the database)
+    if (r.error) return confirm('\u26a0\ufe0f The double-entry stock check could not run (' + r.error.message + ').\n\nSave anyway? If unsure, Cancel and try again in a minute.');
+    if (!r.data || !r.data.length) return true;
+    // 5 Nov 2026 review: keep the 'Pending with: NAME (step) - escalate JIGAR' part - the owner rule says every block names who it is pending with
+    const msgs = [...new Set(r.data.map(x => String(x.message || '')))];
+    const blocking = r.data.some(x => x.blocking);
+    // 5 Nov 2026 review: a real block now raises the RuleBlockBar (send to owner / Ask Jigar) - erp-client-block only logs, so the user had no way forward
+    if (blocking) { try { window.dispatchEvent(new CustomEvent('erp-rule-block', { detail: { msg: r.data[0].message, action: 'grn_precheck' } })); } catch (e) {} }
+    else r.data.forEach(x => { try { window.dispatchEvent(new CustomEvent('erp-client-block', { detail: { msg: '[warn] ' + x.message } })); } catch (e) {} });
+    if (blocking) { alert('Cannot save:\n\n' + msgs.join('\n\n') + '\n\nIf this is a genuine exception, Ask Jigar.'); return false; }
+    return confirm('\u26a0\ufe0f New stock rule - this will soon be blocked:\n\n' + msgs.join('\n\n') + '\n\nSave anyway?');
+  } catch (e) { return confirm('\u26a0\ufe0f The double-entry stock check could not run. Save anyway?'); } // 5 Nov 2026 review: ask, don't fail open
+}
+const erpIsServiceItem = it => typeof (it && it.is_service) === 'boolean' ? it.is_service : /install|transport|on[ -]?pole|lollipop|lollypop|charge|recce|labour|labor|fitting/i.test((it && it.product) || '');
+const erpPrUnmapped = items => (Array.isArray(items) ? items : []).filter(it => !erpIsServiceItem(it) && !String((it && it.stock_material) || '').trim()).length;
+function erpStockCutoffs(grn) {
+  const op = {}, ct = {};
+  (grn || []).forEach(g => {
+    if (!g || !g.date || !STOCK_RESET_TYPES.includes(g.inward_type)) return;
+    const k = String(g.material || '').toLowerCase().trim();
+    const d = String(g.date).slice(0, 10);
+    if (!k) return;
+    if (g.inward_type === 'Count') { if (!ct[k] || d > ct[k]) ct[k] = d; } else if (!op[k] || d < op[k]) op[k] = d;
+  });
+  const c = {};
+  Object.keys(op).forEach(k => { c[k] = { d: op[k], t: 'Opening' }; });
+  Object.keys(ct).forEach(k => { c[k] = { d: ct[k], t: 'Count' }; });
+  return c;
+}
+function erpGrnCounts(g, cut) {
+  if (!g || g.inward_type === 'Void') return false;
+  if (String(g.qc || '').toLowerCase() === 'rejected') return false; // 5 Nov 2026 review: QC-rejected material is not stock
+  const c = cut[String(g.material || '').toLowerCase().trim()];
+  const d = String(g.date || '').slice(0, 10);
+  if (!c) return true;
+  if (STOCK_RESET_TYPES.includes(g.inward_type)) return c.t === 'Count' ? (g.inward_type === 'Count' && d === c.d) : g.inward_type === 'Opening';
+  return d >= c.d;
+}
+// 5 Nov 2026 review: one rule for what a print log takes out of stock. Raw material sent out for outsourced printing
+// (Print page 'Outsourced material (sent)') left the store with print_sqft 0, so it was never deducted - it is now.
+function erpPrintUsed(l, u) {
+  const os = u === 'roll' && l && l.is_outsourced && l.os_type === 'material' ? +l.os_sent_sqft || 0 : 0; // sqft only reduces roll stock
+  return (u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0) + os;
+}
+function erpLogCounts(l, cut) {
+  const c = l && cut[String(l.material || '').toLowerCase().trim()];
+  return !c || String(l.date || '').slice(0, 10) >= c.d;
+}
 function StockPage({
   stock,
   grn,
   pl,
   fl,
   ol,
-  materialsV2
+  materialsV2,
+  user
 }) {
   const [q, setQ] = React.useState('');
   const [sortKey, setSortKey] = React.useState('remaining');
@@ -26186,10 +26348,12 @@ function StockPage({
   activeMats.forEach(m => {
     unitByName[norm(m.name)] = m.unit || 'roll';
   });
+  const _cut = erpStockCutoffs(grn);
   const inwardByName = {};
   (grn || []).forEach(g => {
     const k = norm(g.material);
     if (!k || !unitByName[k]) return;
+    if (!erpGrnCounts(g, _cut)) return;
     const u = unitByName[k];
     inwardByName[k] = (inwardByName[k] || 0) + (u === 'roll' ? +g.sqft || 0 : +g.qty || 0);
   });
@@ -26197,18 +26361,21 @@ function StockPage({
   (pl || []).forEach(l => {
     const k = norm(l.material);
     if (!k || !unitByName[k]) return;
+    if (!erpLogCounts(l, _cut)) return;
     const u = unitByName[k];
-    const v = u === 'roll' ? +l.print_sqft || 0 : +l.qty_used || +l.print_sqft || 0;
+    const v = erpPrintUsed(l, u); // 5 Nov 2026 review: shared helper
     usedByName[k] = (usedByName[k] || 0) + v;
   });
   (fl || []).forEach(l => {
     const k = norm(l.material);
     if (!k || !unitByName[k]) return;
+    if (!erpLogCounts(l, _cut)) return;
     usedByName[k] = (usedByName[k] || 0) + (+l.qty_used || 0);
   });
   (ol || []).filter(l => !l.returned).forEach(l => {
     const k = norm(l.material);
     if (!k || !unitByName[k]) return;
+    if (!erpLogCounts(l, _cut)) return;
     usedByName[k] = (usedByName[k] || 0) + (+l.qty_sent || 0);
   });
   const parseNotes = n => {
@@ -26304,7 +26471,7 @@ function StockPage({
     const ds = String(d).slice(0, 10);
     return ds >= dateRange[0] && ds <= dateRange[1];
   };
-  const grnF = (grn || []).filter(g => inDateRange(g.date));
+  const grnF = (grn || []).filter(g => inDateRange(g.date) && g.inward_type !== 'Count' && g.inward_type !== 'Void');
   const plF = (pl || []).filter(l => inDateRange(l.date));
   const flF = (fl || []).filter(l => inDateRange(l.date));
   const cardInwardRoll = grnF.reduce((s, g) => {
@@ -26453,7 +26620,14 @@ function StockPage({
     s: outOfStockCount > 0 ? `${outOfStockCount} out of stock` : 'all in stock',
     c: "#3b82f6",
     d: 90
-  })), React.createElement("div", {
+  })), React.createElement(StockCountPanel, {
+    user: user,
+    balances: balances,
+    grn: grn,
+    pl: pl,
+    fl: fl,
+    ol: ol // 5 Nov 2026 review: outsource usage is part of the balance too
+  }), React.createElement("div", {
     className: "c",
     style: {
       padding: 0
@@ -27088,12 +27262,162 @@ const prIsSiteClose = p => {
   const it = Array.isArray(p.items) ? p.items : [];
   return it.length > 0 && it.every(x => typeof x.is_service === 'boolean' ? x.is_service : PR_SERVICE_RE.test(x.product || ''));
 };
+// ── 5 Nov 2026 (Jigar): Murli maps every PR material line to a stock material before Jigar approves ──
+function PrMapCard({ user, mats }) {
+  const me = pbKey(user);
+  const can = ['MURLI', 'JIGAR', 'AMOL'].includes(me);
+  const [rows, setRows] = React.useState(null);
+  const [pick, setPick] = React.useState({});
+  const [busy, setBusy] = React.useState('');
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_pr_map_list').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { if (can) load(); }, [can]);
+  if (!can || !rows || !rows.length) return null;
+  const save = async pr => {
+    const its = Array.isArray(pr.items) ? pr.items : [];
+    const map = its.map((it, i) => {
+      const v = pick[pr.id + ':' + i];
+      if (v === '__service') return { index: i, is_service: true };
+      return v ? { index: i, stock_material: v } : null;
+    }).filter(Boolean);
+    if (!map.length) { setMsg('Pick a material (or Service) for at least one line'); return; }
+    setBusy(pr.id); setMsg('');
+    const r = await sb.rpc('erp_pr_map_material', { p_pr_id: pr.id, p_map: map });
+    setBusy('');
+    if (r.error) { setMsg(r.error.message); return; }
+    setMsg(pr.pr_no + (r.data > 0 ? ': saved, ' + r.data + ' line(s) still to map' : ': all lines mapped - ready for approval'));
+    load();
+  };
+  const fd = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+  return React.createElement("div", { style: { border: '1px solid #f59e0b', background: '#f59e0b10', borderRadius: 10, padding: 10, marginBottom: 12 } },
+    React.createElement("div", { style: { fontSize: 13, fontWeight: 800, color: '#f59e0b' } }, '🏷️ Map stock material - ' + rows.length + ' PR' + (rows.length > 1 ? 's' : '') + ' waiting before approval'),
+    React.createElement("div", { style: { fontSize: 11, color: '#cbd5e1', margin: '3px 0 6px' } }, 'Pick the exact stock material for each line. It is locked at Receive Material, so stock is booked against the right material.'),
+    msg ? React.createElement("div", { style: { fontSize: 11, color: '#fbbf24', marginBottom: 6 } }, msg) : null,
+    rows.map(pr => React.createElement("div", { key: pr.id, style: { background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, padding: 8, marginTop: 6 } },
+      React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e2e8f0' } }, pr.pr_no + ' · ' + (pr.vendor_name || '') + (pr.job_id ? ' · job ' + pr.job_id : '') + ' · by ' + (pr.created_by || '') + ' · ' + fd(pr.created_at)),
+      (Array.isArray(pr.items) ? pr.items : []).map((it, i) => (erpIsServiceItem(it) || String(it.stock_material || '').trim()) ? null : React.createElement("div", { key: i, style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 5 } },
+        React.createElement("span", { style: { fontSize: 11, color: '#cbd5e1', flex: '1 1 180px' } }, (it.product || '-') + (it.size ? ' · ' + it.size : '') + ' · qty ' + (it.qty || '')),
+        React.createElement("select", { className: 'in', value: pick[pr.id + ':' + i] || '', onChange: e => { const v = e.target.value; setPick(p => ({ ...p, [pr.id + ':' + i]: v })); }, style: { fontSize: 11, padding: '3px 4px', flex: '1 1 220px', borderColor: pick[pr.id + ':' + i] ? '#1a2030' : '#f59e0b' } },
+          React.createElement("option", { value: '' }, '- select stock material -'),
+          React.createElement("option", { value: '__service' }, 'Service / not stock'),
+          (mats || []).map(m => React.createElement("option", { key: m.name, value: m.name }, m.name + ' (' + (m.unit || 'nos') + ')'))))),
+      React.createElement("button", { type: 'button', className: 'b bp', disabled: busy === pr.id, onClick: () => save(pr), style: { marginTop: 7, fontSize: 11, fontWeight: 800 } }, busy === pr.id ? 'Saving…' : 'Save mapping'))));
+}
+// ── 5 Nov 2026 (Jigar): monthly stock count - Murli counts, Jigar approves; the approved count becomes the new start of stock ──
+function StockCountPanel({ user, balances, grn, pl, fl, ol }) {
+  const me = pbKey(user);
+  const can = ['MURLI', 'JIGAR'].includes(me);
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const [open, setOpen] = React.useState(false);
+  const [cdate, setCdate] = React.useState(iso(new Date()));
+  const [q, setQ] = React.useState('');
+  const [vals, setVals] = React.useState({});
+  const [pending, setPending] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  const load = () => sb.rpc('erp_stock_count_list', { p_status: 'pending' }).then(r => setPending(r.error ? [] : (r.data || [])));
+  React.useEffect(() => { if (can) load(); }, [can]);
+  if (!can) return null;
+  const norm = s => String(s || '').toLowerCase().trim();
+  const lastRate = {};
+  (grn || []).forEach(g => { const k = norm(g.material); if (+g.rate > 0 && (!lastRate[k] || String(g.date) > lastRate[k].d)) lastRate[k] = { d: String(g.date), r: +g.rate }; });
+  const mStart = cdate.slice(0, 8) + '01';
+  const inMonth = d => { const x = String(d || '').slice(0, 10); return x >= mStart && x <= cdate; };
+  const usedThisMonth = new Set([...(pl || []), ...(fl || [])].filter(l => inMonth(l.date)).map(l => norm(l.material)));
+  const noUsage = [...new Set((grn || []).filter(g => inMonth(g.date) && !['Opening', 'Count', 'Void'].includes(g.inward_type)).map(g => g.material))].filter(m => m && !usedThisMonth.has(norm(m)));
+  const limitFor = r => r.unit === 'roll' ? Math.max(50, Math.abs(balAt(r)) * 0.05) : Math.max(2, Math.abs(balAt(r)) * 0.05); // 5 Nov 2026 review: balance on count date
+  // 5 Nov 2026 review: the ERP figure must be the balance ON the count date (end of day), not today's -
+  // a count entered for 31 Oct on 3 Nov was compared with a balance that already had 1-3 Nov usage, so the shown ERP figure,
+  // the difference, the Rs value and the 'reason needed' threshold were all wrong (the approved Count row itself is fine). Same rules as Material Balance.
+  const _cutC = erpStockCutoffs(grn);
+  const _asOf = {};
+  const _unitOf = {};
+  (balances || []).forEach(b => { _unitOf[norm(b.name)] = b.unit; });
+  (grn || []).forEach(g => { const k = norm(g.material); if (String(g.date || '').slice(0, 10) > cdate || !erpGrnCounts(g, _cutC) || !_unitOf[k]) return; _asOf[k] = (_asOf[k] || 0) + (_unitOf[k] === 'roll' ? +g.sqft || 0 : +g.qty || 0); });
+  const _useAsOf = (l, v) => { const k = norm(l.material); if (String(l.date || '').slice(0, 10) > cdate || !erpLogCounts(l, _cutC)) return; _asOf[k] = (_asOf[k] || 0) - v; };
+  (pl || []).forEach(l => { const u = _unitOf[norm(l.material)]; if (u) _useAsOf(l, erpPrintUsed(l, u)); });
+  (fl || []).forEach(l => _useAsOf(l, +l.qty_used || 0));
+  (ol || []).filter(l => !l.returned).forEach(l => _useAsOf(l, +l.qty_sent || 0));
+  const balAt = r => _asOf[norm(r.name)] || 0;
+  const ql = q.toLowerCase().trim();
+  const list = (balances || []).filter(r => !ql || r.name.toLowerCase().includes(ql)).sort((a, b) => a.name.localeCompare(b.name));
+  const set = (n, k, v) => setVals(p => ({ ...p, [n]: { ...(p[n] || {}), [k]: v } }));
+  const entered = (balances || []).filter(r => vals[r.name] && vals[r.name].counted !== undefined && vals[r.name].counted !== '');
+  const submit = async () => {
+    if (!entered.length) { setMsg('Enter the counted quantity for at least one material'); return; }
+    const miss = entered.filter(r => Math.abs(+vals[r.name].counted - balAt(r)) > limitFor(r) && !String(vals[r.name].reason || '').trim());
+    if (miss.length) { setMsg('Reason needed for big differences: ' + miss.map(r => r.name).join(', ')); return; }
+    setBusy(true); setMsg('');
+    const rows = entered.map(r => ({ material: r.name, counted: +vals[r.name].counted, full_rolls: vals[r.name].full_rolls === undefined || vals[r.name].full_rolls === '' ? null : +vals[r.name].full_rolls, erp_balance: Math.round(balAt(r) * 100) / 100, reason: vals[r.name].reason || '' }));
+    const r = await sb.rpc('erp_stock_count_submit', { p_date: cdate, p_rows: rows });
+    setBusy(false);
+    if (r.error) { setMsg(r.error.message); return; }
+    setMsg(r.data + ' material(s) sent to Jigar for approval'); setVals({}); load();
+  };
+  const decide = async (ids, ok) => {
+    if (!ids.length) return;
+    let note = null;
+    if (!ok) { note = prompt('Reason for sending back?') || ''; if (!note.trim()) return; }
+    setBusy(true); setMsg('');
+    const r = await sb.rpc('erp_stock_count_decide', { p_ids: ids, p_approve: ok, p_note: note });
+    setBusy(false);
+    if (r.error) { setMsg(r.error.message); return; }
+    setMsg(ok ? r.data + ' count(s) approved - stock now starts from the count (refresh to see balances)' : r.data + ' count(s) sent back to Murli');
+    load();
+  };
+  // 5 Nov 2026 review: GRN.rate on roll materials is sometimes per roll (Rs 2,000-5,000), sometimes per sqft - a per-roll rate x sqft diff
+  // overstated the Rs difference ~500x. For rolls use the last rate only when it looks like a per-sqft rate (<= Rs 400).
+  const val = r => { const lr = lastRate[norm(r.material)]; if (!lr) return null; if (r.unit === 'roll' && lr.r > 400) return null; return (+r.diff || 0) * lr.r; };
+  const totalVal = pending.reduce((s, r) => s + (val(r) || 0), 0);
+  const cell = { padding: '4px 6px', borderBottom: '1px solid #1f2937', fontSize: 11 };
+  const inp = { fontSize: 11, padding: '3px 5px', width: 80 };
+  return React.createElement("div", { className: 'c', style: { padding: 10, marginBottom: 10, border: '1px solid #8b5cf655' } },
+    React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+      React.createElement("span", { style: { fontSize: 12, fontWeight: 800, color: '#a78bfa' } }, '📋 Monthly stock count' + (pending.length ? ' · ' + pending.length + ' waiting for Jigar' : '')),
+      React.createElement("button", { type: 'button', className: 'b bs', onClick: () => setOpen(o => !o), style: { fontSize: 11 } }, open ? 'Close' : (me === 'JIGAR' && pending.length ? 'Review counts' : 'Enter count'))),
+    msg ? React.createElement("div", { style: { fontSize: 11, color: '#fbbf24', marginTop: 6 } }, msg) : null,
+    !open ? null : React.createElement("div", { style: { marginTop: 8 } },
+      me === 'JIGAR' && pending.length ? React.createElement("div", { style: { marginBottom: 12 } },
+        React.createElement("div", { style: { fontSize: 12, fontWeight: 800, color: '#e2e8f0', marginBottom: 4 } }, 'Waiting for your approval' + (totalVal ? ' · difference ≈ ₹' + Math.round(totalVal).toLocaleString('en-IN') : '')),
+        React.createElement("div", { style: { overflowX: 'auto' } }, React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse' } },
+          React.createElement("thead", null, React.createElement("tr", null, ['Date', 'Material', 'ERP', 'Counted', 'Diff', '₹', 'Reason', ''].map(h => React.createElement("th", { key: h, style: { ...cell, textAlign: 'left', color: '#94a3b8' } }, h)))),
+          React.createElement("tbody", null, pending.map(r => React.createElement("tr", { key: r.id },
+            React.createElement("td", { style: cell }, String(r.count_date).slice(5)),
+            React.createElement("td", { style: { ...cell, fontWeight: 700 } }, r.material),
+            React.createElement("td", { style: cell }, Math.round(+r.erp_balance || 0)),
+            React.createElement("td", { style: cell }, Math.round(+r.counted || 0) + (r.full_rolls != null ? ' (' + r.full_rolls + ' rolls)' : '')),
+            React.createElement("td", { style: { ...cell, color: (+r.diff || 0) < 0 ? '#f87171' : '#4ade80', fontWeight: 700 } }, Math.round(+r.diff || 0)),
+            React.createElement("td", { style: cell }, val(r) == null ? '-' : Math.round(val(r)).toLocaleString('en-IN')),
+            React.createElement("td", { style: cell }, r.reason || ''),
+            React.createElement("td", { style: { ...cell, whiteSpace: 'nowrap' } },
+              React.createElement("button", { type: 'button', className: 'b bs', disabled: busy, onClick: () => decide([r.id], true), style: { fontSize: 10 } }, 'Approve'), ' ',
+              React.createElement("button", { type: 'button', className: 'b bs', disabled: busy, onClick: () => decide([r.id], false), style: { fontSize: 10 } }, 'Send back'))))))),
+        React.createElement("button", { type: 'button', className: 'b bp', disabled: busy, onClick: () => decide(pending.map(r => r.id), true), style: { marginTop: 6, fontSize: 11, fontWeight: 800 } }, 'Approve all ' + pending.length)) : null,
+      noUsage.length ? React.createElement("div", { style: { fontSize: 11, color: '#fca5a5', marginBottom: 8, lineHeight: 1.45 } }, '⚠️ Bought this month but no print/fab usage logged: ' + noUsage.join(', ') + ' - log the usage before counting.') : null,
+      React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 } },
+        React.createElement("label", { style: { fontSize: 11, color: '#cbd5e1' } }, 'Count date ', React.createElement("input", { type: 'date', className: 'in', value: cdate, max: iso(new Date()), onChange: e => setCdate(e.target.value), style: { fontSize: 11, padding: '3px 5px' } })),
+        React.createElement("input", { className: 'in', placeholder: 'Search material…', value: q, onChange: e => setQ(e.target.value), style: { fontSize: 11, padding: '3px 6px', flex: '1 1 160px' } }),
+        React.createElement("button", { type: 'button', className: 'b bp', disabled: busy, onClick: submit, style: { fontSize: 11, fontWeight: 800 } }, busy ? 'Saving…' : 'Send ' + entered.length + ' to Jigar')),
+      React.createElement("div", { style: { fontSize: 10.5, color: '#94a3b8', marginBottom: 4 } }, 'Rolls: enter total sqft counted (full rolls + part rolls). Others: count in nos/sheets. Leave blank to skip a material.'),
+      React.createElement("div", { style: { overflowX: 'auto', maxHeight: 420, overflowY: 'auto' } }, React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse' } },
+        React.createElement("thead", null, React.createElement("tr", null, ['Material', 'Unit', 'ERP balance', 'Full rolls', 'Counted', 'Diff', 'Reason'].map(h => React.createElement("th", { key: h, style: { ...cell, textAlign: 'left', color: '#94a3b8', position: 'sticky', top: 0, background: '#0f172a' } }, h)))),
+        React.createElement("tbody", null, list.map(r => { const v = vals[r.name] || {}; const has = v.counted !== undefined && v.counted !== ''; const d = has ? +v.counted - balAt(r) : null; const big = has && Math.abs(d) > limitFor(r);
+          return React.createElement("tr", { key: r.name },
+            React.createElement("td", { style: { ...cell, fontWeight: 700 } }, r.name),
+            React.createElement("td", { style: cell }, r.unit === 'roll' ? 'sqft' : r.unit),
+            React.createElement("td", { style: cell }, Math.round(balAt(r))),
+            React.createElement("td", { style: cell }, r.unit === 'roll' ? React.createElement("input", { className: 'in', type: 'number', min: 0, value: v.full_rolls || '', onChange: e => set(r.name, 'full_rolls', e.target.value), style: { ...inp, width: 56 } }) : null),
+            React.createElement("td", { style: cell }, React.createElement("input", { className: 'in', type: 'number', min: 0, value: has ? v.counted : '', onChange: e => set(r.name, 'counted', e.target.value), style: inp })),
+            React.createElement("td", { style: { ...cell, color: d == null ? '#64748b' : d < 0 ? '#f87171' : '#4ade80', fontWeight: 700 } }, d == null ? '' : Math.round(d)),
+            React.createElement("td", { style: cell }, has ? React.createElement("input", { className: 'in', value: v.reason || '', placeholder: big ? 'Reason (required)' : 'optional', onChange: e => set(r.name, 'reason', e.target.value), style: { ...inp, width: 150, borderColor: big && !v.reason ? '#f59e0b' : undefined } }) : null)); }))))));
+}
 function GRNReceivePage({
   prs,
   setPrs,
   jobs,
   user,
-  show
+  show,
+  grnAll
 }) {
   const GRN_RECEIVERS = ['Murli Shetty', 'Shreya'];
   const STATUS_FILTERS = ['PO Generated', 'Partially Received', 'PO Sent', 'Approved', 'All', 'Site / service'];
@@ -27128,6 +27452,19 @@ function GRNReceivePage({
   const matUnit = nm => {
     const m = mats.find(z => z.name === nm);
     return m ? m.unit || 'nos' : 'nos';
+  };
+  // 5 Nov 2026 review: one place that says what a receive line adds to stock - used for the preview and kept in step with saveGRN
+  const recvNowPreview = (x, mu) => {
+    const recv = +x.received_now || 0;
+    if (!(recv > 0)) return '';
+    const per = String(x.per || '');
+    if (mu === 'roll') {
+      if (per === 'ft\u00b2') return Math.round(recv) + ' sqft';
+      if (per === 'm\u00b2') return Math.round(recv * 10.7639) + ' sqft (' + recv + ' m\u00b2 x 10.76)';
+      return Math.round(+x.sqft_now || 0) + ' sqft';
+    }
+    if (per === 'ft\u00b2' || per === 'm\u00b2') { const od = +x.ordered_display || 0; return (od > 0 ? Math.round((+x.ordered_qty || 0) * recv / od * 100) / 100 : 0) + ' ' + (mu || 'nos'); }
+    return recv + ' ' + (mu || 'nos');
   };
   const suggestMat = name => {
     const n = (name || '').toLowerCase().split('(')[0].trim();
@@ -27197,13 +27534,20 @@ function GRNReceivePage({
           received_so_far: already,
           received_now: Math.max(0, orderedAmt - already),
           is_service: svc,
+          mat_locked: !!x.stock_material && !svc,
           stock_material: x.stock_material || (svc ? '' : suggestMat(x.product))
         };
       })
     });
     setReceiving(pr);
   };
+  const _rcvBusy = React.useRef(false); // 5 Nov 2026 review: a double tap during the checks received the PO twice
   const saveGRN = async () => {
+    if (_rcvBusy.current) return;
+    _rcvBusy.current = true;
+    try { await saveGRNInner(); } finally { _rcvBusy.current = false; }
+  };
+  const saveGRNInner = async () => {
     if (!gf.received_by) {
       show('Select receiver', false);
       return;
@@ -27234,6 +27578,35 @@ function GRNReceivePage({
         return;
       }
     }
+    {
+      const _pre = (gf.items_received || []).filter(x => !x.is_service && x.stock_material && (+x.received_now || 0) > 0).map((x, i) => ({ id: 'GRNCHECK-' + i, supplier: receiving.vendor_name || '', invoice_no: gf.invoice_no || '', material: x.stock_material, inward_type: 'PR' }));
+      if (_pre.length && !(await erpGrnPrecheck(_pre))) return;
+    }
+    // 5 Nov 2026 review: a receipt dated before the material's opening / monthly count does not change stock - say so
+    {
+      const _c0 = erpStockCutoffs(grnAll || []);
+      const _old = [...new Set((gf.items_received || []).filter(x => !x.is_service && x.stock_material && (+x.received_now || 0) > 0).map(x => x.stock_material).filter(m => _c0[String(m).toLowerCase().trim()] && gf.received_at < _c0[String(m).toLowerCase().trim()].d))];
+      if (_old.length && !confirm('\u26a0\ufe0f ' + _old.join(', ') + ': stock was reset by a count / opening after ' + gf.received_at + '.\n\nThis receipt will be recorded but will NOT add to stock (the count already includes it). Save?')) return;
+    }
+    // 5 Nov 2026 review: spec Rule 1C was not built - warn when the same material, similar sqft, was entered as a manual GRN in the last 45 days
+    try {
+      const _rl = (gf.items_received || []).filter(x => !x.is_service && x.stock_material && (+x.received_now || 0) > 0);
+      if (_rl.length) {
+        const _since = new Date(new Date(gf.received_at).getTime() - 45 * 864e5).toISOString().slice(0, 10);
+        const { data: _man } = await sb.from('grn').select('id,date,material,sqft,qty,supplier,invoice_no').in('inward_type', ['Stock', 'Job']).gte('date', _since).in('material', _rl.map(x => x.stock_material));
+        const _hits = [];
+        _rl.forEach(x => {
+          const mu = matUnit(x.stock_material);
+          const per = String(x.per || '');
+          const sq = mu === 'roll' ? (per === 'ft\u00b2' ? +x.received_now : per === 'm\u00b2' ? +x.received_now * 10.7639 : +x.sqft_now || 0) : 0;
+          (_man || []).filter(g => g.material === x.stock_material).forEach(g => {
+            const same = mu === 'roll' ? (sq > 0 && Math.abs((+g.sqft || 0) - sq) <= Math.max(5, 0.02 * sq)) : (+g.qty || 0) === (+x.received_now || 0);
+            if (same) _hits.push(x.stock_material + ': manual GRN ' + g.id + ' on ' + g.date + ' (' + (mu === 'roll' ? Math.round(+g.sqft) + ' sqft' : g.qty + ' ' + mu) + (g.invoice_no ? ', inv ' + g.invoice_no : '') + ')');
+          });
+        });
+        if (_hits.length && !confirm('\u26a0\ufe0f This material may already be in stock from a manual "New Inward":\n\n' + _hits.join('\n') + '\n\nIf it is the SAME delivery, Cancel and ask Jigar to void the manual entry (or clear it on the double-GRN list).\nIf it is a DIFFERENT delivery, press OK to save.')) return;
+      }
+    } catch (e) {}
     setSaving(true);
     const grn_id = 'GRN' + Date.now();
     const nowIso = new Date().toISOString();
@@ -27253,6 +27626,9 @@ function GRNReceivePage({
       };
     });
     const variances = lines.filter(x => !x.is_service && (+x.received_so_far || 0) + (+x.received_now || 0) !== ordOf(x));
+    // 5 Nov 2026 review: receiving far more than ordered is how '610 rolls' and 960 sheets for a 30-sheet PO got into stock
+    const _over = lines.filter(x => !x.is_service && ordOf(x) > 0 && (+x.received_so_far || 0) + (+x.received_now || 0) > ordOf(x) * 1.1);
+    if (_over.length && !confirm('\u26a0\ufe0f Received is MORE than ordered:\n\n' + _over.map(x => x.product + ': ordered ' + ordOf(x) + ' ' + (x.per || '') + ', receiving ' + ((+x.received_so_far || 0) + (+x.received_now || 0))).join('\n') + '\n\nCheck the unit (rolls vs sqft / m\u00b2, sheets vs sqft). Save anyway?')) { setSaving(false); return; }
     const updates = {
       status: newStatus,
       received_by: gf.received_by,
@@ -27391,7 +27767,10 @@ function GRNReceivePage({
       overflowY: 'auto',
       height: '100%'
     }
-  }, React.createElement("div", {
+  }, React.createElement(PrMapCard, {
+    user: user,
+    mats: mats
+  }), React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -27591,6 +27970,8 @@ function GRNReceivePage({
     const _mu = ((mats || []).find(m => m.name === x.stock_material) || {}).unit || '';
     const _isAreaLine = x.per === 'ft\u00b2' || x.per === 'm\u00b2';
     const _unitMismatch = !!(_mu && _mu !== 'roll' && _isAreaLine);
+    // 5 Nov 2026 review: show what will actually be added to stock (m\u00b2 -> sqft, sheet lines -> sheets)
+    const _stockPreview = !x.is_service && x.stock_material && recvNowPreview(x, _mu);
     const recvNow = +x.received_now || 0;
     const remaining = Math.max(0, ordered - (+x.received_so_far || 0) - recvNow);
     const setIt = patch => setGf(p => ({
@@ -27670,6 +28051,8 @@ function GRNReceivePage({
     }, "Map to stock material"), React.createElement("select", {
       className: "in",
       value: x.stock_material || '',
+      disabled: !!x.mat_locked && !['JIGAR', 'AMOL'].includes(pbKey(user)),
+      title: x.mat_locked ? 'Mapped on the PR before approval - only Jigar or Amol can change it here' : '',
       onChange: e => setIt({
         stock_material: e.target.value
       }),
@@ -27774,7 +28157,10 @@ function GRNReceivePage({
         textAlign: 'right',
         borderColor: +x.sqft_now > 0 ? '#1a2030' : '#f59e0b'
       }
-    })) : null)));
+    })) : null), _stockPreview ? React.createElement("div", {
+      // 5 Nov 2026 review: Murli sees exactly what goes into stock before saving
+      style: { fontSize: 9, color: '#4ade80', marginTop: 4 }
+    }, "Adds to stock: " + _stockPreview + " of " + x.stock_material) : null));
   })), React.createElement("div", {
     style: {
       marginBottom: 10
@@ -30541,6 +30927,13 @@ function ApprovalsPage({
     if (!_rb) {
       show('Set "Required by" before approving — this is the deadline the PO is measured against', false);
       return;
+    }
+    if (['Material', 'Mixed', undefined, null, ''].includes(pr.request_type) && pr.deliver_to !== 'site' && erpPrUnmapped(pr.items) > 0) { // 5 Nov 2026 review: site-delivered POs never enter stock
+      let _blk = false;
+      try { const _b = await sb.rpc('erp_stock_rules_blocking'); _blk = !!(_b && _b.data); } catch (e) {}
+      const _n = erpPrUnmapped(pr.items);
+      if (_blk) { show(pr.pr_no + ': ' + _n + ' item(s) not mapped to a stock material yet - waiting on Murli (Receive Material page)', false); return; }
+      if (!confirm('\u26a0\ufe0f ' + pr.pr_no + ': ' + _n + ' item(s) are not mapped to a stock material yet (Murli maps them on the Receive Material page).\n\nSoon approval will wait for Murli. Approve anyway?')) return;
     }
     setProcessing(pr.id);
     const nowIso = new Date().toISOString();
@@ -38336,6 +38729,71 @@ function V4ChangeGate({ user }) {
         note.trim() ? React.createElement("button", { type: 'button', disabled: busy, onClick: () => done('change'), style: { flex: '1 1 200px', padding: '12px 0', borderRadius: 10, border: '1px solid #f59e0b', background: 'transparent', color: '#fde68a', fontSize: 14, fontWeight: 800, cursor: 'pointer' } }, T('Send my note to Jigar', 'मेरा नोट जिगर को भेजें')) : null)));
 }
 // ── v4.1 Login commitment gate (2026-10-14, Jigar): before the ERP opens, commit a date for every late job ──
+// ── 5 Nov 2026 (Jigar): double GRN clean-up — manual GRN + PO receive for the same delivery. Murli clears each pair; warn 3 days, then block. ──
+function GrnDupGate({ user }) {
+  const me = pbKey(user);
+  const [rows, setRows] = React.useState(null);
+  const [busy, setBusy] = React.useState(0);
+  const [err, setErr] = React.useState('');
+  const [later, setLater] = React.useState(false);
+  const load = () => sb.rpc('erp_grn_dup_list').then(r => setRows(r.error ? [] : (r.data || [])));
+  React.useEffect(() => {
+    if (me !== 'MURLI') return;
+    load();
+    const t = setInterval(erpPoll(load), 30 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [me]);
+  if (me !== 'MURLI' || !rows || !rows.length) return null;
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const today = iso(new Date());
+  const blockFrom = String(rows[0].block_from || '').slice(0, 10);
+  const blocked = !!blockFrom && today >= blockFrom;
+  if (later && !blocked) return null;
+  const fd = d => d ? new Date(String(d).slice(0, 10) + 'T00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+  const decide = async (r, dec) => {
+    // 5 Nov 2026 review: 'same' voids a stock row at once - confirm which row goes, and warn when the two entries differ a lot (wrong pair)
+    if (dec === 'same') {
+      const a = +r.manual_sqft || 0, b = +r.pr_sqft || 0;
+      const far = a > 0 && b > 0 && Math.abs(a - b) > Math.max(5, 0.1 * Math.max(a, b));
+      if (!confirm((far ? '\u26a0\ufe0f The two entries are NOT the same size (' + Math.round(a) + ' vs ' + Math.round(b) + ' sqft) - check the invoice before removing.\n\n' : '') + 'Remove ' + (r.kind === 'same_invoice' ? 'Entry 2 (the later one)' : 'one of the two entries (normally the manual GRN; the PO entry if the manual GRN is older than the opening stock)') + ' of ' + r.material + ' from stock? A backup is kept, but stock drops at once.')) return;
+    }
+    setBusy(r.id); setErr('');
+    const x = await sb.rpc('erp_grn_dup_resolve', { p_id: r.id, p_decision: dec });
+    setBusy(0);
+    if (x.error) { setErr(x.error.message); return; }
+    setRows(p => p.filter(y => y.id !== r.id));
+  };
+  // 5 Nov 2026 review: the gate sits above the RuleBlockBar, so 'Ask Jigar' is wired here (same tables / RPC as the bar). The gate stays until the list is clear.
+  const askJigar = async () => {
+    const why = prompt('This goes to Jigar as a task. Which pair, and what is unclear?', '');
+    if (why === null || !why.trim()) return;
+    setErr('');
+    const ins = await sb.from('erp_rule_blocks').insert({ message: rows.length + ' double GRN pair(s) waiting. Pending with: MURLI (clear double GRNs) - escalate JIGAR', action: 'grn_dup_gate', page: 'grn_dup_gate', source: 'client' }).select('id').single();
+    if (ins.error || !ins.data) { setErr('Could not send - WhatsApp Jigar a screenshot (' + (ins.error ? ins.error.message : 'no id') + ')'); return; }
+    const r = await sb.rpc('erp_rule_ask', { p_id: ins.data.id, p_reason: why.trim() });
+    setErr(r.error ? 'Could not send: ' + r.error.message : '\u2713 Sent to Jigar - keep clearing the pairs you are sure about');
+  };
+  const btn = (bg, bd, col) => ({ padding: '7px 10px', borderRadius: 7, fontSize: 12, fontWeight: 800, cursor: 'pointer', background: bg, border: '1px solid ' + bd, color: col });
+  return React.createElement("div", { role: 'dialog', 'aria-label': 'Double GRN check', style: { position: 'fixed', inset: 0, zIndex: 99991, background: 'rgba(3,6,12,.95)', overflowY: 'auto', padding: 'max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom))' } },
+    React.createElement("div", { style: { maxWidth: 760, margin: '0 auto', background: '#0f172a', border: '1px solid ' + (blocked ? '#e0574f' : '#e3a008'), borderRadius: 12, padding: 14 } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 800, color: blocked ? '#fca5a5' : '#e3a008' } }, '📦 ' + rows.length + ' possible double GRN' + (rows.length > 1 ? 's' : '')),
+      React.createElement("div", { style: { fontSize: 12.5, color: '#cbd5e1', margin: '4px 0 10px', lineHeight: 1.45 } },
+        'Each pair below is the same material entered twice - a manual GRN plus a PO "Receive Material" entry, or the same invoice entered two times. If both are the same delivery, stock is counted twice. Check the invoice / roll and tap one button per pair. ',
+        blocked ? React.createElement("b", { style: { color: '#fca5a5' } }, 'The ERP opens when the list is cleared.') : React.createElement("b", null, 'From ' + fd(blockFrom) + ' the ERP will not open until this list is cleared.')),
+      err ? React.createElement("div", { style: { fontSize: 12, color: '#f87171', marginBottom: 8 } }, err) : null,
+      // 5 Nov 2026 review: never a dead end - Murli can send a pair he cannot decide to Jigar (escalation is logged as a rule block)
+      blocked ? React.createElement("div", { style: { fontSize: 11.5, color: '#cbd5e1', marginBottom: 8 } }, 'Pending with: MURLI (clear double GRNs) - escalate JIGAR. Not sure about a pair? ', React.createElement("button", { type: 'button', onClick: askJigar, style: btn('transparent', '#e3a008', '#e3a008') }, 'Ask Jigar')) : null,
+      rows.map(r => React.createElement("div", { key: r.id, style: { padding: '9px 10px', background: '#0a0f1a', border: '1px solid #1f2937', borderRadius: 8, marginTop: 6 } },
+        React.createElement("div", { style: { fontSize: 14, fontWeight: 800, color: '#e2e8f0' } }, r.material),
+        React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', marginTop: 3, lineHeight: 1.45 } },
+          (r.kind === 'same_invoice' ? 'Entry 1: ' : 'Manual GRN: ') + fd(r.manual_date) + ' · ' + Math.round(+r.manual_sqft || 0) + ' sqft' + (r.manual_supplier ? ' · ' + r.manual_supplier : '') + (r.manual_invoice ? ' · inv ' + r.manual_invoice : '')),
+        React.createElement("div", { style: { fontSize: 12, color: '#cbd5e1', lineHeight: 1.45 } },
+          (r.kind === 'same_invoice' ? 'Entry 2: ' : 'PO receive: ') + fd(r.pr_date) + ' · ' + Math.round(+r.pr_sqft || 0) + ' sqft' + (r.pr_supplier ? ' · ' + r.pr_supplier : '') + (r.pr_job ? ' · job ' + r.pr_job : '') + (r.kind === 'same_invoice' && r.manual_invoice ? ' · same invoice ' + r.manual_invoice : '')),
+        React.createElement("div", { style: { display: 'flex', gap: 8, marginTop: 7, flexWrap: 'wrap' } },
+          React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => decide(r, 'same'), style: btn('#7f1d1d', '#e0574f', '#fff') }, busy === r.id ? '…' : 'Same delivery — remove one'),
+          React.createElement("button", { type: 'button', disabled: !!busy, onClick: () => decide(r, 'different'), style: btn('transparent', '#475569', '#cbd5e1') }, 'Different delivery — keep both')))),
+      blocked ? null : React.createElement("button", { type: 'button', onClick: () => setLater(true), style: { ...btn('transparent', '#475569', '#cbd5e1'), marginTop: 12, width: '100%', padding: '9px 0', fontSize: 13 } }, 'Later — open ERP')));
+}
 function CommitGate({ user }) {
   const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const todayISO = iso(new Date());
